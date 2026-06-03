@@ -97,11 +97,13 @@ type UserEdges struct {
 	PendingAuthSessions []*PendingAuthSession `json:"pending_auth_sessions,omitempty"`
 	// PlatformQuotas holds the value of the platform_quotas edge.
 	PlatformQuotas []*UserPlatformQuota `json:"platform_quotas,omitempty"`
+	// GroupRateLimitWindows holds the value of the group_rate_limit_windows edge.
+	GroupRateLimitWindows []*UserGroupRateLimitWindow `json:"group_rate_limit_windows,omitempty"`
 	// UserAllowedGroups holds the value of the user_allowed_groups edge.
 	UserAllowedGroups []*UserAllowedGroup `json:"user_allowed_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [14]bool
+	loadedTypes [15]bool
 }
 
 // APIKeysOrErr returns the APIKeys value or an error if the edge
@@ -221,10 +223,19 @@ func (e UserEdges) PlatformQuotasOrErr() ([]*UserPlatformQuota, error) {
 	return nil, &NotLoadedError{edge: "platform_quotas"}
 }
 
+// GroupRateLimitWindowsOrErr returns the GroupRateLimitWindows value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) GroupRateLimitWindowsOrErr() ([]*UserGroupRateLimitWindow, error) {
+	if e.loadedTypes[13] {
+		return e.GroupRateLimitWindows, nil
+	}
+	return nil, &NotLoadedError{edge: "group_rate_limit_windows"}
+}
+
 // UserAllowedGroupsOrErr returns the UserAllowedGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e UserEdges) UserAllowedGroupsOrErr() ([]*UserAllowedGroup, error) {
-	if e.loadedTypes[13] {
+	if e.loadedTypes[14] {
 		return e.UserAllowedGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "user_allowed_groups"}
@@ -486,6 +497,11 @@ func (_m *User) QueryPendingAuthSessions() *PendingAuthSessionQuery {
 // QueryPlatformQuotas queries the "platform_quotas" edge of the User entity.
 func (_m *User) QueryPlatformQuotas() *UserPlatformQuotaQuery {
 	return NewUserClient(_m.config).QueryPlatformQuotas(_m)
+}
+
+// QueryGroupRateLimitWindows queries the "group_rate_limit_windows" edge of the User entity.
+func (_m *User) QueryGroupRateLimitWindows() *UserGroupRateLimitWindowQuery {
+	return NewUserClient(_m.config).QueryGroupRateLimitWindows(_m)
 }
 
 // QueryUserAllowedGroups queries the "user_allowed_groups" edge of the User entity.

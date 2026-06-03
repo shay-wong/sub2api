@@ -406,6 +406,54 @@ func (h *UserHandler) GetUserUsage(c *gin.Context) {
 	response.Success(c, stats)
 }
 
+// GetUserGroupRateLimits handles getting a user's per-group 5-hour rate-limit windows.
+// GET /api/v1/admin/users/:id/group-rate-limits
+func (h *UserHandler) GetUserGroupRateLimits(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	records, err := h.adminService.ListUserGroupRateLimitWindows(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	out := make([]dto.UserGroupRateLimitWindow, 0, len(records))
+	for i := range records {
+		out = append(out, dto.UserGroupRateLimitWindowFromService(records[i]))
+	}
+	response.Success(c, gin.H{"group_rate_limits": out})
+}
+
+// ResetUserGroupRateLimit handles resetting a user's 5-hour window for one group.
+// POST /api/v1/admin/users/:id/group-rate-limits/:group_id/reset
+func (h *UserHandler) ResetUserGroupRateLimit(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	groupID, err := strconv.ParseInt(c.Param("group_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid group ID")
+		return
+	}
+
+	record, err := h.adminService.ResetUserGroupRateLimitWindow(c.Request.Context(), userID, groupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if record == nil {
+		response.Success(c, gin.H{"group_rate_limit": nil})
+		return
+	}
+	response.Success(c, gin.H{"group_rate_limit": dto.UserGroupRateLimitWindowFromService(*record)})
+}
+
 // GetBalanceHistory handles getting user's balance/concurrency change history
 // GET /api/v1/admin/users/:id/balance-history
 // Query params:

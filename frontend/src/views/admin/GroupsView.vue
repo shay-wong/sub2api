@@ -185,6 +185,17 @@
             >
           </template>
 
+          <template #cell-rate_limit_5h="{ value }">
+            <span
+              v-if="Number(value || 0) > 0"
+              class="text-sm tabular-nums text-gray-700 dark:text-gray-300"
+              >${{ formatCost(Number(value)) }}/5h</span
+            >
+            <span v-else class="text-sm text-gray-400 dark:text-gray-500">{{
+              t("admin.groups.unlimited")
+            }}</span>
+          </template>
+
           <template #cell-is_exclusive="{ value }">
             <span :class="['badge', value ? 'badge-primary' : 'badge-gray']">
               {{
@@ -508,6 +519,18 @@
             :placeholder="t('admin.groups.form.rpmLimitPlaceholder')"
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
+          <input
+            v-model.number="createForm.rate_limit_5h"
+            type="number"
+            min="0"
+            step="0.01"
+            class="input"
+            :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
         </div>
         <div
           v-if="createForm.subscription_type !== 'subscription'"
@@ -1794,6 +1817,18 @@
             :placeholder="t('admin.groups.form.rpmLimitPlaceholder')"
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
+        </div>
+        <div>
+          <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
+          <input
+            v-model.number="editForm.rate_limit_5h"
+            type="number"
+            min="0"
+            step="0.01"
+            class="input"
+            :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
         </div>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3101,6 +3136,11 @@ const columns = computed<Column[]>(() => [
     sortable: true,
   },
   {
+    key: "rate_limit_5h",
+    label: t("admin.groups.columns.rateLimit5h"),
+    sortable: true,
+  },
+  {
     key: "is_exclusive",
     label: t("admin.groups.columns.type"),
     sortable: true,
@@ -3363,6 +3403,8 @@ const createForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
+  // 分组级每用户 5 小时 USD 窗口限制（0 = 不限制）
+  rate_limit_5h: null as number | null,
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -3695,6 +3737,8 @@ const editForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
+  // 分组级每用户 5 小时 USD 窗口限制（0 = 不限制）
+  rate_limit_5h: null as number | null,
 });
 
 type ImagePricingFormState = {
@@ -3932,6 +3976,7 @@ const closeCreateModal = () => {
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
   createForm.rpm_limit = 0;
+  createForm.rate_limit_5h = null;
   resetModelsListState(createModelsListState);
   createModelRoutingRules.value = [];
 };
@@ -3955,6 +4000,19 @@ const normalizeOptionalLimit = (
   return Number.isFinite(value) && value > 0 ? value : null;
 };
 
+const normalizeGroupRateLimit5h = (
+  value: number | string | null | undefined,
+): number | null => {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed > 0 ? parsed : 0;
+};
+
 const normalizeImageRateMultiplier = (
   value: number | string | null | undefined,
 ): number => {
@@ -3968,6 +4026,13 @@ const normalizeImageRateMultiplier = (
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
+    return;
+  }
+  const rateLimit5h = normalizeGroupRateLimit5h(
+    createForm.rate_limit_5h as number | string | null,
+  );
+  if (rateLimit5h === null) {
+    appStore.showError(t("admin.groups.rateLimit5hInvalidError"));
     return;
   }
   submitting.value = true;
@@ -3984,6 +4049,7 @@ const handleCreateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         createForm.monthly_limit_usd as number | string | null,
       ),
+      rate_limit_5h: rateLimit5h,
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
@@ -4074,6 +4140,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true;
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
+  editForm.rate_limit_5h = group.rate_limit_5h > 0 ? group.rate_limit_5h : null;
   resetModelsListState(editModelsListState, group.models_list_config);
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
@@ -4102,6 +4169,13 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
+  const rateLimit5h = normalizeGroupRateLimit5h(
+    editForm.rate_limit_5h as number | string | null,
+  );
+  if (rateLimit5h === null) {
+    appStore.showError(t("admin.groups.rateLimit5hInvalidError"));
+    return;
+  }
 
   submitting.value = true;
   try {
@@ -4117,6 +4191,7 @@ const handleUpdateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         editForm.monthly_limit_usd as number | string | null,
       ),
+      rate_limit_5h: rateLimit5h,
       fallback_group_id:
         editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
       fallback_group_id_on_invalid_request:

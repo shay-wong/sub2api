@@ -193,6 +193,20 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if !acquired {
 			return
 		}
+		if handleEffectiveGroupRateLimit5h(
+			c.Request.Context(),
+			c,
+			h.billingCacheService,
+			selection,
+			apiKey,
+			accountReleaseFunc,
+			func(err error) { reqLog.Info("openai.images.selected_group_rate_limit_check_failed", zap.Error(err)) },
+			func(status int, code, message string) {
+				h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			},
+		) {
+			return
+		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
@@ -312,20 +326,22 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil {
 			upstreamModel = result.UpstreamModel
 		}
+		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				ChannelUsageFields: channelMapping.ToUsageFields(requestModel, upstreamModel),
+				Result:                result,
+				APIKey:                apiKey,
+				User:                  apiKey.User,
+				Account:               account,
+				Subscription:          subscription,
+				InboundEndpoint:       inboundEndpoint,
+				UpstreamEndpoint:      upstreamEndpoint,
+				UserAgent:             userAgent,
+				IPAddress:             clientIP,
+				RequestPayloadHash:    requestPayloadHash,
+				APIKeyService:         h.apiKeyService,
+				GroupRateLimitGroupID: groupRateLimitGroupID,
+				ChannelUsageFields:    channelMapping.ToUsageFields(requestModel, upstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.images"),

@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/ent/usergroupratelimitwindow"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
@@ -114,6 +115,27 @@ func (_u *GroupUpdate) SetNillableRateMultiplier(v *float64) *GroupUpdate {
 // AddRateMultiplier adds value to the "rate_multiplier" field.
 func (_u *GroupUpdate) AddRateMultiplier(v float64) *GroupUpdate {
 	_u.mutation.AddRateMultiplier(v)
+	return _u
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (_u *GroupUpdate) SetRateLimit5h(v float64) *GroupUpdate {
+	_u.mutation.ResetRateLimit5h()
+	_u.mutation.SetRateLimit5h(v)
+	return _u
+}
+
+// SetNillableRateLimit5h sets the "rate_limit_5h" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableRateLimit5h(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetRateLimit5h(*v)
+	}
+	return _u
+}
+
+// AddRateLimit5h adds value to the "rate_limit_5h" field.
+func (_u *GroupUpdate) AddRateLimit5h(v float64) *GroupUpdate {
+	_u.mutation.AddRateLimit5h(v)
 	return _u
 }
 
@@ -711,6 +733,21 @@ func (_u *GroupUpdate) AddUsageLogs(v ...*UsageLog) *GroupUpdate {
 	return _u.AddUsageLogIDs(ids...)
 }
 
+// AddUserRateLimitWindowIDs adds the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by IDs.
+func (_u *GroupUpdate) AddUserRateLimitWindowIDs(ids ...int64) *GroupUpdate {
+	_u.mutation.AddUserRateLimitWindowIDs(ids...)
+	return _u
+}
+
+// AddUserRateLimitWindows adds the "user_rate_limit_windows" edges to the UserGroupRateLimitWindow entity.
+func (_u *GroupUpdate) AddUserRateLimitWindows(v ...*UserGroupRateLimitWindow) *GroupUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddUserRateLimitWindowIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *GroupUpdate) AddAccountIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -828,6 +865,27 @@ func (_u *GroupUpdate) RemoveUsageLogs(v ...*UsageLog) *GroupUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveUsageLogIDs(ids...)
+}
+
+// ClearUserRateLimitWindows clears all "user_rate_limit_windows" edges to the UserGroupRateLimitWindow entity.
+func (_u *GroupUpdate) ClearUserRateLimitWindows() *GroupUpdate {
+	_u.mutation.ClearUserRateLimitWindows()
+	return _u
+}
+
+// RemoveUserRateLimitWindowIDs removes the "user_rate_limit_windows" edge to UserGroupRateLimitWindow entities by IDs.
+func (_u *GroupUpdate) RemoveUserRateLimitWindowIDs(ids ...int64) *GroupUpdate {
+	_u.mutation.RemoveUserRateLimitWindowIDs(ids...)
+	return _u
+}
+
+// RemoveUserRateLimitWindows removes "user_rate_limit_windows" edges to UserGroupRateLimitWindow entities.
+func (_u *GroupUpdate) RemoveUserRateLimitWindows(v ...*UserGroupRateLimitWindow) *GroupUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveUserRateLimitWindowIDs(ids...)
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -979,6 +1037,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.RateLimit5h(); ok {
+		_spec.SetField(group.FieldRateLimit5h, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRateLimit5h(); ok {
+		_spec.AddField(group.FieldRateLimit5h, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -1315,6 +1379,51 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.UserRateLimitWindowsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedUserRateLimitWindowsIDs(); len(nodes) > 0 && !_u.mutation.UserRateLimitWindowsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.UserRateLimitWindowsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2M,
@@ -1527,6 +1636,27 @@ func (_u *GroupUpdateOne) SetNillableRateMultiplier(v *float64) *GroupUpdateOne 
 // AddRateMultiplier adds value to the "rate_multiplier" field.
 func (_u *GroupUpdateOne) AddRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddRateMultiplier(v)
+	return _u
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (_u *GroupUpdateOne) SetRateLimit5h(v float64) *GroupUpdateOne {
+	_u.mutation.ResetRateLimit5h()
+	_u.mutation.SetRateLimit5h(v)
+	return _u
+}
+
+// SetNillableRateLimit5h sets the "rate_limit_5h" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableRateLimit5h(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetRateLimit5h(*v)
+	}
+	return _u
+}
+
+// AddRateLimit5h adds value to the "rate_limit_5h" field.
+func (_u *GroupUpdateOne) AddRateLimit5h(v float64) *GroupUpdateOne {
+	_u.mutation.AddRateLimit5h(v)
 	return _u
 }
 
@@ -2124,6 +2254,21 @@ func (_u *GroupUpdateOne) AddUsageLogs(v ...*UsageLog) *GroupUpdateOne {
 	return _u.AddUsageLogIDs(ids...)
 }
 
+// AddUserRateLimitWindowIDs adds the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by IDs.
+func (_u *GroupUpdateOne) AddUserRateLimitWindowIDs(ids ...int64) *GroupUpdateOne {
+	_u.mutation.AddUserRateLimitWindowIDs(ids...)
+	return _u
+}
+
+// AddUserRateLimitWindows adds the "user_rate_limit_windows" edges to the UserGroupRateLimitWindow entity.
+func (_u *GroupUpdateOne) AddUserRateLimitWindows(v ...*UserGroupRateLimitWindow) *GroupUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddUserRateLimitWindowIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *GroupUpdateOne) AddAccountIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -2241,6 +2386,27 @@ func (_u *GroupUpdateOne) RemoveUsageLogs(v ...*UsageLog) *GroupUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveUsageLogIDs(ids...)
+}
+
+// ClearUserRateLimitWindows clears all "user_rate_limit_windows" edges to the UserGroupRateLimitWindow entity.
+func (_u *GroupUpdateOne) ClearUserRateLimitWindows() *GroupUpdateOne {
+	_u.mutation.ClearUserRateLimitWindows()
+	return _u
+}
+
+// RemoveUserRateLimitWindowIDs removes the "user_rate_limit_windows" edge to UserGroupRateLimitWindow entities by IDs.
+func (_u *GroupUpdateOne) RemoveUserRateLimitWindowIDs(ids ...int64) *GroupUpdateOne {
+	_u.mutation.RemoveUserRateLimitWindowIDs(ids...)
+	return _u
+}
+
+// RemoveUserRateLimitWindows removes "user_rate_limit_windows" edges to UserGroupRateLimitWindow entities.
+func (_u *GroupUpdateOne) RemoveUserRateLimitWindows(v ...*UserGroupRateLimitWindow) *GroupUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveUserRateLimitWindowIDs(ids...)
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -2422,6 +2588,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.RateLimit5h(); ok {
+		_spec.SetField(group.FieldRateLimit5h, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedRateLimit5h(); ok {
+		_spec.AddField(group.FieldRateLimit5h, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -2751,6 +2923,51 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagelog.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.UserRateLimitWindowsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedUserRateLimitWindowsIDs(); len(nodes) > 0 && !_u.mutation.UserRateLimitWindowsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.UserRateLimitWindowsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

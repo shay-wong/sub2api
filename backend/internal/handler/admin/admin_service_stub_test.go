@@ -10,26 +10,27 @@ import (
 )
 
 type stubAdminService struct {
-	users                []service.User
-	apiKeys              []service.APIKey
-	groups               []service.Group
-	accounts             []service.Account
-	proxies              []service.Proxy
-	proxyCounts          []service.ProxyWithAccountCount
-	redeems              []service.RedeemCode
-	boundAuthIdentity    *service.AdminBindAuthIdentityInput
-	boundAuthIdentityFor int64
-	createdAccounts      []*service.CreateAccountInput
-	createdProxies       []*service.CreateProxyInput
-	updatedProxyIDs      []int64
-	updatedProxies       []*service.UpdateProxyInput
-	testedProxyIDs       []int64
-	getUserErr           error
-	createAccountErr     error
-	updateAccountErr     error
-	bulkUpdateAccountErr error
-	checkMixedErr        error
-	lastMixedCheck       struct {
+	users                 []service.User
+	apiKeys               []service.APIKey
+	groups                []service.Group
+	groupRateLimitWindows []service.UserGroupRateLimitWindowRecord
+	accounts              []service.Account
+	proxies               []service.Proxy
+	proxyCounts           []service.ProxyWithAccountCount
+	redeems               []service.RedeemCode
+	boundAuthIdentity     *service.AdminBindAuthIdentityInput
+	boundAuthIdentityFor  int64
+	createdAccounts       []*service.CreateAccountInput
+	createdProxies        []*service.CreateProxyInput
+	updatedProxyIDs       []int64
+	updatedProxies        []*service.UpdateProxyInput
+	testedProxyIDs        []int64
+	getUserErr            error
+	createAccountErr      error
+	updateAccountErr      error
+	bulkUpdateAccountErr  error
+	checkMixedErr         error
+	lastMixedCheck        struct {
 		accountID int64
 		platform  string
 		groupIDs  []int64
@@ -127,9 +128,19 @@ func newStubAdminService() *stubAdminService {
 		CreatedAt: now,
 	}
 	return &stubAdminService{
-		users:       []service.User{user},
-		apiKeys:     []service.APIKey{apiKey},
-		groups:      []service.Group{group},
+		users:   []service.User{user},
+		apiKeys: []service.APIKey{apiKey},
+		groups:  []service.Group{group},
+		groupRateLimitWindows: []service.UserGroupRateLimitWindowRecord{
+			{
+				UserID:        user.ID,
+				GroupID:       group.ID,
+				GroupName:     group.Name,
+				RateLimit5h:   10,
+				Usage5hUSD:    2.5,
+				Window5hStart: &now,
+			},
+		},
 		accounts:    []service.Account{account},
 		proxies:     []service.Proxy{proxy},
 		proxyCounts: []service.ProxyWithAccountCount{{Proxy: proxy, AccountCount: 1}},
@@ -204,6 +215,28 @@ func (s *stubAdminService) GetUserRPMStatus(ctx context.Context, userID int64) (
 		UserRPMUsed:  0,
 		UserRPMLimit: user.RPMLimit,
 	}, nil
+}
+
+func (s *stubAdminService) ListUserGroupRateLimitWindows(ctx context.Context, userID int64) ([]service.UserGroupRateLimitWindowRecord, error) {
+	out := make([]service.UserGroupRateLimitWindowRecord, 0, len(s.groupRateLimitWindows))
+	for i := range s.groupRateLimitWindows {
+		if s.groupRateLimitWindows[i].UserID == userID {
+			out = append(out, s.groupRateLimitWindows[i])
+		}
+	}
+	return out, nil
+}
+
+func (s *stubAdminService) ResetUserGroupRateLimitWindow(ctx context.Context, userID, groupID int64) (*service.UserGroupRateLimitWindowRecord, error) {
+	for i := range s.groupRateLimitWindows {
+		if s.groupRateLimitWindows[i].UserID == userID && s.groupRateLimitWindows[i].GroupID == groupID {
+			s.groupRateLimitWindows[i].Usage5hUSD = 0
+			s.groupRateLimitWindows[i].Window5hStart = nil
+			rec := s.groupRateLimitWindows[i]
+			return &rec, nil
+		}
+	}
+	return &service.UserGroupRateLimitWindowRecord{UserID: userID, GroupID: groupID}, nil
 }
 
 func (s *stubAdminService) BindUserAuthIdentity(ctx context.Context, userID int64, input service.AdminBindAuthIdentityInput) (*service.AdminBoundAuthIdentity, error) {

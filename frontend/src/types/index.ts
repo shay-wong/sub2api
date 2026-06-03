@@ -502,6 +502,7 @@ export interface Group {
   description: string | null
   platform: GroupPlatform
   rate_multiplier: number
+  rate_limit_5h: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   is_exclusive: boolean
   status: 'active' | 'inactive'
@@ -590,6 +591,16 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
+export interface UserGroupRateLimitWindow {
+  user_id: number
+  group_id: number
+  group_name: string
+  rate_limit_5h: number
+  usage_5h_usd: number
+  window_5h_start: string | null
+  window_5h_reset_at: string | null
+}
+
 export interface CreateApiKeyRequest {
   name: string
   group_id?: number | null
@@ -628,6 +639,7 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  rate_limit_5h?: number | null
   allow_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number
@@ -663,6 +675,7 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  rate_limit_5h?: number | null
   allow_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number

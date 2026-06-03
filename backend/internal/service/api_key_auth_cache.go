@@ -90,7 +90,8 @@ type APIKeyAuthGroupSnapshot struct {
 	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。
-	RPMLimit int `json:"rpm_limit"`
+	RPMLimit    int     `json:"rpm_limit"`
+	RateLimit5h float64 `json:"rate_limit_5h"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

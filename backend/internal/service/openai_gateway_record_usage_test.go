@@ -156,6 +156,7 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
+		nil, // userGroupRateLimitRepo
 	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		rateRepo,
@@ -659,6 +660,65 @@ func TestOpenAIGatewayServiceRecordUsage_BillingFingerprintIncludesRequestPayloa
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
 	require.Equal(t, payloadHash, billingRepo.lastCmd.RequestPayloadHash)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(30)
+	actualGroupID := int64(40)
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai_group_5h_actual_group",
+			Usage: OpenAIUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:                &APIKey{ID: 1200, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:                  &User{ID: 2200},
+		Account:               &Account{ID: 3200},
+		GroupRateLimitGroupID: &actualGroupID,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
+	require.InDelta(t, billingRepo.lastCmd.BalanceCost, billingRepo.lastCmd.GroupRateLimit5hCost, 1e-12)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupForGroupRateLimit(t *testing.T) {
+	apiKeyGroupID := int64(30)
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai_group_5h_api_key_group",
+			Usage: OpenAIUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 1201, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:    &User{ID: 2201},
+		Account: &Account{ID: 3201},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, apiKeyGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesFallbackRequestIDForBillingAndUsageLog(t *testing.T) {

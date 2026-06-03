@@ -16,6 +16,7 @@ type Group struct {
 	Description    string
 	Platform       string
 	RateMultiplier float64
+	RateLimit5h    float64
 	IsExclusive    bool
 	Status         string
 	Hydrated       bool // indicates the group was loaded from a trusted repository source
@@ -95,6 +96,10 @@ func (g *Group) HasWeeklyLimit() bool {
 
 func (g *Group) HasMonthlyLimit() bool {
 	return g.MonthlyLimitUSD != nil && *g.MonthlyLimitUSD > 0
+}
+
+func (g *Group) HasRateLimit5h() bool {
+	return g != nil && g.RateLimit5h > 0
 }
 
 // GetImagePrice 根据 image_size 返回对应的图片生成价格
