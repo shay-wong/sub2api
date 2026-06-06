@@ -4,6 +4,22 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v1.0.0)'
+        required: true
+        type: string
+      simple_release:
+        description: 'Simple release: only x86_64 GHCR image, skip other artifacts'
+        required: false
+        type: boolean
+        default: false
+      ignore_repository_simple_release:
+        description: 'Ignore repository SIMPLE_RELEASE variable for reusable callers'
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -19,7 +35,7 @@ on:
 # 环境变量：合并 workflow_dispatch 输入和 repository variable
 # tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
 env:
-  SIMPLE_RELEASE: ${{ github.event.inputs.simple_release == 'true' || vars.SIMPLE_RELEASE == 'true' }}
+  SIMPLE_RELEASE: ${{ inputs.simple_release == true || github.event.inputs.simple_release == 'true' || (inputs.ignore_repository_simple_release != true && vars.SIMPLE_RELEASE == 'true') }}
 
 permissions:
   contents: write
@@ -28,19 +44,24 @@ permissions:
 jobs:
   # Update VERSION file with tag version
   update-version:
+    if: ${{ github.event_name != 'push' || !contains(github.ref_name, '-fork.') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
       - name: Update VERSION file
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
+          if [ -n "$RELEASE_TAG" ]; then
+            VERSION=${RELEASE_TAG#refs/tags/}
           else
             VERSION=${GITHUB_REF#refs/tags/v}
           fi
+          VERSION=${VERSION#v}
           echo "$VERSION" > backend/cmd/server/VERSION
           echo "Updated VERSION file to: $VERSION"
 
@@ -52,10 +73,13 @@ jobs:
           retention-days: 1
 
   build-frontend:
+    if: ${{ github.event_name != 'push' || !contains(github.ref_name, '-fork.') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -85,6 +109,7 @@ jobs:
           retention-days: 1
 
   release:
+    if: ${{ github.event_name != 'push' || !contains(github.ref_name, '-fork.') }}
     needs: [update-version, build-frontend]
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +117,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
       - name: Download VERSION artifact
         uses: actions/download-artifact@v8
@@ -124,11 +149,53 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
-        if: ${{ env.DOCKERHUB_USERNAME != '' }}
-        uses: docker/login-action@v3
+      - name: Resolve DockerHub image
+        id: dockerhub
         env:
+          DOCKERHUB_NAME: ${{ vars.DOCKERHUB_NAME || secrets.DOCKERHUB_NAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          SIMPLE_RELEASE: ${{ env.SIMPLE_RELEASE }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SIMPLE_RELEASE" = "true" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "image=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          image="${DOCKERHUB_NAME:-$DOCKERHUB_USERNAME}"
+          image="${image#docker.io/}"
+          image="${image%/}"
+
+          if [ -z "$image" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "image=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "DockerHub publishing is configured but DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is missing" >&2
+            exit 1
+          fi
+
+          if [[ "$image" == *:* ]] || [[ "$image" =~ [[:space:]] ]]; then
+            echo "DOCKERHUB_NAME must be a Docker Hub namespace or repository path without tag" >&2
+            exit 1
+          fi
+
+          if [[ "$image" != */* ]]; then
+            image="${image}/sub2api"
+          fi
+
+          image="$(echo "$image" | tr '[:upper:]' '[:lower:]')"
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Login to DockerHub
+        if: ${{ steps.dockerhub.outputs.enabled == 'true' }}
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -147,9 +214,11 @@ jobs:
 
       - name: Get tag message
         id: tag_message
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_NAME=${{ github.event.inputs.tag }}
+          if [ -n "$RELEASE_TAG" ]; then
+            TAG_NAME=${RELEASE_TAG#refs/tags/}
           else
             TAG_NAME=${GITHUB_REF#refs/tags/}
           fi
@@ -164,13 +233,15 @@ jobs:
           echo "$TAG_MESSAGE" | head -10
 
           # 使用 EOF 分隔符处理多行内容
-          echo "message<<EOF" >> $GITHUB_OUTPUT
-          echo "$TAG_MESSAGE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "message<<EOF"
+            echo "$TAG_MESSAGE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set lowercase owner for GHCR
         id: lowercase
-        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -183,18 +254,17 @@ jobs:
           GITHUB_REPO_OWNER: ${{ github.repository_owner }}
           GITHUB_REPO_OWNER_LOWER: ${{ steps.lowercase.outputs.owner }}
           GITHUB_REPO_NAME: ${{ github.event.repository.name }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || 'skip' }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub.outputs.image }}
+          PUBLISH_ROLLING_TAGS: ${{ contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-fork.') && 'false' || 'true' }}
 
       # Update DockerHub description
       - name: Update DockerHub description
-        if: ${{ env.SIMPLE_RELEASE != 'true' && env.DOCKERHUB_USERNAME != '' }}
+        if: ${{ env.SIMPLE_RELEASE != 'true' && steps.dockerhub.outputs.enabled == 'true' }}
         uses: peter-evans/dockerhub-description@v5
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/sub2api
+          repository: ${{ steps.dockerhub.outputs.image }}
           short-description: "Sub2API - AI API Gateway Platform"
           readme-filepath: ./deploy/DOCKER.md
 
@@ -204,7 +274,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_IMAGE: ${{ steps.dockerhub.outputs.image }}
+          RAW_TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag }}
         continue-on-error: true
         run: |
           # 检查必要的环境变量
@@ -213,8 +285,8 @@ jobs:
             exit 0
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_NAME=${{ github.event.inputs.tag }}
+          if [ -n "$RELEASE_TAG" ]; then
+            TAG_NAME=${RELEASE_TAG#refs/tags/}
           else
             TAG_NAME=${GITHUB_REF#refs/tags/}
           fi
@@ -223,8 +295,11 @@ jobs:
           GHCR_IMAGE="ghcr.io/${REPO,,}"  # ${,,} converts to lowercase
 
           # 获取 tag message 内容并转义 Markdown 特殊字符
-          TAG_MESSAGE='${{ steps.tag_message.outputs.message }}'
-          TAG_MESSAGE=$(echo "$TAG_MESSAGE" | sed 's/\([_*`\[]\)/\\\1/g')
+          TAG_MESSAGE="$RAW_TAG_MESSAGE"
+          TAG_MESSAGE="${TAG_MESSAGE//_/\\_}"
+          TAG_MESSAGE="${TAG_MESSAGE//\*/\\*}"
+          TAG_MESSAGE="${TAG_MESSAGE//\`/\\\`}"
+          TAG_MESSAGE="${TAG_MESSAGE//\[/\\[}"
 
           # 限制消息长度（Telegram 消息限制 4096 字符，预留空间给头尾固定内容）
           if [ ${#TAG_MESSAGE} -gt 3500 ]; then
@@ -243,18 +318,17 @@ jobs:
           MESSAGE+="🐳 *Docker 部署:*"$'\n'
           MESSAGE+="\`\`\`bash"$'\n'
           # 根据是否配置 DockerHub 动态生成
-          if [ -n "$DOCKERHUB_USERNAME" ]; then
-            DOCKER_IMAGE="${DOCKERHUB_USERNAME}/sub2api"
+          if [ "$DOCKERHUB_IMAGE" != "skip" ]; then
             MESSAGE+="# Docker Hub"$'\n'
-            MESSAGE+="docker pull ${DOCKER_IMAGE}:${VERSION}"$'\n'
+            MESSAGE+="docker pull ${DOCKERHUB_IMAGE}:${VERSION}"$'\n'
             MESSAGE+="# GitHub Container Registry"$'\n'
           fi
           MESSAGE+="docker pull ${GHCR_IMAGE}:${VERSION}"$'\n'
           MESSAGE+="\`\`\`"$'\n'$'\n'
           MESSAGE+="🔗 *相关链接:*"$'\n'
           MESSAGE+="• [GitHub Release](https://github.com/${REPO}/releases/tag/${TAG_NAME})"$'\n'
-          if [ -n "$DOCKERHUB_USERNAME" ]; then
-            MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKER_IMAGE})"$'\n'
+          if [ "$DOCKERHUB_IMAGE" != "skip" ]; then
+            MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKERHUB_IMAGE})"$'\n'
           fi
           MESSAGE+="• [GitHub Packages](https://github.com/${REPO}/pkgs/container/sub2api)"$'\n'$'\n'
           MESSAGE+="#Sub2API #Release #${TAG_NAME//./_}"
@@ -283,12 +357,19 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Sync VERSION file to released tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
+          if [ -n "$RELEASE_TAG" ]; then
+            VERSION=${RELEASE_TAG#refs/tags/}
           else
             VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          VERSION=${VERSION#v}
+
+          if [[ "$VERSION" == *-fork.* ]]; then
+            echo "Fork release version $VERSION; skipping default branch VERSION sync"
+            exit 0
           fi
 
           CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
