@@ -44,6 +44,7 @@
         <input
           ref="fileInput"
           type="file"
+          multiple
           class="hidden"
           accept="application/json,.json"
           @change="handleFileChange"
@@ -119,7 +120,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const importing = ref(false)
-const file = ref<File | null>(null)
+const files = ref<File[]>([])
 const result = ref<AdminDataImportResult | null>(null)
 const format = ref<AdminAccountDataFormat | 'auto'>('auto')
 const formatOptions = computed(() => [
@@ -129,7 +130,11 @@ const formatOptions = computed(() => [
 ])
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const fileName = computed(() => file.value?.name || '')
+const fileName = computed(() => {
+  if (files.value.length === 0) return ''
+  if (files.value.length === 1) return files.value[0].name
+  return t('admin.accounts.dataImportSelectedFiles', { count: files.value.length })
+})
 
 const errorItems = computed(() => result.value?.errors || [])
 
@@ -137,7 +142,7 @@ watch(
   () => props.show,
   (open) => {
     if (open) {
-      file.value = null
+      files.value = []
       result.value = null
       format.value = 'auto'
       if (fileInput.value) {
@@ -153,7 +158,7 @@ const openFilePicker = () => {
 
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement
-  file.value = target.files?.[0] || null
+  files.value = Array.from(target.files || [])
 }
 
 const handleClose = () => {
@@ -180,21 +185,64 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
 }
 
 const handleImport = async () => {
-  if (!file.value) {
+  if (files.value.length === 0) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
     return
   }
 
   importing.value = true
   try {
-    const text = await readFileAsText(file.value)
-    const dataPayload = JSON.parse(text)
+    const dataPayloads: Array<{ fileName: string; data: unknown }> = []
+    for (const sourceFile of files.value) {
+      const text = await readFileAsText(sourceFile)
+      try {
+        dataPayloads.push({
+          fileName: sourceFile.name,
+          data: JSON.parse(text)
+        })
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          appStore.showError(`${sourceFile.name}: ${t('admin.accounts.dataImportParseFailed')}`)
+          return
+        }
+        throw error
+      }
+    }
 
-    const res = await adminAPI.accounts.importData({
-      data: dataPayload,
-      format: format.value === 'auto' ? undefined : format.value,
-      skip_default_group_bind: true
-    })
+    const res: AdminDataImportResult = {
+      account_created: 0,
+      account_failed: 0,
+      proxy_created: 0,
+      proxy_reused: 0,
+      proxy_failed: 0
+    }
+
+    for (const { fileName: sourceFileName, data } of dataPayloads) {
+      let itemResult: AdminDataImportResult
+      try {
+        itemResult = await adminAPI.accounts.importData({
+          data,
+          format: format.value === 'auto' ? undefined : format.value,
+          skip_default_group_bind: true
+        })
+      } catch (error: any) {
+        appStore.showError(`${sourceFileName}: ${error?.message || t('admin.accounts.dataImportFailed')}`)
+        return
+      }
+
+      res.account_created += itemResult.account_created
+      res.account_failed += itemResult.account_failed
+      res.proxy_created += itemResult.proxy_created
+      res.proxy_reused += itemResult.proxy_reused
+      res.proxy_failed += itemResult.proxy_failed
+      if (itemResult.errors?.length) {
+        const errors = itemResult.errors.map((item) => ({
+          ...item,
+          message: `${sourceFileName}: ${item.message}`
+        }))
+        res.errors = [...(res.errors || []), ...errors]
+      }
+    }
 
     result.value = res
 
