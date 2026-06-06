@@ -203,16 +203,35 @@ func TestAdminService_CreateGroup_WithRateLimit5h(t *testing.T) {
 	svc := &adminServiceImpl{groupRepo: repo}
 
 	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
-		Name:           "limited-group",
-		Description:    "Test group",
-		Platform:       PlatformAnthropic,
-		RateMultiplier: 1.0,
-		RateLimit5h:    12.5,
+		Name:             "limited-group",
+		Description:      "Test group",
+		Platform:         PlatformAnthropic,
+		RateMultiplier:   1.0,
+		SubscriptionType: SubscriptionTypeSubscription,
+		RateLimit5h:      12.5,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, group)
 	require.NotNil(t, repo.created)
 	require.InDelta(t, 12.5, repo.created.RateLimit5h, 1e-12)
+}
+
+func TestAdminService_CreateGroup_ClearsRateLimit5hForStandardGroup(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:             "standard-group",
+		Description:      "Test group",
+		Platform:         PlatformAnthropic,
+		RateMultiplier:   1.0,
+		SubscriptionType: SubscriptionTypeStandard,
+		RateLimit5h:      12.5,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.InDelta(t, 0.0, repo.created.RateLimit5h, 1e-12)
 }
 
 func TestAdminService_CreateGroup_RejectsNegativeRateLimit5h(t *testing.T) {
@@ -409,12 +428,13 @@ func TestAdminService_UpdateGroup_InvalidatesAuthCacheOnRPMLimitChange(t *testin
 
 func TestAdminService_UpdateGroup_RateLimit5hSemantics(t *testing.T) {
 	existingGroup := &Group{
-		ID:             1,
-		Name:           "existing-group",
-		Platform:       PlatformAnthropic,
-		Status:         StatusActive,
-		RateLimit5h:    5,
-		RateMultiplier: 1,
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+		RateLimit5h:      5,
+		RateMultiplier:   1,
 	}
 	repo := &groupRepoStubForAdmin{getByID: existingGroup}
 	invalidator := &authCacheInvalidatorStub{}
@@ -438,14 +458,38 @@ func TestAdminService_UpdateGroup_RateLimit5hSemantics(t *testing.T) {
 	require.InDelta(t, 0.0, repo.updated.RateLimit5h, 1e-12)
 }
 
+func TestAdminService_UpdateGroup_ClearsRateLimit5hWhenStandard(t *testing.T) {
+	existingGroup := &Group{
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+		RateLimit5h:      7.5,
+		RateMultiplier:   1,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
+		SubscriptionType: SubscriptionTypeStandard,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, SubscriptionTypeStandard, repo.updated.SubscriptionType)
+	require.InDelta(t, 0.0, repo.updated.RateLimit5h, 1e-12)
+}
+
 func TestAdminService_UpdateGroup_RateLimit5hOmittedPreservesValue(t *testing.T) {
 	existingGroup := &Group{
-		ID:             1,
-		Name:           "existing-group",
-		Platform:       PlatformAnthropic,
-		Status:         StatusActive,
-		RateLimit5h:    7.5,
-		RateMultiplier: 1,
+		ID:               1,
+		Name:             "existing-group",
+		Platform:         PlatformAnthropic,
+		Status:           StatusActive,
+		SubscriptionType: SubscriptionTypeSubscription,
+		RateLimit5h:      7.5,
+		RateMultiplier:   1,
 	}
 	repo := &groupRepoStubForAdmin{getByID: existingGroup}
 	svc := &adminServiceImpl{groupRepo: repo}

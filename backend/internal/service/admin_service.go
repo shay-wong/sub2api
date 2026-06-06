@@ -1805,6 +1805,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if input.RateLimit5h < 0 {
 		return nil, errors.New("rate_limit_5h must be >= 0")
 	}
+	rateLimit5h := normalizeSubscriptionRateLimit5h(subscriptionType, input.RateLimit5h)
 
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
@@ -1884,7 +1885,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DailyLimitUSD:                   dailyLimit,
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
-		RateLimit5h:                     input.RateLimit5h,
+		RateLimit5h:                     rateLimit5h,
 		AllowImageGeneration:            input.AllowImageGeneration,
 		ImageRateIndependent:            input.ImageRateIndependent,
 		ImageRateMultiplier:             imageRateMultiplier,
@@ -1946,6 +1947,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 func normalizeLimit(limit *float64) *float64 {
 	if limit == nil || *limit < 0 {
 		return nil
+	}
+	return limit
+}
+
+func normalizeSubscriptionRateLimit5h(subscriptionType string, limit float64) float64 {
+	if subscriptionType != SubscriptionTypeSubscription {
+		return 0
 	}
 	return limit
 }
@@ -2070,6 +2078,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 		group.RateLimit5h = *input.RateLimit5h
 	}
+	group.RateLimit5h = normalizeSubscriptionRateLimit5h(group.SubscriptionType, group.RateLimit5h)
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration

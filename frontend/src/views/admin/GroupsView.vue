@@ -185,15 +185,19 @@
             >
           </template>
 
-          <template #cell-rate_limit_5h="{ value }">
+          <template #cell-rate_limit_5h="{ value, row }">
             <span
-              v-if="Number(value || 0) > 0"
+              v-if="row.subscription_type === 'subscription' && Number(value || 0) > 0"
               class="text-sm tabular-nums text-gray-700 dark:text-gray-300"
               >${{ formatCost(Number(value)) }}/5h</span
             >
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">{{
+            <span
+              v-else-if="row.subscription_type === 'subscription'"
+              class="text-sm text-gray-400 dark:text-gray-500"
+            >{{
               t("admin.groups.unlimited")
             }}</span>
+            <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
           </template>
 
           <template #cell-is_exclusive="{ value }">
@@ -520,18 +524,6 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
-        <div>
-          <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
-          <input
-            v-model.number="createForm.rate_limit_5h"
-            type="number"
-            min="0"
-            step="0.01"
-            class="input"
-            :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
-          />
-          <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
-        </div>
         <div
           v-if="createForm.subscription_type !== 'subscription'"
           data-tour="group-form-exclusive"
@@ -627,6 +619,18 @@
             v-if="createForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
+            <div>
+              <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
+              <input
+                v-model.number="createForm.rate_limit_5h"
+                type="number"
+                min="0"
+                step="0.01"
+                class="input"
+                :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
+              />
+              <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
+            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -1818,18 +1822,6 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
-        <div>
-          <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
-          <input
-            v-model.number="editForm.rate_limit_5h"
-            type="number"
-            min="0"
-            step="0.01"
-            class="input"
-            :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
-          />
-          <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
-        </div>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1927,6 +1919,18 @@
             v-if="editForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
+            <div>
+              <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
+              <input
+                v-model.number="editForm.rate_limit_5h"
+                type="number"
+                min="0"
+                step="0.01"
+                class="input"
+                :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
+              />
+              <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
+            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -4013,6 +4017,16 @@ const normalizeGroupRateLimit5h = (
   return parsed > 0 ? parsed : 0;
 };
 
+const normalizeSubscriptionRateLimit5h = (
+  subscriptionType: SubscriptionType,
+  value: number | string | null | undefined,
+): number | null => {
+  if (subscriptionType !== "subscription") {
+    return 0;
+  }
+  return normalizeGroupRateLimit5h(value);
+};
+
 const normalizeImageRateMultiplier = (
   value: number | string | null | undefined,
 ): number => {
@@ -4028,7 +4042,8 @@ const handleCreateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
-  const rateLimit5h = normalizeGroupRateLimit5h(
+  const rateLimit5h = normalizeSubscriptionRateLimit5h(
+    createForm.subscription_type,
     createForm.rate_limit_5h as number | string | null,
   );
   if (rateLimit5h === null) {
@@ -4169,7 +4184,8 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
-  const rateLimit5h = normalizeGroupRateLimit5h(
+  const rateLimit5h = normalizeSubscriptionRateLimit5h(
+    editForm.subscription_type,
     editForm.rate_limit_5h as number | string | null,
   );
   if (rateLimit5h === null) {
