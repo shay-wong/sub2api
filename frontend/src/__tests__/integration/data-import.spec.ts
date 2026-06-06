@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 
 const showError = vi.fn()
@@ -31,34 +31,42 @@ vi.mock('vue-i18n', () => ({
 
 describe('ImportDataModal', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     showError.mockReset()
     showSuccess.mockReset()
     importData.mockReset()
   })
 
-  it('未选择文件时提示错误', async () => {
-    const wrapper = mount(ImportDataModal, {
-      props: { show: true },
-      global: {
-        stubs: {
-          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
-        }
+  const mountModal = () => mount(ImportDataModal, {
+    attachTo: document.body,
+    props: { show: true },
+    global: {
+      stubs: {
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
       }
-    })
+    }
+  })
+
+  const selectDataFormat = async (wrapper: ReturnType<typeof mount>, optionLabel: string) => {
+    await wrapper.get('[data-testid="account-import-format-select"] .select-trigger').trigger('click')
+    await flushPromises()
+
+    const option = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find((item) => item.textContent?.includes(optionLabel))
+    expect(option).toBeTruthy()
+    option!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+  }
+
+  it('未选择文件时提示错误', async () => {
+    const wrapper = mountModal()
 
     await wrapper.find('form').trigger('submit')
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
   })
 
   it('无效 JSON 时提示解析失败', async () => {
-    const wrapper = mount(ImportDataModal, {
-      props: { show: true },
-      global: {
-        stubs: {
-          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
-        }
-      }
-    })
+    const wrapper = mountModal()
 
     const input = wrapper.find('input[type="file"]')
     const file = new File(['invalid json'], 'data.json', { type: 'application/json' })
@@ -76,6 +84,15 @@ describe('ImportDataModal', () => {
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportParseFailed')
   })
 
+  it('数据格式选择器使用全宽自定义 Select', () => {
+    const wrapper = mountModal()
+
+    const formatSelect = wrapper.get('[data-testid="account-import-format-select"]')
+    expect(formatSelect.classes()).toContain('w-full')
+    expect(formatSelect.find('.select-trigger').exists()).toBe(true)
+    expect(wrapper.find('select').exists()).toBe(false)
+  })
+
   it('选择 CPA 格式时把格式传给后端', async () => {
     importData.mockResolvedValue({
       account_created: 1,
@@ -84,16 +101,9 @@ describe('ImportDataModal', () => {
       proxy_reused: 0,
       proxy_failed: 0
     })
-    const wrapper = mount(ImportDataModal, {
-      props: { show: true },
-      global: {
-        stubs: {
-          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }
-        }
-      }
-    })
+    const wrapper = mountModal()
 
-    await wrapper.find('select').setValue('cpa')
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCPA')
     const input = wrapper.find('input[type="file"]')
     const file = new File(['{"access_token":"token","account_id":"acct"}'], 'acct.json', { type: 'application/json' })
     Object.defineProperty(file, 'text', {

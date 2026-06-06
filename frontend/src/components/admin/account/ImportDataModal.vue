@@ -18,11 +18,12 @@
 
       <div>
         <label class="input-label">{{ t('admin.accounts.dataFormat') }}</label>
-        <select v-model="format" class="input-field">
-          <option value="auto">{{ t('admin.accounts.dataFormatAuto') }}</option>
-          <option value="sub2api">{{ t('admin.accounts.dataFormatSub2API') }}</option>
-          <option value="cpa">{{ t('admin.accounts.dataFormatCPA') }}</option>
-        </select>
+        <Select
+          v-model="format"
+          :options="formatOptions"
+          class="w-full"
+          data-testid="account-import-format-select"
+        />
       </div>
 
       <div>
@@ -97,6 +98,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select from '@/components/common/Select.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type { AdminAccountDataFormat, AdminDataImportResult } from '@/types'
@@ -120,6 +122,11 @@ const importing = ref(false)
 const file = ref<File | null>(null)
 const result = ref<AdminDataImportResult | null>(null)
 const format = ref<AdminAccountDataFormat | 'auto'>('auto')
+const formatOptions = computed(() => [
+  { value: 'auto', label: t('admin.accounts.dataFormatAuto') },
+  { value: 'sub2api', label: t('admin.accounts.dataFormatSub2API') },
+  { value: 'cpa', label: t('admin.accounts.dataFormatCPA') }
+])
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = computed(() => file.value?.name || '')
