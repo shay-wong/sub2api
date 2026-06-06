@@ -76,7 +76,7 @@ func (c *githubReleaseClientError) FetchChecksumFile(ctx context.Context, url st
 }
 
 func (c *githubReleaseClient) FetchLatestRelease(ctx context.Context, repo string) (*service.GitHubRelease, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", repo)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -95,12 +95,18 @@ func (c *githubReleaseClient) FetchLatestRelease(ctx context.Context, repo strin
 		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
-	var release service.GitHubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []service.GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, err
 	}
 
-	return &release, nil
+	for _, release := range releases {
+		if !release.Draft {
+			return &release, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no GitHub releases found")
 }
 
 func (c *githubReleaseClient) DownloadFile(ctx context.Context, url, dest string, maxSize int64) error {

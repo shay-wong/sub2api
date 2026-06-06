@@ -29,9 +29,11 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
 
 type updateServiceGitHubClientStub struct {
 	release *GitHubRelease
+	repo    string
 }
 
-func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
+func (s *updateServiceGitHubClientStub) FetchLatestRelease(_ context.Context, repo string) (*GitHubRelease, error) {
+	s.repo = repo
 	return s.release, nil
 }
 
@@ -61,4 +63,61 @@ func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNoUpdateAvailable))
 	require.ErrorIs(t, err, ErrNoUpdateAvailable)
+}
+
+func TestUpdateServiceChecksForkRepository(t *testing.T) {
+	github := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{
+			TagName: "v0.1.134-fork.2",
+			Name:    "v0.1.134-fork.2",
+		},
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, github, "0.1.134-fork.1", "release")
+
+	info, err := svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.Equal(t, "shay-wong/sub2api", github.repo)
+	require.Equal(t, "0.1.134-fork.2", info.LatestVersion)
+	require.True(t, info.HasUpdate)
+}
+
+func TestCompareVersionsSupportsForkReleaseSuffix(t *testing.T) {
+	tests := []struct {
+		name    string
+		current string
+		latest  string
+		want    int
+	}{
+		{
+			name:    "newer fork suffix is update",
+			current: "0.1.134-fork.1",
+			latest:  "0.1.134-fork.2",
+			want:    -1,
+		},
+		{
+			name:    "older fork suffix is not update",
+			current: "0.1.134-fork.2",
+			latest:  "0.1.134-fork.1",
+			want:    1,
+		},
+		{
+			name:    "higher upstream base outranks fork suffix",
+			current: "0.1.134-fork.9",
+			latest:  "0.1.135-fork.1",
+			want:    -1,
+		},
+		{
+			name:    "plain release outranks same base fork release",
+			current: "0.1.134-fork.9",
+			latest:  "0.1.134",
+			want:    -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, compareVersions(tt.current, tt.latest))
+		})
+	}
 }

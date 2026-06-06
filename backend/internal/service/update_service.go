@@ -28,7 +28,7 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+	githubRepo     = "shay-wong/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -103,6 +103,7 @@ type GitHubRelease struct {
 	Body        string        `json:"body"`
 	PublishedAt string        `json:"published_at"`
 	HTMLURL     string        `json:"html_url"`
+	Draft       bool          `json:"draft"`
 	Assets      []GitHubAsset `json:"assets"`
 }
 
@@ -517,29 +518,75 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
-// compareVersions compares two semantic versions
-func compareVersions(current, latest string) int {
-	currentParts := parseVersion(current)
-	latestParts := parseVersion(latest)
+type parsedUpdateVersion struct {
+	major   int
+	minor   int
+	patch   int
+	hasFork bool
+	fork    int
+}
 
-	for i := 0; i < 3; i++ {
-		if currentParts[i] < latestParts[i] {
+// compareVersions compares release versions, including fork suffixes like 0.1.134-fork.2.
+func compareVersions(current, latest string) int {
+	currentVersion := parseVersion(current)
+	latestVersion := parseVersion(latest)
+
+	if currentVersion.major != latestVersion.major {
+		return compareInts(currentVersion.major, latestVersion.major)
+	}
+	if currentVersion.minor != latestVersion.minor {
+		return compareInts(currentVersion.minor, latestVersion.minor)
+	}
+	if currentVersion.patch != latestVersion.patch {
+		return compareInts(currentVersion.patch, latestVersion.patch)
+	}
+
+	if currentVersion.hasFork != latestVersion.hasFork {
+		if currentVersion.hasFork {
 			return -1
 		}
-		if currentParts[i] > latestParts[i] {
-			return 1
-		}
+		return 1
+	}
+	if currentVersion.hasFork {
+		return compareInts(currentVersion.fork, latestVersion.fork)
 	}
 	return 0
 }
 
-func parseVersion(v string) [3]int {
-	v = strings.TrimPrefix(v, "v")
-	parts := strings.Split(v, ".")
-	result := [3]int{0, 0, 0}
+func compareInts(current, latest int) int {
+	if current < latest {
+		return -1
+	}
+	if current > latest {
+		return 1
+	}
+	return 0
+}
+
+func parseVersion(v string) parsedUpdateVersion {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	result := parsedUpdateVersion{}
+
+	base := v
+	if basePart, forkPart, ok := strings.Cut(v, "-fork."); ok {
+		base = basePart
+		if parsed, err := strconv.Atoi(forkPart); err == nil {
+			result.hasFork = true
+			result.fork = parsed
+		}
+	}
+
+	parts := strings.Split(base, ".")
 	for i := 0; i < len(parts) && i < 3; i++ {
 		if parsed, err := strconv.Atoi(parts[i]); err == nil {
-			result[i] = parsed
+			switch i {
+			case 0:
+				result.major = parsed
+			case 1:
+				result.minor = parsed
+			case 2:
+				result.patch = parsed
+			}
 		}
 	}
 	return result

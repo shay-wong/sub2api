@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      sync_version_branch:
+        description: 'Branch to sync VERSION after a successful release'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       tag:
@@ -31,6 +36,11 @@ on:
         required: false
         type: boolean
         default: false
+      sync_version_branch:
+        description: 'Branch to sync VERSION after a successful release'
+        required: false
+        type: string
+        default: ''
 
 # 环境变量：合并 workflow_dispatch 输入和 repository variable
 # tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
@@ -254,12 +264,14 @@ jobs:
           GITHUB_REPO_OWNER: ${{ github.repository_owner }}
           GITHUB_REPO_OWNER_LOWER: ${{ steps.lowercase.outputs.owner }}
           GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          GITHUB_INSTALL_BRANCH: ${{ contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-fork.') && 'stable' || github.event.repository.default_branch }}
           DOCKERHUB_IMAGE: ${{ steps.dockerhub.outputs.image }}
           PUBLISH_ROLLING_TAGS: ${{ contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-fork.') && 'false' || 'true' }}
 
       # Update DockerHub description
       - name: Update DockerHub description
         if: ${{ env.SIMPLE_RELEASE != 'true' && steps.dockerhub.outputs.enabled == 'true' }}
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -351,14 +363,16 @@ jobs:
     if: ${{ needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout default branch
+      - name: Checkout VERSION sync branch
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ inputs.sync_version_branch || github.event.repository.default_branch }}
 
       - name: Sync VERSION file to released tag
         env:
           RELEASE_TAG: ${{ inputs.tag || github.event.inputs.tag }}
+          REQUESTED_SYNC_VERSION_BRANCH: ${{ inputs.sync_version_branch }}
+          SYNC_VERSION_BRANCH: ${{ inputs.sync_version_branch || github.event.repository.default_branch }}
         run: |
           if [ -n "$RELEASE_TAG" ]; then
             VERSION=${RELEASE_TAG#refs/tags/}
@@ -367,8 +381,8 @@ jobs:
           fi
           VERSION=${VERSION#v}
 
-          if [[ "$VERSION" == *-fork.* ]]; then
-            echo "Fork release version $VERSION; skipping default branch VERSION sync"
+          if [[ "$VERSION" == *-fork.* && -z "$REQUESTED_SYNC_VERSION_BRANCH" ]]; then
+            echo "Fork release version $VERSION has no explicit sync_version_branch; skipping VERSION sync"
             exit 0
           fi
 
@@ -383,5 +397,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/cmd/server/VERSION
-          git commit -m "chore: sync VERSION to ${VERSION} [skip ci]"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          git commit -F - <<EOF
+          Keep VERSION aligned with released artifact [skip ci]
+
+          Constraint: release workflows embed tag versions before building
+          Directive: sync VERSION to the branch that owns the release lane
+          Confidence: high
+          Scope-risk: narrow
+          Tested: release job completed before sync
+          Not-tested: local workflow cannot push to GitHub
+          EOF
+          git push origin HEAD:"$SYNC_VERSION_BRANCH"

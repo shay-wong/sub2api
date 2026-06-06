@@ -86,6 +86,7 @@ jobs:
       tag: ${{ needs.create-fork-tag.outputs.release_name }}
       simple_release: false
       ignore_repository_simple_release: true
+      sync_version_branch: stable
     permissions:
       contents: write
       packages: write
