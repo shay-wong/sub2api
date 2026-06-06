@@ -17,6 +17,15 @@
       </div>
 
       <div>
+        <label class="input-label">{{ t('admin.accounts.dataFormat') }}</label>
+        <select v-model="format" class="input-field">
+          <option value="auto">{{ t('admin.accounts.dataFormatAuto') }}</option>
+          <option value="sub2api">{{ t('admin.accounts.dataFormatSub2API') }}</option>
+          <option value="cpa">{{ t('admin.accounts.dataFormatCPA') }}</option>
+        </select>
+      </div>
+
+      <div>
         <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
         <div
           class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-800"
@@ -90,7 +99,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult } from '@/types'
+import type { AdminAccountDataFormat, AdminDataImportResult } from '@/types'
 
 interface Props {
   show: boolean
@@ -110,6 +119,7 @@ const appStore = useAppStore()
 const importing = ref(false)
 const file = ref<File | null>(null)
 const result = ref<AdminDataImportResult | null>(null)
+const format = ref<AdminAccountDataFormat | 'auto'>('auto')
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const fileName = computed(() => file.value?.name || '')
@@ -122,6 +132,7 @@ watch(
     if (open) {
       file.value = null
       result.value = null
+      format.value = 'auto'
       if (fileInput.value) {
         fileInput.value.value = ''
       }
@@ -174,6 +185,7 @@ const handleImport = async () => {
 
     const res = await adminAPI.accounts.importData({
       data: dataPayload,
+      format: format.value === 'auto' ? undefined : format.value,
       skip_default_group_bind: true
     })
 

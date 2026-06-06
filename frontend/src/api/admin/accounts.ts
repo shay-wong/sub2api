@@ -15,6 +15,8 @@ import type {
   AccountUsageStatsResponse,
   TempUnschedulableStatus,
   AdminDataPayload,
+  AdminCPADataPayload,
+  AdminAccountDataFormat,
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
@@ -563,6 +565,7 @@ export async function syncFromCrs(params: {
 
 export async function exportData(options?: {
   ids?: number[]
+  format?: AdminAccountDataFormat
   filters?: {
     platform?: string
     type?: string
@@ -574,8 +577,11 @@ export async function exportData(options?: {
     sort_order?: 'asc' | 'desc'
   }
   includeProxies?: boolean
-}): Promise<AdminDataPayload> {
+}): Promise<AdminDataPayload | AdminCPADataPayload> {
   const params: Record<string, string> = {}
+  if (options?.format) {
+    params.format = options.format
+  }
   if (options?.ids && options.ids.length > 0) {
     params.ids = options.ids.join(',')
   } else if (options?.filters) {
@@ -592,18 +598,27 @@ export async function exportData(options?: {
   if (options?.includeProxies === false) {
     params.include_proxies = 'false'
   }
-  const { data } = await apiClient.get<AdminDataPayload>('/admin/accounts/data', { params })
+  const { data } = await apiClient.get<AdminDataPayload | AdminCPADataPayload>('/admin/accounts/data', { params })
   return data
 }
 
 export async function importData(payload: {
-  data: AdminDataPayload
+  data: unknown
+  format?: AdminAccountDataFormat
   skip_default_group_bind?: boolean
 }): Promise<AdminDataImportResult> {
-  const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
+  const body: {
+    data: unknown
+    format?: AdminAccountDataFormat
+    skip_default_group_bind?: boolean
+  } = {
     data: payload.data,
     skip_default_group_bind: payload.skip_default_group_bind
-  })
+  }
+  if (payload.format) {
+    body.format = payload.format
+  }
+  const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', body)
   return data
 }
 

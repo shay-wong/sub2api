@@ -2,10 +2,12 @@ package admin
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -44,6 +46,27 @@ type dataAccount struct {
 	ProxyKey    *string        `json:"proxy_key"`
 	Concurrency int            `json:"concurrency"`
 	Priority    int            `json:"priority"`
+}
+
+type cpaDataResponse struct {
+	Code int            `json:"code"`
+	Data cpaDataPayload `json:"data"`
+}
+
+type cpaDataPayload struct {
+	Type       string           `json:"type"`
+	ExportedAt string           `json:"exported_at"`
+	Accounts   []cpaDataAccount `json:"accounts"`
+}
+
+type cpaDataAccount struct {
+	AccountID    string `json:"account_id"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	IDToken      string `json:"id_token,omitempty"`
+	Email        string `json:"email,omitempty"`
+	Type         string `json:"type,omitempty"`
+	Expired      string `json:"expired,omitempty"`
 }
 
 func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
@@ -274,4 +297,220 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+}
+
+func TestImportDataAcceptsCPAAccountFile(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	tokenExpiresAt := time.Date(2026, 8, 5, 13, 40, 42, 0, time.UTC)
+	accessToken := buildAccountDataTestJWT(t, tokenExpiresAt, map[string]any{
+		"email": "jwt@example.com",
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": "acct-from-access",
+			"chatgpt_user_id":    "user-from-access",
+		},
+	})
+	idToken := buildAccountDataTestJWT(t, tokenExpiresAt, map[string]any{
+		"https://api.openai.com/auth": map[string]any{
+			"organizations": []map[string]any{
+				{"id": "org-default", "is_default": true},
+			},
+		},
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"format": "cpa",
+		"data": map[string]any{
+			"account_id":    "acct-from-file",
+			"access_token":  accessToken,
+			"refresh_token": "refresh-token",
+			"id_token":      idToken,
+			"email":         "source@example.com",
+			"type":          "codex",
+			"expired":       "2026-08-05T13:40:42Z",
+		},
+		"skip_default_group_bind": true,
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+	require.Equal(t, "codex-source@example.com", created.Name)
+	require.Equal(t, service.PlatformOpenAI, created.Platform)
+	require.Equal(t, service.AccountTypeOAuth, created.Type)
+	require.Equal(t, accessToken, created.Credentials["access_token"])
+	require.Equal(t, "refresh-token", created.Credentials["refresh_token"])
+	require.Equal(t, "acct-from-file", created.Credentials["chatgpt_account_id"])
+	require.Equal(t, "user-from-access", created.Credentials["chatgpt_user_id"])
+	require.Equal(t, "org-default", created.Credentials["organization_id"])
+	require.Equal(t, float64(tokenExpiresAt.Unix()), created.Credentials["expires_at"])
+	require.Equal(t, "source@example.com", created.Extra["email"])
+	require.Equal(t, "codex", created.Extra["cpa_type"])
+	require.Equal(t, 10, created.Concurrency)
+	require.Equal(t, 1, created.Priority)
+	require.NotNil(t, created.RateMultiplier)
+	require.Equal(t, 1.0, *created.RateMultiplier)
+	require.NotNil(t, created.AutoPauseOnExpired)
+	require.True(t, *created.AutoPauseOnExpired)
+	require.Nil(t, created.ExpiresAt)
+}
+
+func TestImportDataAutoDetectsCPAAccountsArray(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	accessToken := buildAccountDataTestJWT(t, time.Now().Add(time.Hour), map[string]any{
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_user_id": "user-from-access",
+		},
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"data": []map[string]any{
+			{
+				"account_id":   "acct-1",
+				"access_token": accessToken,
+				"email":        "first@example.com",
+				"type":         "codex",
+			},
+			{
+				"account_id":   "acct-2",
+				"access_token": accessToken,
+				"type":         "codex",
+			},
+		},
+		"skip_default_group_bind": true,
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Len(t, adminSvc.createdAccounts, 2)
+	require.Equal(t, "codex-first@example.com", adminSvc.createdAccounts[0].Name)
+	require.Equal(t, "codex-user-from-access", adminSvc.createdAccounts[1].Name)
+}
+
+func TestImportDataRejectsUnsupportedCPAWrapperType(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	body, err := json.Marshal(map[string]any{
+		"format": "cpa",
+		"data": map[string]any{
+			"type": "unexpected-auth-files",
+			"accounts": []map[string]any{
+				{
+					"account_id":   "acct-1",
+					"access_token": "access-token",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "unsupported CPA data type")
+	require.Empty(t, adminSvc.createdAccounts)
+}
+
+func TestImportDataCPAReplayUsesOriginalRequestFingerprint(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	repo := newMemoryIdempotencyRepoStub()
+	cfg := service.DefaultIdempotencyConfig()
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(repo, cfg))
+	t.Cleanup(func() {
+		service.SetDefaultIdempotencyCoordinator(nil)
+	})
+
+	body := []byte(`{"format":"cpa","data":{"account_id":"acct-1","access_token":"access-token","email":"first@example.com","type":"codex"},"skip_default_group_bind":true}`)
+	call := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "same-cpa-import")
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	first := call()
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Empty(t, first.Header().Get("X-Idempotency-Replayed"))
+	require.Len(t, adminSvc.createdAccounts, 1)
+
+	second := call()
+	require.Equal(t, http.StatusOK, second.Code)
+	require.Equal(t, "true", second.Header().Get("X-Idempotency-Replayed"))
+	require.Len(t, adminSvc.createdAccounts, 1)
+}
+
+func TestExportDataSupportsCPAFormat(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	expiresAt := time.Date(2026, 8, 5, 13, 40, 42, 0, time.UTC)
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       21,
+			Name:     "account",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token":       "access-token",
+				"refresh_token":      "refresh-token",
+				"id_token":           "id-token",
+				"chatgpt_account_id": "acct-export",
+				"expires_at":         expiresAt.Unix(),
+			},
+			Extra: map[string]any{
+				"email":    "export@example.com",
+				"cpa_type": "codex",
+			},
+			Status: service.StatusActive,
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data?format=cpa&include_proxies=false", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp cpaDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, cpaDataType, resp.Data.Type)
+	require.Len(t, resp.Data.Accounts, 1)
+	require.Equal(t, "acct-export", resp.Data.Accounts[0].AccountID)
+	require.Equal(t, "access-token", resp.Data.Accounts[0].AccessToken)
+	require.Equal(t, "refresh-token", resp.Data.Accounts[0].RefreshToken)
+	require.Equal(t, "id-token", resp.Data.Accounts[0].IDToken)
+	require.Equal(t, "export@example.com", resp.Data.Accounts[0].Email)
+	require.Equal(t, "codex", resp.Data.Accounts[0].Type)
+	require.Equal(t, "2026-08-05T13:40:42Z", resp.Data.Accounts[0].Expired)
+}
+
+func buildAccountDataTestJWT(t *testing.T, expiresAt time.Time, extraClaims map[string]any) string {
+	t.Helper()
+	header := map[string]any{
+		"alg": "none",
+		"typ": "JWT",
+	}
+	claims := map[string]any{
+		"exp": expiresAt.Unix(),
+		"iat": time.Now().Unix(),
+	}
+	for key, value := range extraClaims {
+		claims[key] = value
+	}
+	headerBytes, err := json.Marshal(header)
+	require.NoError(t, err)
+	claimBytes, err := json.Marshal(claims)
+	require.NoError(t, err)
+	return base64.RawURLEncoding.EncodeToString(headerBytes) + "." + base64.RawURLEncoding.EncodeToString(claimBytes) + "."
 }

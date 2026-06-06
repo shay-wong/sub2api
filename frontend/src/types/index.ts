@@ -1112,6 +1112,24 @@ export interface AdminDataPayload {
   accounts: AdminDataAccount[]
 }
 
+export type AdminAccountDataFormat = 'sub2api' | 'cpa'
+
+export interface AdminCPADataPayload {
+  type: 'cpa-auth-files'
+  exported_at: string
+  accounts: AdminCPADataAccount[]
+}
+
+export interface AdminCPADataAccount {
+  account_id: string
+  access_token: string
+  refresh_token?: string
+  id_token?: string
+  email?: string
+  type?: string
+  expired?: string
+}
+
 export interface AdminDataProxy {
   proxy_key: string
   name: string

@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -18,10 +20,12 @@ import (
 )
 
 const (
-	dataType       = "sub2api-data"
-	legacyDataType = "sub2api-bundle"
-	dataVersion    = 1
-	dataPageCap    = 1000
+	dataFormatSub2API = "sub2api"
+	dataFormatCPA     = "cpa"
+	dataType          = "sub2api-data"
+	legacyDataType    = "sub2api-bundle"
+	dataVersion       = 1
+	dataPageCap       = 1000
 )
 
 type DataPayload struct {
@@ -62,6 +66,12 @@ type DataAccount struct {
 }
 
 type DataImportRequest struct {
+	Format               string          `json:"format,omitempty"`
+	Data                 json.RawMessage `json:"data"`
+	SkipDefaultGroupBind *bool           `json:"skip_default_group_bind"`
+}
+
+type resolvedDataImportRequest struct {
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
 }
@@ -89,6 +99,12 @@ func buildProxyKey(protocol, host string, port int, username, password string) s
 func (h *AccountHandler) ExportData(c *gin.Context) {
 	ctx := c.Request.Context()
 
+	format, err := parseDataFormat(c.Query("format"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
 	selectedIDs, err := parseAccountIDs(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
@@ -98,6 +114,16 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	accounts, err := h.resolveExportAccounts(ctx, selectedIDs, c)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+
+	if format == dataFormatCPA {
+		payload, err := buildCPADataPayload(accounts)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		response.Success(c, payload)
 		return
 	}
 
@@ -182,17 +208,22 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 		return
 	}
 
-	if err := validateDataHeader(req.Data); err != nil {
+	payload, err := resolveDataImportPayload(req)
+	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	resolved := resolvedDataImportRequest{
+		Data:                 payload,
+		SkipDefaultGroupBind: req.SkipDefaultGroupBind,
+	}
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return h.importData(ctx, req)
+		return h.importData(ctx, resolved)
 	})
 }
 
-func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) (DataImportResult, error) {
+func (h *AccountHandler) importData(ctx context.Context, req resolvedDataImportRequest) (DataImportResult, error) {
 	skipDefaultGroupBind := true
 	if req.SkipDefaultGroupBind != nil {
 		skipDefaultGroupBind = *req.SkipDefaultGroupBind
@@ -492,6 +523,48 @@ func parseAccountIDs(c *gin.Context) ([]int64, error) {
 		}
 	}
 	return ids, nil
+}
+
+func parseDataFormat(format string) (string, error) {
+	normalized := strings.TrimSpace(strings.ToLower(format))
+	switch normalized {
+	case "", dataFormatSub2API:
+		return dataFormatSub2API, nil
+	case dataFormatCPA:
+		return dataFormatCPA, nil
+	default:
+		return "", fmt.Errorf("unsupported data format: %s", format)
+	}
+}
+
+func resolveDataImportPayload(req DataImportRequest) (DataPayload, error) {
+	if len(bytes.TrimSpace(req.Data)) == 0 {
+		return DataPayload{}, errors.New("data is required")
+	}
+
+	format := strings.TrimSpace(strings.ToLower(req.Format))
+	if format == "" && looksLikeCPAData(req.Data) {
+		format = dataFormatCPA
+	}
+	if format == "" {
+		format = dataFormatSub2API
+	}
+
+	switch format {
+	case dataFormatSub2API:
+		var payload DataPayload
+		if err := json.Unmarshal(req.Data, &payload); err != nil {
+			return DataPayload{}, fmt.Errorf("invalid sub2api data: %w", err)
+		}
+		if err := validateDataHeader(payload); err != nil {
+			return DataPayload{}, err
+		}
+		return payload, nil
+	case dataFormatCPA:
+		return convertCPADataPayload(req.Data)
+	default:
+		return DataPayload{}, fmt.Errorf("unsupported data format: %s", req.Format)
+	}
 }
 
 func parseIncludeProxies(c *gin.Context) (bool, error) {
