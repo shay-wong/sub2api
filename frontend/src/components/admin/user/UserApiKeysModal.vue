@@ -7,6 +7,54 @@
         </div>
         <div><p class="font-medium text-gray-900 dark:text-white">{{ user.email }}</p><p class="text-sm text-gray-500 dark:text-dark-400">{{ user.username }}</p></div>
       </div>
+      <div class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h4 class="text-xs font-semibold text-gray-500 dark:text-dark-400">
+            {{ t('admin.users.groupRateLimits') }}
+          </h4>
+          <svg v-if="groupRateLimitsLoading" class="h-4 w-4 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+        </div>
+        <div v-if="!groupRateLimitsLoading && groupRateLimits.length === 0" class="text-sm text-gray-500 dark:text-dark-400">
+          {{ t('admin.users.groupRateLimitNoActiveWindow') }}
+        </div>
+        <div v-else class="grid gap-2 sm:grid-cols-2">
+          <div
+            v-for="record in groupRateLimits"
+            :key="record.group_id"
+            class="rounded-lg bg-gray-50 p-3 dark:bg-dark-700/60"
+            :data-testid="`user-group-rate-limit-${record.group_id}`"
+          >
+            <div class="mb-2 flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-gray-900 dark:text-white">
+                  {{ record.group_name || `#${record.group_id}` }}
+                </p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+                  {{ formatGroupRateLimitUsage(record) }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-300 dark:hover:bg-dark-600"
+                :data-testid="`reset-user-group-rate-limit-${record.group_id}`"
+                :disabled="resettingGroupRateLimitIds.has(record.group_id)"
+                @click="resetGroupRateLimit(record)"
+              >
+                {{ resettingGroupRateLimitIds.has(record.group_id) ? t('common.saving') : t('admin.users.groupRateLimitReset') }}
+              </button>
+            </div>
+            <div v-if="getGroupRateLimitValue(record) > 0" class="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+              <div
+                :class="groupRateLimitBarClass(record)"
+                :style="{ width: groupRateLimitPercent(record) + '%' }"
+              />
+            </div>
+            <p class="mt-1 truncate text-[11px] text-gray-400 dark:text-dark-500">
+              {{ formatGroupRateLimitReset(record) }}
+            </p>
+          </div>
+        </div>
+      </div>
       <div v-if="loading" class="flex justify-center py-8"><svg class="h-8 w-8 animate-spin text-primary-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
       <div v-else-if="apiKeys.length === 0" class="py-8 text-center"><p class="text-sm text-gray-500">{{ t('admin.users.noApiKeys') }}</p></div>
       <div v-else ref="scrollContainerRef" class="max-h-96 space-y-3 overflow-y-auto" @scroll="closeGroupSelector">
@@ -102,8 +150,8 @@ import { ref, computed, watch, onMounted, onUnmounted, type ComponentPublicInsta
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import { formatDateTime } from '@/utils/format'
-import type { AdminUser, AdminGroup, ApiKey } from '@/types'
+import { formatCurrency, formatDateTime } from '@/utils/format'
+import type { AdminUser, AdminGroup, ApiKey, UserGroupRateLimitWindow } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
@@ -115,8 +163,11 @@ const appStore = useAppStore()
 
 const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])
+const groupRateLimits = ref<UserGroupRateLimitWindow[]>([])
 const loading = ref(false)
+const groupRateLimitsLoading = ref(false)
 const updatingKeyIds = ref(new Set<number>())
+const resettingGroupRateLimitIds = ref(new Set<number>())
 const groupSelectorKeyId = ref<number | null>(null)
 const dropdownPosition = ref<{ top: number; left: number } | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
@@ -136,14 +187,19 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
   }
 }
 
-watch(() => props.show, (v) => {
-  if (v && props.user) {
-    load()
-    loadGroups()
-  } else {
-    closeGroupSelector()
+watch(
+  () => props.show,
+  (v) => {
+    if (v && props.user) {
+      load()
+      loadGroups()
+      loadGroupRateLimits()
+    } else {
+      closeGroupSelector()
+      groupRateLimits.value = []
+    }
   }
-})
+)
 
 const load = async () => {
   if (!props.user) return
@@ -165,6 +221,20 @@ const loadGroups = async () => {
     allGroups.value = groups
   } catch (error) {
     console.error('Failed to load groups:', error)
+  }
+}
+
+const loadGroupRateLimits = async () => {
+  if (!props.user) return
+  groupRateLimitsLoading.value = true
+  try {
+    const res = await adminAPI.users.getUserGroupRateLimits(props.user.id)
+    groupRateLimits.value = res.group_rate_limits || []
+  } catch (error) {
+    console.error('Failed to load group rate limits:', error)
+    appStore.showError(t('admin.users.groupRateLimitLoadFailed'))
+  } finally {
+    groupRateLimitsLoading.value = false
   }
 }
 
@@ -211,11 +281,73 @@ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
     } else {
       appStore.showSuccess(t('admin.users.groupChangedSuccess'))
     }
+    loadGroupRateLimits()
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.users.groupChangeFailed'))
   } finally {
     updatingKeyIds.value.delete(key.id)
   }
+}
+
+const replaceGroupRateLimit = (updated: UserGroupRateLimitWindow) => {
+  const idx = groupRateLimits.value.findIndex((r) => r.group_id === updated.group_id)
+  if (idx !== -1) {
+    groupRateLimits.value[idx] = updated
+  } else {
+    groupRateLimits.value.push(updated)
+  }
+}
+
+const resetGroupRateLimit = async (record: UserGroupRateLimitWindow) => {
+  if (!props.user) return
+  closeGroupSelector()
+  resettingGroupRateLimitIds.value.add(record.group_id)
+  try {
+    const result = await adminAPI.users.resetUserGroupRateLimit(props.user.id, record.group_id)
+    replaceGroupRateLimit(result.group_rate_limit)
+    appStore.showSuccess(t('admin.users.groupRateLimitResetSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.users.groupRateLimitResetFailed'))
+  } finally {
+    resettingGroupRateLimitIds.value.delete(record.group_id)
+  }
+}
+
+const getGroupRateLimitValue = (record: UserGroupRateLimitWindow) => Number(record.rate_limit_5h || 0)
+const getGroupUsageValue = (record: UserGroupRateLimitWindow) => Number(record.usage_5h_usd || 0)
+
+const groupRateLimitPercent = (record: UserGroupRateLimitWindow) => {
+  const limit = getGroupRateLimitValue(record)
+  if (limit <= 0) return 0
+  return Math.min((getGroupUsageValue(record) / limit) * 100, 100)
+}
+
+const formatGroupRateLimitUsage = (record: UserGroupRateLimitWindow) => {
+  const usage = formatCurrency(getGroupUsageValue(record))
+  const limit = getGroupRateLimitValue(record)
+  if (limit <= 0) {
+    return t('admin.users.groupRateLimitUsage', {
+      usage,
+      limit: t('admin.users.groupRateLimitUnlimited')
+    })
+  }
+  return t('admin.users.groupRateLimitUsage', {
+    usage,
+    limit: formatCurrency(limit)
+  })
+}
+
+const formatGroupRateLimitReset = (record: UserGroupRateLimitWindow) => {
+  if (!record.window_5h_reset_at) return t('admin.users.groupRateLimitNoActiveWindow')
+  return t('admin.users.resetsAt', { time: formatDateTime(record.window_5h_reset_at) })
+}
+
+const groupRateLimitBarClass = (record: UserGroupRateLimitWindow) => {
+  const limit = getGroupRateLimitValue(record)
+  const usage = getGroupUsageValue(record)
+  if (usage >= limit) return 'h-full rounded-full bg-red-500 transition-all'
+  if (usage >= limit * 0.8) return 'h-full rounded-full bg-yellow-500 transition-all'
+  return 'h-full rounded-full bg-emerald-500 transition-all'
 }
 
 const handleKeyDown = (event: KeyboardEvent) => {
@@ -238,10 +370,16 @@ const handleClickOutside = (event: MouseEvent) => {
 
 const handleClose = () => {
   closeGroupSelector()
+  groupRateLimits.value = []
   emit('close')
 }
 
 onMounted(() => {
+  if (props.show && props.user) {
+    load()
+    loadGroups()
+    loadGroupRateLimits()
+  }
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleKeyDown, true)
 })

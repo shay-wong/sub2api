@@ -134,6 +134,12 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 	}
 
+	if cmd.GroupRateLimit5hCost > 0 && cmd.GroupRateLimitGroupID != nil {
+		if err := incrementUsageBillingUserGroupRateLimit(ctx, tx, cmd.UserID, *cmd.GroupRateLimitGroupID, cmd.GroupRateLimit5hCost); err != nil {
+			return err
+		}
+	}
+
 	if cmd.AccountQuotaCost > 0 && (strings.EqualFold(cmd.AccountType, service.AccountTypeAPIKey) || strings.EqualFold(cmd.AccountType, service.AccountTypeBedrock)) {
 		quotaState, err := incrementUsageBillingAccountQuota(ctx, tx, cmd.AccountID, cmd.AccountQuotaCost)
 		if err != nil {
@@ -238,6 +244,49 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 	}
 	if affected == 0 {
 		return service.ErrAPIKeyNotFound
+	}
+	return nil
+}
+
+func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, userID, groupID int64, cost float64) error {
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO user_group_rate_limit_windows (
+			user_id,
+			group_id,
+			usage_5h_usd,
+			window_5h_start,
+			created_at,
+			updated_at
+		)
+		SELECT u.id, g.id, $3, NOW(), NOW(), NOW()
+		FROM users u
+		JOIN groups g ON g.id = $2 AND g.deleted_at IS NULL
+		WHERE u.id = $1 AND u.deleted_at IS NULL
+		ON CONFLICT (user_id, group_id) WHERE deleted_at IS NULL
+		DO UPDATE SET
+			usage_5h_usd = CASE
+				WHEN user_group_rate_limit_windows.window_5h_start IS NULL
+					OR user_group_rate_limit_windows.window_5h_start + INTERVAL '5 hours' <= NOW()
+				THEN EXCLUDED.usage_5h_usd
+				ELSE user_group_rate_limit_windows.usage_5h_usd + EXCLUDED.usage_5h_usd
+			END,
+			window_5h_start = CASE
+				WHEN user_group_rate_limit_windows.window_5h_start IS NULL
+					OR user_group_rate_limit_windows.window_5h_start + INTERVAL '5 hours' <= NOW()
+				THEN EXCLUDED.window_5h_start
+				ELSE user_group_rate_limit_windows.window_5h_start
+			END,
+			updated_at = EXCLUDED.updated_at
+	`, userID, groupID, cost)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrGroupNotFound
 	}
 	return nil
 }

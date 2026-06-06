@@ -42,6 +42,8 @@ type AdminService interface {
 	GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error)
 	GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error)
 	GetUserRPMStatus(ctx context.Context, userID int64) (*UserRPMStatus, error)
+	ListUserGroupRateLimitWindows(ctx context.Context, userID int64) ([]UserGroupRateLimitWindowRecord, error)
+	ResetUserGroupRateLimitWindow(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error)
 	// GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
 	// codeType is optional - pass empty string to return all types.
 	// Also returns totalRecharged (sum of all positive balance top-ups).
@@ -198,6 +200,7 @@ type CreateGroupInput struct {
 	DailyLimitUSD    *float64 // 日限额 (USD)
 	WeeklyLimitUSD   *float64 // 周限额 (USD)
 	MonthlyLimitUSD  *float64 // 月限额 (USD)
+	RateLimit5h      float64  // 分组级 5 小时 USD 限制，0 = 不限制
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	AllowImageGeneration bool
 	ImageRateIndependent bool
@@ -239,6 +242,7 @@ type UpdateGroupInput struct {
 	DailyLimitUSD    *float64 // 日限额 (USD)
 	WeeklyLimitUSD   *float64 // 周限额 (USD)
 	MonthlyLimitUSD  *float64 // 月限额 (USD)
+	RateLimit5h      *float64 // nil 表示不修改，0 = 不限制
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	AllowImageGeneration *bool
 	ImageRateIndependent *bool
@@ -525,24 +529,25 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
-	userRepo             UserRepository
-	groupRepo            GroupRepository
-	accountRepo          AccountRepository
-	proxyRepo            ProxyRepository
-	apiKeyRepo           APIKeyRepository
-	redeemCodeRepo       RedeemCodeRepository
-	userGroupRateRepo    UserGroupRateRepository
-	userRPMCache         UserRPMCache
-	billingCacheService  *BillingCacheService
-	proxyProber          ProxyExitInfoProber
-	proxyLatencyCache    ProxyLatencyCache
-	authCacheInvalidator APIKeyAuthCacheInvalidator
-	entClient            *dbent.Client // 用于开启数据库事务
-	settingService       *SettingService
-	defaultSubAssigner   DefaultSubscriptionAssigner
-	userSubRepo          UserSubscriptionRepository
-	privacyClientFactory PrivacyClientFactory
-	runtimeBlocker       AccountRuntimeBlocker
+	userRepo               UserRepository
+	groupRepo              GroupRepository
+	accountRepo            AccountRepository
+	proxyRepo              ProxyRepository
+	apiKeyRepo             APIKeyRepository
+	redeemCodeRepo         RedeemCodeRepository
+	userGroupRateRepo      UserGroupRateRepository
+	userGroupRateLimitRepo UserGroupRateLimitWindowRepository
+	userRPMCache           UserRPMCache
+	billingCacheService    *BillingCacheService
+	proxyProber            ProxyExitInfoProber
+	proxyLatencyCache      ProxyLatencyCache
+	authCacheInvalidator   APIKeyAuthCacheInvalidator
+	entClient              *dbent.Client // 用于开启数据库事务
+	settingService         *SettingService
+	defaultSubAssigner     DefaultSubscriptionAssigner
+	userSubRepo            UserSubscriptionRepository
+	privacyClientFactory   PrivacyClientFactory
+	runtimeBlocker         AccountRuntimeBlocker
 }
 
 type userGroupRateBatchReader interface {
@@ -558,6 +563,7 @@ func NewAdminService(
 	apiKeyRepo APIKeyRepository,
 	redeemCodeRepo RedeemCodeRepository,
 	userGroupRateRepo UserGroupRateRepository,
+	userGroupRateLimitRepo UserGroupRateLimitWindowRepository,
 	userRPMCache UserRPMCache,
 	billingCacheService *BillingCacheService,
 	proxyProber ProxyExitInfoProber,
@@ -571,24 +577,25 @@ func NewAdminService(
 	runtimeBlocker AccountRuntimeBlocker,
 ) AdminService {
 	return &adminServiceImpl{
-		userRepo:             userRepo,
-		groupRepo:            groupRepo,
-		accountRepo:          accountRepo,
-		proxyRepo:            proxyRepo,
-		apiKeyRepo:           apiKeyRepo,
-		redeemCodeRepo:       redeemCodeRepo,
-		userGroupRateRepo:    userGroupRateRepo,
-		userRPMCache:         userRPMCache,
-		billingCacheService:  billingCacheService,
-		proxyProber:          proxyProber,
-		proxyLatencyCache:    proxyLatencyCache,
-		authCacheInvalidator: authCacheInvalidator,
-		entClient:            entClient,
-		settingService:       settingService,
-		defaultSubAssigner:   defaultSubAssigner,
-		userSubRepo:          userSubRepo,
-		privacyClientFactory: privacyClientFactory,
-		runtimeBlocker:       runtimeBlocker,
+		userRepo:               userRepo,
+		groupRepo:              groupRepo,
+		accountRepo:            accountRepo,
+		proxyRepo:              proxyRepo,
+		apiKeyRepo:             apiKeyRepo,
+		redeemCodeRepo:         redeemCodeRepo,
+		userGroupRateRepo:      userGroupRateRepo,
+		userGroupRateLimitRepo: userGroupRateLimitRepo,
+		userRPMCache:           userRPMCache,
+		billingCacheService:    billingCacheService,
+		proxyProber:            proxyProber,
+		proxyLatencyCache:      proxyLatencyCache,
+		authCacheInvalidator:   authCacheInvalidator,
+		entClient:              entClient,
+		settingService:         settingService,
+		defaultSubAssigner:     defaultSubAssigner,
+		userSubRepo:            userSubRepo,
+		privacyClientFactory:   privacyClientFactory,
+		runtimeBlocker:         runtimeBlocker,
 	}
 }
 
@@ -1096,6 +1103,35 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 		UserRPMLimit: user.RPMLimit,
 		PerGroup:     perGroup,
 	}, nil
+}
+
+func (s *adminServiceImpl) ListUserGroupRateLimitWindows(ctx context.Context, userID int64) ([]UserGroupRateLimitWindowRecord, error) {
+	if userID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER_ID", "invalid user id")
+	}
+	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+		return nil, err
+	}
+	if s.userGroupRateLimitRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("GROUP_RATE_LIMIT_REPOSITORY_UNAVAILABLE", "group rate limit repository is not configured")
+	}
+	return s.userGroupRateLimitRepo.ListByUser(ctx, userID)
+}
+
+func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error) {
+	if userID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER_ID", "invalid user id")
+	}
+	if groupID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
+	}
+	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+		return nil, err
+	}
+	if s.userGroupRateLimitRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("GROUP_RATE_LIMIT_REPOSITORY_UNAVAILABLE", "group rate limit repository is not configured")
+	}
+	return s.userGroupRateLimitRepo.Reset(ctx, userID, groupID)
 }
 
 func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {
@@ -1766,6 +1802,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
 	monthlyLimit := normalizeLimit(input.MonthlyLimitUSD)
+	if input.RateLimit5h < 0 {
+		return nil, errors.New("rate_limit_5h must be >= 0")
+	}
 
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
@@ -1845,6 +1884,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DailyLimitUSD:                   dailyLimit,
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
+		RateLimit5h:                     input.RateLimit5h,
 		AllowImageGeneration:            input.AllowImageGeneration,
 		ImageRateIndependent:            input.ImageRateIndependent,
 		ImageRateMultiplier:             imageRateMultiplier,
@@ -2024,6 +2064,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group.DailyLimitUSD = normalizeLimit(input.DailyLimitUSD)
 	group.WeeklyLimitUSD = normalizeLimit(input.WeeklyLimitUSD)
 	group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
+	if input.RateLimit5h != nil {
+		if *input.RateLimit5h < 0 {
+			return nil, errors.New("rate_limit_5h must be >= 0")
+		}
+		group.RateLimit5h = *input.RateLimit5h
+	}
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration

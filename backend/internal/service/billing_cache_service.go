@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -26,8 +27,9 @@ var (
 	ErrSubscriptionInvalid       = infraerrors.Forbidden("SUBSCRIPTION_INVALID", "subscription is invalid or expired")
 	ErrBillingServiceUnavailable = infraerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", "Billing service temporarily unavailable. Please retry later.")
 	// RPM 超限错误。gateway_handler 负责映射为 HTTP 429。
-	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
-	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
+	ErrGroupRPMExceeded         = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
+	ErrUserRPMExceeded          = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
+	ErrGroupRateLimit5hExceeded = infraerrors.TooManyRequests("GROUP_RATE_5H_EXCEEDED", "group 5-hour rate limit exceeded")
 
 	// user × platform quota（HTTP 429 Too Many Requests + Retry-After header）。
 	// 选用 429 而非 403：限额耗尽属于"暂时性资源用尽，重试可恢复"的场景（RFC 6585），
@@ -99,15 +101,16 @@ type apiKeyRateLimitLoader interface {
 // BillingCacheService 计费缓存服务
 // 负责余额和订阅数据的缓存管理，提供高性能的计费资格检查
 type BillingCacheService struct {
-	cache                 BillingCache
-	userRepo              UserRepository
-	subRepo               UserSubscriptionRepository
-	apiKeyRateLimitLoader apiKeyRateLimitLoader
-	userRPMCache          UserRPMCache
-	userGroupRateRepo     UserGroupRateRepository
-	cfg                   *config.Config
-	circuitBreaker        *billingCircuitBreaker
-	userPlatformQuotaRepo UserPlatformQuotaRepository
+	cache                  BillingCache
+	userRepo               UserRepository
+	subRepo                UserSubscriptionRepository
+	apiKeyRateLimitLoader  apiKeyRateLimitLoader
+	userRPMCache           UserRPMCache
+	userGroupRateRepo      UserGroupRateRepository
+	userGroupRateLimitRepo UserGroupRateLimitWindowRepository
+	cfg                    *config.Config
+	circuitBreaker         *billingCircuitBreaker
+	userPlatformQuotaRepo  UserPlatformQuotaRepository
 
 	cacheWriteChan     chan cacheWriteTask
 	cacheWriteWg       sync.WaitGroup
@@ -131,18 +134,20 @@ func NewBillingCacheService(
 	apiKeyRepo APIKeyRepository,
 	userRPMCache UserRPMCache,
 	userGroupRateRepo UserGroupRateRepository,
+	userGroupRateLimitRepo UserGroupRateLimitWindowRepository,
 	cfg *config.Config,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *BillingCacheService {
 	svc := &BillingCacheService{
-		cache:                 cache,
-		userRepo:              userRepo,
-		subRepo:               subRepo,
-		apiKeyRateLimitLoader: apiKeyRepo,
-		userRPMCache:          userRPMCache,
-		userGroupRateRepo:     userGroupRateRepo,
-		cfg:                   cfg,
-		userPlatformQuotaRepo: userPlatformQuotaRepo,
+		cache:                  cache,
+		userRepo:               userRepo,
+		subRepo:                subRepo,
+		apiKeyRateLimitLoader:  apiKeyRepo,
+		userRPMCache:           userRPMCache,
+		userGroupRateRepo:      userGroupRateRepo,
+		userGroupRateLimitRepo: userGroupRateLimitRepo,
+		cfg:                    cfg,
+		userPlatformQuotaRepo:  userPlatformQuotaRepo,
 	}
 	svc.circuitBreaker = newBillingCircuitBreaker(cfg.Billing.CircuitBreaker)
 	svc.startCacheWriteWorkers()
@@ -734,6 +739,10 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		}
 	}
 
+	if err := s.CheckGroupRateLimit5h(ctx, user, group); err != nil {
+		return err
+	}
+
 	// Check API Key rate limits (applies to both billing modes)
 	if apiKey != nil && apiKey.HasRateLimits() {
 		if err := s.checkAPIKeyRateLimits(ctx, apiKey); err != nil {
@@ -747,6 +756,48 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	}
 
 	return nil
+}
+
+// CheckGroupRateLimit5h checks only the per-user, per-group 5-hour USD window.
+// Handlers call this again after account selection because Claude Code fallback
+// routing can execute the request through a different group than the API key's
+// default group.
+func (s *BillingCacheService) CheckGroupRateLimit5h(ctx context.Context, user *User, group *Group) error {
+	if s == nil || s.userGroupRateLimitRepo == nil || user == nil || !group.HasRateLimit5h() {
+		return nil
+	}
+	if shouldSkipOriginalClaudeCodeOnlyGroupRateLimit(ctx, group) {
+		return nil
+	}
+	rec, err := s.userGroupRateLimitRepo.Get(ctx, user.ID, group.ID)
+	if err != nil {
+		logger.LegacyPrintf(
+			"service.billing_cache",
+			"Warning: group 5h rate limit lookup failed user=%d group=%d: %v (fail-open)",
+			user.ID,
+			group.ID,
+			err,
+		)
+		return nil
+	}
+	if rec == nil || rec.Window5hStart == nil || IsWindowExpired(rec.Window5hStart, RateLimitWindow5h) {
+		return nil
+	}
+	if rec.Usage5hUSD >= group.RateLimit5h {
+		return withWindowResetsMetadata(ErrGroupRateLimit5hExceeded, rec.Window5hStart.Add(RateLimitWindow5h))
+	}
+	return nil
+}
+
+func shouldSkipOriginalClaudeCodeOnlyGroupRateLimit(ctx context.Context, group *Group) bool {
+	if forcePlatform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && forcePlatform != "" {
+		return false
+	}
+	return group != nil &&
+		group.ClaudeCodeOnly &&
+		!IsClaudeCodeClient(ctx) &&
+		group.FallbackGroupID != nil &&
+		*group.FallbackGroupID > 0
 }
 
 // checkRPM 执行并行 RPM 限流，所有适用的限制同时生效，任一超限即拒绝：

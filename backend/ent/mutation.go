@@ -46,6 +46,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
+	"github.com/Wei-Shaw/sub2api/ent/usergroupratelimitwindow"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
@@ -93,6 +94,7 @@ const (
 	TypeUserAllowedGroup              = "UserAllowedGroup"
 	TypeUserAttributeDefinition       = "UserAttributeDefinition"
 	TypeUserAttributeValue            = "UserAttributeValue"
+	TypeUserGroupRateLimitWindow      = "UserGroupRateLimitWindow"
 	TypeUserPlatformQuota             = "UserPlatformQuota"
 	TypeUserSubscription              = "UserSubscription"
 )
@@ -14862,6 +14864,8 @@ type GroupMutation struct {
 	description                             *string
 	rate_multiplier                         *float64
 	addrate_multiplier                      *float64
+	rate_limit_5h                           *float64
+	addrate_limit_5h                        *float64
 	is_exclusive                            *bool
 	status                                  *string
 	platform                                *string
@@ -14917,6 +14921,9 @@ type GroupMutation struct {
 	usage_logs                              map[int64]struct{}
 	removedusage_logs                       map[int64]struct{}
 	clearedusage_logs                       bool
+	user_rate_limit_windows                 map[int64]struct{}
+	removeduser_rate_limit_windows          map[int64]struct{}
+	cleareduser_rate_limit_windows          bool
 	accounts                                map[int64]struct{}
 	removedaccounts                         map[int64]struct{}
 	clearedaccounts                         bool
@@ -15286,6 +15293,62 @@ func (m *GroupMutation) AddedRateMultiplier() (r float64, exists bool) {
 func (m *GroupMutation) ResetRateMultiplier() {
 	m.rate_multiplier = nil
 	m.addrate_multiplier = nil
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (m *GroupMutation) SetRateLimit5h(f float64) {
+	m.rate_limit_5h = &f
+	m.addrate_limit_5h = nil
+}
+
+// RateLimit5h returns the value of the "rate_limit_5h" field in the mutation.
+func (m *GroupMutation) RateLimit5h() (r float64, exists bool) {
+	v := m.rate_limit_5h
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRateLimit5h returns the old "rate_limit_5h" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldRateLimit5h(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRateLimit5h is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRateLimit5h requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRateLimit5h: %w", err)
+	}
+	return oldValue.RateLimit5h, nil
+}
+
+// AddRateLimit5h adds f to the "rate_limit_5h" field.
+func (m *GroupMutation) AddRateLimit5h(f float64) {
+	if m.addrate_limit_5h != nil {
+		*m.addrate_limit_5h += f
+	} else {
+		m.addrate_limit_5h = &f
+	}
+}
+
+// AddedRateLimit5h returns the value that was added to the "rate_limit_5h" field in this mutation.
+func (m *GroupMutation) AddedRateLimit5h() (r float64, exists bool) {
+	v := m.addrate_limit_5h
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRateLimit5h resets all changes to the "rate_limit_5h" field.
+func (m *GroupMutation) ResetRateLimit5h() {
+	m.rate_limit_5h = nil
+	m.addrate_limit_5h = nil
 }
 
 // SetIsExclusive sets the "is_exclusive" field.
@@ -16928,6 +16991,60 @@ func (m *GroupMutation) ResetUsageLogs() {
 	m.removedusage_logs = nil
 }
 
+// AddUserRateLimitWindowIDs adds the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by ids.
+func (m *GroupMutation) AddUserRateLimitWindowIDs(ids ...int64) {
+	if m.user_rate_limit_windows == nil {
+		m.user_rate_limit_windows = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.user_rate_limit_windows[ids[i]] = struct{}{}
+	}
+}
+
+// ClearUserRateLimitWindows clears the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity.
+func (m *GroupMutation) ClearUserRateLimitWindows() {
+	m.cleareduser_rate_limit_windows = true
+}
+
+// UserRateLimitWindowsCleared reports if the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity was cleared.
+func (m *GroupMutation) UserRateLimitWindowsCleared() bool {
+	return m.cleareduser_rate_limit_windows
+}
+
+// RemoveUserRateLimitWindowIDs removes the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by IDs.
+func (m *GroupMutation) RemoveUserRateLimitWindowIDs(ids ...int64) {
+	if m.removeduser_rate_limit_windows == nil {
+		m.removeduser_rate_limit_windows = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.user_rate_limit_windows, ids[i])
+		m.removeduser_rate_limit_windows[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedUserRateLimitWindows returns the removed IDs of the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity.
+func (m *GroupMutation) RemovedUserRateLimitWindowsIDs() (ids []int64) {
+	for id := range m.removeduser_rate_limit_windows {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// UserRateLimitWindowsIDs returns the "user_rate_limit_windows" edge IDs in the mutation.
+func (m *GroupMutation) UserRateLimitWindowsIDs() (ids []int64) {
+	for id := range m.user_rate_limit_windows {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetUserRateLimitWindows resets all changes to the "user_rate_limit_windows" edge.
+func (m *GroupMutation) ResetUserRateLimitWindows() {
+	m.user_rate_limit_windows = nil
+	m.cleareduser_rate_limit_windows = false
+	m.removeduser_rate_limit_windows = nil
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *GroupMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -17070,7 +17187,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 35)
+	fields := make([]string, 0, 36)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -17088,6 +17205,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.rate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
+	}
+	if m.rate_limit_5h != nil {
+		fields = append(fields, group.FieldRateLimit5h)
 	}
 	if m.is_exclusive != nil {
 		fields = append(fields, group.FieldIsExclusive)
@@ -17196,6 +17316,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.Description()
 	case group.FieldRateMultiplier:
 		return m.RateMultiplier()
+	case group.FieldRateLimit5h:
+		return m.RateLimit5h()
 	case group.FieldIsExclusive:
 		return m.IsExclusive()
 	case group.FieldStatus:
@@ -17275,6 +17397,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldDescription(ctx)
 	case group.FieldRateMultiplier:
 		return m.OldRateMultiplier(ctx)
+	case group.FieldRateLimit5h:
+		return m.OldRateLimit5h(ctx)
 	case group.FieldIsExclusive:
 		return m.OldIsExclusive(ctx)
 	case group.FieldStatus:
@@ -17383,6 +17507,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRateMultiplier(v)
+		return nil
+	case group.FieldRateLimit5h:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRateLimit5h(v)
 		return nil
 	case group.FieldIsExclusive:
 		v, ok := value.(bool)
@@ -17598,6 +17729,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, group.FieldRateMultiplier)
 	}
+	if m.addrate_limit_5h != nil {
+		fields = append(fields, group.FieldRateLimit5h)
+	}
 	if m.adddaily_limit_usd != nil {
 		fields = append(fields, group.FieldDailyLimitUsd)
 	}
@@ -17644,6 +17778,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case group.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case group.FieldRateLimit5h:
+		return m.AddedRateLimit5h()
 	case group.FieldDailyLimitUsd:
 		return m.AddedDailyLimitUsd()
 	case group.FieldWeeklyLimitUsd:
@@ -17683,6 +17819,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case group.FieldRateLimit5h:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRateLimit5h(v)
 		return nil
 	case group.FieldDailyLimitUsd:
 		v, ok := value.(float64)
@@ -17882,6 +18025,9 @@ func (m *GroupMutation) ResetField(name string) error {
 	case group.FieldRateMultiplier:
 		m.ResetRateMultiplier()
 		return nil
+	case group.FieldRateLimit5h:
+		m.ResetRateLimit5h()
+		return nil
 	case group.FieldIsExclusive:
 		m.ResetIsExclusive()
 		return nil
@@ -17975,7 +18121,7 @@ func (m *GroupMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *GroupMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.api_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -17987,6 +18133,9 @@ func (m *GroupMutation) AddedEdges() []string {
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, group.EdgeUsageLogs)
+	}
+	if m.user_rate_limit_windows != nil {
+		edges = append(edges, group.EdgeUserRateLimitWindows)
 	}
 	if m.accounts != nil {
 		edges = append(edges, group.EdgeAccounts)
@@ -18025,6 +18174,12 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case group.EdgeUserRateLimitWindows:
+		ids := make([]ent.Value, 0, len(m.user_rate_limit_windows))
+		for id := range m.user_rate_limit_windows {
+			ids = append(ids, id)
+		}
+		return ids
 	case group.EdgeAccounts:
 		ids := make([]ent.Value, 0, len(m.accounts))
 		for id := range m.accounts {
@@ -18043,7 +18198,7 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *GroupMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.removedapi_keys != nil {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -18055,6 +18210,9 @@ func (m *GroupMutation) RemovedEdges() []string {
 	}
 	if m.removedusage_logs != nil {
 		edges = append(edges, group.EdgeUsageLogs)
+	}
+	if m.removeduser_rate_limit_windows != nil {
+		edges = append(edges, group.EdgeUserRateLimitWindows)
 	}
 	if m.removedaccounts != nil {
 		edges = append(edges, group.EdgeAccounts)
@@ -18093,6 +18251,12 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case group.EdgeUserRateLimitWindows:
+		ids := make([]ent.Value, 0, len(m.removeduser_rate_limit_windows))
+		for id := range m.removeduser_rate_limit_windows {
+			ids = append(ids, id)
+		}
+		return ids
 	case group.EdgeAccounts:
 		ids := make([]ent.Value, 0, len(m.removedaccounts))
 		for id := range m.removedaccounts {
@@ -18111,7 +18275,7 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *GroupMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.clearedapi_keys {
 		edges = append(edges, group.EdgeAPIKeys)
 	}
@@ -18123,6 +18287,9 @@ func (m *GroupMutation) ClearedEdges() []string {
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, group.EdgeUsageLogs)
+	}
+	if m.cleareduser_rate_limit_windows {
+		edges = append(edges, group.EdgeUserRateLimitWindows)
 	}
 	if m.clearedaccounts {
 		edges = append(edges, group.EdgeAccounts)
@@ -18145,6 +18312,8 @@ func (m *GroupMutation) EdgeCleared(name string) bool {
 		return m.clearedsubscriptions
 	case group.EdgeUsageLogs:
 		return m.clearedusage_logs
+	case group.EdgeUserRateLimitWindows:
+		return m.cleareduser_rate_limit_windows
 	case group.EdgeAccounts:
 		return m.clearedaccounts
 	case group.EdgeAllowedUsers:
@@ -18176,6 +18345,9 @@ func (m *GroupMutation) ResetEdge(name string) error {
 		return nil
 	case group.EdgeUsageLogs:
 		m.ResetUsageLogs()
+		return nil
+	case group.EdgeUserRateLimitWindows:
+		m.ResetUserRateLimitWindows()
 		return nil
 	case group.EdgeAccounts:
 		m.ResetAccounts()
@@ -38148,80 +38320,83 @@ func (m *UsageLogMutation) ResetEdge(name string) error {
 // UserMutation represents an operation that mutates the User nodes in the graph.
 type UserMutation struct {
 	config
-	op                            Op
-	typ                           string
-	id                            *int64
-	created_at                    *time.Time
-	updated_at                    *time.Time
-	deleted_at                    *time.Time
-	email                         *string
-	password_hash                 *string
-	role                          *string
-	balance                       *float64
-	addbalance                    *float64
-	concurrency                   *int
-	addconcurrency                *int
-	status                        *string
-	username                      *string
-	notes                         *string
-	totp_secret_encrypted         *string
-	totp_enabled                  *bool
-	totp_enabled_at               *time.Time
-	signup_source                 *string
-	last_login_at                 *time.Time
-	last_active_at                *time.Time
-	balance_notify_enabled        *bool
-	balance_notify_threshold_type *string
-	balance_notify_threshold      *float64
-	addbalance_notify_threshold   *float64
-	balance_notify_extra_emails   *string
-	total_recharged               *float64
-	addtotal_recharged            *float64
-	rpm_limit                     *int
-	addrpm_limit                  *int
-	clearedFields                 map[string]struct{}
-	api_keys                      map[int64]struct{}
-	removedapi_keys               map[int64]struct{}
-	clearedapi_keys               bool
-	redeem_codes                  map[int64]struct{}
-	removedredeem_codes           map[int64]struct{}
-	clearedredeem_codes           bool
-	subscriptions                 map[int64]struct{}
-	removedsubscriptions          map[int64]struct{}
-	clearedsubscriptions          bool
-	assigned_subscriptions        map[int64]struct{}
-	removedassigned_subscriptions map[int64]struct{}
-	clearedassigned_subscriptions bool
-	announcement_reads            map[int64]struct{}
-	removedannouncement_reads     map[int64]struct{}
-	clearedannouncement_reads     bool
-	allowed_groups                map[int64]struct{}
-	removedallowed_groups         map[int64]struct{}
-	clearedallowed_groups         bool
-	usage_logs                    map[int64]struct{}
-	removedusage_logs             map[int64]struct{}
-	clearedusage_logs             bool
-	attribute_values              map[int64]struct{}
-	removedattribute_values       map[int64]struct{}
-	clearedattribute_values       bool
-	promo_code_usages             map[int64]struct{}
-	removedpromo_code_usages      map[int64]struct{}
-	clearedpromo_code_usages      bool
-	payment_orders                map[int64]struct{}
-	removedpayment_orders         map[int64]struct{}
-	clearedpayment_orders         bool
-	auth_identities               map[int64]struct{}
-	removedauth_identities        map[int64]struct{}
-	clearedauth_identities        bool
-	pending_auth_sessions         map[int64]struct{}
-	removedpending_auth_sessions  map[int64]struct{}
-	clearedpending_auth_sessions  bool
-	platform_quotas               map[int64]struct{}
-	removedplatform_quotas        map[int64]struct{}
-	clearedplatform_quotas        bool
-	done                          bool
-	oldValue                      func(context.Context) (*User, error)
-	predicates                    []predicate.User
+	op                              Op
+	typ                             string
+	id                              *int64
+	created_at                      *time.Time
+	updated_at                      *time.Time
+	deleted_at                      *time.Time
+	email                           *string
+	password_hash                   *string
+	role                            *string
+	balance                         *float64
+	addbalance                      *float64
+	concurrency                     *int
+	addconcurrency                  *int
+	status                          *string
+	username                        *string
+	notes                           *string
+	totp_secret_encrypted           *string
+	totp_enabled                    *bool
+	totp_enabled_at                 *time.Time
+	signup_source                   *string
+	last_login_at                   *time.Time
+	last_active_at                  *time.Time
+	balance_notify_enabled          *bool
+	balance_notify_threshold_type   *string
+	balance_notify_threshold        *float64
+	addbalance_notify_threshold     *float64
+	balance_notify_extra_emails     *string
+	total_recharged                 *float64
+	addtotal_recharged              *float64
+	rpm_limit                       *int
+	addrpm_limit                    *int
+	clearedFields                   map[string]struct{}
+	api_keys                        map[int64]struct{}
+	removedapi_keys                 map[int64]struct{}
+	clearedapi_keys                 bool
+	redeem_codes                    map[int64]struct{}
+	removedredeem_codes             map[int64]struct{}
+	clearedredeem_codes             bool
+	subscriptions                   map[int64]struct{}
+	removedsubscriptions            map[int64]struct{}
+	clearedsubscriptions            bool
+	assigned_subscriptions          map[int64]struct{}
+	removedassigned_subscriptions   map[int64]struct{}
+	clearedassigned_subscriptions   bool
+	announcement_reads              map[int64]struct{}
+	removedannouncement_reads       map[int64]struct{}
+	clearedannouncement_reads       bool
+	allowed_groups                  map[int64]struct{}
+	removedallowed_groups           map[int64]struct{}
+	clearedallowed_groups           bool
+	usage_logs                      map[int64]struct{}
+	removedusage_logs               map[int64]struct{}
+	clearedusage_logs               bool
+	attribute_values                map[int64]struct{}
+	removedattribute_values         map[int64]struct{}
+	clearedattribute_values         bool
+	promo_code_usages               map[int64]struct{}
+	removedpromo_code_usages        map[int64]struct{}
+	clearedpromo_code_usages        bool
+	payment_orders                  map[int64]struct{}
+	removedpayment_orders           map[int64]struct{}
+	clearedpayment_orders           bool
+	auth_identities                 map[int64]struct{}
+	removedauth_identities          map[int64]struct{}
+	clearedauth_identities          bool
+	pending_auth_sessions           map[int64]struct{}
+	removedpending_auth_sessions    map[int64]struct{}
+	clearedpending_auth_sessions    bool
+	platform_quotas                 map[int64]struct{}
+	removedplatform_quotas          map[int64]struct{}
+	clearedplatform_quotas          bool
+	group_rate_limit_windows        map[int64]struct{}
+	removedgroup_rate_limit_windows map[int64]struct{}
+	clearedgroup_rate_limit_windows bool
+	done                            bool
+	oldValue                        func(context.Context) (*User, error)
+	predicates                      []predicate.User
 }
 
 var _ ent.Mutation = (*UserMutation)(nil)
@@ -40031,6 +40206,60 @@ func (m *UserMutation) ResetPlatformQuotas() {
 	m.removedplatform_quotas = nil
 }
 
+// AddGroupRateLimitWindowIDs adds the "group_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by ids.
+func (m *UserMutation) AddGroupRateLimitWindowIDs(ids ...int64) {
+	if m.group_rate_limit_windows == nil {
+		m.group_rate_limit_windows = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.group_rate_limit_windows[ids[i]] = struct{}{}
+	}
+}
+
+// ClearGroupRateLimitWindows clears the "group_rate_limit_windows" edge to the UserGroupRateLimitWindow entity.
+func (m *UserMutation) ClearGroupRateLimitWindows() {
+	m.clearedgroup_rate_limit_windows = true
+}
+
+// GroupRateLimitWindowsCleared reports if the "group_rate_limit_windows" edge to the UserGroupRateLimitWindow entity was cleared.
+func (m *UserMutation) GroupRateLimitWindowsCleared() bool {
+	return m.clearedgroup_rate_limit_windows
+}
+
+// RemoveGroupRateLimitWindowIDs removes the "group_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by IDs.
+func (m *UserMutation) RemoveGroupRateLimitWindowIDs(ids ...int64) {
+	if m.removedgroup_rate_limit_windows == nil {
+		m.removedgroup_rate_limit_windows = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.group_rate_limit_windows, ids[i])
+		m.removedgroup_rate_limit_windows[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedGroupRateLimitWindows returns the removed IDs of the "group_rate_limit_windows" edge to the UserGroupRateLimitWindow entity.
+func (m *UserMutation) RemovedGroupRateLimitWindowsIDs() (ids []int64) {
+	for id := range m.removedgroup_rate_limit_windows {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// GroupRateLimitWindowsIDs returns the "group_rate_limit_windows" edge IDs in the mutation.
+func (m *UserMutation) GroupRateLimitWindowsIDs() (ids []int64) {
+	for id := range m.group_rate_limit_windows {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetGroupRateLimitWindows resets all changes to the "group_rate_limit_windows" edge.
+func (m *UserMutation) ResetGroupRateLimitWindows() {
+	m.group_rate_limit_windows = nil
+	m.clearedgroup_rate_limit_windows = false
+	m.removedgroup_rate_limit_windows = nil
+}
+
 // Where appends a list predicates to the UserMutation builder.
 func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
@@ -40640,7 +40869,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.api_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -40679,6 +40908,9 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.platform_quotas != nil {
 		edges = append(edges, user.EdgePlatformQuotas)
+	}
+	if m.group_rate_limit_windows != nil {
+		edges = append(edges, user.EdgeGroupRateLimitWindows)
 	}
 	return edges
 }
@@ -40765,13 +40997,19 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeGroupRateLimitWindows:
+		ids := make([]ent.Value, 0, len(m.group_rate_limit_windows))
+		for id := range m.group_rate_limit_windows {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.removedapi_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -40810,6 +41048,9 @@ func (m *UserMutation) RemovedEdges() []string {
 	}
 	if m.removedplatform_quotas != nil {
 		edges = append(edges, user.EdgePlatformQuotas)
+	}
+	if m.removedgroup_rate_limit_windows != nil {
+		edges = append(edges, user.EdgeGroupRateLimitWindows)
 	}
 	return edges
 }
@@ -40896,13 +41137,19 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeGroupRateLimitWindows:
+		ids := make([]ent.Value, 0, len(m.removedgroup_rate_limit_windows))
+		for id := range m.removedgroup_rate_limit_windows {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.clearedapi_keys {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -40942,6 +41189,9 @@ func (m *UserMutation) ClearedEdges() []string {
 	if m.clearedplatform_quotas {
 		edges = append(edges, user.EdgePlatformQuotas)
 	}
+	if m.clearedgroup_rate_limit_windows {
+		edges = append(edges, user.EdgeGroupRateLimitWindows)
+	}
 	return edges
 }
 
@@ -40975,6 +41225,8 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedpending_auth_sessions
 	case user.EdgePlatformQuotas:
 		return m.clearedplatform_quotas
+	case user.EdgeGroupRateLimitWindows:
+		return m.clearedgroup_rate_limit_windows
 	}
 	return false
 }
@@ -41029,6 +41281,9 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgePlatformQuotas:
 		m.ResetPlatformQuotas()
+		return nil
+	case user.EdgeGroupRateLimitWindows:
+		m.ResetGroupRateLimitWindows()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)
@@ -43248,6 +43503,833 @@ func (m *UserAttributeValueMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown UserAttributeValue edge %s", name)
+}
+
+// UserGroupRateLimitWindowMutation represents an operation that mutates the UserGroupRateLimitWindow nodes in the graph.
+type UserGroupRateLimitWindowMutation struct {
+	config
+	op              Op
+	typ             string
+	id              *int64
+	created_at      *time.Time
+	updated_at      *time.Time
+	deleted_at      *time.Time
+	usage_5h_usd    *float64
+	addusage_5h_usd *float64
+	window_5h_start *time.Time
+	clearedFields   map[string]struct{}
+	user            *int64
+	cleareduser     bool
+	group           *int64
+	clearedgroup    bool
+	done            bool
+	oldValue        func(context.Context) (*UserGroupRateLimitWindow, error)
+	predicates      []predicate.UserGroupRateLimitWindow
+}
+
+var _ ent.Mutation = (*UserGroupRateLimitWindowMutation)(nil)
+
+// usergroupratelimitwindowOption allows management of the mutation configuration using functional options.
+type usergroupratelimitwindowOption func(*UserGroupRateLimitWindowMutation)
+
+// newUserGroupRateLimitWindowMutation creates new mutation for the UserGroupRateLimitWindow entity.
+func newUserGroupRateLimitWindowMutation(c config, op Op, opts ...usergroupratelimitwindowOption) *UserGroupRateLimitWindowMutation {
+	m := &UserGroupRateLimitWindowMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUserGroupRateLimitWindow,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUserGroupRateLimitWindowID sets the ID field of the mutation.
+func withUserGroupRateLimitWindowID(id int64) usergroupratelimitwindowOption {
+	return func(m *UserGroupRateLimitWindowMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UserGroupRateLimitWindow
+		)
+		m.oldValue = func(ctx context.Context) (*UserGroupRateLimitWindow, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UserGroupRateLimitWindow.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUserGroupRateLimitWindow sets the old UserGroupRateLimitWindow of the mutation.
+func withUserGroupRateLimitWindow(node *UserGroupRateLimitWindow) usergroupratelimitwindowOption {
+	return func(m *UserGroupRateLimitWindowMutation) {
+		m.oldValue = func(context.Context) (*UserGroupRateLimitWindow, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UserGroupRateLimitWindowMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UserGroupRateLimitWindowMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UserGroupRateLimitWindowMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UserGroupRateLimitWindowMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UserGroupRateLimitWindow.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UserGroupRateLimitWindowMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UserGroupRateLimitWindowMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UserGroupRateLimitWindowMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UserGroupRateLimitWindowMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *UserGroupRateLimitWindowMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *UserGroupRateLimitWindowMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[usergroupratelimitwindow.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *UserGroupRateLimitWindowMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[usergroupratelimitwindow.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *UserGroupRateLimitWindowMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, usergroupratelimitwindow.FieldDeletedAt)
+}
+
+// SetUserID sets the "user_id" field.
+func (m *UserGroupRateLimitWindowMutation) SetUserID(i int64) {
+	m.user = &i
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) UserID() (r int64, exists bool) {
+	v := m.user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *UserGroupRateLimitWindowMutation) ResetUserID() {
+	m.user = nil
+}
+
+// SetGroupID sets the "group_id" field.
+func (m *UserGroupRateLimitWindowMutation) SetGroupID(i int64) {
+	m.group = &i
+}
+
+// GroupID returns the value of the "group_id" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) GroupID() (r int64, exists bool) {
+	v := m.group
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGroupID returns the old "group_id" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldGroupID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGroupID: %w", err)
+	}
+	return oldValue.GroupID, nil
+}
+
+// ResetGroupID resets all changes to the "group_id" field.
+func (m *UserGroupRateLimitWindowMutation) ResetGroupID() {
+	m.group = nil
+}
+
+// SetUsage5hUsd sets the "usage_5h_usd" field.
+func (m *UserGroupRateLimitWindowMutation) SetUsage5hUsd(f float64) {
+	m.usage_5h_usd = &f
+	m.addusage_5h_usd = nil
+}
+
+// Usage5hUsd returns the value of the "usage_5h_usd" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) Usage5hUsd() (r float64, exists bool) {
+	v := m.usage_5h_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsage5hUsd returns the old "usage_5h_usd" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldUsage5hUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsage5hUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsage5hUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsage5hUsd: %w", err)
+	}
+	return oldValue.Usage5hUsd, nil
+}
+
+// AddUsage5hUsd adds f to the "usage_5h_usd" field.
+func (m *UserGroupRateLimitWindowMutation) AddUsage5hUsd(f float64) {
+	if m.addusage_5h_usd != nil {
+		*m.addusage_5h_usd += f
+	} else {
+		m.addusage_5h_usd = &f
+	}
+}
+
+// AddedUsage5hUsd returns the value that was added to the "usage_5h_usd" field in this mutation.
+func (m *UserGroupRateLimitWindowMutation) AddedUsage5hUsd() (r float64, exists bool) {
+	v := m.addusage_5h_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetUsage5hUsd resets all changes to the "usage_5h_usd" field.
+func (m *UserGroupRateLimitWindowMutation) ResetUsage5hUsd() {
+	m.usage_5h_usd = nil
+	m.addusage_5h_usd = nil
+}
+
+// SetWindow5hStart sets the "window_5h_start" field.
+func (m *UserGroupRateLimitWindowMutation) SetWindow5hStart(t time.Time) {
+	m.window_5h_start = &t
+}
+
+// Window5hStart returns the value of the "window_5h_start" field in the mutation.
+func (m *UserGroupRateLimitWindowMutation) Window5hStart() (r time.Time, exists bool) {
+	v := m.window_5h_start
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWindow5hStart returns the old "window_5h_start" field's value of the UserGroupRateLimitWindow entity.
+// If the UserGroupRateLimitWindow object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserGroupRateLimitWindowMutation) OldWindow5hStart(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWindow5hStart is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWindow5hStart requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWindow5hStart: %w", err)
+	}
+	return oldValue.Window5hStart, nil
+}
+
+// ClearWindow5hStart clears the value of the "window_5h_start" field.
+func (m *UserGroupRateLimitWindowMutation) ClearWindow5hStart() {
+	m.window_5h_start = nil
+	m.clearedFields[usergroupratelimitwindow.FieldWindow5hStart] = struct{}{}
+}
+
+// Window5hStartCleared returns if the "window_5h_start" field was cleared in this mutation.
+func (m *UserGroupRateLimitWindowMutation) Window5hStartCleared() bool {
+	_, ok := m.clearedFields[usergroupratelimitwindow.FieldWindow5hStart]
+	return ok
+}
+
+// ResetWindow5hStart resets all changes to the "window_5h_start" field.
+func (m *UserGroupRateLimitWindowMutation) ResetWindow5hStart() {
+	m.window_5h_start = nil
+	delete(m.clearedFields, usergroupratelimitwindow.FieldWindow5hStart)
+}
+
+// ClearUser clears the "user" edge to the User entity.
+func (m *UserGroupRateLimitWindowMutation) ClearUser() {
+	m.cleareduser = true
+	m.clearedFields[usergroupratelimitwindow.FieldUserID] = struct{}{}
+}
+
+// UserCleared reports if the "user" edge to the User entity was cleared.
+func (m *UserGroupRateLimitWindowMutation) UserCleared() bool {
+	return m.cleareduser
+}
+
+// UserIDs returns the "user" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// UserID instead. It exists only for internal usage by the builders.
+func (m *UserGroupRateLimitWindowMutation) UserIDs() (ids []int64) {
+	if id := m.user; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetUser resets all changes to the "user" edge.
+func (m *UserGroupRateLimitWindowMutation) ResetUser() {
+	m.user = nil
+	m.cleareduser = false
+}
+
+// ClearGroup clears the "group" edge to the Group entity.
+func (m *UserGroupRateLimitWindowMutation) ClearGroup() {
+	m.clearedgroup = true
+	m.clearedFields[usergroupratelimitwindow.FieldGroupID] = struct{}{}
+}
+
+// GroupCleared reports if the "group" edge to the Group entity was cleared.
+func (m *UserGroupRateLimitWindowMutation) GroupCleared() bool {
+	return m.clearedgroup
+}
+
+// GroupIDs returns the "group" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// GroupID instead. It exists only for internal usage by the builders.
+func (m *UserGroupRateLimitWindowMutation) GroupIDs() (ids []int64) {
+	if id := m.group; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetGroup resets all changes to the "group" edge.
+func (m *UserGroupRateLimitWindowMutation) ResetGroup() {
+	m.group = nil
+	m.clearedgroup = false
+}
+
+// Where appends a list predicates to the UserGroupRateLimitWindowMutation builder.
+func (m *UserGroupRateLimitWindowMutation) Where(ps ...predicate.UserGroupRateLimitWindow) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UserGroupRateLimitWindowMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UserGroupRateLimitWindowMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UserGroupRateLimitWindow, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UserGroupRateLimitWindowMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UserGroupRateLimitWindowMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UserGroupRateLimitWindow).
+func (m *UserGroupRateLimitWindowMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UserGroupRateLimitWindowMutation) Fields() []string {
+	fields := make([]string, 0, 7)
+	if m.created_at != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldDeletedAt)
+	}
+	if m.user != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldUserID)
+	}
+	if m.group != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldGroupID)
+	}
+	if m.usage_5h_usd != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldUsage5hUsd)
+	}
+	if m.window_5h_start != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldWindow5hStart)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UserGroupRateLimitWindowMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usergroupratelimitwindow.FieldCreatedAt:
+		return m.CreatedAt()
+	case usergroupratelimitwindow.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case usergroupratelimitwindow.FieldDeletedAt:
+		return m.DeletedAt()
+	case usergroupratelimitwindow.FieldUserID:
+		return m.UserID()
+	case usergroupratelimitwindow.FieldGroupID:
+		return m.GroupID()
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		return m.Usage5hUsd()
+	case usergroupratelimitwindow.FieldWindow5hStart:
+		return m.Window5hStart()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UserGroupRateLimitWindowMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usergroupratelimitwindow.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usergroupratelimitwindow.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case usergroupratelimitwindow.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case usergroupratelimitwindow.FieldUserID:
+		return m.OldUserID(ctx)
+	case usergroupratelimitwindow.FieldGroupID:
+		return m.OldGroupID(ctx)
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		return m.OldUsage5hUsd(ctx)
+	case usergroupratelimitwindow.FieldWindow5hStart:
+		return m.OldWindow5hStart(ctx)
+	}
+	return nil, fmt.Errorf("unknown UserGroupRateLimitWindow field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserGroupRateLimitWindowMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usergroupratelimitwindow.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usergroupratelimitwindow.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case usergroupratelimitwindow.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case usergroupratelimitwindow.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case usergroupratelimitwindow.FieldGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGroupID(v)
+		return nil
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsage5hUsd(v)
+		return nil
+	case usergroupratelimitwindow.FieldWindow5hStart:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWindow5hStart(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UserGroupRateLimitWindowMutation) AddedFields() []string {
+	var fields []string
+	if m.addusage_5h_usd != nil {
+		fields = append(fields, usergroupratelimitwindow.FieldUsage5hUsd)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UserGroupRateLimitWindowMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		return m.AddedUsage5hUsd()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserGroupRateLimitWindowMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddUsage5hUsd(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UserGroupRateLimitWindowMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usergroupratelimitwindow.FieldDeletedAt) {
+		fields = append(fields, usergroupratelimitwindow.FieldDeletedAt)
+	}
+	if m.FieldCleared(usergroupratelimitwindow.FieldWindow5hStart) {
+		fields = append(fields, usergroupratelimitwindow.FieldWindow5hStart)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UserGroupRateLimitWindowMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UserGroupRateLimitWindowMutation) ClearField(name string) error {
+	switch name {
+	case usergroupratelimitwindow.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case usergroupratelimitwindow.FieldWindow5hStart:
+		m.ClearWindow5hStart()
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UserGroupRateLimitWindowMutation) ResetField(name string) error {
+	switch name {
+	case usergroupratelimitwindow.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usergroupratelimitwindow.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case usergroupratelimitwindow.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case usergroupratelimitwindow.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case usergroupratelimitwindow.FieldGroupID:
+		m.ResetGroupID()
+		return nil
+	case usergroupratelimitwindow.FieldUsage5hUsd:
+		m.ResetUsage5hUsd()
+		return nil
+	case usergroupratelimitwindow.FieldWindow5hStart:
+		m.ResetWindow5hStart()
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UserGroupRateLimitWindowMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.user != nil {
+		edges = append(edges, usergroupratelimitwindow.EdgeUser)
+	}
+	if m.group != nil {
+		edges = append(edges, usergroupratelimitwindow.EdgeGroup)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UserGroupRateLimitWindowMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usergroupratelimitwindow.EdgeUser:
+		if id := m.user; id != nil {
+			return []ent.Value{*id}
+		}
+	case usergroupratelimitwindow.EdgeGroup:
+		if id := m.group; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UserGroupRateLimitWindowMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UserGroupRateLimitWindowMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UserGroupRateLimitWindowMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.cleareduser {
+		edges = append(edges, usergroupratelimitwindow.EdgeUser)
+	}
+	if m.clearedgroup {
+		edges = append(edges, usergroupratelimitwindow.EdgeGroup)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UserGroupRateLimitWindowMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usergroupratelimitwindow.EdgeUser:
+		return m.cleareduser
+	case usergroupratelimitwindow.EdgeGroup:
+		return m.clearedgroup
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UserGroupRateLimitWindowMutation) ClearEdge(name string) error {
+	switch name {
+	case usergroupratelimitwindow.EdgeUser:
+		m.ClearUser()
+		return nil
+	case usergroupratelimitwindow.EdgeGroup:
+		m.ClearGroup()
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UserGroupRateLimitWindowMutation) ResetEdge(name string) error {
+	switch name {
+	case usergroupratelimitwindow.EdgeUser:
+		m.ResetUser()
+		return nil
+	case usergroupratelimitwindow.EdgeGroup:
+		m.ResetGroup()
+		return nil
+	}
+	return fmt.Errorf("unknown UserGroupRateLimitWindow edge %s", name)
 }
 
 // UserPlatformQuotaMutation represents an operation that mutates the UserPlatformQuota nodes in the graph.

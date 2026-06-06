@@ -48,6 +48,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
+	"github.com/Wei-Shaw/sub2api/ent/usergroupratelimitwindow"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 
@@ -125,6 +126,8 @@ type Client struct {
 	UserAttributeDefinition *UserAttributeDefinitionClient
 	// UserAttributeValue is the client for interacting with the UserAttributeValue builders.
 	UserAttributeValue *UserAttributeValueClient
+	// UserGroupRateLimitWindow is the client for interacting with the UserGroupRateLimitWindow builders.
+	UserGroupRateLimitWindow *UserGroupRateLimitWindowClient
 	// UserPlatformQuota is the client for interacting with the UserPlatformQuota builders.
 	UserPlatformQuota *UserPlatformQuotaClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
@@ -173,6 +176,7 @@ func (c *Client) init() {
 	c.UserAllowedGroup = NewUserAllowedGroupClient(c.config)
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
+	c.UserGroupRateLimitWindow = NewUserGroupRateLimitWindowClient(c.config)
 	c.UserPlatformQuota = NewUserPlatformQuotaClient(c.config)
 	c.UserSubscription = NewUserSubscriptionClient(c.config)
 }
@@ -300,6 +304,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
+		UserGroupRateLimitWindow:      NewUserGroupRateLimitWindowClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
@@ -354,6 +359,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
+		UserGroupRateLimitWindow:      NewUserGroupRateLimitWindowClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
@@ -394,7 +400,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
 		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.UserGroupRateLimitWindow, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -413,7 +419,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
 		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.UserGroupRateLimitWindow, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -488,6 +494,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UserAttributeDefinition.mutate(ctx, m)
 	case *UserAttributeValueMutation:
 		return c.UserAttributeValue.mutate(ctx, m)
+	case *UserGroupRateLimitWindowMutation:
+		return c.UserGroupRateLimitWindow.mutate(ctx, m)
 	case *UserPlatformQuotaMutation:
 		return c.UserPlatformQuota.mutate(ctx, m)
 	case *UserSubscriptionMutation:
@@ -2565,6 +2573,22 @@ func (c *GroupClient) QueryUsageLogs(_m *Group) *UsageLogQuery {
 			sqlgraph.From(group.Table, group.FieldID, id),
 			sqlgraph.To(usagelog.Table, usagelog.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, group.UsageLogsTable, group.UsageLogsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryUserRateLimitWindows queries the user_rate_limit_windows edge of a Group.
+func (c *GroupClient) QueryUserRateLimitWindows(_m *Group) *UserGroupRateLimitWindowQuery {
+	query := (&UserGroupRateLimitWindowClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(group.Table, group.FieldID, id),
+			sqlgraph.To(usergroupratelimitwindow.Table, usergroupratelimitwindow.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, group.UserRateLimitWindowsTable, group.UserRateLimitWindowsColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -5365,6 +5389,22 @@ func (c *UserClient) QueryPlatformQuotas(_m *User) *UserPlatformQuotaQuery {
 	return query
 }
 
+// QueryGroupRateLimitWindows queries the group_rate_limit_windows edge of a User.
+func (c *UserClient) QueryGroupRateLimitWindows(_m *User) *UserGroupRateLimitWindowQuery {
+	query := (&UserGroupRateLimitWindowClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(usergroupratelimitwindow.Table, usergroupratelimitwindow.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.GroupRateLimitWindowsTable, user.GroupRateLimitWindowsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryUserAllowedGroups queries the user_allowed_groups edge of a User.
 func (c *UserClient) QueryUserAllowedGroups(_m *User) *UserAllowedGroupQuery {
 	query := (&UserAllowedGroupClient{config: c.config}).Query()
@@ -5840,6 +5880,173 @@ func (c *UserAttributeValueClient) mutate(ctx context.Context, m *UserAttributeV
 	}
 }
 
+// UserGroupRateLimitWindowClient is a client for the UserGroupRateLimitWindow schema.
+type UserGroupRateLimitWindowClient struct {
+	config
+}
+
+// NewUserGroupRateLimitWindowClient returns a client for the UserGroupRateLimitWindow from the given config.
+func NewUserGroupRateLimitWindowClient(c config) *UserGroupRateLimitWindowClient {
+	return &UserGroupRateLimitWindowClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usergroupratelimitwindow.Hooks(f(g(h())))`.
+func (c *UserGroupRateLimitWindowClient) Use(hooks ...Hook) {
+	c.hooks.UserGroupRateLimitWindow = append(c.hooks.UserGroupRateLimitWindow, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usergroupratelimitwindow.Intercept(f(g(h())))`.
+func (c *UserGroupRateLimitWindowClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UserGroupRateLimitWindow = append(c.inters.UserGroupRateLimitWindow, interceptors...)
+}
+
+// Create returns a builder for creating a UserGroupRateLimitWindow entity.
+func (c *UserGroupRateLimitWindowClient) Create() *UserGroupRateLimitWindowCreate {
+	mutation := newUserGroupRateLimitWindowMutation(c.config, OpCreate)
+	return &UserGroupRateLimitWindowCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UserGroupRateLimitWindow entities.
+func (c *UserGroupRateLimitWindowClient) CreateBulk(builders ...*UserGroupRateLimitWindowCreate) *UserGroupRateLimitWindowCreateBulk {
+	return &UserGroupRateLimitWindowCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserGroupRateLimitWindowClient) MapCreateBulk(slice any, setFunc func(*UserGroupRateLimitWindowCreate, int)) *UserGroupRateLimitWindowCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserGroupRateLimitWindowCreateBulk{err: fmt.Errorf("calling to UserGroupRateLimitWindowClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserGroupRateLimitWindowCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserGroupRateLimitWindowCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UserGroupRateLimitWindow.
+func (c *UserGroupRateLimitWindowClient) Update() *UserGroupRateLimitWindowUpdate {
+	mutation := newUserGroupRateLimitWindowMutation(c.config, OpUpdate)
+	return &UserGroupRateLimitWindowUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserGroupRateLimitWindowClient) UpdateOne(_m *UserGroupRateLimitWindow) *UserGroupRateLimitWindowUpdateOne {
+	mutation := newUserGroupRateLimitWindowMutation(c.config, OpUpdateOne, withUserGroupRateLimitWindow(_m))
+	return &UserGroupRateLimitWindowUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserGroupRateLimitWindowClient) UpdateOneID(id int64) *UserGroupRateLimitWindowUpdateOne {
+	mutation := newUserGroupRateLimitWindowMutation(c.config, OpUpdateOne, withUserGroupRateLimitWindowID(id))
+	return &UserGroupRateLimitWindowUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UserGroupRateLimitWindow.
+func (c *UserGroupRateLimitWindowClient) Delete() *UserGroupRateLimitWindowDelete {
+	mutation := newUserGroupRateLimitWindowMutation(c.config, OpDelete)
+	return &UserGroupRateLimitWindowDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserGroupRateLimitWindowClient) DeleteOne(_m *UserGroupRateLimitWindow) *UserGroupRateLimitWindowDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserGroupRateLimitWindowClient) DeleteOneID(id int64) *UserGroupRateLimitWindowDeleteOne {
+	builder := c.Delete().Where(usergroupratelimitwindow.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserGroupRateLimitWindowDeleteOne{builder}
+}
+
+// Query returns a query builder for UserGroupRateLimitWindow.
+func (c *UserGroupRateLimitWindowClient) Query() *UserGroupRateLimitWindowQuery {
+	return &UserGroupRateLimitWindowQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUserGroupRateLimitWindow},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UserGroupRateLimitWindow entity by its id.
+func (c *UserGroupRateLimitWindowClient) Get(ctx context.Context, id int64) (*UserGroupRateLimitWindow, error) {
+	return c.Query().Where(usergroupratelimitwindow.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserGroupRateLimitWindowClient) GetX(ctx context.Context, id int64) *UserGroupRateLimitWindow {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a UserGroupRateLimitWindow.
+func (c *UserGroupRateLimitWindowClient) QueryUser(_m *UserGroupRateLimitWindow) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usergroupratelimitwindow.Table, usergroupratelimitwindow.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, usergroupratelimitwindow.UserTable, usergroupratelimitwindow.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryGroup queries the group edge of a UserGroupRateLimitWindow.
+func (c *UserGroupRateLimitWindowClient) QueryGroup(_m *UserGroupRateLimitWindow) *GroupQuery {
+	query := (&GroupClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usergroupratelimitwindow.Table, usergroupratelimitwindow.FieldID, id),
+			sqlgraph.To(group.Table, group.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, usergroupratelimitwindow.GroupTable, usergroupratelimitwindow.GroupColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UserGroupRateLimitWindowClient) Hooks() []Hook {
+	hooks := c.hooks.UserGroupRateLimitWindow
+	return append(hooks[:len(hooks):len(hooks)], usergroupratelimitwindow.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserGroupRateLimitWindowClient) Interceptors() []Interceptor {
+	inters := c.inters.UserGroupRateLimitWindow
+	return append(inters[:len(inters):len(inters)], usergroupratelimitwindow.Interceptors[:]...)
+}
+
+func (c *UserGroupRateLimitWindowClient) mutate(ctx context.Context, m *UserGroupRateLimitWindowMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserGroupRateLimitWindowCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserGroupRateLimitWindowUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserGroupRateLimitWindowUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserGroupRateLimitWindowDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserGroupRateLimitWindow mutation op: %q", m.Op())
+	}
+}
+
 // UserPlatformQuotaClient is a client for the UserPlatformQuota schema.
 type UserPlatformQuotaClient struct {
 	config
@@ -6200,8 +6407,8 @@ type (
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		UserAttributeDefinition, UserAttributeValue, UserGroupRateLimitWindow,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6211,8 +6418,8 @@ type (
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		UserAttributeDefinition, UserAttributeValue, UserGroupRateLimitWindow,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

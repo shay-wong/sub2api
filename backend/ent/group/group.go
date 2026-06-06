@@ -28,6 +28,8 @@ const (
 	FieldDescription = "description"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldRateLimit5h holds the string denoting the rate_limit_5h field in the database.
+	FieldRateLimit5h = "rate_limit_5h"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -94,6 +96,8 @@ const (
 	EdgeSubscriptions = "subscriptions"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
+	// EdgeUserRateLimitWindows holds the string denoting the user_rate_limit_windows edge name in mutations.
+	EdgeUserRateLimitWindows = "user_rate_limit_windows"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgeAllowedUsers holds the string denoting the allowed_users edge name in mutations.
@@ -132,6 +136,13 @@ const (
 	UsageLogsInverseTable = "usage_logs"
 	// UsageLogsColumn is the table column denoting the usage_logs relation/edge.
 	UsageLogsColumn = "group_id"
+	// UserRateLimitWindowsTable is the table that holds the user_rate_limit_windows relation/edge.
+	UserRateLimitWindowsTable = "user_group_rate_limit_windows"
+	// UserRateLimitWindowsInverseTable is the table name for the UserGroupRateLimitWindow entity.
+	// It exists in this package in order to avoid circular dependency with the "usergroupratelimitwindow" package.
+	UserRateLimitWindowsInverseTable = "user_group_rate_limit_windows"
+	// UserRateLimitWindowsColumn is the table column denoting the user_rate_limit_windows relation/edge.
+	UserRateLimitWindowsColumn = "group_id"
 	// AccountsTable is the table that holds the accounts relation/edge. The primary key declared below.
 	AccountsTable = "account_groups"
 	// AccountsInverseTable is the table name for the Account entity.
@@ -167,6 +178,7 @@ var Columns = []string{
 	FieldName,
 	FieldDescription,
 	FieldRateMultiplier,
+	FieldRateLimit5h,
 	FieldIsExclusive,
 	FieldStatus,
 	FieldPlatform,
@@ -235,6 +247,8 @@ var (
 	NameValidator func(string) error
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
+	// DefaultRateLimit5h holds the default value on creation for the "rate_limit_5h" field.
+	DefaultRateLimit5h float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -321,6 +335,11 @@ func ByDescription(opts ...sql.OrderTermOption) OrderOption {
 // ByRateMultiplier orders the results by the rate_multiplier field.
 func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateMultiplier, opts...).ToFunc()
+}
+
+// ByRateLimit5h orders the results by the rate_limit_5h field.
+func ByRateLimit5h(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRateLimit5h, opts...).ToFunc()
 }
 
 // ByIsExclusive orders the results by the is_exclusive field.
@@ -504,6 +523,20 @@ func ByUsageLogs(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByUserRateLimitWindowsCount orders the results by user_rate_limit_windows count.
+func ByUserRateLimitWindowsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newUserRateLimitWindowsStep(), opts...)
+	}
+}
+
+// ByUserRateLimitWindows orders the results by user_rate_limit_windows terms.
+func ByUserRateLimitWindows(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newUserRateLimitWindowsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByAccountsCount orders the results by accounts count.
 func ByAccountsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -585,6 +618,13 @@ func newUsageLogsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(UsageLogsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, UsageLogsTable, UsageLogsColumn),
+	)
+}
+func newUserRateLimitWindowsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(UserRateLimitWindowsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, UserRateLimitWindowsTable, UserRateLimitWindowsColumn),
 	)
 }
 func newAccountsStep() *sqlgraph.Step {

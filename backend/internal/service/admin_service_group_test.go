@@ -198,6 +198,38 @@ func TestAdminService_CreateGroup_NilImagePricing(t *testing.T) {
 	require.Nil(t, repo.created.ImagePrice4K)
 }
 
+func TestAdminService_CreateGroup_WithRateLimit5h(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:           "limited-group",
+		Description:    "Test group",
+		Platform:       PlatformAnthropic,
+		RateMultiplier: 1.0,
+		RateLimit5h:    12.5,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.created)
+	require.InDelta(t, 12.5, repo.created.RateLimit5h, 1e-12)
+}
+
+func TestAdminService_CreateGroup_RejectsNegativeRateLimit5h(t *testing.T) {
+	repo := &groupRepoStubForAdmin{}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:           "bad-group",
+		Description:    "Test group",
+		Platform:       PlatformAnthropic,
+		RateMultiplier: 1.0,
+		RateLimit5h:    -1,
+	})
+	require.Error(t, err)
+	require.Nil(t, repo.created)
+}
+
 // TestAdminService_UpdateGroup_WithImagePricing 测试更新分组时 ImagePrice 字段正确更新
 func TestAdminService_UpdateGroup_WithImagePricing(t *testing.T) {
 	existingGroup := &Group{
@@ -373,6 +405,74 @@ func TestAdminService_UpdateGroup_InvalidatesAuthCacheOnRPMLimitChange(t *testin
 	require.NotNil(t, group)
 	require.Equal(t, 60, repo.updated.RPMLimit)
 	require.Equal(t, []int64{1}, invalidator.groupIDs, "分组 RPMLimit 写入 auth snapshot，变更后必须失效 API Key 认证缓存")
+}
+
+func TestAdminService_UpdateGroup_RateLimit5hSemantics(t *testing.T) {
+	existingGroup := &Group{
+		ID:             1,
+		Name:           "existing-group",
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		RateLimit5h:    5,
+		RateMultiplier: 1,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		groupRepo:            repo,
+		authCacheInvalidator: invalidator,
+	}
+
+	next := 10.0
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{RateLimit5h: &next})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.InDelta(t, 10.0, repo.updated.RateLimit5h, 1e-12)
+	require.Equal(t, []int64{1}, invalidator.groupIDs)
+
+	zero := 0.0
+	group, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{RateLimit5h: &zero})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.InDelta(t, 0.0, repo.updated.RateLimit5h, 1e-12)
+}
+
+func TestAdminService_UpdateGroup_RateLimit5hOmittedPreservesValue(t *testing.T) {
+	existingGroup := &Group{
+		ID:             1,
+		Name:           "existing-group",
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		RateLimit5h:    7.5,
+		RateMultiplier: 1,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{Name: "renamed"})
+	require.NoError(t, err)
+	require.NotNil(t, group)
+	require.NotNil(t, repo.updated)
+	require.InDelta(t, 7.5, repo.updated.RateLimit5h, 1e-12)
+}
+
+func TestAdminService_UpdateGroup_RejectsNegativeRateLimit5h(t *testing.T) {
+	existingGroup := &Group{
+		ID:             1,
+		Name:           "existing-group",
+		Platform:       PlatformAnthropic,
+		Status:         StatusActive,
+		RateLimit5h:    7.5,
+		RateMultiplier: 1,
+	}
+	repo := &groupRepoStubForAdmin{getByID: existingGroup}
+	svc := &adminServiceImpl{groupRepo: repo}
+	negative := -0.1
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{RateLimit5h: &negative})
+	require.Error(t, err)
+	require.Nil(t, repo.updated)
 }
 
 func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testing.T) {

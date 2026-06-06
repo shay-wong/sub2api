@@ -82,12 +82,23 @@ type APIKey struct {
 	Group *Group `json:"group,omitempty"`
 }
 
+type UserGroupRateLimitWindow struct {
+	UserID          int64      `json:"user_id"`
+	GroupID         int64      `json:"group_id"`
+	GroupName       string     `json:"group_name"`
+	RateLimit5h     float64    `json:"rate_limit_5h"`
+	Usage5hUSD      float64    `json:"usage_5h_usd"`
+	Window5hStart   *time.Time `json:"window_5h_start"`
+	Window5hResetAt *time.Time `json:"window_5h_reset_at"`
+}
+
 type Group struct {
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`
 	Platform       string  `json:"platform"`
 	RateMultiplier float64 `json:"rate_multiplier"`
+	RateLimit5h    float64 `json:"rate_limit_5h"`
 	IsExclusive    bool    `json:"is_exclusive"`
 	Status         string  `json:"status"`
 

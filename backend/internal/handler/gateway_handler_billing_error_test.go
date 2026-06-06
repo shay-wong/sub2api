@@ -41,6 +41,20 @@ func TestBillingErrorDetails_APIKeyRateLimitStillMaps(t *testing.T) {
 	}
 }
 
+func TestBillingErrorDetails_GroupRateLimit5hMapsToTooManyRequestsWithRetryAfter(t *testing.T) {
+	err := service.ErrGroupRateLimit5hExceeded.WithMetadata(map[string]string{
+		"window_resets_at": time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339),
+	})
+
+	status, code, msg, retryAfter := billingErrorDetails(err)
+
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.Equal(t, "rate_limit_exceeded", code)
+	require.NotEmpty(t, msg)
+	require.GreaterOrEqual(t, retryAfter, 5*60*60-1)
+	require.LessOrEqual(t, retryAfter, 5*60*60+1)
+}
+
 func TestBillingErrorDetails_BillingServiceUnavailableMapsTo503(t *testing.T) {
 	status, code, _, retryAfter := billingErrorDetails(service.ErrBillingServiceUnavailable)
 	require.Equal(t, http.StatusServiceUnavailable, status)

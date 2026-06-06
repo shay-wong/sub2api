@@ -147,6 +147,22 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		if !accountAcquired {
 			return
 		}
+		if handleEffectiveGroupRateLimit5h(
+			c.Request.Context(),
+			c,
+			h.billingCacheService,
+			selection,
+			apiKey,
+			accountReleaseFunc,
+			func(err error) {
+				reqLog.Info("openai_embeddings.selected_group_rate_limit_check_failed", zap.Error(err))
+			},
+			func(status int, code, message string) {
+				h.errorResponse(c, status, code, message)
+			},
+		) {
+			return
+		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
@@ -213,20 +229,22 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				APIKeyService:      h.apiKeyService,
-				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				Result:                result,
+				APIKey:                apiKey,
+				User:                  apiKey.User,
+				Account:               account,
+				Subscription:          subscription,
+				InboundEndpoint:       inboundEndpoint,
+				UpstreamEndpoint:      upstreamEndpoint,
+				UserAgent:             userAgent,
+				IPAddress:             clientIP,
+				APIKeyService:         h.apiKeyService,
+				GroupRateLimitGroupID: groupRateLimitGroupID,
+				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.embeddings"),

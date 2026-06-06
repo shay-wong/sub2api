@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,7 +100,7 @@ func (b *billingCacheWorkerStub) BatchGetUserPlatformQuotaCache(ctx context.Cont
 
 func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(svc.Stop)
 
 	start := time.Now()
@@ -120,7 +122,7 @@ func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 
 func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 	cache := &billingCacheWorkerStub{}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	svc.Stop()
 
 	enqueued := svc.enqueueCacheWrite(cacheWriteTask{
@@ -129,4 +131,104 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 		amount: 1,
 	})
 	require.False(t, enqueued)
+}
+
+type groupRateLimitWindowRepoStub struct {
+	calls int32
+	rec   *UserGroupRateLimitWindowRecord
+	err   error
+}
+
+func (s *groupRateLimitWindowRepoStub) Get(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error) {
+	atomic.AddInt32(&s.calls, 1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.rec, nil
+}
+
+func (s *groupRateLimitWindowRepoStub) ListByUser(ctx context.Context, userID int64) ([]UserGroupRateLimitWindowRecord, error) {
+	return nil, nil
+}
+
+func (s *groupRateLimitWindowRepoStub) ListByGroup(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]UserGroupRateLimitWindowRecord, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
+
+func (s *groupRateLimitWindowRepoStub) IncrementWithWindowReset(ctx context.Context, userID, groupID int64, cost float64, now time.Time) error {
+	return nil
+}
+
+func (s *groupRateLimitWindowRepoStub) Reset(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error) {
+	return nil, nil
+}
+
+func TestBillingCacheService_CheckGroupRateLimit5h_SelectedGroupExceeded(t *testing.T) {
+	windowStart := time.Now().Add(-time.Hour)
+	repo := &groupRateLimitWindowRepoStub{
+		rec: &UserGroupRateLimitWindowRecord{
+			UserID:        1,
+			GroupID:       20,
+			Usage5hUSD:    10,
+			Window5hStart: &windowStart,
+		},
+	}
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, repo, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckGroupRateLimit5h(context.Background(), &User{ID: 1}, &Group{ID: 20, RateLimit5h: 10})
+
+	require.ErrorIs(t, err, ErrGroupRateLimit5hExceeded)
+	require.EqualValues(t, 1, atomic.LoadInt32(&repo.calls))
+}
+
+func TestBillingCacheService_CheckGroupRateLimit5h_SkipsOriginalClaudeCodeOnlyFallbackGroup(t *testing.T) {
+	fallbackGroupID := int64(20)
+	windowStart := time.Now().Add(-time.Hour)
+	repo := &groupRateLimitWindowRepoStub{
+		rec: &UserGroupRateLimitWindowRecord{
+			UserID:        1,
+			GroupID:       10,
+			Usage5hUSD:    10,
+			Window5hStart: &windowStart,
+		},
+	}
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, repo, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	err := svc.CheckGroupRateLimit5h(context.Background(), &User{ID: 1}, &Group{
+		ID:              10,
+		RateLimit5h:     10,
+		ClaudeCodeOnly:  true,
+		FallbackGroupID: &fallbackGroupID,
+	})
+
+	require.NoError(t, err)
+	require.EqualValues(t, 0, atomic.LoadInt32(&repo.calls))
+}
+
+func TestBillingCacheService_CheckGroupRateLimit5h_ForcedPlatformDoesNotSkipClaudeCodeOnlyGroup(t *testing.T) {
+	fallbackGroupID := int64(20)
+	windowStart := time.Now().Add(-time.Hour)
+	repo := &groupRateLimitWindowRepoStub{
+		rec: &UserGroupRateLimitWindowRecord{
+			UserID:        1,
+			GroupID:       10,
+			Usage5hUSD:    10,
+			Window5hStart: &windowStart,
+		},
+	}
+	svc := NewBillingCacheService(nil, nil, nil, nil, nil, nil, repo, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+	ctx := context.WithValue(context.Background(), ctxkey.ForcePlatform, PlatformAntigravity)
+
+	err := svc.CheckGroupRateLimit5h(ctx, &User{ID: 1}, &Group{
+		ID:              10,
+		RateLimit5h:     10,
+		ClaudeCodeOnly:  true,
+		FallbackGroupID: &fallbackGroupID,
+	})
+
+	require.ErrorIs(t, err, ErrGroupRateLimit5hExceeded)
+	require.EqualValues(t, 1, atomic.LoadInt32(&repo.calls))
 }

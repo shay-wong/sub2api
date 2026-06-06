@@ -161,3 +161,54 @@ func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {
 	got := GetUpstreamEndpoint(c, service.PlatformOpenAI)
 	require.Equal(t, "/v1/responses/compact", got)
 }
+
+func TestEffectiveGroupRateLimitGroupID_SelectionWinsOverAPIKeyGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectionGroupID := int64(20)
+
+	got := EffectiveGroupRateLimitGroupID(
+		&service.AccountSelectionResult{GroupID: &selectionGroupID},
+		&service.APIKey{GroupID: &apiKeyGroupID},
+	)
+
+	require.NotNil(t, got)
+	require.Equal(t, selectionGroupID, *got)
+}
+
+func TestEffectiveGroupRateLimitGroupID_FallsBackToAPIKeyGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+
+	got := EffectiveGroupRateLimitGroupID(nil, &service.APIKey{GroupID: &apiKeyGroupID})
+
+	require.NotNil(t, got)
+	require.Equal(t, apiKeyGroupID, *got)
+}
+
+func TestEffectiveGroupRateLimitGroupID_ReturnsNilWhenNoGroup(t *testing.T) {
+	require.Nil(t, EffectiveGroupRateLimitGroupID(nil, nil))
+	require.Nil(t, EffectiveGroupRateLimitGroupID(&service.AccountSelectionResult{}, &service.APIKey{}))
+}
+
+func TestEffectiveGroupRateLimitGroup_SelectionGroupWins(t *testing.T) {
+	apiKeyGroup := &service.Group{ID: 10, RateLimit5h: 100}
+	selectionGroup := &service.Group{ID: 20, RateLimit5h: 10}
+
+	got := EffectiveGroupRateLimitGroup(
+		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
+		&service.APIKey{GroupID: &apiKeyGroup.ID, Group: apiKeyGroup},
+	)
+
+	require.Same(t, selectionGroup, got)
+}
+
+func TestEffectiveGroupRateLimitGroup_DoesNotUseAPIKeyGroupForDifferentSelectionID(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectionGroupID := int64(20)
+
+	got := EffectiveGroupRateLimitGroup(
+		&service.AccountSelectionResult{GroupID: &selectionGroupID},
+		&service.APIKey{GroupID: &apiKeyGroupID, Group: &service.Group{ID: apiKeyGroupID}},
+	)
+
+	require.Nil(t, got)
+}

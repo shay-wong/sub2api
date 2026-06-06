@@ -85,6 +85,11 @@ func RateMultiplier(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRateMultiplier, v))
 }
 
+// RateLimit5h applies equality check predicate on the "rate_limit_5h" field. It's identical to RateLimit5hEQ.
+func RateLimit5h(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRateLimit5h, v))
+}
+
 // IsExclusive applies equality check predicate on the "is_exclusive" field. It's identical to IsExclusiveEQ.
 func IsExclusive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldIsExclusive, v))
@@ -518,6 +523,46 @@ func RateMultiplierLT(v float64) predicate.Group {
 // RateMultiplierLTE applies the LTE predicate on the "rate_multiplier" field.
 func RateMultiplierLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldRateMultiplier, v))
+}
+
+// RateLimit5hEQ applies the EQ predicate on the "rate_limit_5h" field.
+func RateLimit5hEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldRateLimit5h, v))
+}
+
+// RateLimit5hNEQ applies the NEQ predicate on the "rate_limit_5h" field.
+func RateLimit5hNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldRateLimit5h, v))
+}
+
+// RateLimit5hIn applies the In predicate on the "rate_limit_5h" field.
+func RateLimit5hIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldRateLimit5h, vs...))
+}
+
+// RateLimit5hNotIn applies the NotIn predicate on the "rate_limit_5h" field.
+func RateLimit5hNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldRateLimit5h, vs...))
+}
+
+// RateLimit5hGT applies the GT predicate on the "rate_limit_5h" field.
+func RateLimit5hGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldRateLimit5h, v))
+}
+
+// RateLimit5hGTE applies the GTE predicate on the "rate_limit_5h" field.
+func RateLimit5hGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldRateLimit5h, v))
+}
+
+// RateLimit5hLT applies the LT predicate on the "rate_limit_5h" field.
+func RateLimit5hLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldRateLimit5h, v))
+}
+
+// RateLimit5hLTE applies the LTE predicate on the "rate_limit_5h" field.
+func RateLimit5hLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldRateLimit5h, v))
 }
 
 // IsExclusiveEQ applies the EQ predicate on the "is_exclusive" field.
@@ -1524,6 +1569,29 @@ func HasUsageLogs() predicate.Group {
 func HasUsageLogsWith(preds ...predicate.UsageLog) predicate.Group {
 	return predicate.Group(func(s *sql.Selector) {
 		step := newUsageLogsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasUserRateLimitWindows applies the HasEdge predicate on the "user_rate_limit_windows" edge.
+func HasUserRateLimitWindows() predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, UserRateLimitWindowsTable, UserRateLimitWindowsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasUserRateLimitWindowsWith applies the HasEdge predicate on the "user_rate_limit_windows" edge with a given conditions (other predicates).
+func HasUserRateLimitWindowsWith(preds ...predicate.UserGroupRateLimitWindow) predicate.Group {
+	return predicate.Group(func(s *sql.Selector) {
+		step := newUserRateLimitWindowsStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

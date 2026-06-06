@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/ent/usergroupratelimitwindow"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
@@ -101,6 +102,20 @@ func (_c *GroupCreate) SetRateMultiplier(v float64) *GroupCreate {
 func (_c *GroupCreate) SetNillableRateMultiplier(v *float64) *GroupCreate {
 	if v != nil {
 		_c.SetRateMultiplier(*v)
+	}
+	return _c
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (_c *GroupCreate) SetRateLimit5h(v float64) *GroupCreate {
+	_c.mutation.SetRateLimit5h(v)
+	return _c
+}
+
+// SetNillableRateLimit5h sets the "rate_limit_5h" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableRateLimit5h(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetRateLimit5h(*v)
 	}
 	return _c
 }
@@ -555,6 +570,21 @@ func (_c *GroupCreate) AddUsageLogs(v ...*UsageLog) *GroupCreate {
 	return _c.AddUsageLogIDs(ids...)
 }
 
+// AddUserRateLimitWindowIDs adds the "user_rate_limit_windows" edge to the UserGroupRateLimitWindow entity by IDs.
+func (_c *GroupCreate) AddUserRateLimitWindowIDs(ids ...int64) *GroupCreate {
+	_c.mutation.AddUserRateLimitWindowIDs(ids...)
+	return _c
+}
+
+// AddUserRateLimitWindows adds the "user_rate_limit_windows" edges to the UserGroupRateLimitWindow entity.
+func (_c *GroupCreate) AddUserRateLimitWindows(v ...*UserGroupRateLimitWindow) *GroupCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddUserRateLimitWindowIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *GroupCreate) AddAccountIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -639,6 +669,10 @@ func (_c *GroupCreate) defaults() error {
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		v := group.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
+	}
+	if _, ok := _c.mutation.RateLimit5h(); !ok {
+		v := group.DefaultRateLimit5h
+		_c.mutation.SetRateLimit5h(v)
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		v := group.DefaultIsExclusive
@@ -741,6 +775,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "Group.rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.RateLimit5h(); !ok {
+		return &ValidationError{Name: "rate_limit_5h", err: errors.New(`ent: missing required field "Group.rate_limit_5h"`)}
 	}
 	if _, ok := _c.mutation.IsExclusive(); !ok {
 		return &ValidationError{Name: "is_exclusive", err: errors.New(`ent: missing required field "Group.is_exclusive"`)}
@@ -872,6 +909,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(group.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
+	}
+	if value, ok := _c.mutation.RateLimit5h(); ok {
+		_spec.SetField(group.FieldRateLimit5h, field.TypeFloat64, value)
+		_node.RateLimit5h = value
 	}
 	if value, ok := _c.mutation.IsExclusive(); ok {
 		_spec.SetField(group.FieldIsExclusive, field.TypeBool, value)
@@ -1053,6 +1094,22 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		}
 		_spec.Edges = append(_spec.Edges, edge)
 	}
+	if nodes := _c.mutation.UserRateLimitWindowsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   group.UserRateLimitWindowsTable,
+			Columns: []string{group.UserRateLimitWindowsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usergroupratelimitwindow.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2M,
@@ -1220,6 +1277,24 @@ func (u *GroupUpsert) UpdateRateMultiplier() *GroupUpsert {
 // AddRateMultiplier adds v to the "rate_multiplier" field.
 func (u *GroupUpsert) AddRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldRateMultiplier, v)
+	return u
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (u *GroupUpsert) SetRateLimit5h(v float64) *GroupUpsert {
+	u.Set(group.FieldRateLimit5h, v)
+	return u
+}
+
+// UpdateRateLimit5h sets the "rate_limit_5h" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateRateLimit5h() *GroupUpsert {
+	u.SetExcluded(group.FieldRateLimit5h)
+	return u
+}
+
+// AddRateLimit5h adds v to the "rate_limit_5h" field.
+func (u *GroupUpsert) AddRateLimit5h(v float64) *GroupUpsert {
+	u.Add(group.FieldRateLimit5h, v)
 	return u
 }
 
@@ -1830,6 +1905,27 @@ func (u *GroupUpsertOne) AddRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (u *GroupUpsertOne) SetRateLimit5h(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRateLimit5h(v)
+	})
+}
+
+// AddRateLimit5h adds v to the "rate_limit_5h" field.
+func (u *GroupUpsertOne) AddRateLimit5h(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddRateLimit5h(v)
+	})
+}
+
+// UpdateRateLimit5h sets the "rate_limit_5h" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateRateLimit5h() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRateLimit5h()
 	})
 }
 
@@ -2685,6 +2781,27 @@ func (u *GroupUpsertBulk) AddRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetRateLimit5h sets the "rate_limit_5h" field.
+func (u *GroupUpsertBulk) SetRateLimit5h(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetRateLimit5h(v)
+	})
+}
+
+// AddRateLimit5h adds v to the "rate_limit_5h" field.
+func (u *GroupUpsertBulk) AddRateLimit5h(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddRateLimit5h(v)
+	})
+}
+
+// UpdateRateLimit5h sets the "rate_limit_5h" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateRateLimit5h() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateRateLimit5h()
 	})
 }
 

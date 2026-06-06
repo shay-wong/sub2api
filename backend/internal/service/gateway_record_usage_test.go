@@ -45,6 +45,7 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
+		nil, // userGroupRateLimitRepo
 	)
 }
 
@@ -140,6 +141,65 @@ func TestGatewayServiceRecordUsage_BillingFingerprintIncludesRequestPayloadHash(
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
 	require.Equal(t, payloadHash, billingRepo.lastCmd.RequestPayloadHash)
+}
+
+func TestGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	actualGroupID := int64(20)
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_group_5h_actual_group",
+			Usage: ClaudeUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:                &APIKey{ID: 510, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:                  &User{ID: 610},
+		Account:               &Account{ID: 710},
+		GroupRateLimitGroupID: &actualGroupID,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
+	require.InDelta(t, billingRepo.lastCmd.BalanceCost, billingRepo.lastCmd.GroupRateLimit5hCost, 1e-12)
+}
+
+func TestGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupForGroupRateLimit(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_group_5h_api_key_group",
+			Usage: ClaudeUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 511, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:    &User{ID: 611},
+		Account: &Account{ID: 711},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, apiKeyGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
 }
 
 func TestGatewayServiceRecordUsage_BillingFingerprintFallsBackToContextRequestID(t *testing.T) {

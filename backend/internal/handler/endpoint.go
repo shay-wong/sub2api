@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -180,4 +182,80 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 		rawPath = c.Request.URL.Path
 	}
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
+}
+
+// EffectiveGroupRateLimitGroupID returns the actual group that should receive
+// post-usage group 5h limit increments. Selection wins because fallback routing
+// may execute a request through a different group than the API key's default.
+func EffectiveGroupRateLimitGroupID(selection *service.AccountSelectionResult, apiKey *service.APIKey) *int64 {
+	if selection != nil && selection.GroupID != nil && *selection.GroupID > 0 {
+		id := *selection.GroupID
+		return &id
+	}
+	if apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID > 0 {
+		id := *apiKey.GroupID
+		return &id
+	}
+	return nil
+}
+
+// EffectiveGroupRateLimitGroup returns the group object to use for the
+// selected-request 5h preflight. It intentionally returns nil when selection
+// points at a different group but did not carry that group's snapshot; falling
+// back to the API key group in that case would check the wrong window.
+func EffectiveGroupRateLimitGroup(selection *service.AccountSelectionResult, apiKey *service.APIKey) *service.Group {
+	if selection != nil && selection.Group != nil && selection.Group.ID > 0 {
+		return selection.Group
+	}
+	if selection != nil && selection.GroupID != nil && *selection.GroupID > 0 {
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ID == *selection.GroupID {
+			return apiKey.Group
+		}
+		return nil
+	}
+	if apiKey != nil {
+		return apiKey.Group
+	}
+	return nil
+}
+
+func CheckEffectiveGroupRateLimit5h(ctx context.Context, billingCacheService *service.BillingCacheService, selection *service.AccountSelectionResult, apiKey *service.APIKey) error {
+	if billingCacheService == nil || apiKey == nil {
+		return nil
+	}
+	groupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+	if groupID == nil || (apiKey.GroupID != nil && *apiKey.GroupID == *groupID) {
+		return nil
+	}
+	return billingCacheService.CheckGroupRateLimit5h(ctx, apiKey.User, EffectiveGroupRateLimitGroup(selection, apiKey))
+}
+
+func handleEffectiveGroupRateLimit5h(
+	ctx context.Context,
+	c *gin.Context,
+	billingCacheService *service.BillingCacheService,
+	selection *service.AccountSelectionResult,
+	apiKey *service.APIKey,
+	release func(),
+	logFailure func(error),
+	respond func(status int, code, message string),
+) bool {
+	err := CheckEffectiveGroupRateLimit5h(ctx, billingCacheService, selection, apiKey)
+	if err == nil {
+		return false
+	}
+	if logFailure != nil {
+		logFailure(err)
+	}
+	if release != nil {
+		release()
+	}
+	status, code, message, retryAfter := billingErrorDetails(err)
+	if retryAfter > 0 && c != nil {
+		c.Header("Retry-After", strconv.Itoa(retryAfter))
+	}
+	if respond != nil {
+		respond(status, code, message)
+	}
+	return true
 }
