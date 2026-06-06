@@ -174,7 +174,9 @@
       <template #table>
         <AccountBulkActionsBar
           :selected-ids="selIds"
+          :testing="batchTestRunning"
           @delete="handleBulkDelete"
+          @test="openBatchTestModal"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @edit-selected="openBulkEditSelected"
@@ -354,6 +356,13 @@
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
+    <AccountBatchTestModal
+      :show="showBatchTest"
+      :accounts="batchTestAccounts"
+      @close="closeBatchTestModal"
+      @running-change="batchTestRunning = $event"
+      @completed="handleBatchTestCompleted"
+    />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
@@ -413,6 +422,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountBatchTestModal from '@/components/admin/account/AccountBatchTestModal.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
@@ -492,6 +502,8 @@ const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
+const showBatchTest = ref(false)
+const batchTestRunning = ref(false)
 const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showTLSFingerprintProfiles = ref(false)
@@ -500,6 +512,7 @@ const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
 const reAuthAcc = ref<Account | null>(null)
 const testingAcc = ref<Account | null>(null)
+const batchTestAccounts = ref<Account[]>([])
 const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
@@ -876,6 +889,7 @@ const isAnyModalOpen = computed(() => {
     showDeleteDialog.value ||
     showReAuth.value ||
     showTest.value ||
+    showBatchTest.value ||
     showStats.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -1231,6 +1245,38 @@ const toggleSelectAllVisible = (event: Event) => {
   toggleVisible(target.checked)
 }
 const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); clearSelection(); reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const openBatchTestModal = () => {
+  const accountIds = [...selIds.value]
+  if (accountIds.length === 0) return
+  const accountsById = new Map(accounts.value.map(account => [account.id, account]))
+  batchTestAccounts.value = accountIds
+    .map(id => accountsById.get(id))
+    .filter((account): account is Account => Boolean(account))
+  if (batchTestAccounts.value.length === 0) {
+    appStore.showInfo(t('admin.accounts.bulkTest.empty'))
+    return
+  }
+  showBatchTest.value = true
+}
+const closeBatchTestModal = () => {
+  showBatchTest.value = false
+  batchTestRunning.value = false
+  batchTestAccounts.value = []
+}
+const handleBatchTestCompleted = (payload: { success: number; failed: number; failedIds: number[]; errors: string[] }) => {
+  if (payload.failed > 0) {
+    setSelectedIds(payload.failedIds)
+    appStore.showError(t('admin.accounts.bulkActions.testPartialSuccess', {
+      success: payload.success,
+      failed: payload.failed,
+      errors: payload.errors.join('; ')
+    }))
+  } else {
+    clearSelection()
+    appStore.showSuccess(t('admin.accounts.bulkActions.testSuccess', { count: payload.success }))
+  }
+  reload()
+}
 const handleBulkResetStatus = async () => {
   if (!confirm(t('common.confirm'))) return
   try {
