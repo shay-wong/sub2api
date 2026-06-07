@@ -3447,9 +3447,10 @@ export default {
       },
       bulkTest: {
         title: '批量测试账号',
-        modelId: '测试模型',
-        defaultModelPlaceholder: '留空使用后端默认模型',
-        modelHint: '留空时每个平台使用后端默认测试模型；填写后所有账号使用同一个模型 ID。',
+        modelId: '账号测试模型',
+        defaultModelOption: '默认兜底模型',
+        modelHint: '默认不传模型 ID，使用该账号的后端兜底测试模型。',
+        modelLoadFailed: '模型列表加载失败，仍可直接测试并使用兜底默认模型。',
         modeHint: 'Compact 探测只影响 OpenAI 账号，其它平台仍按常规测试。',
         total: '总数',
         success: '成功',
@@ -3464,6 +3465,7 @@ export default {
         logCompleted: '测试完成',
         logFailed: '测试失败',
         logCancelled: '已取消',
+        logDetails: '测试日志（{count} 条）',
         status: {
           pending: '待测试',
           running: '测试中',

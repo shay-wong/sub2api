@@ -3300,9 +3300,10 @@ export default {
       },
       bulkTest: {
         title: 'Batch Test Accounts',
-        modelId: 'Test Model',
-        defaultModelPlaceholder: 'Leave empty to use backend defaults',
-        modelHint: 'When empty, each platform uses its backend default test model; when filled, every account uses the same model ID.',
+        modelId: 'Account Test Model',
+        defaultModelOption: 'Fallback default model',
+        modelHint: 'By default no model ID is sent, so this account uses the backend fallback test model.',
+        modelLoadFailed: 'Model list failed to load. You can still test with the fallback default model.',
         modeHint: 'Compact probe only affects OpenAI accounts; other platforms still use the regular test flow.',
         total: 'Total',
         success: 'Success',
@@ -3317,6 +3318,7 @@ export default {
         logCompleted: 'Test completed',
         logFailed: 'Test failed',
         logCancelled: 'Cancelled',
+        logDetails: 'Test logs ({count})',
         status: {
           pending: 'Pending',
           running: 'Running',

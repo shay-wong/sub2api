@@ -2,6 +2,18 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountBatchTestModal from '../AccountBatchTestModal.vue'
 
+const { getAvailableModels } = vi.hoisted(() => ({
+  getAvailableModels: vi.fn()
+}))
+
+vi.mock('@/api/admin', () => ({
+  adminAPI: {
+    accounts: {
+      getAvailableModels
+    }
+  }
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -76,6 +88,28 @@ const accounts = [
   }
 ] as any
 
+const SelectStub = {
+  props: ['modelValue', 'options'],
+  emits: ['update:modelValue', 'change'],
+  setup(props: { options: Array<{ value: unknown; label: string }> }, { emit }: { emit: (event: string, ...args: unknown[]) => void }) {
+    const onChange = (event: Event) => {
+      const raw = (event.target as HTMLSelectElement).value
+      const option = props.options.find((item) => String(item.value ?? '') === raw)
+      const value = option ? option.value : raw
+      emit('update:modelValue', value)
+      emit('change', value, option ?? null)
+    }
+    return { onChange }
+  },
+  template: `
+    <select v-bind="$attrs" :value="modelValue ?? ''" @change="onChange">
+      <option v-for="option in options" :key="String(option.value ?? '')" :value="option.value ?? ''">
+        {{ option.label }}
+      </option>
+    </select>
+  `
+}
+
 function mountModal() {
   return mount(AccountBatchTestModal, {
     props: {
@@ -85,6 +119,7 @@ function mountModal() {
     global: {
       stubs: {
         BaseDialog: { template: '<div data-test="account-batch-test-modal"><slot /><slot name="footer" /></div>' },
+        Select: SelectStub,
         Icon: true
       }
     }
@@ -95,16 +130,31 @@ describe('AccountBatchTestModal', () => {
   beforeEach(() => {
     localStorage.clear()
     localStorage.setItem('auth_token', 'test-token')
+    getAvailableModels.mockReset()
+    getAvailableModels.mockImplementation(async (id: number) => {
+      if (id === 1) {
+        return [
+          { id: 'claude-sonnet-4-5', type: 'model', display_name: 'Claude Sonnet 4.5', created_at: '2026-01-01T00:00:00Z' }
+        ]
+      }
+      return [
+        { id: 'gpt-5.4', type: 'model', display_name: 'GPT 5.4', created_at: '2026-01-01T00:00:00Z' }
+      ]
+    })
     global.fetch = vi.fn()
       .mockResolvedValueOnce(createStreamResponse(true))
       .mockResolvedValueOnce(createStreamResponse(false, 'token expired')) as any
   })
 
-  it('runs selected accounts sequentially with a model id and shows progress details', async () => {
+  it('runs selected accounts sequentially with per-account model choices and shows progress details', async () => {
     const wrapper = mountModal()
 
-    await wrapper.get('[data-test="batch-test-model-id"]').setValue('claude-sonnet-4-5')
-    await wrapper.get('[data-test="batch-test-mode"]').setValue('compact')
+    await flushPromises()
+    const modelSelects = wrapper.findAll('[data-test="batch-test-model-select"]')
+    expect(modelSelects).toHaveLength(2)
+
+    await modelSelects[0].setValue('claude-sonnet-4-5')
+    await wrapper.get('[data-test="batch-test-mode-compact"]').trigger('click')
     await wrapper.get('[data-test="batch-test-start"]').trigger('click')
     await flushPromises()
     await flushPromises()
@@ -117,7 +167,7 @@ describe('AccountBatchTestModal', () => {
     ])
     expect((global.fetch as any).mock.calls.map((call: any[]) => JSON.parse(call[1].body))).toEqual([
       { model_id: 'claude-sonnet-4-5', mode: 'compact' },
-      { model_id: 'claude-sonnet-4-5', mode: 'compact' }
+      { mode: 'compact' }
     ])
     expect(wrapper.text()).toContain('account-one')
     expect(wrapper.text()).toContain('account-two')

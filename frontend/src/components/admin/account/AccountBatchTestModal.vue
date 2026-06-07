@@ -7,65 +7,66 @@
     @close="handleClose"
   >
     <div class="space-y-4">
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div class="space-y-1.5">
-            <label class="input-label">{{ t('admin.accounts.bulkTest.modelId') }}</label>
-            <input
-              v-model="modelId"
-              data-test="batch-test-model-id"
-              type="text"
-              class="input w-full"
-              :disabled="running"
-              :placeholder="t('admin.accounts.bulkTest.defaultModelPlaceholder')"
-            />
-            <p class="input-hint">
-              {{ t('admin.accounts.bulkTest.modelHint') }}
-            </p>
-          </div>
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div class="space-y-3">
           <div class="space-y-1.5">
             <label class="input-label">{{ t('admin.accounts.openai.testMode') }}</label>
-            <select
-              v-model="testMode"
-              class="input w-full"
-              :disabled="running"
+            <div
+              class="grid max-w-xl grid-cols-2 rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800"
               data-test="batch-test-mode"
             >
-              <option value="default">{{ t('admin.accounts.openai.testModeDefault') }}</option>
-              <option value="compact">{{ t('admin.accounts.openai.testModeCompact') }}</option>
-            </select>
+              <button
+                type="button"
+                data-test="batch-test-mode-default"
+                :disabled="running"
+                :class="modeButtonClass('default')"
+                @click="testMode = 'default'"
+              >
+                {{ t('admin.accounts.openai.testModeDefault') }}
+              </button>
+              <button
+                type="button"
+                data-test="batch-test-mode-compact"
+                :disabled="running"
+                :class="modeButtonClass('compact')"
+                @click="testMode = 'compact'"
+              >
+                {{ t('admin.accounts.openai.testModeCompact') }}
+              </button>
+            </div>
             <p class="input-hint">
               {{ t('admin.accounts.bulkTest.modeHint') }}
             </p>
           </div>
+
+          <div data-test="batch-test-summary" class="text-sm text-gray-600 dark:text-dark-300">
+            {{ t('admin.accounts.bulkTest.summary', summary) }}
+          </div>
         </div>
-        <div class="grid grid-cols-3 gap-2 md:min-w-64">
-          <div class="rounded-lg border border-gray-200 p-3 text-center dark:border-dark-700">
+
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-lg border border-gray-200 bg-white/70 p-3 text-center dark:border-dark-700 dark:bg-dark-800/60">
             <div class="text-lg font-semibold text-gray-900 dark:text-white">{{ summary.total }}</div>
             <div class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.bulkTest.total') }}</div>
           </div>
-          <div class="rounded-lg border border-emerald-200 p-3 text-center dark:border-emerald-800">
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-center dark:border-emerald-800 dark:bg-emerald-500/10">
             <div class="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{{ summary.success }}</div>
             <div class="text-xs text-emerald-600/80 dark:text-emerald-400/80">{{ t('admin.accounts.bulkTest.success') }}</div>
           </div>
-          <div class="rounded-lg border border-red-200 p-3 text-center dark:border-red-800">
+          <div class="rounded-lg border border-red-200 bg-red-50/70 p-3 text-center dark:border-red-800 dark:bg-red-500/10">
             <div class="text-lg font-semibold text-red-600 dark:text-red-400">{{ summary.failed }}</div>
             <div class="text-xs text-red-600/80 dark:text-red-400/80">{{ t('admin.accounts.bulkTest.failed') }}</div>
           </div>
         </div>
       </div>
 
-      <div data-test="batch-test-summary" class="text-sm text-gray-600 dark:text-dark-300">
-        {{ t('admin.accounts.bulkTest.summary', summary) }}
-      </div>
-
-      <div class="max-h-[420px] overflow-auto rounded-lg border border-gray-200 dark:border-dark-700">
+      <div class="max-h-[480px] overflow-auto rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900/40">
         <div
           v-for="item in testItems"
           :key="item.account.id"
           class="border-b border-gray-100 p-3 last:border-b-0 dark:border-dark-700"
         >
-          <div class="flex items-start justify-between gap-3">
+          <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)_auto] lg:items-start">
             <div class="min-w-0">
               <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
                 {{ item.account.name }}
@@ -74,21 +75,45 @@
                 #{{ item.account.id }} · {{ item.account.platform }} · {{ item.account.type }}
               </div>
             </div>
-            <span :class="statusClass(item.status)">
-              {{ statusLabel(item.status) }}
-            </span>
-          </div>
-          <div
-            v-if="item.logs.length > 0"
-            class="mt-2 max-h-28 overflow-auto rounded bg-gray-50 p-2 font-mono text-xs text-gray-700 dark:bg-dark-800 dark:text-dark-200"
-          >
-            <div v-for="(line, idx) in item.logs" :key="idx" class="whitespace-pre-wrap">
-              {{ line }}
+            <div class="space-y-1">
+              <div class="text-xs font-medium text-gray-600 dark:text-dark-300">
+                {{ t('admin.accounts.bulkTest.modelId') }}
+              </div>
+              <Select
+                v-model="item.selectedModelId"
+                :options="modelOptionsFor(item)"
+                :disabled="running || item.loadingModels"
+                :placeholder="item.loadingModels ? t('common.loading') : t('admin.accounts.bulkTest.defaultModelOption')"
+                searchable
+                data-test="batch-test-model-select"
+              />
+              <p class="text-xs text-gray-500 dark:text-dark-400">
+                {{ item.modelLoadError || t('admin.accounts.bulkTest.modelHint') }}
+              </p>
+            </div>
+            <div class="flex justify-start lg:justify-end">
+              <span :class="statusClass(item.status)">
+                {{ statusLabel(item.status) }}
+              </span>
             </div>
           </div>
           <div v-if="item.error" class="mt-2 text-xs text-red-600 dark:text-red-400">
             {{ item.error }}
           </div>
+          <details
+            v-if="item.logs.length > 0"
+            class="mt-2 rounded bg-gray-50 text-xs text-gray-700 dark:bg-dark-800 dark:text-dark-200"
+            :open="item.status === 'running'"
+          >
+            <summary class="cursor-pointer select-none px-2 py-1.5 text-gray-500 dark:text-dark-300">
+              {{ t('admin.accounts.bulkTest.logDetails', { count: item.logs.length }) }}
+            </summary>
+            <div class="max-h-32 overflow-auto border-t border-gray-100 p-2 font-mono dark:border-dark-700">
+              <div v-for="(line, idx) in item.logs" :key="idx" class="whitespace-pre-wrap break-words">
+                {{ line }}
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>
@@ -121,17 +146,26 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
+import { adminAPI } from '@/api/admin'
 import { runAccountConnectionTest, type AccountTestEvent } from '@/utils/accountTestRunner'
-import type { Account } from '@/types'
+import type { Account, ClaudeModel } from '@/types'
 
 type TestStatus = 'pending' | 'running' | 'success' | 'failed'
+type TestMode = 'default' | 'compact'
 
 interface TestItem {
   account: Account
   status: TestStatus
   logs: string[]
   error: string
+  selectedModelId: string
+  modelOptions: SelectOption[]
+  loadingModels: boolean
+  modelLoadError: string
 }
+
+const DEFAULT_MODEL_OPTION_VALUE = ''
 
 const props = defineProps<{
   show: boolean
@@ -145,8 +179,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const modelId = ref('')
-const testMode = ref<'default' | 'compact'>('default')
+const testMode = ref<TestMode>('default')
 const running = ref(false)
 const testItems = ref<TestItem[]>([])
 let abortController: AbortController | null = null
@@ -157,8 +190,48 @@ const resetItems = () => {
     account,
     status: 'pending',
     logs: [],
-    error: ''
+    error: '',
+    selectedModelId: DEFAULT_MODEL_OPTION_VALUE,
+    modelOptions: [],
+    loadingModels: false,
+    modelLoadError: ''
   }))
+}
+
+const defaultModelOption = computed<SelectOption>(() => ({
+  value: DEFAULT_MODEL_OPTION_VALUE,
+  label: t('admin.accounts.bulkTest.defaultModelOption')
+}))
+
+const toModelOption = (model: ClaudeModel): SelectOption => ({
+  value: model.id,
+  label: model.display_name || model.id
+})
+
+const sortModelOptions = (options: SelectOption[]) => [...options].sort((a, b) => String(a.label).localeCompare(String(b.label)))
+
+const modelOptionsFor = (item: TestItem) => [
+  defaultModelOption.value,
+  ...item.modelOptions
+]
+
+const loadItemModels = async (item: TestItem) => {
+  item.loadingModels = true
+  item.modelLoadError = ''
+  try {
+    const models = await adminAPI.accounts.getAvailableModels(item.account.id)
+    item.modelOptions = sortModelOptions(models.map(toModelOption))
+  } catch (error) {
+    console.error('Failed to load batch test models:', error)
+    item.modelOptions = []
+    item.modelLoadError = t('admin.accounts.bulkTest.modelLoadFailed')
+  } finally {
+    item.loadingModels = false
+  }
+}
+
+const loadAllItemModels = async () => {
+  await Promise.all(testItems.value.map(loadItemModels))
 }
 
 const abortCurrentTest = () => {
@@ -176,6 +249,7 @@ watch(
   ([show]) => {
     if (show) {
       resetItems()
+      loadAllItemModels()
     } else {
       cancelBatchTest()
     }
@@ -199,6 +273,14 @@ const statusClass = (status: TestStatus) => [
   status === 'failed' && 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300',
   status === 'running' && 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300',
   status === 'pending' && 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-dark-300'
+]
+
+const modeButtonClass = (mode: TestMode) => [
+  'rounded-md px-3 py-2 text-sm font-medium transition-colors',
+  testMode.value === mode
+    ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
+    : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white',
+  running.value && 'cursor-not-allowed opacity-70'
 ]
 
 const appendEventLog = (item: TestItem, event: AccountTestEvent) => {
@@ -232,7 +314,6 @@ const startBatchTest = async () => {
   running.value = true
   emit('running-change', true)
   cancellationRequested = false
-  const selectedModelId = modelId.value.trim()
 
   try {
     for (const item of testItems.value) {
@@ -244,7 +325,7 @@ const startBatchTest = async () => {
         const result = await runAccountConnectionTest({
           accountId: item.account.id,
           authToken: localStorage.getItem('auth_token'),
-          modelId: selectedModelId || undefined,
+          modelId: item.selectedModelId || undefined,
           mode: testMode.value,
           signal: abortController.signal,
           onEvent: (event) => appendEventLog(item, event)
