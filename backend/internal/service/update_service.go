@@ -543,9 +543,9 @@ func compareVersions(current, latest string) int {
 
 	if currentVersion.hasFork != latestVersion.hasFork {
 		if currentVersion.hasFork {
-			return -1
+			return 1
 		}
-		return 1
+		return -1
 	}
 	if currentVersion.hasFork {
 		return compareInts(currentVersion.fork, latestVersion.fork)

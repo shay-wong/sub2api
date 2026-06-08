@@ -108,10 +108,28 @@ func TestCompareVersionsSupportsForkReleaseSuffix(t *testing.T) {
 			want:    -1,
 		},
 		{
-			name:    "plain release outranks same base fork release",
+			name:    "fork release outranks same base plain release",
 			current: "0.1.134-fork.9",
 			latest:  "0.1.134",
+			want:    1,
+		},
+		{
+			name:    "same base fork release outranks plain release",
+			current: "0.1.134",
+			latest:  "0.1.134-fork.1",
 			want:    -1,
+		},
+		{
+			name:    "current fork does not update to same base plain release",
+			current: "0.1.135-fork.1",
+			latest:  "0.1.135",
+			want:    1,
+		},
+		{
+			name:    "higher fork release outranks same base plain release",
+			current: "0.1.135-fork.2",
+			latest:  "0.1.135",
+			want:    1,
 		},
 	}
 
