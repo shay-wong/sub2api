@@ -62,11 +62,82 @@
 
       <div class="max-h-[480px] overflow-auto rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900/40">
         <div
-          v-for="item in testItems"
+          v-if="hasTestResults"
+          class="sticky top-0 z-10 flex flex-col gap-3 border-b border-gray-200 bg-white/95 p-3 backdrop-blur dark:border-dark-700 dark:bg-dark-900/95 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800">
+              <button
+                type="button"
+                data-test="batch-test-filter-all"
+                :class="filterButtonClass(false)"
+                @click="showFailedOnly = false"
+              >
+                {{ t('admin.accounts.bulkTest.filterAll') }}
+              </button>
+              <button
+                type="button"
+                data-test="batch-test-filter-failed"
+                :class="filterButtonClass(true)"
+                :disabled="summary.failed === 0"
+                @click="showFailedOnly = true"
+              >
+                {{ t('admin.accounts.bulkTest.filterFailed', { count: summary.failed }) }}
+              </button>
+            </div>
+            <span v-if="summary.failed > 0" class="text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.accounts.bulkTest.failedSelection', { count: selectedFailedIds.length }) }}
+            </span>
+          </div>
+
+          <div v-if="summary.failed > 0" class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-test="batch-test-select-visible-failed"
+              class="btn btn-secondary btn-sm"
+              :disabled="running || deletingFailed || visibleFailedItems.length === 0"
+              @click="toggleVisibleFailedSelection"
+            >
+              {{ allVisibleFailedSelected ? t('admin.accounts.bulkTest.clearFailedSelection') : t('admin.accounts.bulkTest.selectVisibleFailed') }}
+            </button>
+            <button
+              type="button"
+              data-test="batch-test-delete-selected-failed"
+              class="btn btn-danger btn-sm"
+              :disabled="running || deletingFailed || selectedFailedIds.length === 0"
+              @click="deleteSelectedFailedAccounts"
+            >
+              {{ deletingFailed ? t('admin.accounts.bulkTest.deletingFailed') : t('admin.accounts.bulkTest.deleteSelectedFailed', { count: selectedFailedIds.length }) }}
+            </button>
+            <button
+              type="button"
+              data-test="batch-test-delete-all-failed"
+              class="btn btn-danger btn-sm"
+              :disabled="running || deletingFailed || failedItems.length === 0"
+              @click="deleteAllFailedAccounts"
+            >
+              {{ t('admin.accounts.bulkTest.deleteAllFailed', { count: failedItems.length }) }}
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-for="item in visibleTestItems"
           :key="item.account.id"
           class="border-b border-gray-100 p-3 last:border-b-0 dark:border-dark-700"
         >
-          <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)_auto] lg:items-start">
+          <div class="grid gap-3 lg:grid-cols-[2rem_minmax(0,1fr)_minmax(240px,320px)_auto] lg:items-start">
+            <div class="flex h-8 items-center justify-center">
+              <input
+                v-if="item.status === 'failed'"
+                type="checkbox"
+                data-test="batch-test-failed-checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+                :checked="selectedFailedIds.includes(item.account.id)"
+                :disabled="running || deletingFailed"
+                @change="toggleFailedSelection(item.account.id, ($event.target as HTMLInputElement).checked)"
+              />
+            </div>
             <div class="min-w-0">
               <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
                 {{ item.account.name }}
@@ -124,6 +195,7 @@
           type="button"
           data-test="batch-test-close"
           class="btn btn-secondary"
+          :disabled="deletingFailed"
           @click="handleClose"
         >
           {{ running ? t('common.cancel') : t('common.close') }}
@@ -132,7 +204,7 @@
           type="button"
           data-test="batch-test-start"
           class="btn btn-primary"
-          :disabled="running || testItems.length === 0"
+          :disabled="running || deletingFailed || testItems.length === 0"
           @click="startBatchTest"
         >
           {{ running ? t('admin.accounts.bulkTest.running') : t('admin.accounts.bulkTest.start') }}
@@ -148,6 +220,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { adminAPI } from '@/api/admin'
+import { useAppStore } from '@/stores/app'
 import { runAccountConnectionTest, type AccountTestEvent } from '@/utils/accountTestRunner'
 import type { Account, ClaudeModel } from '@/types'
 
@@ -166,6 +239,10 @@ interface TestItem {
 }
 
 const DEFAULT_MODEL_OPTION_VALUE = ''
+const BATCH_TEST_CONCURRENCY = 20
+const MODEL_LOAD_CONCURRENCY = 10
+const BATCH_TEST_START_STAGGER_MIN_MS = 5
+const BATCH_TEST_START_STAGGER_MAX_MS = 25
 
 const props = defineProps<{
   show: boolean
@@ -176,13 +253,18 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'running-change', running: boolean): void
   (e: 'completed', payload: { success: number; failed: number; failedIds: number[]; errors: string[] }): void
+  (e: 'deleted', payload: { success: number; failed: number; deletedIds: number[] }): void
 }>()
 
 const { t } = useI18n()
+const appStore = useAppStore()
 const testMode = ref<TestMode>('default')
 const running = ref(false)
+const deletingFailed = ref(false)
+const showFailedOnly = ref(false)
+const selectedFailedIds = ref<number[]>([])
 const testItems = ref<TestItem[]>([])
-let abortController: AbortController | null = null
+const abortControllers = new Set<AbortController>()
 let cancellationRequested = false
 
 const resetItems = () => {
@@ -196,6 +278,8 @@ const resetItems = () => {
     loadingModels: false,
     modelLoadError: ''
   }))
+  selectedFailedIds.value = []
+  showFailedOnly.value = false
 }
 
 const defaultModelOption = computed<SelectOption>(() => ({
@@ -230,13 +314,26 @@ const loadItemModels = async (item: TestItem) => {
   }
 }
 
+const loadItemModelsLimited = async (items: TestItem[]) => {
+  let nextIndex = 0
+  const workerCount = Math.min(MODEL_LOAD_CONCURRENCY, items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+      await loadItemModels(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
 const loadAllItemModels = async () => {
-  await Promise.all(testItems.value.map(loadItemModels))
+  await loadItemModelsLimited(testItems.value)
 }
 
 const abortCurrentTest = () => {
-  abortController?.abort()
-  abortController = null
+  abortControllers.forEach(controller => controller.abort())
+  abortControllers.clear()
 }
 
 const cancelBatchTest = () => {
@@ -265,6 +362,15 @@ const summary = computed(() => ({
   pending: testItems.value.filter(item => item.status === 'pending').length
 }))
 
+const failedItems = computed(() => testItems.value.filter(item => item.status === 'failed'))
+const visibleTestItems = computed(() => showFailedOnly.value ? failedItems.value : testItems.value)
+const visibleFailedItems = computed(() => visibleTestItems.value.filter(item => item.status === 'failed'))
+const hasTestResults = computed(() => testItems.value.some(item => item.status === 'success' || item.status === 'failed'))
+const allVisibleFailedSelected = computed(() => (
+  visibleFailedItems.value.length > 0 &&
+  visibleFailedItems.value.every(item => selectedFailedIds.value.includes(item.account.id))
+))
+
 const statusLabel = (status: TestStatus) => t(`admin.accounts.bulkTest.status.${status}`)
 
 const statusClass = (status: TestStatus) => [
@@ -281,6 +387,13 @@ const modeButtonClass = (mode: TestMode) => [
     ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
     : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white',
   running.value && 'cursor-not-allowed opacity-70'
+]
+
+const filterButtonClass = (failedOnly: boolean) => [
+  'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+  showFailedOnly.value === failedOnly
+    ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
+    : 'text-gray-500 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-300 dark:hover:text-white'
 ]
 
 const appendEventLog = (item: TestItem, event: AccountTestEvent) => {
@@ -309,50 +422,135 @@ const appendEventLog = (item: TestItem, event: AccountTestEvent) => {
   }
 }
 
+const sleep = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms))
+
+type StartStaggerDelay = number | (() => number)
+
+const randomBatchTestStartStaggerMs = () => (
+  BATCH_TEST_START_STAGGER_MIN_MS +
+  Math.floor(Math.random() * (BATCH_TEST_START_STAGGER_MAX_MS - BATCH_TEST_START_STAGGER_MIN_MS + 1))
+)
+
+const hasStartStagger = (delay: StartStaggerDelay) => (
+  typeof delay === 'function' || delay > 0
+)
+
+const resolveStartStaggerMs = (delay: StartStaggerDelay) => (
+  Math.max(0, typeof delay === 'function' ? delay() : delay)
+)
+
+const runLimited = async <T,>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+  shouldStop: () => boolean = () => cancellationRequested,
+  startStaggerMs: StartStaggerDelay = 0
+) => {
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, items.length)
+  let nextStartAt = Date.now()
+  let startGate = Promise.resolve()
+
+  const waitForStartSlot = async () => {
+    if (!hasStartStagger(startStaggerMs)) return
+
+    const previousGate = startGate
+    let releaseStartGate: (() => void) | undefined
+    startGate = new Promise<void>((resolve) => {
+      releaseStartGate = resolve
+    })
+
+    await previousGate
+
+    try {
+      const now = Date.now()
+      const waitMs = Math.max(0, nextStartAt - now)
+      nextStartAt = Math.max(now, nextStartAt) + resolveStartStaggerMs(startStaggerMs)
+      if (waitMs > 0) {
+        await sleep(waitMs)
+      }
+    } finally {
+      releaseStartGate?.()
+    }
+  }
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (!shouldStop()) {
+      const itemIndex = nextIndex
+      nextIndex += 1
+      if (itemIndex >= items.length) return
+      const item = items[itemIndex]
+      await waitForStartSlot()
+      if (shouldStop()) return
+      await worker(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
+const runSingleTest = async (item: TestItem) => {
+  item.status = 'running'
+  item.logs = []
+  item.error = ''
+  const controller = new AbortController()
+  abortControllers.add(controller)
+  try {
+    const result = await runAccountConnectionTest({
+      accountId: item.account.id,
+      authToken: localStorage.getItem('auth_token'),
+      modelId: item.selectedModelId || undefined,
+      mode: testMode.value,
+      signal: controller.signal,
+      onEvent: (event) => appendEventLog(item, event)
+    })
+    if (result.success) {
+      item.status = 'success'
+    } else {
+      item.status = 'failed'
+      item.error = result.error || t('admin.accounts.bulkTest.logFailed')
+    }
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      item.status = 'pending'
+      item.logs.push(t('admin.accounts.bulkTest.logCancelled'))
+      return
+    }
+    item.status = 'failed'
+    item.error = error instanceof Error && error.message ? error.message : t('admin.accounts.bulkTest.logFailed')
+    item.logs.push(item.error)
+  } finally {
+    abortControllers.delete(controller)
+  }
+}
+
+const pruneFailedSelection = () => {
+  const failedIds = new Set(failedItems.value.map(item => item.account.id))
+  selectedFailedIds.value = selectedFailedIds.value.filter(id => failedIds.has(id))
+}
+
 const startBatchTest = async () => {
-  if (running.value || testItems.value.length === 0) return
+  if (running.value || deletingFailed.value || testItems.value.length === 0) return
   running.value = true
   emit('running-change', true)
   cancellationRequested = false
+  selectedFailedIds.value = []
+  showFailedOnly.value = false
 
   try {
-    for (const item of testItems.value) {
-      item.status = 'running'
-      item.logs = []
-      item.error = ''
-      abortController = new AbortController()
-      try {
-        const result = await runAccountConnectionTest({
-          accountId: item.account.id,
-          authToken: localStorage.getItem('auth_token'),
-          modelId: item.selectedModelId || undefined,
-          mode: testMode.value,
-          signal: abortController.signal,
-          onEvent: (event) => appendEventLog(item, event)
-        })
-        if (result.success) {
-          item.status = 'success'
-        } else {
-          item.status = 'failed'
-          item.error = result.error || t('admin.accounts.bulkTest.logFailed')
-        }
-      } catch (error: any) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          item.status = 'pending'
-          item.logs.push(t('admin.accounts.bulkTest.logCancelled'))
-          break
-        }
-        item.status = 'failed'
-        item.error = error?.message || t('admin.accounts.bulkTest.logFailed')
-        item.logs.push(item.error)
-      } finally {
-        abortController = null
-      }
-    }
+    await runLimited(
+      testItems.value,
+      BATCH_TEST_CONCURRENCY,
+      runSingleTest,
+      () => cancellationRequested,
+      randomBatchTestStartStaggerMs
+    )
   } finally {
     running.value = false
+    abortControllers.clear()
     emit('running-change', false)
   }
+
+  pruneFailedSelection()
 
   if (!cancellationRequested) {
     const failed = testItems.value.filter(item => item.status === 'failed')
@@ -363,6 +561,75 @@ const startBatchTest = async () => {
       errors: failed.map(item => `${item.account.name}: ${item.error || t('admin.accounts.bulkTest.logFailed')}`)
     })
   }
+}
+
+const toggleFailedSelection = (id: number, checked: boolean) => {
+  const selected = new Set(selectedFailedIds.value)
+  if (checked) {
+    selected.add(id)
+  } else {
+    selected.delete(id)
+  }
+  selectedFailedIds.value = Array.from(selected)
+}
+
+const toggleVisibleFailedSelection = () => {
+  if (allVisibleFailedSelected.value) {
+    const visibleIds = new Set(visibleFailedItems.value.map(item => item.account.id))
+    selectedFailedIds.value = selectedFailedIds.value.filter(id => !visibleIds.has(id))
+    return
+  }
+
+  const selected = new Set(selectedFailedIds.value)
+  visibleFailedItems.value.forEach(item => selected.add(item.account.id))
+  selectedFailedIds.value = Array.from(selected)
+}
+
+const deleteFailedAccounts = async (ids: number[]) => {
+  const uniqueIds = Array.from(new Set(ids)).filter(id => failedItems.value.some(item => item.account.id === id))
+  if (uniqueIds.length === 0 || deletingFailed.value) return
+  if (!window.confirm(t('admin.accounts.bulkTest.deleteFailedConfirm', { count: uniqueIds.length }))) return
+
+  deletingFailed.value = true
+  const deletedIds: number[] = []
+  let failed = 0
+
+  try {
+    await runLimited(uniqueIds, uniqueIds.length, async (id) => {
+      try {
+        await adminAPI.accounts.delete(id)
+        deletedIds.push(id)
+      } catch {
+        failed += 1
+      }
+    }, () => false)
+  } finally {
+    deletingFailed.value = false
+  }
+
+  if (deletedIds.length > 0) {
+    const deletedSet = new Set(deletedIds)
+    testItems.value = testItems.value.filter(item => !deletedSet.has(item.account.id))
+    selectedFailedIds.value = selectedFailedIds.value.filter(id => !deletedSet.has(id))
+    emit('deleted', { success: deletedIds.length, failed, deletedIds })
+  }
+
+  if (failed > 0) {
+    appStore.showError(t('admin.accounts.bulkTest.deleteFailedPartial', {
+      success: deletedIds.length,
+      failed
+    }))
+  } else {
+    appStore.showSuccess(t('admin.accounts.bulkTest.deleteFailedSuccess', { count: deletedIds.length }))
+  }
+}
+
+const deleteSelectedFailedAccounts = () => {
+  deleteFailedAccounts(selectedFailedIds.value)
+}
+
+const deleteAllFailedAccounts = () => {
+  deleteFailedAccounts(failedItems.value.map(item => item.account.id))
 }
 
 const handleClose = () => {

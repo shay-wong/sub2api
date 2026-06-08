@@ -362,6 +362,7 @@
       @close="closeBatchTestModal"
       @running-change="batchTestRunning = $event"
       @completed="handleBatchTestCompleted"
+      @deleted="handleBatchTestDeleted"
     />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
@@ -1276,6 +1277,12 @@ const handleBatchTestCompleted = (payload: { success: number; failed: number; fa
     appStore.showSuccess(t('admin.accounts.bulkActions.testSuccess', { count: payload.success }))
   }
   reload()
+}
+const handleBatchTestDeleted = (payload: { success: number; failed: number; deletedIds: number[] }) => {
+  if (payload.success > 0) {
+    setSelectedIds(selIds.value.filter(id => !payload.deletedIds.includes(id)))
+    reload()
+  }
 }
 const handleBulkResetStatus = async () => {
   if (!confirm(t('common.confirm'))) return
