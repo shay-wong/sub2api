@@ -29,15 +29,30 @@
       <div>
         <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
         <div
-          class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-800"
+          class="flex items-center justify-between gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors"
+          :class="isDraggingFiles
+            ? 'border-primary-400 bg-primary-50 dark:border-primary-500 dark:bg-primary-900/20'
+            : 'border-gray-300 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'"
+          data-testid="account-import-drop-zone"
+          @dragenter.prevent="handleFileDragEnter"
+          @dragover.prevent="handleFileDragOver"
+          @dragleave.prevent="handleFileDragLeave"
+          @drop.prevent="handleFileDrop"
         >
           <div class="min-w-0">
             <div class="truncate text-sm text-gray-700 dark:text-dark-200">
               {{ fileName || t('admin.accounts.dataImportSelectFile') }}
             </div>
-            <div class="text-xs text-gray-500 dark:text-dark-400">JSON (.json)</div>
+            <div class="text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.accounts.dataImportDropHint') }}
+            </div>
           </div>
-          <button type="button" class="btn btn-secondary shrink-0" @click="openFilePicker">
+          <button
+            type="button"
+            class="btn btn-secondary shrink-0"
+            :disabled="importing"
+            @click="openFilePicker"
+          >
             {{ t('common.chooseFile') }}
           </button>
         </div>
@@ -46,7 +61,7 @@
           type="file"
           multiple
           class="hidden"
-          accept="application/json,.json"
+          accept="application/json,text/plain,.json,.txt"
           @change="handleFileChange"
         />
       </div>
@@ -174,11 +189,14 @@ const appStore = useAppStore()
 const DATA_IMPORT_CONCURRENCY = 10
 const DATA_IMPORT_ACCOUNT_CHUNK_SIZE = 25
 const CPA_DATA_TYPE = 'cpa-auth-files'
+const TXT_RT_SEPARATOR = '----'
+const TXT_RT_EXPIRED_AT = '1970-01-01T00:00:00Z'
 
 const importing = ref(false)
 const files = ref<File[]>([])
 const result = ref<AdminDataImportResult | null>(null)
 const format = ref<AdminAccountDataFormat | 'auto'>('auto')
+const fileDragDepth = ref(0)
 
 type ImportProgressStage = 'reading' | 'importing'
 
@@ -193,6 +211,7 @@ interface ImportProgressState {
 interface ParsedImportFile {
   fileName: string
   data: unknown
+  format?: AdminAccountDataFormat
 }
 
 interface ImportPayloadTask {
@@ -201,6 +220,7 @@ interface ImportPayloadTask {
   format?: AdminAccountDataFormat
   failureKind?: 'account' | 'proxy'
   failureCount?: number
+  progressCount?: number
 }
 
 interface PreparedImportPlan {
@@ -221,6 +241,7 @@ const formatOptions = computed(() => [
 ])
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const isDraggingFiles = computed(() => fileDragDepth.value > 0)
 const fileName = computed(() => {
   if (files.value.length === 0) return ''
   if (files.value.length === 1) return files.value[0].name
@@ -328,6 +349,10 @@ const markRequestFailed = (
   return res
 }
 
+const getImportTaskProgressCount = (payload: ImportPayloadTask): number => (
+  Math.max(1, payload.progressCount ?? payload.failureCount ?? 1)
+)
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null
 )
@@ -433,6 +458,60 @@ const createSub2APIPayload = (
   accounts
 })
 
+const getTxtRefreshTokenImportLines = (content: string): string[] => (
+  content
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+)
+
+const looksLikeTxtRefreshTokenImport = (content: string): boolean => (
+  getTxtRefreshTokenImportLines(content)
+    .some((line) => line.includes(TXT_RT_SEPARATOR))
+)
+
+const parseTxtRefreshTokenImport = (content: string): AdminDataPayload => {
+  const lines = getTxtRefreshTokenImportLines(content)
+  const accounts = lines.map((line, index): AdminDataAccount => {
+    const parts = line.split(TXT_RT_SEPARATOR).map((part) => part.trim())
+    if (parts.length !== 4) {
+      throw new SyntaxError(`Invalid TXT refresh token import line ${index + 1}`)
+    }
+
+    const [email, password, marker, refreshToken] = parts
+    const normalizedMarker = marker.toLowerCase()
+    if (!email || !password || !refreshToken || !['rt', 'refresh_token'].includes(normalizedMarker)) {
+      throw new SyntaxError(`Invalid TXT refresh token import line ${index + 1}`)
+    }
+
+    return {
+      name: email,
+      platform: 'openai',
+      type: 'oauth',
+      credentials: {
+        refresh_token: refreshToken,
+        email,
+        expires_at: TXT_RT_EXPIRED_AT
+      },
+      extra: {
+        email,
+        import_source: 'txt_refresh_token'
+      },
+      concurrency: 10,
+      priority: 1,
+      rate_multiplier: 1,
+      auto_pause_on_expired: true
+    }
+  })
+
+  if (accounts.length === 0) {
+    throw new SyntaxError('Empty TXT refresh token import')
+  }
+
+  return createSub2APIPayload([], accounts)
+}
+
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
   const chunks: T[][] = []
   for (let index = 0; index < items.length; index += size) {
@@ -449,7 +528,8 @@ const createAccountTasks = (
     fileName: chunks.length > 1 ? `${sourceFileName} #${index + 1}` : sourceFileName,
     data: createSub2APIPayload([], items),
     format: 'sub2api',
-    failureCount: items.length
+    failureCount: items.length,
+    progressCount: items.length
   }))
 }
 
@@ -465,7 +545,8 @@ const createCPATasks = (
       accounts: items
     },
     format: 'cpa',
-    failureCount: items.length
+    failureCount: items.length,
+    progressCount: items.length
   }))
 }
 
@@ -475,7 +556,7 @@ const prepareImportPlan = (dataPayloads: ParsedImportFile[]): PreparedImportPlan
   const accountTasks: ImportPayloadTask[] = []
   const resolvedPayloads = dataPayloads.map((payload) => ({
     ...payload,
-    payloadFormat: resolveParsedFormat(payload.data)
+    payloadFormat: payload.format || resolveParsedFormat(payload.data)
   }))
 
   for (const payload of resolvedPayloads) {
@@ -503,11 +584,13 @@ const prepareImportPlan = (dataPayloads: ParsedImportFile[]): PreparedImportPlan
       if (cpaAccounts) {
         accountTasks.push(...createCPATasks(cpaAccounts, payload.fileName))
       } else {
+        const accountCount = inferCPAFailureCount(payload.data)
         accountTasks.push({
           fileName: payload.fileName,
           data: payload.data,
           format: 'cpa',
-          failureCount: inferCPAFailureCount(payload.data)
+          failureCount: accountCount,
+          progressCount: accountCount
         })
       }
       continue
@@ -536,7 +619,8 @@ const prepareImportPlan = (dataPayloads: ParsedImportFile[]): PreparedImportPlan
           data: createSub2APIPayload(proxies, []),
           format: 'sub2api',
           failureKind: 'proxy',
-          failureCount: proxies.length
+          failureCount: proxies.length,
+          progressCount: proxies.length
         }
       : null,
     accountTasks
@@ -574,8 +658,8 @@ const importPayloadsConcurrently = async (
     return res
   }
 
-  const total = dataPayloads.length
-  const concurrency = Math.min(DATA_IMPORT_CONCURRENCY, total)
+  const total = dataPayloads.reduce((sum, payload) => sum + getImportTaskProgressCount(payload), 0)
+  const concurrency = Math.min(DATA_IMPORT_CONCURRENCY, dataPayloads.length)
   const activeFileNames = new Set<string>()
   let completed = 0
   let nextIndex = 0
@@ -603,7 +687,7 @@ const importPayloadsConcurrently = async (
       addImportResult(res, itemResult)
 
       activeFileNames.delete(payload.fileName)
-      completed += 1
+      completed += getImportTaskProgressCount(payload)
       updateProgress()
     }
   }
@@ -628,14 +712,49 @@ watch(
 )
 
 const openFilePicker = () => {
+  if (importing.value) return
   fileInput.value?.click()
+}
+
+const setSelectedFiles = (selectedFiles: File[]) => {
+  if (importing.value) return
+  files.value = selectedFiles
+  result.value = null
+  importProgress.value = null
 }
 
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement
-  files.value = Array.from(target.files || [])
-  result.value = null
-  importProgress.value = null
+  setSelectedFiles(Array.from(target.files || []))
+}
+
+const handleFileDragEnter = () => {
+  if (importing.value) return
+  fileDragDepth.value += 1
+}
+
+const handleFileDragOver = (event: DragEvent) => {
+  if (importing.value) return
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+const handleFileDragLeave = () => {
+  if (importing.value) return
+  fileDragDepth.value = Math.max(0, fileDragDepth.value - 1)
+}
+
+const handleFileDrop = (event: DragEvent) => {
+  fileDragDepth.value = 0
+  if (importing.value) return
+  const droppedFiles = Array.from(event.dataTransfer?.files || [])
+  if (droppedFiles.length > 0) {
+    setSelectedFiles(droppedFiles)
+    if (fileInput.value) {
+      fileInput.value.value = ''
+    }
+  }
 }
 
 const handleClose = () => {
@@ -692,6 +811,22 @@ const handleImport = async () => {
         })
       } catch (error) {
         if (error instanceof SyntaxError) {
+          if (looksLikeTxtRefreshTokenImport(text)) {
+            try {
+              dataPayloads.push({
+                fileName: sourceFile.name,
+                data: parseTxtRefreshTokenImport(text),
+                format: 'sub2api'
+              })
+              continue
+            } catch (txtError) {
+              if (!(txtError instanceof SyntaxError)) {
+                throw txtError
+              }
+              appStore.showError(`${sourceFile.name}: ${txtError.message}`)
+              return
+            }
+          }
           appStore.showError(`${sourceFile.name}: ${t('admin.accounts.dataImportParseFailed')}`)
           return
         }
@@ -705,7 +840,7 @@ const handleImport = async () => {
       importProgress.value = {
         stage: 'importing',
         completed: 0,
-        total: 1,
+        total: getImportTaskProgressCount(importPlan.proxyTask),
         activeFileNames: [importPlan.proxyTask.fileName],
         concurrency: 1
       }

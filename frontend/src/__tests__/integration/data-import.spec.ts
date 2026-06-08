@@ -67,6 +67,14 @@ const createJsonFile = (name: string, content: string) => {
   return file
 }
 
+const createTextFile = (name: string, content: string) => {
+  const file = new File([content], name, { type: 'text/plain' })
+  Object.defineProperty(file, 'text', {
+    value: () => Promise.resolve(content)
+  })
+  return file
+}
+
 describe('ImportDataModal', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -130,6 +138,146 @@ describe('ImportDataModal', () => {
     expect(formatSelect.classes()).toContain('w-full')
     expect(formatSelect.find('.select-trigger').exists()).toBe(true)
     expect(wrapper.find('select').exists()).toBe(false)
+  })
+
+  it('支持拖入数据文件后导入', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+    const dropZone = wrapper.get('[data-testid="account-import-drop-zone"]')
+    const file = createJsonFile('dropped.json', sub2apiContent([1]))
+
+    await dropZone.trigger('dragenter', {
+      dataTransfer: { files: [file] }
+    })
+    expect(dropZone.classes().join(' ')).toContain('border-primary-400')
+
+    await dropZone.trigger('drop', {
+      dataTransfer: { files: [file] }
+    })
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('dropped.json')
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [
+          expect.objectContaining({
+            name: 'account-1'
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
+  })
+
+  it('导入中忽略拖入的新文件', async () => {
+    let resolveImport: ((value: unknown) => void) | null = null
+    importData.mockImplementation(() => new Promise((resolve) => {
+      resolveImport = resolve
+    }))
+    const wrapper = mountModal()
+    const dropZone = wrapper.get('[data-testid="account-import-drop-zone"]')
+    const input = wrapper.find('input[type="file"]')
+    const firstFile = createJsonFile('first.json', sub2apiContent([1]))
+    const droppedFile = createJsonFile('dropped.json', sub2apiContent([2]))
+    Object.defineProperty(input.element, 'files', {
+      value: [firstFile]
+    })
+
+    await input.trigger('change')
+    const submitPromise = wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    await dropZone.trigger('drop', {
+      dataTransfer: { files: [droppedFile] }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('first.json')
+    expect(wrapper.text()).not.toContain('dropped.json')
+    expect(importData).toHaveBeenCalledTimes(1)
+
+    resolveImport!(successfulImportResult())
+    await submitPromise
+    await flushPromises()
+
+    expect(showSuccess).toHaveBeenCalled()
+  })
+
+  it('支持邮箱密码 RT TXT 格式导入为 OpenAI OAuth 账号', async () => {
+    importData.mockResolvedValue(successfulImportResult(2))
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile(
+      'accounts.txt',
+      [
+        '\uFEFFfirst@example.com----password-1----rt----refresh-token-1',
+        'second@example.com----password-2----refresh_token----refresh-token-2'
+      ].join('\r\n')
+    )
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'sub2api-data',
+        accounts: [
+          expect.objectContaining({
+            name: 'first@example.com',
+            platform: 'openai',
+            type: 'oauth',
+            credentials: {
+              refresh_token: 'refresh-token-1',
+              email: 'first@example.com',
+              expires_at: '1970-01-01T00:00:00Z'
+            },
+            extra: {
+              email: 'first@example.com',
+              import_source: 'txt_refresh_token'
+            },
+            concurrency: 10,
+            priority: 1,
+            rate_multiplier: 1,
+            auto_pause_on_expired: true
+          }),
+          expect.objectContaining({
+            name: 'second@example.com',
+            credentials: expect.objectContaining({
+              refresh_token: 'refresh-token-2'
+            })
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
+    expect(JSON.stringify(importData.mock.calls[0][0])).not.toContain('password-1')
+    expect(JSON.stringify(importData.mock.calls[0][0])).not.toContain('password-2')
+  })
+
+  it('无效邮箱密码 RT TXT 行不会调用导入接口', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('bad-accounts.txt', 'first@example.com----password----bad----refresh-token')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('bad-accounts.txt'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('Invalid TXT refresh token import line 1'))
   })
 
   it('选择 CPA 格式时把格式传给后端', async () => {
@@ -479,6 +627,43 @@ describe('ImportDataModal', () => {
       .toContain('admin.accounts.dataImportProgressImporting {"completed":1,"total":11}')
 
     resolvers.slice(1).forEach((resolve) => resolve(successfulImportResult()))
+    await submitPromise
+    await flushPromises()
+
+    expect(showSuccess).toHaveBeenCalled()
+  })
+
+  it('Sub2API 账号分片导入进度按账号数量显示', async () => {
+    const resolvers: Array<(value: unknown) => void> = []
+    importData.mockImplementation(() => new Promise((resolve) => {
+      resolvers.push(resolve)
+    }))
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createJsonFile('large.json', sub2apiContent(Array.from({ length: 26 }, (_, index) => index + 1)))
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    const submitPromise = wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="account-import-progress"]').text())
+      .toContain('admin.accounts.dataImportProgressImporting {"completed":0,"total":26}')
+    expect(wrapper.get('[data-testid="account-import-progress"]').text())
+      .toContain('admin.accounts.dataImportProgressConcurrency {"count":2}')
+
+    resolvers[0](successfulImportResult(25))
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="account-import-progress"]').text())
+      .toContain('admin.accounts.dataImportProgressImporting {"completed":25,"total":26}')
+    expect(wrapper.get('[data-testid="account-import-progress"]').text()).toContain('96%')
+
+    resolvers[1](successfulImportResult(1))
     await submitPromise
     await flushPromises()
 
