@@ -615,6 +615,7 @@ describe('ImportDataModal', () => {
     expect(wrapper.text()).toContain('failed.json')
     expect(wrapper.text()).toContain('duplicate account')
     expect(wrapper.text()).toContain('"account_created":3')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
   })
 
   it('后端返回的失败详情会标记来源文件', async () => {
@@ -649,5 +650,6 @@ describe('ImportDataModal', () => {
 
     expect(wrapper.text()).toContain('source.json')
     expect(wrapper.text()).toContain('already exists')
+    expect(wrapper.emitted('imported')).toBeUndefined()
   })
 })

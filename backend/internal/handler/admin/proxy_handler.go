@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // ProxyHandler handles admin proxy management
@@ -36,7 +38,7 @@ type CreateProxyRequest struct {
 	ExpiresAt      *int64 `json:"expires_at"`
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	ExpiryWarnDays *int   `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // UpdateProxyRequest represents update proxy request
@@ -51,7 +53,7 @@ type UpdateProxyRequest struct {
 	ExpiresAt      *int64 `json:"expires_at"`
 	FallbackMode   string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
 	BackupProxyID  *int64 `json:"backup_proxy_id"`
-	ExpiryWarnDays int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
+	ExpiryWarnDays *int   `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // List handles listing all proxies with pagination
@@ -176,29 +178,43 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		return
 	}
 
-	var req UpdateProxyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var raw map[string]json.RawMessage
+	if err := c.ShouldBindBodyWith(&raw, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
 
+	var req UpdateProxyRequest
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	_, expiresAtProvided := raw["expires_at"]
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil && *req.ExpiresAt > 0 {
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		expiresAt = &t
 	}
+	_, fallbackModeProvided := raw["fallback_mode"]
+	_, backupProxyIDProvided := raw["backup_proxy_id"]
+	_, expiryWarnDaysProvided := raw["expiry_warn_days"]
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
-		Name:           strings.TrimSpace(req.Name),
-		Protocol:       strings.TrimSpace(req.Protocol),
-		Host:           strings.TrimSpace(req.Host),
-		Port:           req.Port,
-		Username:       strings.TrimSpace(req.Username),
-		Password:       strings.TrimSpace(req.Password),
-		Status:         strings.TrimSpace(req.Status),
-		ExpiresAt:      expiresAt,
-		FallbackMode:   strings.TrimSpace(req.FallbackMode),
-		BackupProxyID:  req.BackupProxyID,
-		ExpiryWarnDays: req.ExpiryWarnDays,
+		Name:                   strings.TrimSpace(req.Name),
+		Protocol:               strings.TrimSpace(req.Protocol),
+		Host:                   strings.TrimSpace(req.Host),
+		Port:                   req.Port,
+		Username:               strings.TrimSpace(req.Username),
+		Password:               strings.TrimSpace(req.Password),
+		Status:                 strings.TrimSpace(req.Status),
+		ExpiresAt:              expiresAt,
+		ExpiresAtProvided:      expiresAtProvided,
+		FallbackMode:           strings.TrimSpace(req.FallbackMode),
+		FallbackModeProvided:   fallbackModeProvided,
+		BackupProxyID:          req.BackupProxyID,
+		BackupProxyIDProvided:  backupProxyIDProvided,
+		ExpiryWarnDays:         req.ExpiryWarnDays,
+		ExpiryWarnDaysProvided: expiryWarnDaysProvided,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

@@ -91,6 +91,17 @@ const AccountBatchTestModalStub = {
   `
 }
 
+const ImportDataModalStub = {
+  props: ['show'],
+  emits: ['close', 'imported'],
+  template: `
+    <div data-test="import-data-modal" :data-show="String(show)">
+      <button data-test="emit-imported-keep-open" @click="$emit('imported', { close: false })">partial</button>
+      <button data-test="emit-imported-close" @click="$emit('imported')">complete</button>
+    </div>
+  `
+}
+
 describe('admin AccountsView batch test', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -157,7 +168,7 @@ describe('admin AccountsView batch test', () => {
           AccountTableFilters: { template: '<div></div>' },
           AccountActionMenu: true,
           AccountBatchTestModal: AccountBatchTestModalStub,
-          ImportDataModal: true,
+          ImportDataModal: ImportDataModalStub,
           ReAuthAccountModal: true,
           AccountTestModal: true,
           AccountStatsModal: true,
@@ -208,7 +219,7 @@ describe('admin AccountsView batch test', () => {
           AccountTableFilters: { template: '<div></div>' },
           AccountActionMenu: true,
           AccountBatchTestModal: AccountBatchTestModalStub,
-          ImportDataModal: true,
+          ImportDataModal: ImportDataModalStub,
           ReAuthAccountModal: true,
           AccountTestModal: true,
           AccountStatsModal: true,
@@ -248,5 +259,68 @@ describe('admin AccountsView batch test', () => {
 
     expect(wrapper.get('[data-test="batch-test-accounts"]').text()).toBe('admin.accounts.bulkActions.test')
     expect(wrapper.get('[data-test="batch-test-accounts"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('refreshes after partial import success without closing the import dialog', async () => {
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: { template: '<div></div>' },
+          AccountActionMenu: true,
+          AccountBatchTestModal: AccountBatchTestModalStub,
+          ImportDataModal: ImportDataModalStub,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: true,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="import-data-modal"]').attributes('data-show')).toBe('false')
+
+    await wrapper.get('button[title="admin.accounts.moreActions"]').trigger('click')
+    const importButton = wrapper.findAll('.account-tools-menu-item')
+      .find((button) => button.text().includes('admin.accounts.dataImport'))
+    expect(importButton).toBeTruthy()
+    await importButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="import-data-modal"]').attributes('data-show')).toBe('true')
+
+    await wrapper.get('[data-test="emit-imported-keep-open"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="import-data-modal"]').attributes('data-show')).toBe('true')
+
+    await wrapper.get('[data-test="emit-imported-close"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledTimes(3)
+    expect(wrapper.get('[data-test="import-data-modal"]').attributes('data-show')).toBe('false')
   })
 })

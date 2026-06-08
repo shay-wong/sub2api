@@ -161,7 +161,7 @@ interface Props {
 
 interface Emits {
   (e: 'close'): void
-  (e: 'imported'): void
+  (e: 'imported', options?: { close?: boolean }): void
 }
 
 const props = defineProps<Props>()
@@ -547,6 +547,10 @@ const hasImportErrors = (res: AdminDataImportResult): boolean => (
   res.account_failed > 0 || res.proxy_failed > 0 || Boolean(res.errors?.length)
 )
 
+const hasImportSuccess = (res: AdminDataImportResult): boolean => (
+  res.account_created > 0 || res.proxy_created > 0 || res.proxy_reused > 0
+)
+
 const importOnePayload = async (
   payload: ImportPayloadTask
 ): Promise<AdminDataImportResult> => {
@@ -720,6 +724,9 @@ const handleImport = async () => {
     }
     if (hasImportErrors(res)) {
       appStore.showError(t('admin.accounts.dataImportCompletedWithErrors', msgParams))
+      if (hasImportSuccess(res)) {
+        emit('imported', { close: false })
+      }
     } else {
       appStore.showSuccess(t('admin.accounts.dataImportSuccess', msgParams))
       emit('imported')
