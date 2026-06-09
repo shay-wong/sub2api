@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
@@ -45,6 +46,30 @@ type openAITokenRuntimeMetricsStore struct {
 	lockWaitHit        atomic.Int64
 	lockWaitMiss       atomic.Int64
 	lastObservedUnixMs atomic.Int64
+}
+
+// OpenAITokenPermanentRefreshError 表示 OpenAI OAuth refresh_token 已永久失效，
+// 该账号需要重新登录，当前请求应切换到其他账号。
+type OpenAITokenPermanentRefreshError struct {
+	AccountID int64
+	Err       error
+}
+
+func (e *OpenAITokenPermanentRefreshError) Error() string {
+	if e == nil {
+		return "openai token refresh failed permanently"
+	}
+	if e.Err == nil {
+		return fmt.Sprintf("openai token refresh failed permanently for account %d", e.AccountID)
+	}
+	return fmt.Sprintf("openai token refresh failed permanently for account %d: %v", e.AccountID, e.Err)
+}
+
+func (e *OpenAITokenPermanentRefreshError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 func (m *openAITokenRuntimeMetricsStore) snapshot() OpenAITokenRuntimeMetrics {
@@ -163,7 +188,7 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，
 			// 否则会被反复选中、每次都在 token 阶段直接返回错误，对用户呈现持续 502。
 			p.disableAccountMissingRefreshToken(account, reason)
-			return "", errors.New(reason)
+			return "", &OpenAITokenPermanentRefreshError{AccountID: account.ID, Err: errors.New(reason)}
 		}
 		needsRefresh = false
 	}
@@ -175,6 +200,13 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
+			if isNonRetryableRefreshError(err) {
+				reason := fmt.Sprintf("Token refresh failed (non-retryable): %v", err)
+				p.disableAccountTokenRefreshFailed(account, reason)
+				p.metrics.refreshFailure.Add(1)
+				p.metrics.touchNow()
+				return "", &OpenAITokenPermanentRefreshError{AccountID: account.ID, Err: err}
+			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
@@ -270,18 +302,23 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	return accessToken, nil
 }
 
-// disableAccountMissingRefreshToken 在请求路径上发现 OpenAI OAuth 账号
-// 凭证已过期且 refresh_token 缺失时，将账号标记为 error 状态。
-// 这是一种永久性故障：仅靠后续请求或 TokenRefreshService 不会自愈
-// （NeedsRefresh 也会因 refresh_token 为空直接跳过），
-// 必须主动剔除以避免账号被持续选中导致用户端反复 502。
-// 使用 background context 是因为请求 context 可能很快结束。
 func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account, reason string) {
+	p.disableAccountWithTokenError(account, reason, "missing_refresh_token", "openai_token_provider.account_disabled_missing_refresh_token")
+}
+
+func (p *OpenAITokenProvider) disableAccountTokenRefreshFailed(account *Account, reason string) {
+	p.disableAccountWithTokenError(account, reason, "token_refresh_non_retryable", "openai_token_provider.account_disabled_token_refresh_failed")
+}
+
+// disableAccountWithTokenError 在请求路径上发现 OpenAI OAuth 永久性凭证故障时，
+// 将账号剔出调度池并删除 token 缓存。使用 background context 是因为请求 context
+// 可能很快结束，而账号状态必须落库以避免后续请求反复命中同一坏账号。
+func (p *OpenAITokenProvider) disableAccountWithTokenError(account *Account, reason string, blockReason string, logEvent string) {
 	if p == nil || p.accountRepo == nil || account == nil {
 		return
 	}
 	if p.runtimeBlocker != nil {
-		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, "missing_refresh_token")
+		p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, blockReason)
 	}
 	bgCtx := context.Background()
 	if err := p.accountRepo.SetError(bgCtx, account.ID, reason); err != nil {
@@ -300,7 +337,7 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 			)
 		}
 	}
-	slog.Warn("openai_token_provider.account_disabled_missing_refresh_token",
+	slog.Warn(logEvent,
 		"account_id", account.ID,
 		"reason", reason,
 	)

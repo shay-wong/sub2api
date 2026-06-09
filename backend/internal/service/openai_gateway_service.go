@@ -2291,6 +2291,10 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		if s.openAITokenProvider != nil {
 			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
+				var permanentRefreshErr *OpenAITokenPermanentRefreshError
+				if errors.As(err, &permanentRefreshErr) {
+					return "", "", newOpenAITokenRefreshFailoverError(err)
+				}
 				return "", "", err
 			}
 			return accessToken, "oauth", nil
@@ -2309,6 +2313,24 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		return apiKey, "apikey", nil
 	default:
 		return "", "", fmt.Errorf("unsupported account type: %s", account.Type)
+	}
+}
+
+func newOpenAITokenRefreshFailoverError(err error) *UpstreamFailoverError {
+	message := "OpenAI OAuth token refresh failed permanently; account requires re-login"
+	if err != nil {
+		message = sanitizeUpstreamErrorMessage(err.Error())
+	}
+	body, _ := json.Marshal(gin.H{
+		"error": gin.H{
+			"type":    "upstream_error",
+			"code":    "openai_oauth_token_refresh_failed",
+			"message": message,
+		},
+	})
+	return &UpstreamFailoverError{
+		StatusCode:   http.StatusBadGateway,
+		ResponseBody: body,
 	}
 }
 
