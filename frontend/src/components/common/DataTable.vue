@@ -1,5 +1,9 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
+  <div
+    v-if="!isDesktopViewport"
+    ref="mobileListRef"
+    :class="['space-y-3', { 'mobile-virtual-list': virtualizeMobile }]"
+  >
     <template v-if="loading">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
@@ -28,6 +32,44 @@
             </p>
           </div>
         </slot>
+      </div>
+    </template>
+
+    <template v-else-if="virtualizeMobile">
+      <div
+        class="relative w-full"
+        :style="{ height: `${mobileVirtualTotalSize}px` }"
+      >
+        <div
+          v-for="{ row, index, start } in mobileVirtualRows"
+          :key="resolveRowKey(row, index)"
+          :ref="measureMobileElement"
+          :data-index="index"
+          class="absolute left-0 top-0 w-full pb-3"
+          :style="{ transform: `translateY(${start}px)` }"
+        >
+          <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+            <div class="space-y-3">
+              <div
+                v-for="column in dataColumns"
+                :key="column.key"
+                class="flex items-start justify-between gap-4"
+              >
+                <span class="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
+                  {{ column.label }}
+                </span>
+                <div class="text-right text-sm text-gray-900 dark:text-gray-100">
+                  <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
+                    {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
+                  </slot>
+                </div>
+              </div>
+              <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
+                <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -157,10 +199,10 @@
             </td>
           </tr>
           <tr
-            v-for="virtualRow in virtualItems"
-            :key="resolveRowKey(sortedData[virtualRow.index], virtualRow.index)"
-            :data-row-id="resolveRowKey(sortedData[virtualRow.index], virtualRow.index)"
-            :data-index="virtualRow.index"
+            v-for="{ row, index } in virtualRows"
+            :key="resolveRowKey(row, index)"
+            :data-row-id="resolveRowKey(row, index)"
+            :data-index="index"
             :ref="measureElement"
             class="hover:bg-gray-50 dark:hover:bg-dark-800"
           >
@@ -175,12 +217,12 @@
               ]"
             >
               <slot :name="`cell-${column.key}`"
-                    :row="sortedData[virtualRow.index]"
-                    :value="sortedData[virtualRow.index][column.key]"
+                    :row="row"
+                    :value="row[column.key]"
                     :expanded="actionsExpanded">
                 {{ column.formatter
-                   ? column.formatter(sortedData[virtualRow.index][column.key], sortedData[virtualRow.index])
-                   : sortedData[virtualRow.index][column.key] }}
+                   ? column.formatter(row[column.key], row)
+                   : row[column.key] }}
               </slot>
             </td>
           </tr>
@@ -197,7 +239,11 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useVirtualizer, observeElementRect as observeElementRectDefault } from '@tanstack/vue-virtual'
+import {
+  useVirtualizer,
+  useWindowVirtualizer,
+  observeElementRect as observeElementRectDefault
+} from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
@@ -215,6 +261,8 @@ const emit = defineEmits<{
 
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
+const mobileListRef = ref<HTMLElement | null>(null)
+const mobileScrollMargin = ref(0)
 const isScrollable = ref(false)
 const actionsColumnNeedsExpanding = ref(false)
 
@@ -292,9 +340,18 @@ const checkActionsColumnWidth = () => {
   })
 }
 
+const updateMobileScrollMargin = () => {
+  if (!mobileListRef.value || typeof window === 'undefined') {
+    mobileScrollMargin.value = 0
+    return
+  }
+  mobileScrollMargin.value = mobileListRef.value.getBoundingClientRect().top + window.scrollY
+}
+
 // 监听尺寸变化
 let resizeObserver: ResizeObserver | null = null
 let resizeHandler: (() => void) | null = null
+let mobileMarginResizeHandler: (() => void) | null = null
 let desktopViewportMediaQuery: MediaQueryList | null = null
 let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
 
@@ -338,11 +395,17 @@ onMounted(() => {
     } else {
       desktopViewportMediaQuery.addListener(desktopViewportListener)
     }
+    mobileMarginResizeHandler = () => updateMobileScrollMargin()
+    window.addEventListener('resize', mobileMarginResizeHandler)
   }
 })
 
 onUnmounted(() => {
   detachDesktopTableTracking()
+  if (mobileMarginResizeHandler) {
+    window.removeEventListener('resize', mobileMarginResizeHandler)
+    mobileMarginResizeHandler = null
+  }
   if (desktopViewportMediaQuery && desktopViewportListener) {
     if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
       desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
@@ -382,6 +445,10 @@ interface Props {
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
   overscan?: number
+  /** Enable virtualized card rendering on mobile/narrow viewports. */
+  virtualizeMobile?: boolean
+  /** Estimated mobile card height in px for the window virtualizer (default 180) */
+  estimateMobileRowHeight?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -390,7 +457,8 @@ const props = withDefaults(defineProps<Props>(), {
   stickyActionsColumn: true,
   expandableActions: true,
   defaultSortOrder: 'asc',
-  serverSideSort: false
+  serverSideSort: false,
+  virtualizeMobile: false
 })
 
 const sortKey = ref<string>('')
@@ -608,6 +676,23 @@ const rowVirtualizer = useVirtualizer(computed(() => ({
 })))
 
 const virtualItems = computed(() => rowVirtualizer.value.getVirtualItems())
+type VirtualDataRow = {
+  row: any
+  index: number
+  start: number
+}
+
+const virtualRows = computed<VirtualDataRow[]>(() =>
+  virtualItems.value.flatMap((virtualRow) => {
+    const row = sortedData.value[virtualRow.index]
+    if (!row) return []
+    return [{
+      row,
+      index: virtualRow.index,
+      start: virtualRow.start
+    }]
+  })
+)
 
 const virtualPaddingTop = computed(() => {
   const items = virtualItems.value
@@ -625,6 +710,46 @@ const measureElement = (el: any) => {
     rowVirtualizer.value.measureElement(el as Element)
   }
 }
+
+const virtualizeMobile = computed(() => props.virtualizeMobile && !isDesktopViewport.value)
+
+const mobileRowVirtualizer = useWindowVirtualizer(computed(() => ({
+  count: virtualizeMobile.value ? (sortedData.value?.length ?? 0) : 0,
+  estimateSize: () => props.estimateMobileRowHeight ?? 180,
+  overscan: props.overscan ?? 5,
+  scrollMargin: mobileScrollMargin.value,
+  useAnimationFrameWithResizeObserver: true,
+})))
+
+const mobileVirtualRows = computed<VirtualDataRow[]>(() =>
+  mobileRowVirtualizer.value.getVirtualItems().flatMap((virtualRow) => {
+    const row = sortedData.value[virtualRow.index]
+    if (!row) return []
+    return [{
+      row,
+      index: virtualRow.index,
+      start: virtualRow.start - mobileRowVirtualizer.value.options.scrollMargin
+    }]
+  })
+)
+
+const mobileVirtualTotalSize = computed(() => mobileRowVirtualizer.value.getTotalSize())
+
+const measureMobileElement = (el: any) => {
+  if (el) {
+    mobileRowVirtualizer.value.measureElement(el as Element)
+  }
+}
+
+watch(
+  [virtualizeMobile, () => props.data.length, () => props.loading],
+  async () => {
+    if (!virtualizeMobile.value) return
+    await nextTick()
+    updateMobileScrollMargin()
+  },
+  { immediate: true, flush: 'post' }
+)
 
 const hasActionsColumn = computed(() => {
   return props.columns.some(column => column.key === 'actions')
@@ -759,6 +884,11 @@ defineExpose({
 .table-body {
   position: relative;
   z-index: 0;
+}
+
+.mobile-virtual-list {
+  position: relative;
+  width: 100%;
 }
 
 /* 所有表头单元格固定在顶部 */

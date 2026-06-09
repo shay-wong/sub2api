@@ -309,6 +309,105 @@ describe('user UsageView tooltip', () => {
     clickSpy.mockRestore()
   })
 
+  it('exports all pages even when list total is an approximate fast-pagination total', async () => {
+    const makeLog = (index: number) => ({
+      request_id: `req-export-${index}`,
+      actual_cost: 0.001,
+      total_cost: 0.001,
+      rate_multiplier: 1,
+      service_tier: null,
+      input_cost: 0,
+      output_cost: 0,
+      cache_creation_cost: 0,
+      cache_read_cost: 0,
+      input_tokens: index,
+      output_tokens: index,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_5m_tokens: 0,
+      cache_creation_1h_tokens: 0,
+      image_count: 0,
+      image_size: null,
+      first_token_ms: null,
+      duration_ms: 1,
+      created_at: '2026-03-08T00:00:00Z',
+      model: 'gpt-5.4',
+      reasoning_effort: null,
+      api_key: { name: 'demo-key' },
+    })
+
+    query
+      .mockResolvedValueOnce({
+        items: [makeLog(0)],
+        total: 101,
+        pages: 2,
+      })
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 100 }, (_, index) => makeLog(index + 1)),
+        total: 101,
+        pages: 2,
+      })
+      .mockResolvedValueOnce({
+        items: Array.from({ length: 100 }, (_, index) => makeLog(index + 101)),
+        total: 101,
+        pages: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [makeLog(201)],
+        total: 201,
+        pages: 3,
+      })
+    getStatsByDateRange.mockResolvedValue({
+      total_requests: 201,
+      total_tokens: 100,
+      total_cost: 0.1,
+      avg_duration_ms: 1,
+    })
+    list.mockResolvedValue({ items: [] })
+
+    let exportedBlob: Blob | null = null
+    const originalCreateObjectURL = window.URL.createObjectURL
+    const originalRevokeObjectURL = window.URL.revokeObjectURL
+    window.URL.createObjectURL = vi.fn((blob: Blob | MediaSource) => {
+      exportedBlob = blob as Blob
+      return 'blob:usage-export'
+    }) as typeof window.URL.createObjectURL
+    window.URL.revokeObjectURL = vi.fn(() => {}) as typeof window.URL.revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    try {
+      const wrapper = mount(UsageView, {
+        global: {
+          stubs: {
+            AppLayout: AppLayoutStub,
+            TablePageLayout: TablePageLayoutStub,
+            Pagination: true,
+            EmptyState: true,
+            Select: true,
+            DateRangePicker: true,
+            DataTable: DataTableStub,
+            Icon: true,
+            Teleport: true,
+          },
+        },
+      })
+
+      await flushPromises()
+
+      const setupState = (wrapper.vm as any).$?.setupState
+      await setupState.exportToCSV()
+
+      expect(exportedBlob).not.toBeNull()
+      const exportCalls = query.mock.calls.filter(([params]) => (params as Record<string, unknown>).page_size === 100)
+      expect(exportCalls.map(([params]) => (params as Record<string, unknown>).page)).toEqual([1, 2, 3])
+      expect(clickSpy).toHaveBeenCalled()
+    } finally {
+      window.URL.createObjectURL = originalCreateObjectURL
+      window.URL.revokeObjectURL = originalRevokeObjectURL
+      clickSpy.mockRestore()
+    }
+  })
+
   it('exports historical image rows with image billing mode derived from image_count', async () => {
     const exportedLogs = [
       {

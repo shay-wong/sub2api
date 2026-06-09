@@ -2844,11 +2844,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 }
 
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
-	if filters.ExactTotal {
-		return false
-	}
-	// 强选择过滤下记录集通常较小，保留精确总数。
-	return filters.UserID == 0 && filters.APIKeyID == 0 && filters.AccountID == 0
+	return !filters.ExactTotal
 }
 
 // UsageStats represents usage statistics

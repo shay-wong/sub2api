@@ -1,13 +1,17 @@
 <template>
-  <div class="card overflow-hidden">
-    <div class="overflow-auto">
+  <div class="card usage-table-card overflow-hidden">
+    <div class="usage-table-scroll">
       <DataTable
         :columns="columns"
-        :data="data"
+        :data="displayRows"
         :loading="loading"
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
         :default-sort-order="defaultSortOrder"
+        :estimate-row-height="96"
+        :overscan="8"
+        :virtualize-mobile="true"
+        :estimate-mobile-row-height="360"
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <template #cell-user="{ row }">
@@ -37,8 +41,8 @@
         </template>
 
         <template #cell-model="{ row }">
-          <div v-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5 text-xs">
-            <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
+          <div v-if="row.__display.modelSteps" class="space-y-0.5 text-xs">
+            <div v-for="(step, i) in row.__display.modelSteps" :key="i"
                  class="break-all"
                  :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
                  :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
@@ -58,7 +62,7 @@
 
         <template #cell-reasoning_effort="{ row }">
           <span class="text-sm text-gray-900 dark:text-white">
-            {{ formatReasoningEffort(row.reasoning_effort) }}
+            {{ row.__display.reasoningEffort }}
           </span>
         </template>
 
@@ -83,14 +87,14 @@
         </template>
 
         <template #cell-stream="{ row }">
-          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getRequestTypeBadgeClass(row)">
-            {{ getRequestTypeLabel(row) }}
+          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="row.__display.requestTypeBadgeClass">
+            {{ row.__display.requestTypeLabel }}
           </span>
         </template>
 
         <template #cell-billing_mode="{ row }">
-          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getBillingModeBadgeClass(getDisplayBillingMode(row))">
-            {{ getBillingModeLabel(getDisplayBillingMode(row), t) }}
+          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="row.__display.billingModeBadgeClass">
+            {{ row.__display.billingModeLabel }}
           </span>
         </template>
 
@@ -109,21 +113,21 @@
               <div class="flex items-center gap-2">
                 <div class="inline-flex items-center gap-1">
                   <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.__display.inputTokens }}</span>
                 </div>
                 <div class="inline-flex items-center gap-1">
                   <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.__display.outputTokens }}</span>
                 </div>
               </div>
               <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
                 <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1">
                   <svg class="h-3.5 w-3.5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
-                  <span class="font-medium text-sky-600 dark:text-sky-400">{{ formatCacheTokens(row.cache_read_tokens) }}</span>
+                  <span class="font-medium text-sky-600 dark:text-sky-400">{{ row.__display.cacheReadTokens }}</span>
                 </div>
                 <div v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-1">
                   <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
+                  <span class="font-medium text-amber-600 dark:text-amber-400">{{ row.__display.cacheCreationTokens }}</span>
                   <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
                   <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
                 </div>
@@ -131,7 +135,7 @@
               <div v-if="hasImageOutputTokens(row)" class="flex items-center gap-2">
                 <div class="inline-flex items-center gap-1">
                   <svg class="h-3.5 w-3.5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                  <span class="font-medium text-pink-600 dark:text-pink-400">{{ row.image_output_tokens.toLocaleString() }}</span>
+                  <span class="font-medium text-pink-600 dark:text-pink-400">{{ row.__display.imageOutputTokens }}</span>
                 </div>
               </div>
             </div>
@@ -151,7 +155,7 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span class="font-medium text-green-600 dark:text-green-400">${{ row.__display.actualCost }}</span>
               <!-- Cost Detail Tooltip -->
               <div
                 class="group relative"
@@ -164,26 +168,26 @@
               </div>
             </div>
             <div v-if="row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
-              A ${{ accountBilled(row).toFixed(6) }}
+              A ${{ row.__display.accountBilled }}
             </div>
           </div>
         </template>
 
         <template #cell-first_token="{ row }">
-          <span v-if="row.first_token_ms != null" class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.first_token_ms) }}</span>
+          <span v-if="row.first_token_ms != null" class="text-sm text-gray-600 dark:text-gray-400">{{ row.__display.firstToken }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
         <template #cell-duration="{ row }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.duration_ms) }}</span>
+          <span class="text-sm text-gray-600 dark:text-gray-400">{{ row.__display.duration }}</span>
         </template>
 
-        <template #cell-created_at="{ value }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+        <template #cell-created_at="{ row }">
+          <span class="text-sm text-gray-600 dark:text-gray-400">{{ row.__display.createdAt }}</span>
         </template>
 
         <template #cell-user_agent="{ row }">
-          <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
+          <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ row.__display.userAgent }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
@@ -300,22 +304,7 @@
               <span class="text-gray-400">{{ t('usage.imageOutputCost') }}</span>
               <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(6) }}</span>
             </div>
-            <!-- Token billing: show unit prices per 1M tokens -->
-            <template v-if="!tooltipData?.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN">
-              <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
-                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, tooltipData.input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-              <div v-if="tooltipData && tooltipData.output_cost > 0 && textOutputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
-                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-              <div v-if="tooltipData && hasImageOutputTokens(tooltipData)" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageOutputTokenPrice') }}</span>
-                <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-            </template>
-            <template v-else-if="isImageUsage(tooltipData)">
+            <template v-if="tooltipData && isImageUsage(tooltipData)">
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageCount') }}</span>
                 <span class="font-medium text-white">{{ tooltipData.image_count }}{{ t('usage.imageUnit') }}</span>
@@ -347,6 +336,21 @@
               <div class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageTotalPrice') }}</span>
                 <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+              </div>
+            </template>
+            <!-- Token billing: show unit prices per 1M tokens -->
+            <template v-else-if="!tooltipData?.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN">
+              <div v-if="tooltipData && tooltipData.input_tokens > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, tooltipData.input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.output_cost > 0 && textOutputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
+                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && hasImageOutputTokens(tooltipData)" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageOutputTokenPrice') }}</span>
+                <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
             </template>
             <div v-else class="flex items-center justify-between gap-4">
@@ -402,7 +406,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
@@ -451,7 +455,7 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   loading: false,
   serverSideSort: false,
   defaultSortKey: '',
@@ -462,6 +466,30 @@ defineEmits<{
   sort: [key: string, order: 'asc' | 'desc']
 }>()
 const { t } = useI18n()
+
+type UsageLogDisplay = {
+  modelSteps: string[] | null
+  reasoningEffort: string
+  requestTypeLabel: string
+  requestTypeBadgeClass: string
+  billingModeLabel: string
+  billingModeBadgeClass: string
+  inputTokens: string
+  outputTokens: string
+  cacheReadTokens: string
+  cacheCreationTokens: string
+  imageOutputTokens: string
+  actualCost: string
+  accountBilled: string
+  firstToken: string
+  duration: string
+  createdAt: string
+  userAgent: string
+}
+
+type DisplayAdminUsageLog = AdminUsageLog & {
+  __display: UsageLogDisplay
+}
 
 // Tooltip state - cost
 const tooltipVisible = ref(false)
@@ -489,8 +517,6 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
 }
 
-
-
 const formatUserAgent = (ua: string): string => {
   return ua
 }
@@ -500,6 +526,43 @@ const formatDuration = (ms: number | null | undefined): string => {
   if (ms < 1000) return `${ms}ms`
   return `${(ms / 1000).toFixed(2)}s`
 }
+
+const getModelSteps = (row: AdminUsageLog): string[] | null => {
+  const chain = row.model_mapping_chain
+  if (!chain || !chain.includes('→')) return null
+  return chain.split('→')
+}
+
+const formatNumber = (value: number | null | undefined): string => (value ?? 0).toLocaleString()
+const formatCompactTokens = (value: number | null | undefined): string => formatCacheTokens(value ?? 0)
+
+const buildDisplayRow = (row: AdminUsageLog): DisplayAdminUsageLog => {
+  const displayBillingMode = getDisplayBillingMode(row)
+  return {
+    ...row,
+    __display: {
+      modelSteps: getModelSteps(row),
+      reasoningEffort: formatReasoningEffort(row.reasoning_effort),
+      requestTypeLabel: getRequestTypeLabel(row),
+      requestTypeBadgeClass: getRequestTypeBadgeClass(row),
+      billingModeLabel: getBillingModeLabel(displayBillingMode, t),
+      billingModeBadgeClass: getBillingModeBadgeClass(displayBillingMode),
+      inputTokens: formatNumber(row.input_tokens),
+      outputTokens: formatNumber(row.output_tokens),
+      cacheReadTokens: formatCompactTokens(row.cache_read_tokens),
+      cacheCreationTokens: formatCompactTokens(row.cache_creation_tokens),
+      imageOutputTokens: formatNumber(row.image_output_tokens),
+      actualCost: row.actual_cost?.toFixed(6) || '0.000000',
+      accountBilled: accountBilled(row).toFixed(6),
+      firstToken: formatDuration(row.first_token_ms),
+      duration: formatDuration(row.duration_ms),
+      createdAt: formatDateTime(row.created_at),
+      userAgent: row.user_agent ? formatUserAgent(row.user_agent) : '',
+    },
+  }
+}
+
+const displayRows = computed(() => props.data.map(buildDisplayRow))
 
 // Cost tooltip functions
 const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
@@ -531,3 +594,20 @@ const hideTokenTooltip = () => {
   tokenTooltipData.value = null
 }
 </script>
+
+<style scoped>
+.usage-table-scroll {
+  display: flex;
+  min-height: 360px;
+  height: min(72vh, 860px);
+  flex-direction: column;
+}
+
+@media (max-width: 767px) {
+  .usage-table-scroll {
+    display: block;
+    min-height: 0;
+    height: auto;
+  }
+}
+</style>
