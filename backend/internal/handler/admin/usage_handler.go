@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const adminUsageCountTimeout = 5 * time.Second
 
 // UsageHandler handles admin usage-related requests
 type UsageHandler struct {
@@ -57,6 +60,100 @@ type CreateUsageCleanupTaskRequest struct {
 	Timezone    string  `json:"timezone"`
 }
 
+func parseAdminUsageInt64Query(c *gin.Context, key, errorMessage string) (int64, bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		return 0, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		response.BadRequest(c, errorMessage)
+		return 0, false
+	}
+	return id, true
+}
+
+func parseAdminUsageLogFilters(c *gin.Context) (usagestats.UsageLogFilters, bool) {
+	userID, ok := parseAdminUsageInt64Query(c, "user_id", "Invalid user_id")
+	if !ok {
+		return usagestats.UsageLogFilters{}, false
+	}
+	apiKeyID, ok := parseAdminUsageInt64Query(c, "api_key_id", "Invalid api_key_id")
+	if !ok {
+		return usagestats.UsageLogFilters{}, false
+	}
+	accountID, ok := parseAdminUsageInt64Query(c, "account_id", "Invalid account_id")
+	if !ok {
+		return usagestats.UsageLogFilters{}, false
+	}
+	groupID, ok := parseAdminUsageInt64Query(c, "group_id", "Invalid group_id")
+	if !ok {
+		return usagestats.UsageLogFilters{}, false
+	}
+
+	filters := usagestats.UsageLogFilters{
+		UserID:      userID,
+		APIKeyID:    apiKeyID,
+		AccountID:   accountID,
+		GroupID:     groupID,
+		Model:       c.Query("model"),
+		BillingMode: strings.TrimSpace(c.Query("billing_mode")),
+	}
+
+	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
+		parsed, err := service.ParseUsageRequestType(requestTypeStr)
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return usagestats.UsageLogFilters{}, false
+		}
+		value := int16(parsed)
+		filters.RequestType = &value
+	} else if streamStr := c.Query("stream"); streamStr != "" {
+		val, err := strconv.ParseBool(streamStr)
+		if err != nil {
+			response.BadRequest(c, "Invalid stream value, use true or false")
+			return usagestats.UsageLogFilters{}, false
+		}
+		filters.Stream = &val
+	}
+
+	if billingTypeStr := c.Query("billing_type"); billingTypeStr != "" {
+		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
+		if err != nil {
+			response.BadRequest(c, "Invalid billing_type")
+			return usagestats.UsageLogFilters{}, false
+		}
+		bt := int8(val)
+		filters.BillingType = &bt
+	}
+
+	return filters, true
+}
+
+func applyAdminUsageOptionalDateRange(c *gin.Context, filters *usagestats.UsageLogFilters) bool {
+	userTZ := c.Query("timezone")
+	if startDateStr := c.Query("start_date"); startDateStr != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+			return false
+		}
+		filters.StartTime = &t
+	}
+
+	if endDateStr := c.Query("end_date"); endDateStr != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+			return false
+		}
+		// Use half-open range [start, end), move to next calendar day start (DST-safe).
+		t = t.AddDate(0, 0, 1)
+		filters.EndTime = &t
+	}
+	return true
+}
+
 // List handles listing all usage records with filters
 // GET /api/v1/admin/usage
 func (h *UsageHandler) List(c *gin.Context) {
@@ -71,120 +168,20 @@ func (h *UsageHandler) List(c *gin.Context) {
 		exactTotal = parsed
 	}
 
-	// Parse filters
-	var userID, apiKeyID, accountID, groupID int64
-	if userIDStr := c.Query("user_id"); userIDStr != "" {
-		id, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid user_id")
-			return
-		}
-		userID = id
-	}
-
-	if apiKeyIDStr := c.Query("api_key_id"); apiKeyIDStr != "" {
-		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid api_key_id")
-			return
-		}
-		apiKeyID = id
-	}
-
-	if accountIDStr := c.Query("account_id"); accountIDStr != "" {
-		id, err := strconv.ParseInt(accountIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid account_id")
-			return
-		}
-		accountID = id
-	}
-
-	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
-		id, err := strconv.ParseInt(groupIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		groupID = id
-	}
-
-	model := c.Query("model")
-	billingMode := strings.TrimSpace(c.Query("billing_mode"))
-
-	var requestType *int16
-	var stream *bool
-	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
-		parsed, err := service.ParseUsageRequestType(requestTypeStr)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		value := int16(parsed)
-		requestType = &value
-	} else if streamStr := c.Query("stream"); streamStr != "" {
-		val, err := strconv.ParseBool(streamStr)
-		if err != nil {
-			response.BadRequest(c, "Invalid stream value, use true or false")
-			return
-		}
-		stream = &val
-	}
-
-	var billingType *int8
-	if billingTypeStr := c.Query("billing_type"); billingTypeStr != "" {
-		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
-		if err != nil {
-			response.BadRequest(c, "Invalid billing_type")
-			return
-		}
-		bt := int8(val)
-		billingType = &bt
-	}
-
-	// Parse date range
-	var startTime, endTime *time.Time
-	userTZ := c.Query("timezone") // Get user's timezone from request
-	if startDateStr := c.Query("start_date"); startDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
-			return
-		}
-		startTime = &t
-	}
-
-	if endDateStr := c.Query("end_date"); endDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
-			return
-		}
-		// Use half-open range [start, end), move to next calendar day start (DST-safe).
-		t = t.AddDate(0, 0, 1)
-		endTime = &t
-	}
-
 	params := pagination.PaginationParams{
 		Page:      page,
 		PageSize:  pageSize,
 		SortBy:    c.DefaultQuery("sort_by", "created_at"),
 		SortOrder: c.DefaultQuery("sort_order", "desc"),
 	}
-	filters := usagestats.UsageLogFilters{
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Model:       model,
-		RequestType: requestType,
-		Stream:      stream,
-		BillingType: billingType,
-		BillingMode: billingMode,
-		StartTime:   startTime,
-		EndTime:     endTime,
-		ExactTotal:  exactTotal,
+	filters, ok := parseAdminUsageLogFilters(c)
+	if !ok {
+		return
 	}
+	if !applyAdminUsageOptionalDateRange(c, &filters) {
+		return
+	}
+	filters.ExactTotal = exactTotal
 
 	records, result, err := h.usageService.ListWithFilters(c.Request.Context(), params, filters)
 	if err != nil {
@@ -199,78 +196,38 @@ func (h *UsageHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// Count handles exact usage count with filters.
+// GET /api/v1/admin/usage/count
+func (h *UsageHandler) Count(c *gin.Context) {
+	filters, ok := parseAdminUsageLogFilters(c)
+	if !ok {
+		return
+	}
+	if !applyAdminUsageOptionalDateRange(c, &filters) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), adminUsageCountTimeout)
+	defer cancel()
+
+	total, err := h.usageService.CountWithFilters(ctx, filters)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			response.Error(c, http.StatusGatewayTimeout, "Usage count query timed out")
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"total": total})
+}
+
 // Stats handles getting usage statistics with filters
 // GET /api/v1/admin/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {
-	// Parse filters - same as List endpoint
-	var userID, apiKeyID, accountID, groupID int64
-	if userIDStr := c.Query("user_id"); userIDStr != "" {
-		id, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid user_id")
-			return
-		}
-		userID = id
-	}
-
-	if apiKeyIDStr := c.Query("api_key_id"); apiKeyIDStr != "" {
-		id, err := strconv.ParseInt(apiKeyIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid api_key_id")
-			return
-		}
-		apiKeyID = id
-	}
-
-	if accountIDStr := c.Query("account_id"); accountIDStr != "" {
-		id, err := strconv.ParseInt(accountIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid account_id")
-			return
-		}
-		accountID = id
-	}
-
-	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
-		id, err := strconv.ParseInt(groupIDStr, 10, 64)
-		if err != nil {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		groupID = id
-	}
-
-	model := c.Query("model")
-	billingMode := strings.TrimSpace(c.Query("billing_mode"))
-
-	var requestType *int16
-	var stream *bool
-	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
-		parsed, err := service.ParseUsageRequestType(requestTypeStr)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		value := int16(parsed)
-		requestType = &value
-	} else if streamStr := c.Query("stream"); streamStr != "" {
-		val, err := strconv.ParseBool(streamStr)
-		if err != nil {
-			response.BadRequest(c, "Invalid stream value, use true or false")
-			return
-		}
-		stream = &val
-	}
-
-	var billingType *int8
-	if billingTypeStr := c.Query("billing_type"); billingTypeStr != "" {
-		val, err := strconv.ParseInt(billingTypeStr, 10, 8)
-		if err != nil {
-			response.BadRequest(c, "Invalid billing_type")
-			return
-		}
-		bt := int8(val)
-		billingType = &bt
+	filters, ok := parseAdminUsageLogFilters(c)
+	if !ok {
+		return
 	}
 
 	// Parse date range
@@ -309,21 +266,8 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		}
 		endTime = now
 	}
-
-	// Build filters and call GetStatsWithFilters
-	filters := usagestats.UsageLogFilters{
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Model:       model,
-		RequestType: requestType,
-		Stream:      stream,
-		BillingType: billingType,
-		BillingMode: billingMode,
-		StartTime:   &startTime,
-		EndTime:     &endTime,
-	}
+	filters.StartTime = &startTime
+	filters.EndTime = &endTime
 
 	var stats *usagestats.UsageStats
 	// nocache: 绕过缓存直接回源,刷新者本人拿最新;不回写缓存(管理台"我刷新我自己拿最新"语义,非全局失效)。

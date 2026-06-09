@@ -376,6 +376,15 @@ func (s *UsageService) ListWithFilters(ctx context.Context, params pagination.Pa
 	return logs, result, nil
 }
 
+// CountWithFilters returns the exact number of usage logs matching admin filters.
+func (s *UsageService) CountWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (int64, error) {
+	total, err := s.usageRepo.CountWithFilters(ctx, filters)
+	if err != nil {
+		return 0, fmt.Errorf("count usage logs with filters: %w", err)
+	}
+	return total, nil
+}
+
 // GetGlobalStats returns global usage stats for a time range.
 func (s *UsageService) GetGlobalStats(ctx context.Context, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	stats, err := s.usageRepo.GetGlobalStats(ctx, startTime, endTime)

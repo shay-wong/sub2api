@@ -12,11 +12,16 @@
         {{ t('pagination.previous') }}
       </button>
       <span class="text-sm text-gray-700 dark:text-gray-300">
-        {{ t('pagination.pageOf', { page, total: totalPages }) }}
+        <template v-if="isTotalKnown">
+          {{ t('pagination.pageOf', { page, total: totalPages }) }}
+        </template>
+        <template v-else>
+          {{ t('pagination.page') }} {{ page }}
+        </template>
       </span>
       <button
         @click="goToPage(page + 1)"
-        :disabled="page === totalPages"
+        :disabled="!canGoNext"
         class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
       >
         {{ t('pagination.next') }}
@@ -32,7 +37,10 @@
           {{ t('pagination.to') }}
           <span class="font-medium">{{ toItem }}</span>
           {{ t('pagination.of') }}
-          <span class="font-medium">{{ total }}</span>
+          <span v-if="isTotalKnown" class="font-medium">{{ total }}</span>
+          <span v-else class="font-medium">
+            {{ totalLoading ? t('pagination.totalLoading') : t('pagination.totalUnavailable') }}
+          </span>
           {{ t('pagination.results') }}
         </p>
 
@@ -69,6 +77,7 @@
 
       <!-- Desktop pagination buttons -->
       <nav
+        v-if="isTotalKnown"
         class="relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
         aria-label="Pagination"
       >
@@ -113,6 +122,31 @@
           <Icon name="chevronRight" size="md" />
         </button>
       </nav>
+      <nav
+        v-else
+        class="relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
+        aria-label="Pagination"
+      >
+        <button
+          @click="goToPage(page - 1)"
+          :disabled="page === 1"
+          class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          :aria-label="t('pagination.previous')"
+        >
+          <Icon name="chevronLeft" size="md" />
+        </button>
+        <span class="relative inline-flex items-center border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300">
+          {{ t('pagination.page') }} {{ page }}
+        </span>
+        <button
+          @click="goToPage(page + 1)"
+          :disabled="!canGoNext"
+          class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          :aria-label="t('pagination.next')"
+        >
+          <Icon name="chevronRight" size="md" />
+        </button>
+      </nav>
     </div>
   </div>
 </template>
@@ -131,9 +165,13 @@ interface Props {
   total: number
   page: number
   pageSize: number
+  itemCount?: number
   pageSizeOptions?: number[]
   showPageSizeSelector?: boolean
   showJump?: boolean
+  totalKnown?: boolean
+  hasNextPage?: boolean
+  totalLoading?: boolean
 }
 
 interface Emits {
@@ -143,21 +181,33 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   pageSizeOptions: () => getConfiguredTablePageSizeOptions(),
+  itemCount: undefined,
   showPageSizeSelector: true,
-  showJump: false
+  showJump: false,
+  totalKnown: true,
+  hasNextPage: false,
+  totalLoading: false
 })
 
 const emit = defineEmits<Emits>()
 
-const totalPages = computed(() => Math.ceil(props.total / props.pageSize))
+const isTotalKnown = computed(() => props.totalKnown)
+const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
+const canGoNext = computed(() => (
+  isTotalKnown.value ? props.page < totalPages.value : props.hasNextPage
+))
 
 const fromItem = computed(() => {
-  if (props.total === 0) return 0
+  if (props.total === 0 && isTotalKnown.value) return 0
   return (props.page - 1) * props.pageSize + 1
 })
 
 const toItem = computed(() => {
+  if (!isTotalKnown.value && props.itemCount !== undefined) {
+    return fromItem.value + Math.max(0, props.itemCount - 1)
+  }
   const to = props.page * props.pageSize
+  if (!isTotalKnown.value) return to
   return to > props.total ? props.total : to
 })
 
@@ -237,7 +287,10 @@ const visiblePages = computed(() => {
 })
 
 const goToPage = (newPage: number) => {
-  if (newPage >= 1 && newPage <= totalPages.value && newPage !== props.page) {
+  if (newPage < 1 || newPage === props.page) return
+  if (isTotalKnown.value && newPage > totalPages.value) return
+  if (!isTotalKnown.value && newPage > props.page && !props.hasNextPage) return
+  {
     emit('update:page', newPage)
   }
 }

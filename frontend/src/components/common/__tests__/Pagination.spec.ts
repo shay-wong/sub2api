@@ -72,4 +72,33 @@ describe('Pagination', () => {
 
     expect(wrapper.emitted('update:pageSize')).toEqual([[1000]])
   })
+
+  it('keeps the sentinel total hidden while exact total is loading', async () => {
+    const wrapper = mount(Pagination, {
+      props: {
+        page: 1,
+        pageSize: 1000,
+        itemCount: 20,
+        total: 0,
+        totalKnown: false,
+        totalLoading: true,
+        hasNextPage: true,
+        pageSizeOptions: [20, 100, 500, 1000]
+      },
+      global: {
+        stubs: {
+          Icon: true,
+          Select: SelectStub
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('pagination.totalLoading')
+    expect(wrapper.text()).not.toContain('1001')
+
+    const buttons = wrapper.findAll('button')
+    await buttons[buttons.length - 1].trigger('click')
+
+    expect(wrapper.emitted('update:page')).toEqual([[2]])
+  })
 })

@@ -2785,8 +2785,7 @@ func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters = usagestats.UsageLogFilters
 
-// ListWithFilters lists usage logs with optional filters (for admin)
-func (r *usageLogRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+func buildUsageLogFilterWhere(filters UsageLogFilters) (string, []any) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
@@ -2822,7 +2821,12 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		args = append(args, *filters.EndTime)
 	}
 
-	whereClause := buildWhere(conditions)
+	return buildWhere(conditions), args
+}
+
+// ListWithFilters lists usage logs with optional filters (for admin)
+func (r *usageLogRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+	whereClause, args := buildUsageLogFilterWhere(filters)
 	var (
 		logs []service.UsageLog
 		page *pagination.PaginationResult
@@ -2841,6 +2845,17 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		return nil, nil, err
 	}
 	return logs, page, nil
+}
+
+// CountWithFilters counts usage logs with optional filters (for admin).
+func (r *usageLogRepository) CountWithFilters(ctx context.Context, filters UsageLogFilters) (int64, error) {
+	whereClause, args := buildUsageLogFilterWhere(filters)
+	countQuery := "SELECT COUNT(*) FROM usage_logs " + whereClause
+	var total int64
+	if err := scanSingleRow(ctx, r.sql, countQuery, args, &total); err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {

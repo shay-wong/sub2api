@@ -104,6 +104,27 @@ export async function list(
   return data
 }
 
+export interface AdminUsageCountResponse {
+  total: number
+}
+
+/**
+ * Count usage logs with optional filters (admin only)
+ * @param params - Query parameters for filtering
+ * @returns Exact matching usage log count
+ */
+export async function count(
+  params: AdminUsageQueryParams,
+  options?: { signal?: AbortSignal; timeout?: number }
+): Promise<AdminUsageCountResponse> {
+  const { data } = await apiClient.get<AdminUsageCountResponse>('/admin/usage/count', {
+    params,
+    signal: options?.signal,
+    timeout: options?.timeout
+  })
+  return data
+}
+
 /**
  * Get usage statistics with optional filters (admin only)
  * @param params - Query parameters for filtering
@@ -200,6 +221,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 
 export const adminUsageAPI = {
   list,
+  count,
   getStats,
   searchUsers,
   searchApiKeys,

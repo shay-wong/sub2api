@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
+const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -12,6 +12,7 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } =
 
   return {
     list: vi.fn(),
+    count: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     usage: {
       list,
+      count,
       getStats,
     },
     dashboard: {
@@ -53,6 +55,7 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: vi.fn(),
+    count,
   },
 }))
 
@@ -120,6 +123,7 @@ describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     list.mockReset()
+    count.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getById.mockReset()
@@ -130,6 +134,7 @@ describe('admin UsageView distribution metric toggles', () => {
       total: 0,
       pages: 0,
     })
+    count.mockResolvedValue({ total: 0 })
     getStats.mockResolvedValue({
       total_requests: 0,
       total_input_tokens: 0,
@@ -150,6 +155,64 @@ describe('admin UsageView distribution metric toggles', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('loads usage rows with fast pagination and counts exact total separately when needed', async () => {
+    let resolveCount: (value: { total: number }) => void = () => {}
+    list.mockResolvedValueOnce({
+      items: [{ id: 1 }],
+      total: 21,
+      pages: 2,
+    })
+    count.mockReturnValueOnce(new Promise((resolve) => {
+      resolveCount = resolve
+    }))
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          AuditLogModal: true,
+          Pagination: {
+            props: ['total', 'totalKnown', 'totalLoading', 'hasNextPage'],
+            template: '<div data-test="pagination" :data-total="total" :data-total-known="String(totalKnown)" :data-total-loading="String(totalLoading)" :data-has-next-page="String(hasNextPage)" />',
+          },
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(list.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ exact_total: false }))
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total-known')).toBe('false')
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total-loading')).toBe('true')
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total')).toBe('0')
+
+    await flushPromises()
+
+    expect(count).toHaveBeenCalledWith(
+      expect.objectContaining({ exact_total: false }),
+      expect.objectContaining({ signal: expect.any(AbortSignal), timeout: expect.any(Number) })
+    )
+    resolveCount({ total: 25 })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total-known')).toBe('true')
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total')).toBe('25')
+    wrapper.unmount()
   })
 
   it('keeps previous model stats visible during refresh until new data arrives', async () => {

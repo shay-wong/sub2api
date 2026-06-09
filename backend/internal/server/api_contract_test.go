@@ -2509,6 +2509,15 @@ func (r *stubUsageLogRepo) ListWithFilters(ctx context.Context, params paginatio
 	return out, paginationResult(total, params), nil
 }
 
+func (r *stubUsageLogRepo) CountWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (int64, error) {
+	logs, page, err := r.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, filters)
+	_ = logs
+	if err != nil {
+		return 0, err
+	}
+	return page.Total, nil
+}
+
 func (r *stubUsageLogRepo) GetGlobalStats(ctx context.Context, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	return nil, errors.New("not implemented")
 }

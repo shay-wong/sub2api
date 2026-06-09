@@ -1351,6 +1351,8 @@ export default {
     showing: 'Showing',
     to: 'to',
     of: 'of',
+    totalLoading: 'counting total',
+    totalUnavailable: 'total unavailable',
     results: 'results',
     page: 'Page',
     pageOf: 'Page {page} of {total}',

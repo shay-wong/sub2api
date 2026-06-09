@@ -119,7 +119,18 @@
           @sort="handleSort"
           @userClick="handleUserClick"
         />
-        <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+        <Pagination
+          v-if="usageLogs.length > 0 || pagination.total > 0"
+          :page="pagination.page"
+          :total="pagination.total"
+          :page-size="pagination.page_size"
+          :item-count="usageLogs.length"
+          :total-known="pagination.totalKnown"
+          :has-next-page="pagination.hasNextPage"
+          :total-loading="pagination.totalLoading"
+          @update:page="handlePageChange"
+          @update:pageSize="handlePageSizeChange"
+        />
       </div>
       <div v-show="activeTab === 'errors'">
         <OpsErrorLogTable
@@ -194,10 +205,12 @@ const inboundEndpointStats = ref<EndpointStat[]>([])
 const upstreamEndpointStats = ref<EndpointStat[]>([])
 const endpointPathStats = ref<EndpointStat[]>([])
 const endpointStatsLoading = ref(false)
-let abortController: AbortController | null = null; let exportAbortController: AbortController | null = null
+let abortController: AbortController | null = null; let exportAbortController: AbortController | null = null; let usageCountAbortController: AbortController | null = null
 let chartReqSeq = 0
 let statsReqSeq = 0
 let modelStatsReqSeq = 0
+let usageCountReqSeq = 0
+const USAGE_COUNT_TIMEOUT_MS = 6000
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
@@ -254,7 +267,7 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
-const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
+const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0, totalKnown: true, hasNextPage: false, totalLoading: false })
 const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
@@ -325,13 +338,65 @@ const buildUsageListParams = (
 
 const loadLogs = async () => {
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
+  usageCountAbortController?.abort()
+  pagination.totalKnown = false
+  pagination.totalLoading = false
+  pagination.hasNextPage = false
   try {
     const res = await adminAPI.usage.list(
       buildUsageListParams(pagination.page, pagination.page_size, false),
       { signal: c.signal }
     )
-    if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
-  } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
+    if(!c.signal.aborted) {
+      usageLogs.value = res.items
+      const currentPageEnd = pagination.page * pagination.page_size
+      pagination.hasNextPage = res.total > currentPageEnd
+      if (pagination.hasNextPage) {
+        pagination.total = 0
+        pagination.totalKnown = false
+        pagination.totalLoading = true
+        void loadExactUsageTotal()
+      } else if (pagination.page > 1 && res.items.length === 0) {
+        pagination.total = 0
+        pagination.totalKnown = false
+        pagination.totalLoading = true
+        void loadExactUsageTotal()
+      } else {
+        pagination.total = (pagination.page - 1) * pagination.page_size + res.items.length
+        pagination.totalKnown = true
+        pagination.totalLoading = false
+      }
+    }
+  } catch (error: any) { if(!isAbortLikeError(error)) console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
+}
+
+const isAbortLikeError = (error: any) => (
+  error?.name === 'AbortError' || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
+)
+
+const loadExactUsageTotal = async () => {
+  const seq = ++usageCountReqSeq
+  const c = new AbortController()
+  usageCountAbortController = c
+  try {
+    const res = await adminUsageAPI.count(buildUsageListParams(1, 1, false), {
+      signal: c.signal,
+      timeout: USAGE_COUNT_TIMEOUT_MS
+    })
+    if (seq !== usageCountReqSeq || c.signal.aborted) return
+    pagination.total = res.total
+    pagination.totalKnown = true
+    pagination.totalLoading = false
+    pagination.hasNextPage = pagination.page * pagination.page_size < res.total
+  } catch (error: any) {
+    if (seq === usageCountReqSeq && !isAbortLikeError(error)) {
+      console.error('Failed to load exact usage total:', error)
+      pagination.totalLoading = false
+      pagination.totalKnown = false
+    }
+  } finally {
+    if (usageCountAbortController === c) usageCountAbortController = null
+  }
 }
 const loadStats = async (force = false) => {
   const seq = ++statsReqSeq
@@ -501,6 +566,18 @@ const exportToExcel = async () => {
   const c = new AbortController(); exportAbortController = c
   try {
     let p = 1; let total = pagination.total; let exportedCount = 0
+    let hasExactExportTotal = pagination.totalKnown && total > 0
+    try {
+      const countRes = await adminUsageAPI.count(buildUsageListParams(1, 1, false), {
+        signal: c.signal,
+        timeout: USAGE_COUNT_TIMEOUT_MS
+      })
+      total = countRes.total
+      hasExactExportTotal = true
+      exportProgress.total = total
+    } catch (error: any) {
+      if (!isAbortLikeError(error)) console.error('Failed to count usage logs before export:', error)
+    }
     const XLSX = await import('xlsx')
     const headers = [
       t('usage.time'), t('admin.usage.user'), t('usage.apiKeyFilter'),
@@ -518,10 +595,10 @@ const exportToExcel = async () => {
     const ws = XLSX.utils.aoa_to_sheet([headers])
     while (true) {
       const res = await adminUsageAPI.list(
-        buildUsageListParams(p, 100, true),
+        buildUsageListParams(p, 100, false),
         { signal: c.signal }
       )
-      if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
+      if (c.signal.aborted) break
       const rows = (res.items || []).map((log: AdminUsageLog) => [
         log.created_at, log.user?.email || '', log.api_key?.name || '', log.account?.name || '', log.model,
         log.upstream_model || '', formatReasoningEffort(log.reasoning_effort), log.group?.name || '',
@@ -540,7 +617,7 @@ const exportToExcel = async () => {
       exportedCount += rows.length
       exportProgress.current = exportedCount
       exportProgress.progress = total > 0 ? Math.min(100, Math.round(exportedCount / total * 100)) : 0
-      if (exportedCount >= total || res.items.length < 100) break; p++
+      if ((hasExactExportTotal && exportedCount >= total) || res.items.length < 100) break; p++
     }
     if(!c.signal.aborted) {
       const wb = XLSX.utils.book_new()
@@ -686,7 +763,7 @@ onMounted(() => {
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); usageCountAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

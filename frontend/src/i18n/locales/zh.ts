@@ -1355,6 +1355,8 @@ export default {
     showing: '显示',
     to: '至',
     of: '共',
+    totalLoading: '总数统计中',
+    totalUnavailable: '总数暂不可用',
     results: '条结果',
     page: '页',
     pageOf: '第 {page} / {total} 页',

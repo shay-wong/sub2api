@@ -17,6 +17,9 @@ type adminUsageRepoCapture struct {
 	service.UsageLogRepository
 	listParams   pagination.PaginationParams
 	listFilters  usagestats.UsageLogFilters
+	countFilters usagestats.UsageLogFilters
+	countTotal   int64
+	countErr     error
 	statsFilters usagestats.UsageLogFilters
 }
 
@@ -36,12 +39,21 @@ func (s *adminUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters
 	return &usagestats.UsageStats{}, nil
 }
 
+func (s *adminUsageRepoCapture) CountWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (int64, error) {
+	s.countFilters = filters
+	if s.countErr != nil {
+		return 0, s.countErr
+	}
+	return s.countTotal, nil
+}
+
 func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	usageSvc := service.NewUsageService(repo, nil, nil, nil)
 	handler := NewUsageHandler(usageSvc, nil, nil, nil)
 	router := gin.New()
 	router.GET("/admin/usage", handler.List)
+	router.GET("/admin/usage/count", handler.Count)
 	router.GET("/admin/usage/stats", handler.Stats)
 	return router
 }
@@ -103,6 +115,52 @@ func TestAdminUsageListInvalidExactTotal(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsageCountRequestTypePriority(t *testing.T) {
+	repo := &adminUsageRepoCapture{countTotal: 42}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/count?request_type=ws_v2&stream=false", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.countFilters.RequestType)
+	require.Equal(t, int16(service.RequestTypeWSV2), *repo.countFilters.RequestType)
+	require.Nil(t, repo.countFilters.Stream)
+}
+
+func TestAdminUsageListAndCountShareFilterParsing(t *testing.T) {
+	repo := &adminUsageRepoCapture{countTotal: 42}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+	query := "?user_id=11&api_key_id=22&account_id=33&group_id=44&model=gpt-5&billing_type=1&billing_mode=image&request_type=stream&start_date=2026-01-02&end_date=2026-01-03&timezone=UTC"
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/usage"+query, nil)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	require.Equal(t, http.StatusOK, listRec.Code)
+
+	countReq := httptest.NewRequest(http.MethodGet, "/admin/usage/count"+query, nil)
+	countRec := httptest.NewRecorder()
+	router.ServeHTTP(countRec, countReq)
+	require.Equal(t, http.StatusOK, countRec.Code)
+
+	listFilters := repo.listFilters
+	countFilters := repo.countFilters
+	listFilters.ExactTotal = false
+	require.Equal(t, listFilters, countFilters)
+}
+
+func TestAdminUsageCountTimeout(t *testing.T) {
+	repo := &adminUsageRepoCapture{countErr: context.DeadlineExceeded}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/count", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
 }
 
 func TestAdminUsageStatsRequestTypePriority(t *testing.T) {
