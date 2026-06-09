@@ -345,6 +345,10 @@ const chartColors = [
   '#a855f7'
 ]
 
+const toFiniteNumber = (value: number | null | undefined): number => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 const displayModelStats = computed(() => {
   const sourceStats = props.source === 'upstream'
     ? props.upstreamModelStats
@@ -354,7 +358,7 @@ const displayModelStats = computed(() => {
   if (!sourceStats?.length) return []
 
   const metricKey = props.metric === 'actual_cost' ? 'actual_cost' : 'total_tokens'
-  return [...sourceStats].sort((a, b) => b[metricKey] - a[metricKey])
+  return [...sourceStats].sort((a, b) => toFiniteNumber(b[metricKey]) - toFiniteNumber(a[metricKey]))
 })
 
 const chartData = computed(() => {
@@ -364,7 +368,7 @@ const chartData = computed(() => {
     labels: displayModelStats.value.map((m) => m.model),
     datasets: [
       {
-        data: displayModelStats.value.map((m) => props.metric === 'actual_cost' ? m.actual_cost : m.total_tokens),
+        data: displayModelStats.value.map((m) => toFiniteNumber(props.metric === 'actual_cost' ? m.actual_cost : m.total_tokens)),
         backgroundColor: chartColors.slice(0, displayModelStats.value.length),
         borderWidth: 0
       }
@@ -376,12 +380,12 @@ const rankingChartData = computed(() => {
   if (!props.rankingItems?.length) return null
 
   const labels = props.rankingItems.map((item, index) => `#${index + 1} ${getRankingUserLabel(item)}`)
-  const data = props.rankingItems.map((item) => item.actual_cost)
+  const data = props.rankingItems.map((item) => toFiniteNumber(item.actual_cost))
   const backgroundColor = chartColors.slice(0, props.rankingItems.length)
 
   if (otherRankingItem.value) {
     labels.push(t('admin.dashboard.spendingRankingOther'))
-    data.push(otherRankingItem.value.actual_cost)
+    data.push(toFiniteNumber(otherRankingItem.value.actual_cost))
     backgroundColor.push('#94a3b8')
   }
 
@@ -400,13 +404,13 @@ const rankingChartData = computed(() => {
 const otherRankingItem = computed<RankingDisplayItem | null>(() => {
   if (!props.rankingItems?.length) return null
 
-  const rankedActualCost = props.rankingItems.reduce((sum, item) => sum + item.actual_cost, 0)
-  const rankedRequests = props.rankingItems.reduce((sum, item) => sum + item.requests, 0)
-  const rankedTokens = props.rankingItems.reduce((sum, item) => sum + item.tokens, 0)
+  const rankedActualCost = props.rankingItems.reduce((sum, item) => sum + toFiniteNumber(item.actual_cost), 0)
+  const rankedRequests = props.rankingItems.reduce((sum, item) => sum + toFiniteNumber(item.requests), 0)
+  const rankedTokens = props.rankingItems.reduce((sum, item) => sum + toFiniteNumber(item.tokens), 0)
 
-  const otherActualCost = Math.max((props.rankingTotalActualCost || 0) - rankedActualCost, 0)
-  const otherRequests = Math.max((props.rankingTotalRequests || 0) - rankedRequests, 0)
-  const otherTokens = Math.max((props.rankingTotalTokens || 0) - rankedTokens, 0)
+  const otherActualCost = Math.max(toFiniteNumber(props.rankingTotalActualCost) - rankedActualCost, 0)
+  const otherRequests = Math.max(toFiniteNumber(props.rankingTotalRequests) - rankedRequests, 0)
+  const otherTokens = Math.max(toFiniteNumber(props.rankingTotalTokens) - rankedTokens, 0)
 
   if (otherActualCost <= 0.000001 && otherRequests <= 0 && otherTokens <= 0) return null
 
@@ -437,7 +441,7 @@ const doughnutOptions = computed(() => ({
     tooltip: {
       callbacks: {
         label: (context: any) => {
-          const value = context.raw as number
+          const value = toFiniteNumber(context.raw as number | undefined)
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
           const formattedValue = props.metric === 'actual_cost'
@@ -460,7 +464,7 @@ const rankingDoughnutOptions = computed(() => ({
     tooltip: {
       callbacks: {
         label: (context: any) => {
-          const value = context.raw as number
+          const value = toFiniteNumber(context.raw as number | undefined)
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
           return `${context.label}: $${formatCost(value)} (${percentage}%)`
@@ -470,19 +474,20 @@ const rankingDoughnutOptions = computed(() => ({
   }
 }))
 
-const formatTokens = (value: number): string => {
-  if (value >= 1_000_000_000) {
-    return `${(value / 1_000_000_000).toFixed(2)}B`
-  } else if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(2)}M`
-  } else if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(2)}K`
+const formatTokens = (value: number | null | undefined): string => {
+  const normalized = toFiniteNumber(value)
+  if (normalized >= 1_000_000_000) {
+    return `${(normalized / 1_000_000_000).toFixed(2)}B`
+  } else if (normalized >= 1_000_000) {
+    return `${(normalized / 1_000_000).toFixed(2)}M`
+  } else if (normalized >= 1_000) {
+    return `${(normalized / 1_000).toFixed(2)}K`
   }
-  return value.toLocaleString()
+  return normalized.toLocaleString()
 }
 
-const formatNumber = (value: number): string => {
-  return value.toLocaleString()
+const formatNumber = (value: number | null | undefined): string => {
+  return toFiniteNumber(value).toLocaleString()
 }
 
 const getRankingUserLabel = (item: UserSpendingRankingItem): string => {
@@ -495,14 +500,15 @@ const getRankingRowLabel = (item: RankingDisplayItem): string => {
   return getRankingUserLabel(item)
 }
 
-const formatCost = (value: number): string => {
-  if (value >= 1000) {
-    return (value / 1000).toFixed(2) + 'K'
-  } else if (value >= 1) {
-    return value.toFixed(2)
-  } else if (value >= 0.01) {
-    return value.toFixed(3)
+const formatCost = (value: number | null | undefined): string => {
+  const normalized = toFiniteNumber(value)
+  if (normalized >= 1000) {
+    return (normalized / 1000).toFixed(2) + 'K'
+  } else if (normalized >= 1) {
+    return normalized.toFixed(2)
+  } else if (normalized >= 0.01) {
+    return normalized.toFixed(3)
   }
-  return value.toFixed(4)
+  return normalized.toFixed(4)
 }
 </script>
