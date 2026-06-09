@@ -29,20 +29,20 @@
     </template>
 
     <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative">
-      <svg
-        class="h-4 w-4 cursor-help text-red-500 transition-colors hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        stroke-width="2"
+    <div v-if="hasError && account.error_message" class="group/error relative min-w-0">
+      <div
+        class="flex max-w-[18rem] items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300"
+        :title="account.error_message"
       >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
-        />
-      </svg>
+        <Icon name="exclamationTriangle" size="xs" :stroke-width="2" class="shrink-0" />
+        <span
+          v-if="visibleErrorCode"
+          class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-red-700 dark:bg-red-900/50 dark:text-red-200"
+        >
+          {{ visibleErrorCode }}
+        </span>
+        <span class="truncate">{{ visibleErrorSummary }}</span>
+      </div>
       <!-- Tooltip - 向下显示 -->
       <div
         class="invisible absolute left-0 top-full z-[100] mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
@@ -287,6 +287,42 @@ const isTempUnschedulable = computed(() => {
 const hasError = computed(() => {
   return props.account.status === 'error'
 })
+
+const extractErrorCode = (message: string | null | undefined): string => {
+  if (!message) return ''
+  const patterns = [
+    /"(?:(?:error_)?code|status_code|status)"\s*:\s*"?(?<code>[A-Za-z0-9_.-]+)"?/i,
+    /\b(?:error_code|status_code|status|code|HTTP)\s*[:=]\s*["']?(?<code>[A-Za-z0-9_.-]+)["']?/i,
+    /\b(?:invalid_[a-z0-9_]+|rate_limit_exceeded|insufficient_quota|context_length_exceeded|upstream_error)\b/i,
+    /\b(\d{3})\b/
+  ]
+  for (const pattern of patterns) {
+    const match = message.match(pattern)
+    if (!match) continue
+    const rawCode = (match.groups?.code || match[1] || match[0]).replace(/^["']|["']$/g, '')
+    if (!rawCode) continue
+    const numericCode = Number(rawCode)
+    if (/^\d{3}$/.test(rawCode) && (numericCode < 100 || numericCode > 599)) continue
+    return rawCode
+  }
+  return ''
+}
+
+const summarizeErrorMessage = (message: string | null | undefined): string => {
+  const cleaned = String(message || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleaned) return ''
+
+  const colonIndex = cleaned.indexOf(':')
+  const summary = colonIndex >= 0 && colonIndex < cleaned.length - 1
+    ? cleaned.slice(colonIndex + 1).trim()
+    : cleaned
+  return summary || cleaned
+}
+
+const visibleErrorCode = computed(() => extractErrorCode(props.account.error_message))
+const visibleErrorSummary = computed(() => summarizeErrorMessage(props.account.error_message))
 
 const isQuotaExceeded = computed(() => {
   const exceeded = (used?: number | null, limit?: number | null) =>

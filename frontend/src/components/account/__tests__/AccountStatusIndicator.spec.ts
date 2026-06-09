@@ -159,4 +159,45 @@ describe('AccountStatusIndicator', () => {
     // AICredits 积分耗尽状态应显示
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
   })
+
+  it('错误状态直接显示错误码和错误摘要', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 5,
+          status: 'error',
+          error_message: 'upstream status_code=429: rate limited'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('admin.accounts.status.error')
+    expect(wrapper.text()).toContain('429')
+    expect(wrapper.text()).toContain('rate limited')
+  })
+
+  it('错误状态支持直接显示字符串错误码', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 6,
+          status: 'error',
+          error_message: 'error_code=invalid_api_key: token revoked'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('invalid_api_key')
+    expect(wrapper.text()).toContain('token revoked')
+  })
 })

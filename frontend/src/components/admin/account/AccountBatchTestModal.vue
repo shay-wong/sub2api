@@ -212,13 +212,60 @@
       </div>
     </template>
   </BaseDialog>
+  <ConfirmDialog
+    :show="showFailedDeleteConfirm"
+    :title="t('admin.accounts.bulkTest.deleteFailedTitle')"
+    :message="t('admin.accounts.bulkTest.deleteFailedConfirm', { count: failedDeleteConfirmCount })"
+    :confirm-text="deletingFailed ? t('admin.accounts.bulkTest.deletingFailed') : t('common.delete')"
+    :cancel-text="t('common.cancel')"
+    :danger="true"
+    :confirm-disabled="deletingFailed"
+    @confirm="confirmDeleteFailedAccounts"
+    @cancel="closeFailedDeleteConfirm"
+  >
+    <div class="space-y-3">
+      <div class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-900/20">
+        <div class="flex gap-2">
+          <Icon name="exclamationTriangle" size="sm" :stroke-width="2" class="mt-0.5 shrink-0 text-red-600 dark:text-red-300" />
+          <div class="space-y-1">
+            <p class="text-sm font-medium text-red-800 dark:text-red-200">
+              {{ t('admin.accounts.bulkTest.deleteFailedSummary', { count: failedDeleteConfirmCount }) }}
+            </p>
+            <p class="text-xs leading-relaxed text-red-700 dark:text-red-300">
+              {{ t('admin.accounts.bulkTest.deleteFailedWarning') }}
+            </p>
+          </div>
+        </div>
+      </div>
+      <div v-if="failedDeletePreviewItems.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/70">
+        <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-300">
+          {{ t('admin.accounts.bulkTest.deleteFailedPreviewTitle') }}
+        </div>
+        <ul class="space-y-1.5">
+          <li
+            v-for="item in failedDeletePreviewItems"
+            :key="item.account.id"
+            class="flex min-w-0 items-center justify-between gap-3 text-sm text-gray-700 dark:text-dark-200"
+          >
+            <span class="truncate">{{ item.account.name }}</span>
+            <span class="shrink-0 text-xs text-gray-400 dark:text-dark-400">#{{ item.account.id }}</span>
+          </li>
+        </ul>
+        <p v-if="failedDeleteMoreCount > 0" class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+          {{ t('admin.accounts.bulkTest.deleteFailedMore', { count: failedDeleteMoreCount }) }}
+        </p>
+      </div>
+    </div>
+  </ConfirmDialog>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { runAccountConnectionTest, type AccountTestEvent } from '@/utils/accountTestRunner'
@@ -261,6 +308,8 @@ const appStore = useAppStore()
 const testMode = ref<TestMode>('default')
 const running = ref(false)
 const deletingFailed = ref(false)
+const showFailedDeleteConfirm = ref(false)
+const pendingFailedDeleteIds = ref<number[]>([])
 const showFailedOnly = ref(false)
 const selectedFailedIds = ref<number[]>([])
 const testItems = ref<TestItem[]>([])
@@ -370,6 +419,12 @@ const allVisibleFailedSelected = computed(() => (
   visibleFailedItems.value.length > 0 &&
   visibleFailedItems.value.every(item => selectedFailedIds.value.includes(item.account.id))
 ))
+const failedDeleteConfirmCount = computed(() => pendingFailedDeleteIds.value.length)
+const failedDeletePreviewItems = computed(() => {
+  const pendingIds = new Set(pendingFailedDeleteIds.value)
+  return failedItems.value.filter(item => pendingIds.has(item.account.id)).slice(0, 5)
+})
+const failedDeleteMoreCount = computed(() => Math.max(0, failedDeleteConfirmCount.value - failedDeletePreviewItems.value.length))
 
 const statusLabel = (status: TestStatus) => t(`admin.accounts.bulkTest.status.${status}`)
 
@@ -585,24 +640,36 @@ const toggleVisibleFailedSelection = () => {
   selectedFailedIds.value = Array.from(selected)
 }
 
-const deleteFailedAccounts = async (ids: number[]) => {
+const requestDeleteFailedAccounts = (ids: number[]) => {
   const uniqueIds = Array.from(new Set(ids)).filter(id => failedItems.value.some(item => item.account.id === id))
   if (uniqueIds.length === 0 || deletingFailed.value) return
-  if (!window.confirm(t('admin.accounts.bulkTest.deleteFailedConfirm', { count: uniqueIds.length }))) return
+  pendingFailedDeleteIds.value = uniqueIds
+  showFailedDeleteConfirm.value = true
+}
+
+const closeFailedDeleteConfirm = () => {
+  if (deletingFailed.value) return
+  showFailedDeleteConfirm.value = false
+  pendingFailedDeleteIds.value = []
+}
+
+const confirmDeleteFailedAccounts = async () => {
+  const uniqueIds = [...pendingFailedDeleteIds.value]
+  if (uniqueIds.length === 0 || deletingFailed.value) return
 
   deletingFailed.value = true
   const deletedIds: number[] = []
   let failed = 0
 
   try {
-    await runLimited(uniqueIds, uniqueIds.length, async (id) => {
-      try {
-        await adminAPI.accounts.delete(id)
-        deletedIds.push(id)
-      } catch {
+    const results = await Promise.allSettled(uniqueIds.map(id => adminAPI.accounts.delete(id)))
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        deletedIds.push(uniqueIds[index])
+      } else {
         failed += 1
       }
-    }, () => false)
+    })
   } finally {
     deletingFailed.value = false
   }
@@ -622,14 +689,15 @@ const deleteFailedAccounts = async (ids: number[]) => {
   } else {
     appStore.showSuccess(t('admin.accounts.bulkTest.deleteFailedSuccess', { count: deletedIds.length }))
   }
+  closeFailedDeleteConfirm()
 }
 
 const deleteSelectedFailedAccounts = () => {
-  deleteFailedAccounts(selectedFailedIds.value)
+  requestDeleteFailedAccounts(selectedFailedIds.value)
 }
 
 const deleteAllFailedAccounts = () => {
-  deleteFailedAccounts(failedItems.value.map(item => item.account.id))
+  requestDeleteFailedAccounts(failedItems.value.map(item => item.account.id))
 }
 
 const handleClose = () => {

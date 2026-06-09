@@ -144,6 +144,20 @@ const SelectStub = {
   `
 }
 
+const ConfirmDialogStub = {
+  props: ['show', 'title', 'message', 'confirmText', 'cancelText', 'danger', 'confirmDisabled'],
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-test="confirm-dialog">
+      <div data-test="confirm-title">{{ title }}</div>
+      <div data-test="confirm-message">{{ message }}</div>
+      <slot />
+      <button data-test="confirm-cancel" @click="$emit('cancel')">{{ cancelText }}</button>
+      <button data-test="confirm-submit" :disabled="confirmDisabled" @click="$emit('confirm')">{{ confirmText }}</button>
+    </div>
+  `
+}
+
 function mountModal(accountList = accounts) {
   return mount(AccountBatchTestModal, {
     props: {
@@ -153,6 +167,7 @@ function mountModal(accountList = accounts) {
     global: {
       stubs: {
         BaseDialog: { template: '<div data-test="account-batch-test-modal"><slot /><slot name="footer" /></div>' },
+        ConfirmDialog: ConfirmDialogStub,
         Select: SelectStub,
         Icon: true
       }
@@ -352,7 +367,8 @@ describe('AccountBatchTestModal', () => {
       .mockResolvedValueOnce(createStreamResponse(true))
       .mockResolvedValueOnce(createStreamResponse(false, 'token expired')) as any
     deleteAccount.mockResolvedValue({ message: 'ok' })
-    window.confirm = vi.fn(() => true)
+    const nativeConfirm = vi.fn()
+    vi.stubGlobal('confirm', nativeConfirm)
 
     try {
       const wrapper = mountModal()
@@ -372,6 +388,13 @@ describe('AccountBatchTestModal', () => {
       await wrapper.get('[data-test="batch-test-delete-selected-failed"]').trigger('click')
       await flushPromises()
 
+      expect(nativeConfirm).not.toHaveBeenCalled()
+      expect(deleteAccount).not.toHaveBeenCalled()
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedSummary {"count":1}')
+
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
+      await flushPromises()
+
       expect(deleteAccount).toHaveBeenCalledWith(2)
       expect(wrapper.text()).not.toContain('account-two')
       expect(wrapper.emitted('deleted')?.[0]?.[0]).toEqual({
@@ -383,6 +406,7 @@ describe('AccountBatchTestModal', () => {
     } finally {
       randomSpy.mockRestore()
       vi.useRealTimers()
+      vi.unstubAllGlobals()
     }
   })
 
@@ -401,7 +425,8 @@ describe('AccountBatchTestModal', () => {
     deleteAccount.mockImplementation(() => new Promise((resolve) => {
       deleteResolvers.push(resolve)
     }))
-    window.confirm = vi.fn(() => true)
+    const nativeConfirm = vi.fn()
+    vi.stubGlobal('confirm', nativeConfirm)
 
     try {
       const wrapper = mountModal(failedAccounts)
@@ -414,6 +439,12 @@ describe('AccountBatchTestModal', () => {
       await flushPromises()
 
       await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+
+      expect(nativeConfirm).not.toHaveBeenCalled()
+      expect(deleteAccount).not.toHaveBeenCalled()
+
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
       await flushPromises()
 
       expect(deleteAccount).toHaveBeenCalledTimes(failedAccounts.length)
@@ -430,6 +461,7 @@ describe('AccountBatchTestModal', () => {
     } finally {
       randomSpy.mockRestore()
       vi.useRealTimers()
+      vi.unstubAllGlobals()
     }
   })
 
@@ -444,7 +476,6 @@ describe('AccountBatchTestModal', () => {
     deleteAccount.mockImplementation(() => new Promise((resolve) => {
       resolveDelete = resolve
     }))
-    window.confirm = vi.fn(() => true)
 
     try {
       const wrapper = mountModal(failedAccounts)
@@ -453,6 +484,8 @@ describe('AccountBatchTestModal', () => {
       await wrapper.get('[data-test="batch-test-start"]').trigger('click')
       await flushPromises()
       await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
       await flushPromises()
 
       expect(wrapper.get('[data-test="batch-test-start"]').attributes('disabled')).toBeDefined()
