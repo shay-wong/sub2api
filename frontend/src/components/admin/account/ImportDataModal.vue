@@ -221,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -270,7 +270,7 @@ type AccountImportFormat =
   | 'codex-session'
 
 const importing = ref(false)
-const files = ref<File[]>([])
+const files = shallowRef<File[]>([])
 const result = ref<AccountImportResult | null>(null)
 const format = ref<AccountImportFormat>('auto')
 const fileDragDepth = ref(0)
@@ -1169,7 +1169,7 @@ const getDroppedFiles = async (event: DragEvent): Promise<File[]> => {
   const entries = items
     .map((item) => {
       const getAsEntry = (item as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry
-      return getAsEntry?.()
+      return typeof getAsEntry === 'function' ? getAsEntry.call(item) : undefined
     })
     .filter(isDroppedFileSystemEntry)
 

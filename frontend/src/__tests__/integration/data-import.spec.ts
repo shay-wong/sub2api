@@ -262,6 +262,32 @@ describe('ImportDataModal', () => {
     expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
   })
 
+  it('保留浏览器 File 原生方法的调用上下文', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+    const input = wrapper.find('[data-testid="account-import-file-input"]')
+    const content = sub2apiContent([1])
+    const file = new File([content], 'accounts.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', {
+      value() {
+        if (this !== file) {
+          throw new TypeError('Illegal invocation')
+        }
+        return Promise.resolve(content)
+      }
+    })
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Illegal invocation'))
+    expect(importData).toHaveBeenCalledTimes(1)
+  })
+
   it('支持移除单个已选择的导入文件', async () => {
     importData.mockResolvedValue(successfulImportResult())
     const wrapper = mountModal()
