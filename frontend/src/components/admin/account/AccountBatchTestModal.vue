@@ -191,8 +191,13 @@
               </span>
             </div>
           </div>
-          <div v-if="item.error" class="mt-2 text-xs text-red-600 dark:text-red-400">
-            {{ item.error }}
+          <div v-if="item.error" class="mt-2 flex lg:ml-8" data-test="batch-test-error">
+            <span
+              class="inline-flex max-w-full items-center rounded-md bg-red-50 px-2 py-1 font-mono text-xs font-medium text-red-700 ring-1 ring-red-200 dark:bg-red-500/10 dark:text-red-200 dark:ring-red-500/30"
+              data-test="batch-test-error-summary"
+            >
+              {{ formatErrorSummary(item.error) }}
+            </span>
           </div>
           <details
             v-if="item.logs.length > 0"
@@ -238,11 +243,11 @@
   <ConfirmDialog
     :show="showFailedDeleteConfirm"
     :title="t('admin.accounts.bulkTest.deleteFailedTitle')"
-    :message="t('admin.accounts.bulkTest.deleteFailedConfirm', { count: failedDeleteConfirmCount })"
+    :message="t('admin.accounts.bulkTest.deleteFailedConfirm', { count: failedDeleteSelectedCount })"
     :confirm-text="deletingFailed ? t('admin.accounts.bulkTest.deletingFailed') : t('common.delete')"
     :cancel-text="t('common.cancel')"
     :danger="true"
-    :confirm-disabled="deletingFailed"
+    :confirm-disabled="deletingFailed || failedDeleteSelectedCount === 0"
     @confirm="confirmDeleteFailedAccounts"
     @cancel="closeFailedDeleteConfirm"
   >
@@ -252,18 +257,27 @@
           <Icon name="exclamationTriangle" size="sm" :stroke-width="2" class="mt-0.5 shrink-0 text-red-600 dark:text-red-300" />
           <div class="space-y-1">
             <p class="text-sm font-medium text-red-800 dark:text-red-200">
-              {{ t('admin.accounts.bulkTest.deleteFailedSummary', { count: failedDeleteConfirmCount }) }}
+              {{ t('admin.accounts.bulkTest.deleteFailedSelectedSummary', { selected: failedDeleteSelectedCount, total: failedDeleteCandidateCount }) }}
             </p>
             <p class="text-xs leading-relaxed text-red-700 dark:text-red-300">
               {{ t('admin.accounts.bulkTest.deleteFailedWarning') }}
+            </p>
+            <p v-if="failedDeleteSelectedCount === 0" class="text-xs font-medium text-red-700 dark:text-red-300">
+              {{ t('admin.accounts.bulkTest.deleteFailedNoSelection') }}
             </p>
           </div>
         </div>
       </div>
       <div v-if="failedDeleteGroups.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/70">
-        <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-300">
-          {{ t('admin.accounts.bulkTest.deleteFailedErrorSummaryTitle') }}
+        <div class="mb-1 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-300">
+          <span>{{ t('admin.accounts.bulkTest.deleteFailedErrorSummaryTitle') }}</span>
+          <span class="shrink-0 normal-case tracking-normal">
+            {{ t('admin.accounts.bulkTest.deleteFailedSelectedCount', { selected: failedDeleteSelectedCount, total: failedDeleteCandidateCount }) }}
+          </span>
         </div>
+        <p class="mb-2 text-xs text-gray-500 dark:text-dark-300">
+          {{ t('admin.accounts.bulkTest.deleteFailedGroupSelectionHint') }}
+        </p>
         <div class="space-y-2">
           <div
             v-for="group in failedDeleteGroups"
@@ -271,15 +285,19 @@
             class="rounded-lg border bg-white dark:bg-dark-900/60"
             :class="failedDeleteGroupClass(group.severity)"
             :data-severity="group.severity"
+            :data-selected="isFailedDeleteGroupSelected(group.key) ? 'true' : 'false'"
             data-test="batch-test-delete-error-group"
           >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
-              :aria-expanded="isFailedDeleteGroupExpanded(group.key)"
-              @click="toggleFailedDeleteGroup(group.key)"
-            >
-              <span class="flex min-w-0 items-center gap-2">
+            <div class="flex items-center gap-2">
+              <label class="flex min-w-0 flex-1 items-center gap-2 px-3 py-2">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-dark-600 dark:bg-dark-800"
+                  :checked="isFailedDeleteGroupSelected(group.key)"
+                  :disabled="deletingFailed"
+                  data-test="batch-test-delete-error-group-checkbox"
+                  @change="toggleFailedDeleteGroupSelection(group.key, ($event.target as HTMLInputElement).checked)"
+                >
                 <Icon
                   :name="group.severity === 'warning' ? 'exclamationTriangle' : 'xCircle'"
                   size="sm"
@@ -294,12 +312,17 @@
                 >
                   {{ group.severityLabel }}
                 </span>
-              </span>
-              <span class="flex shrink-0 items-center gap-2 text-xs text-gray-500 dark:text-dark-300">
+              </label>
+              <button
+                type="button"
+                class="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-dark-300 dark:hover:text-white"
+                :aria-expanded="isFailedDeleteGroupExpanded(group.key)"
+                @click="toggleFailedDeleteGroup(group.key)"
+              >
                 {{ t('admin.accounts.bulkTest.deleteFailedGroupCount', { count: group.count }) }}
                 <Icon :name="isFailedDeleteGroupExpanded(group.key) ? 'chevronDown' : 'chevronRight'" size="xs" :stroke-width="2" />
-              </span>
-            </button>
+              </button>
+            </div>
             <div
               v-if="isFailedDeleteGroupExpanded(group.key)"
               class="border-t border-gray-100 px-3 py-2 dark:border-dark-700"
@@ -423,6 +446,7 @@ const recentTestRecords = ref(getRecentAccountTestRecords())
 const recentTestNow = ref(Date.now())
 const abortControllers = new Set<AbortController>()
 const expandedFailedDeleteGroupKeys = ref<string[]>([])
+const selectedFailedDeleteGroupKeys = ref<string[]>([])
 const failedDeleteProgress = ref({ completed: 0, total: 0 })
 let cancellationRequested = false
 let recentTestRefreshTimer: number | null = null
@@ -564,7 +588,7 @@ const allVisibleFailedSelected = computed(() => (
   visibleFailedItems.value.length > 0 &&
   visibleFailedItems.value.every(item => selectedFailedIds.value.includes(item.account.id))
 ))
-const failedDeleteConfirmCount = computed(() => pendingFailedDeleteIds.value.length)
+const failedDeleteCandidateCount = computed(() => pendingFailedDeleteIds.value.length)
 const failedDeleteItems = computed(() => {
   const pendingIds = new Set(pendingFailedDeleteIds.value)
   return failedItems.value.filter(item => pendingIds.has(item.account.id))
@@ -595,6 +619,13 @@ const failedDeleteGroups = computed<FailedDeleteGroup[]>(() => {
       return b.count - a.count || a.key.localeCompare(b.key)
     })
 })
+const failedDeleteSelectedItems = computed(() => {
+  const selectedGroupKeys = new Set(selectedFailedDeleteGroupKeys.value)
+  return failedDeleteGroups.value.flatMap(group => (
+    selectedGroupKeys.has(group.key) ? group.items : []
+  ))
+})
+const failedDeleteSelectedCount = computed(() => failedDeleteSelectedItems.value.length)
 const failedDeleteProgressPercent = computed(() => {
   if (failedDeleteProgress.value.total <= 0) return 0
   return Math.round((failedDeleteProgress.value.completed / failedDeleteProgress.value.total) * 100)
@@ -626,6 +657,40 @@ const filterButtonClass = (failedOnly: boolean) => [
     : 'text-gray-500 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-300 dark:hover:text-white'
 ]
 
+const toPlainErrorValue = (value: unknown): string => {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return ''
+}
+
+const findJsonErrorValue = (value: unknown, keys: string[]): string => {
+  if (!value || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const direct = toPlainErrorValue(record[key])
+    if (direct) return direct
+  }
+  for (const nestedKey of ['error', 'data', 'response']) {
+    const nested = findJsonErrorValue(record[nestedKey], keys)
+    if (nested) return nested
+  }
+  return ''
+}
+
+const parseJsonError = (message: string): unknown | null => {
+  const trimmed = message.trim()
+  const jsonStartIndex = trimmed.search(/[\[{]/)
+  if (jsonStartIndex < 0) return null
+  const jsonText = trimmed.slice(jsonStartIndex)
+  try {
+    return JSON.parse(jsonText)
+  } catch {
+    return null
+  }
+}
+
 const extractErrorCode = (message: string | null | undefined): string => {
   if (!message) return ''
   if (
@@ -634,8 +699,15 @@ const extractErrorCode = (message: string | null | undefined): string => {
   ) {
     return 'timeout'
   }
+  const parsedError = parseJsonError(message)
+  if (parsedError) {
+    const status = findJsonErrorValue(parsedError, ['status', 'status_code', 'http_status'])
+    if (status) return status
+    const code = findJsonErrorValue(parsedError, ['code', 'error_code'])
+    if (code) return code
+  }
   const patterns = [
-    /"(?:(?:error_)?code|status_code|status)"\s*:\s*"?(?<code>[A-Za-z0-9_.-]+)"?/i,
+    /"(?<key>status|status_code|http_status|(?:error_)?code)"\s*:\s*"?(?<code>[A-Za-z0-9_.-]+)"?/i,
     /\b(?:error_code|status_code|status|code|HTTP)\s*[:=]\s*["']?(?<code>[A-Za-z0-9_.-]+)["']?/i,
     /\b(?:returned|returns|returning|响应|返回)\s+(?<code>[4-5]\d{2})\b/i,
     /\b(?:invalid_[a-z0-9_]+|rate_limit_exceeded|insufficient_quota|context_length_exceeded|upstream_error)\b/i
@@ -650,6 +722,26 @@ const extractErrorCode = (message: string | null | undefined): string => {
     return rawCode
   }
   return ''
+}
+
+const extractErrorMessage = (message: string | null | undefined): string => {
+  if (!message) return ''
+  const parsedError = parseJsonError(message)
+  if (parsedError) {
+    return findJsonErrorValue(parsedError, ['message', 'error_description', 'detail', 'type'])
+  }
+  const withoutJson = message.replace(/\{[\s\S]*$/, '').trim()
+  return withoutJson || message
+}
+
+const truncateErrorSummary = (message: string, maxLength = 96) => (
+  message.length > maxLength ? `${message.slice(0, maxLength - 1)}...` : message
+)
+
+const formatErrorSummary = (message: string | null | undefined): string => {
+  const code = extractErrorCode(message)
+  if (code) return truncateErrorSummary(code, 48)
+  return truncateErrorSummary(extractErrorMessage(message) || t('admin.accounts.bulkTest.logFailed'))
 }
 
 const failedDeleteSeverityFor = (code: string): FailedDeleteSeverity => (
@@ -688,6 +780,18 @@ const toggleFailedDeleteGroup = (key: string) => {
     : [...expandedFailedDeleteGroupKeys.value, key]
 }
 
+const isFailedDeleteGroupSelected = (key: string) => selectedFailedDeleteGroupKeys.value.includes(key)
+
+const toggleFailedDeleteGroupSelection = (key: string, checked: boolean) => {
+  const selected = new Set(selectedFailedDeleteGroupKeys.value)
+  if (checked) {
+    selected.add(key)
+  } else {
+    selected.delete(key)
+  }
+  selectedFailedDeleteGroupKeys.value = Array.from(selected)
+}
+
 const appendEventLog = (item: TestItem, event: AccountTestEvent) => {
   if (event.type === 'test_start') {
     item.logs.push(event.model
@@ -706,11 +810,11 @@ const appendEventLog = (item: TestItem, event: AccountTestEvent) => {
   if (event.type === 'test_complete') {
     item.logs.push(event.success
       ? t('admin.accounts.bulkTest.logCompleted')
-      : event.error || t('admin.accounts.bulkTest.logFailed'))
+      : formatErrorSummary(event.error || t('admin.accounts.bulkTest.logFailed')))
     return
   }
   if (event.type === 'error') {
-    item.logs.push(event.error || t('admin.accounts.bulkTest.logFailed'))
+    item.logs.push(formatErrorSummary(event.error || t('admin.accounts.bulkTest.logFailed')))
   }
 }
 
@@ -887,7 +991,7 @@ const startBatchTest = async () => {
       failed: failed.length,
       skipped: summary.value.skipped,
       failedIds: failed.map(item => item.account.id),
-      errors: failed.map(item => `${item.account.name}: ${item.error || t('admin.accounts.bulkTest.logFailed')}`)
+      errors: failed.map(item => `${item.account.name}: ${formatErrorSummary(item.error)}`)
     })
   }
 }
@@ -919,6 +1023,9 @@ const requestDeleteFailedAccounts = (ids: number[]) => {
   if (uniqueIds.length === 0 || deletingFailed.value) return
   pendingFailedDeleteIds.value = uniqueIds
   expandedFailedDeleteGroupKeys.value = []
+  selectedFailedDeleteGroupKeys.value = failedDeleteGroups.value
+    .filter(group => group.severity === 'error')
+    .map(group => group.key)
   failedDeleteProgress.value = { completed: 0, total: 0 }
   showFailedDeleteConfirm.value = true
 }
@@ -928,11 +1035,12 @@ const closeFailedDeleteConfirm = () => {
   showFailedDeleteConfirm.value = false
   pendingFailedDeleteIds.value = []
   expandedFailedDeleteGroupKeys.value = []
+  selectedFailedDeleteGroupKeys.value = []
   failedDeleteProgress.value = { completed: 0, total: 0 }
 }
 
 const confirmDeleteFailedAccounts = async () => {
-  const uniqueIds = [...pendingFailedDeleteIds.value]
+  const uniqueIds = Array.from(new Set(failedDeleteSelectedItems.value.map(item => item.account.id)))
   if (uniqueIds.length === 0 || deletingFailed.value) return
 
   deletingFailed.value = true

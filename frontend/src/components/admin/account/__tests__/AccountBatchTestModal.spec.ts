@@ -514,6 +514,45 @@ describe('AccountBatchTestModal', () => {
     }
   })
 
+  it('shows compact error codes instead of raw JSON error payloads', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const rawError = `token_invalidated ${JSON.stringify({
+      error: {
+        message: 'Your authentication token has been invalidated. Please try signing in again.',
+        type: 'invalid_request_error',
+        code: 'token_invalidated',
+        param: null
+      },
+      status: 401
+    })}`
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(false, rawError)) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="batch-test-error-summary"]').text()).toBe('401')
+      expect(wrapper.text()).not.toContain('token_invalidated')
+      expect(wrapper.text()).not.toContain('Your authentication token has been invalidated')
+      expect(wrapper.text()).not.toContain('"status":401')
+      expect(wrapper.emitted('completed')?.[0]?.[0]).toMatchObject({
+        success: 0,
+        failed: 1,
+        errors: ['account-one: 401']
+      })
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('marks a stuck account test as failed after the per-account timeout', async () => {
     vi.useFakeTimers()
     const randomSpy = mockBatchTestStartStagger()
@@ -609,7 +648,7 @@ describe('AccountBatchTestModal', () => {
 
       expect(nativeConfirm).not.toHaveBeenCalled()
       expect(deleteAccount).not.toHaveBeenCalled()
-      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedSummary {"count":1}')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedSelectedSummary {"selected":1,"total":1}')
       expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupUnknown')
       expect(wrapper.get('[data-test="confirm-dialog"]').text()).not.toContain('account-two')
 
@@ -668,6 +707,10 @@ describe('AccountBatchTestModal', () => {
       expect(groups[1].text()).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupCode {"code":"429"}')
       expect(groups[1].text()).toContain('admin.accounts.bulkTest.deleteFailedGroupCount {"count":2}')
       expect(wrapper.get('[data-test="confirm-dialog"]').text()).not.toContain('rate-limited-a')
+      const checkboxes = wrapper.findAll('[data-test="batch-test-delete-error-group-checkbox"]')
+      expect(checkboxes).toHaveLength(2)
+      expect((checkboxes[0].element as HTMLInputElement).checked).toBe(true)
+      expect((checkboxes[1].element as HTMLInputElement).checked).toBe(false)
 
       await groups[1].find('button').trigger('click')
       const detailAccounts = wrapper.findAll('[data-test="batch-test-delete-error-account"]')
@@ -676,6 +719,96 @@ describe('AccountBatchTestModal', () => {
       expect(detailAccounts[0].text()).toContain('#2')
       expect(detailAccounts[1].text()).toContain('rate-limited-b')
       expect(detailAccounts[1].text()).toContain('#3')
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('deletes only the selected failure groups and keeps 429 out by default', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const failedAccounts = [
+      accountFixture({ id: 1, name: 'auth-failed', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 2, name: 'rate-limited-a', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 3, name: 'rate-limited-b', platform: 'openai', type: 'oauth', status: 'active' })
+    ] as any
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 401: unauthorized'))
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 429: rate limited'))
+      .mockResolvedValueOnce(createStreamResponse(false, '{"error":{"code":"429"}}')) as any
+    deleteAccount.mockResolvedValue({ message: 'ok' })
+
+    try {
+      const wrapper = mountModal(failedAccounts)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync((failedAccounts.length - 1) * mockedBatchTestStaggerMs(0))
+      await flushPromises()
+      await flushPromises()
+
+      await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="confirm-message"]').text()).toContain('admin.accounts.bulkTest.deleteFailedConfirm {"count":1}')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedSelectedSummary {"selected":1,"total":3}')
+
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
+      await flushPromises()
+
+      expect(deleteAccount).toHaveBeenCalledTimes(1)
+      expect(deleteAccount).toHaveBeenCalledWith(1)
+      expect(wrapper.text()).not.toContain('auth-failed')
+      expect(wrapper.text()).toContain('rate-limited-a')
+      expect(wrapper.text()).toContain('rate-limited-b')
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('allows changing the failed-account deletion scope by error group', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const failedAccounts = [
+      accountFixture({ id: 1, name: 'auth-failed', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 2, name: 'rate-limited-a', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 3, name: 'rate-limited-b', platform: 'openai', type: 'oauth', status: 'active' })
+    ] as any
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 401: unauthorized'))
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 429: rate limited'))
+      .mockResolvedValueOnce(createStreamResponse(false, '{"error":{"code":"429"}}')) as any
+    deleteAccount.mockResolvedValue({ message: 'ok' })
+
+    try {
+      const wrapper = mountModal(failedAccounts)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync((failedAccounts.length - 1) * mockedBatchTestStaggerMs(0))
+      await flushPromises()
+      await flushPromises()
+
+      await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+
+      const checkboxes = wrapper.findAll('[data-test="batch-test-delete-error-group-checkbox"]')
+      await checkboxes[0].setValue(false)
+      await checkboxes[1].setValue(true)
+      expect(wrapper.get('[data-test="confirm-message"]').text()).toContain('admin.accounts.bulkTest.deleteFailedConfirm {"count":2}')
+
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
+      await flushPromises()
+
+      expect(deleteAccount).toHaveBeenCalledTimes(2)
+      expect(deleteAccount.mock.calls.map(([id]) => id)).toEqual([2, 3])
+      expect(wrapper.text()).toContain('auth-failed')
+      expect(wrapper.text()).not.toContain('rate-limited-a')
+      expect(wrapper.text()).not.toContain('rate-limited-b')
     } finally {
       randomSpy.mockRestore()
       vi.useRealTimers()
