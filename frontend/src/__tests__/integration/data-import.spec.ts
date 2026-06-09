@@ -4,8 +4,9 @@ import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 
 const showError = vi.fn()
 const showSuccess = vi.fn()
-const { importData } = vi.hoisted(() => ({
-  importData: vi.fn()
+const { importData, importCodexSession } = vi.hoisted(() => ({
+  importData: vi.fn(),
+  importCodexSession: vi.fn()
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -18,7 +19,8 @@ vi.mock('@/stores/app', () => ({
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      importData
+      importData,
+      importCodexSession
     }
   }
 }))
@@ -38,6 +40,16 @@ const successfulImportResult = (accountCreated = 1) => ({
   proxy_reused: 0,
   proxy_failed: 0
 })
+
+const successfulCodexImportResult = (created = 1, updated = 0, skipped = 0) => ({
+  total: created + updated + skipped,
+  created,
+  updated,
+  skipped,
+  failed: 0
+})
+
+const codexAccessToken = 'eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.signature'
 
 const sub2apiContent = (
   accountIds: number[],
@@ -75,12 +87,49 @@ const createTextFile = (name: string, content: string) => {
   return file
 }
 
+const withRelativePath = (file: File, path: string) => {
+  Object.defineProperty(file, 'webkitRelativePath', {
+    value: path,
+    configurable: true
+  })
+  return file
+}
+
+const createFileEntry = (path: string, file: File) => ({
+  isFile: true,
+  isDirectory: false,
+  name: file.name,
+  fullPath: `/${path}`,
+  file: (success: (entryFile: File) => void) => success(file)
+})
+
+const createDirectoryEntry = (path: string, entries: Array<ReturnType<typeof createFileEntry> | ReturnType<typeof createDirectoryEntry>>) => ({
+  isFile: false,
+  isDirectory: true,
+  name: path.split('/').pop() || path,
+  fullPath: `/${path}`,
+  createReader: () => {
+    let read = false
+    return {
+      readEntries: (success: (batch: typeof entries) => void) => {
+        if (read) {
+          success([])
+          return
+        }
+        read = true
+        success(entries)
+      }
+    }
+  }
+})
+
 describe('ImportDataModal', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     showError.mockReset()
     showSuccess.mockReset()
     importData.mockReset()
+    importCodexSession.mockReset()
   })
 
   const mountModal = () => mount(ImportDataModal, {
@@ -131,6 +180,28 @@ describe('ImportDataModal', () => {
     expect(showError).toHaveBeenCalledWith(expect.stringContaining('admin.accounts.dataImportParseFailed'))
   })
 
+  it('JSON 文件里的普通文本不会被误识别为裸 RT', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['plain-token'], 'data.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', {
+      value: () => Promise.resolve('plain-token')
+    })
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(importCodexSession).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('data.json'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('admin.accounts.dataImportParseFailed'))
+  })
+
   it('数据格式选择器使用全宽自定义 Select', () => {
     const wrapper = mountModal()
 
@@ -171,6 +242,116 @@ describe('ImportDataModal', () => {
     })
   })
 
+  it('支持清空已选择的导入文件', async () => {
+    const wrapper = mountModal()
+    const input = wrapper.find('[data-testid="account-import-file-input"]')
+    const file = createJsonFile('accounts.json', sub2apiContent([1]))
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    expect(wrapper.text()).toContain('accounts.json')
+    expect(wrapper.get('[data-testid="account-import-selected-files"]').text()).toContain('accounts.json')
+
+    await wrapper.get('[data-testid="account-import-clear-files"]').trigger('click')
+    await wrapper.find('form').trigger('submit')
+
+    expect(wrapper.text()).not.toContain('accounts.json')
+    expect(importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.dataImportSelectFile')
+  })
+
+  it('支持移除单个已选择的导入文件', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+    const input = wrapper.find('[data-testid="account-import-file-input"]')
+    const firstFile = createJsonFile('first.json', sub2apiContent([1]))
+    const secondFile = createJsonFile('second.json', sub2apiContent([2]))
+    Object.defineProperty(input.element, 'files', {
+      value: [firstFile, secondFile]
+    })
+
+    await input.trigger('change')
+    const removeButtons = wrapper.findAll('[data-testid="account-import-remove-file"]')
+    await removeButtons[0].trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('first.json')
+    expect(wrapper.text()).toContain('second.json')
+    expect(importData).toHaveBeenCalledTimes(1)
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [
+          expect.objectContaining({
+            name: 'account-2'
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
+  })
+
+  it('支持选择文件夹并导入其中的 JSON / TXT 文件', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+    const directoryInput = wrapper.find('[data-testid="account-import-directory-input"]')
+    const jsonFile = withRelativePath(createJsonFile('accounts.json', sub2apiContent([1])), 'backup/accounts.json')
+    const txtFile = withRelativePath(createTextFile('tokens.txt', 'rt----refresh-token'), 'backup/nested/tokens.txt')
+    const ignoredFile = withRelativePath(createTextFile('readme.md', 'ignored'), 'backup/readme.md')
+    Object.defineProperty(directoryInput.element, 'files', {
+      value: [jsonFile, txtFile, ignoredFile]
+    })
+
+    await directoryInput.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('backup/accounts.json')
+    expect(wrapper.text()).toContain('backup/nested/tokens.txt')
+    expect(wrapper.text()).not.toContain('backup/readme.md')
+    expect(importData).toHaveBeenCalledTimes(2)
+    expect(importData.mock.calls[0][0].data.accounts[0].name).toBe('account-1')
+    expect(importData.mock.calls[1][0].data.accounts[0].credentials.refresh_token).toBe('refresh-token')
+  })
+
+  it('支持拖入文件夹并递归读取其中的数据文件', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+    const dropZone = wrapper.get('[data-testid="account-import-drop-zone"]')
+    const jsonFile = createJsonFile('accounts.json', sub2apiContent([1]))
+    const txtFile = createTextFile('tokens.txt', 'rt----refresh-token')
+    const ignoredFile = createTextFile('readme.md', 'ignored')
+    const directoryEntry = createDirectoryEntry('backup', [
+      createFileEntry('backup/accounts.json', jsonFile),
+      createDirectoryEntry('backup/nested', [
+        createFileEntry('backup/nested/tokens.txt', txtFile),
+        createFileEntry('backup/nested/readme.md', ignoredFile)
+      ])
+    ])
+
+    await dropZone.trigger('drop', {
+      dataTransfer: {
+        items: [
+          {
+            webkitGetAsEntry: () => directoryEntry
+          }
+        ],
+        files: []
+      }
+    })
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('backup/accounts.json')
+    expect(wrapper.text()).toContain('backup/nested/tokens.txt')
+    expect(wrapper.text()).not.toContain('backup/nested/readme.md')
+    expect(importData).toHaveBeenCalledTimes(2)
+  })
+
   it('导入中忽略拖入的新文件', async () => {
     let resolveImport: ((value: unknown) => void) | null = null
     importData.mockImplementation(() => new Promise((resolve) => {
@@ -206,15 +387,16 @@ describe('ImportDataModal', () => {
   })
 
   it('支持邮箱密码 RT TXT 格式导入为 OpenAI OAuth 账号', async () => {
-    importData.mockResolvedValue(successfulImportResult(2))
+    importData.mockResolvedValue(successfulImportResult(3))
     const wrapper = mountModal()
 
     const input = wrapper.find('input[type="file"]')
     const file = createTextFile(
       'accounts.txt',
       [
-        '\uFEFFfirst@example.com----password-1----rt----refresh-token-1',
-        'second@example.com----password-2----refresh_token----refresh-token-2'
+        '\uFEFFfirst@example.com----password-1----at----access-token-1----rt----refresh-token-1',
+        'access_token----access-token-2----password-2----refresh_token----refresh-token-2----second@example.com',
+        'rt----refresh-token-3'
       ].join('\r\n')
     )
     Object.defineProperty(input.element, 'files', {
@@ -234,6 +416,7 @@ describe('ImportDataModal', () => {
             platform: 'openai',
             type: 'oauth',
             credentials: {
+              access_token: 'access-token-1',
               refresh_token: 'refresh-token-1',
               email: 'first@example.com',
               expires_at: '1970-01-01T00:00:00Z'
@@ -250,8 +433,19 @@ describe('ImportDataModal', () => {
           expect.objectContaining({
             name: 'second@example.com',
             credentials: expect.objectContaining({
+              access_token: 'access-token-2',
               refresh_token: 'refresh-token-2'
             })
+          }),
+          expect.objectContaining({
+            name: 'openai-rt-3',
+            credentials: {
+              refresh_token: 'refresh-token-3',
+              expires_at: '1970-01-01T00:00:00Z'
+            },
+            extra: {
+              import_source: 'txt_refresh_token'
+            }
           })
         ]
       }),
@@ -260,6 +454,130 @@ describe('ImportDataModal', () => {
     })
     expect(JSON.stringify(importData.mock.calls[0][0])).not.toContain('password-1')
     expect(JSON.stringify(importData.mock.calls[0][0])).not.toContain('password-2')
+  })
+
+  it('自动模式不会识别无标记裸 RT TXT', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('refresh-tokens.txt', 'refresh-token-1\nrefresh-token-2')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('refresh-tokens.txt'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('admin.accounts.dataImportParseFailed'))
+  })
+
+  it('显式选择 RT TXT 时支持裸 RT 多行导入', async () => {
+    importData.mockResolvedValue(successfulImportResult(2))
+    const wrapper = mountModal()
+
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatOpenAIRTTxt')
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('refresh-tokens.txt', 'refresh-token-1\nrefresh-token-2')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [
+          expect.objectContaining({
+            name: 'openai-rt-1',
+            credentials: {
+              refresh_token: 'refresh-token-1',
+              expires_at: '1970-01-01T00:00:00Z'
+            }
+          }),
+          expect.objectContaining({
+            name: 'openai-rt-2',
+            credentials: {
+              refresh_token: 'refresh-token-2',
+              expires_at: '1970-01-01T00:00:00Z'
+            }
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
+  })
+
+  it('自动模式支持 Mobile RT 明确标记导入', async () => {
+    importData.mockResolvedValue(successfulImportResult())
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('mobile-rt.txt', 'mobile_rt----mobile-refresh-token')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [
+          expect.objectContaining({
+            credentials: expect.objectContaining({
+              refresh_token: 'mobile-refresh-token',
+              client_id: 'app_LlGpXReQgckcGGUo2JrYvtJK'
+            })
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
+  })
+
+  it('显式选择 Mobile RT TXT 时裸行按 Mobile RT 导入', async () => {
+    importData.mockResolvedValue(successfulImportResult(2))
+    const wrapper = mountModal()
+
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatOpenAIMobileRTTxt')
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('mobile-refresh-tokens.txt', 'mobile-token-1\nmobile-token-2')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        accounts: [
+          expect.objectContaining({
+            credentials: expect.objectContaining({
+              refresh_token: 'mobile-token-1',
+              client_id: 'app_LlGpXReQgckcGGUo2JrYvtJK'
+            })
+          }),
+          expect.objectContaining({
+            credentials: expect.objectContaining({
+              refresh_token: 'mobile-token-2',
+              client_id: 'app_LlGpXReQgckcGGUo2JrYvtJK'
+            })
+          })
+        ]
+      }),
+      format: 'sub2api',
+      skip_default_group_bind: true
+    })
   })
 
   it('无效邮箱密码 RT TXT 行不会调用导入接口', async () => {
@@ -278,6 +596,141 @@ describe('ImportDataModal', () => {
     expect(importData).not.toHaveBeenCalled()
     expect(showError).toHaveBeenCalledWith(expect.stringContaining('bad-accounts.txt'))
     expect(showError).toHaveBeenCalledWith(expect.stringContaining('Invalid TXT refresh token import line 1'))
+  })
+
+  it('只有 access_token 没有 RT 的 TXT 行不会调用导入接口', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('access-only.txt', 'at----access-token')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('access-only.txt'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('Invalid TXT refresh token import line 1'))
+  })
+
+  it('邮箱不唯一的 TXT 行不会调用导入接口', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile(
+      'ambiguous-accounts.txt',
+      'first@example.com----second@example.com----password----rt----refresh-token'
+    )
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('ambiguous-accounts.txt'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('Invalid TXT refresh token import line 1'))
+  })
+
+  it('自动模式不会识别无结构 Codex AT 文本', async () => {
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('codex-at.txt', `${codexAccessToken}\n${codexAccessToken}`)
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importCodexSession).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('codex-at.txt'))
+    expect(showError).toHaveBeenCalledWith(expect.stringContaining('admin.accounts.dataImportParseFailed'))
+  })
+
+  it('显式选择 Codex JSON / AT 时支持 AT 文本导入', async () => {
+    importCodexSession.mockResolvedValue(successfulCodexImportResult(2))
+    const wrapper = mountModal()
+
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCodexSession')
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('codex-at.txt', `${codexAccessToken}\n${codexAccessToken}`)
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(importCodexSession).toHaveBeenCalledWith({
+      content: `${codexAccessToken}\n${codexAccessToken}`,
+      update_existing: true,
+      skip_default_group_bind: true
+    })
+    expect(showSuccess.mock.calls[0][0]).toContain('"account_created":2')
+  })
+
+  it('自动识别 Codex JSON 并走 Codex 导入接口', async () => {
+    importCodexSession.mockResolvedValue(successfulCodexImportResult(1, 1, 1))
+    const wrapper = mountModal()
+
+    const input = wrapper.find('input[type="file"]')
+    const content = JSON.stringify([
+      { accessToken: codexAccessToken, user: { email: 'first@example.com' } },
+      { tokens: { access_token: codexAccessToken }, user: { email: 'second@example.com' } },
+      codexAccessToken
+    ])
+    const file = createJsonFile('codex.json', content)
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(importCodexSession).toHaveBeenCalledWith({
+      content,
+      update_existing: true,
+      skip_default_group_bind: true
+    })
+    const successMessage = showSuccess.mock.calls[0][0]
+    expect(successMessage).toContain('"account_created":1')
+    expect(successMessage).toContain('"account_updated":1')
+    expect(successMessage).toContain('"account_skipped":1')
+  })
+
+  it('显式选择 Codex JSON / AT 时交给 Codex 后端解析', async () => {
+    importCodexSession.mockResolvedValue(successfulCodexImportResult())
+    const wrapper = mountModal()
+
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCodexSession')
+    const input = wrapper.find('input[type="file"]')
+    const file = createTextFile('codex-plain.txt', 'plain-access-token')
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).not.toHaveBeenCalled()
+    expect(importCodexSession).toHaveBeenCalledWith({
+      content: 'plain-access-token',
+      update_existing: true,
+      skip_default_group_bind: true
+    })
   })
 
   it('选择 CPA 格式时把格式传给后端', async () => {
@@ -319,10 +772,44 @@ describe('ImportDataModal', () => {
     })
   })
 
-  it('自动识别 CPA 顶层账号数组并按 CPA 格式导入', async () => {
+  it('自动识别带 type 的 CPA wrapper 并按 CPA 格式导入', async () => {
     importData.mockResolvedValue(successfulImportResult(2))
     const wrapper = mountModal()
 
+    const input = wrapper.find('input[type="file"]')
+    const file = createJsonFile('cpa-wrapper.json', JSON.stringify({
+      type: 'cpa-auth-files',
+      accounts: [
+        { access_token: 'token-1', account_id: 'acct-1' },
+        { access_token: 'token-2', account_id: 'acct-2' }
+      ]
+    }))
+    Object.defineProperty(input.element, 'files', {
+      value: [file]
+    })
+
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(importData).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'cpa-auth-files',
+        accounts: [
+          { access_token: 'token-1', account_id: 'acct-1' },
+          { access_token: 'token-2', account_id: 'acct-2' }
+        ]
+      }),
+      format: 'cpa',
+      skip_default_group_bind: true
+    })
+  })
+
+  it('显式选择 CPA 时顶层账号数组按 CPA 格式导入', async () => {
+    importData.mockResolvedValue(successfulImportResult(2))
+    const wrapper = mountModal()
+
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCPA')
     const input = wrapper.find('input[type="file"]')
     const file = createJsonFile('cpa-array.json', JSON.stringify([
       { access_token: 'token-1', account_id: 'acct-1' },
@@ -349,10 +836,11 @@ describe('ImportDataModal', () => {
     })
   })
 
-  it('CPA 顶层数组包含无效账号时仍按 CPA 原始数组交给后端校验', async () => {
+  it('显式选择 CPA 时顶层数组包含无效账号仍交给后端校验', async () => {
     importData.mockRejectedValue(new Error('CPA account 2 access_token is required'))
     const wrapper = mountModal()
 
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCPA')
     const input = wrapper.find('input[type="file"]')
     const data = [
       { access_token: 'token-1', account_id: 'acct-1' },
@@ -377,10 +865,11 @@ describe('ImportDataModal', () => {
     expect(wrapper.text()).toContain('CPA account 2 access_token is required')
   })
 
-  it('CPA wrapper 类型不支持时保持原始数据交给后端校验', async () => {
+  it('手动选择 CPA 时 unsupported wrapper 保持原始数据交给后端校验', async () => {
     importData.mockRejectedValue(new Error('unsupported CPA data type: unexpected-auth-files'))
     const wrapper = mountModal()
 
+    await selectDataFormat(wrapper, 'admin.accounts.dataFormatCPA')
     const input = wrapper.find('input[type="file"]')
     const file = createJsonFile('unsupported-cpa.json', JSON.stringify({
       type: 'unexpected-auth-files',

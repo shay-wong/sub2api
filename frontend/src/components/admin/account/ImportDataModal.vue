@@ -47,14 +47,69 @@
               {{ t('admin.accounts.dataImportDropHint') }}
             </div>
           </div>
-          <button
-            type="button"
-            class="btn btn-secondary shrink-0"
-            :disabled="importing"
-            @click="openFilePicker"
-          >
-            {{ t('common.chooseFile') }}
-          </button>
+          <div class="flex shrink-0 flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="importing"
+              @click="openFilePicker"
+            >
+              {{ t('common.chooseFile') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="importing"
+              @click="openDirectoryPicker"
+            >
+              {{ t('admin.accounts.dataImportChooseFolder') }}
+            </button>
+          </div>
+        </div>
+        <div
+          v-if="files.length > 0"
+          class="mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900/40"
+          data-testid="account-import-selected-files"
+        >
+          <div class="flex items-center justify-between gap-3 border-b border-gray-100 px-3 py-2 dark:border-dark-700">
+            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">
+              {{ t('admin.accounts.dataImportSelectedFiles', { count: files.length }) }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-dark-100"
+              :disabled="importing"
+              data-testid="account-import-clear-files"
+              @click="clearSelectedFiles"
+            >
+              <Icon name="x" size="xs" :stroke-width="2" />
+              {{ t('admin.accounts.dataImportClearFiles') }}
+            </button>
+          </div>
+          <ul class="max-h-40 divide-y divide-gray-100 overflow-auto dark:divide-dark-700">
+            <li
+              v-for="(file, index) in files"
+              :key="getImportFileKey(file, index)"
+              class="flex min-w-0 items-center justify-between gap-3 px-3 py-2"
+            >
+              <span
+                class="truncate text-sm text-gray-700 dark:text-dark-200"
+                :title="getImportFileDisplayName(file)"
+              >
+                {{ getImportFileDisplayName(file) }}
+              </span>
+              <button
+                type="button"
+                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-900/20 dark:hover:text-red-300"
+                :disabled="importing"
+                :aria-label="t('admin.accounts.dataImportRemoveFile', { name: getImportFileDisplayName(file) })"
+                data-testid="account-import-remove-file"
+                @click="removeSelectedFile(index)"
+              >
+                <Icon name="x" size="sm" :stroke-width="2" />
+              </button>
+            </li>
+          </ul>
         </div>
         <input
           ref="fileInput"
@@ -62,7 +117,18 @@
           multiple
           class="hidden"
           accept="application/json,text/plain,.json,.txt"
+          data-testid="account-import-file-input"
           @change="handleFileChange"
+        />
+        <input
+          ref="directoryInput"
+          type="file"
+          multiple
+          webkitdirectory
+          class="hidden"
+          accept="application/json,text/plain,.json,.txt"
+          data-testid="account-import-directory-input"
+          @change="handleDirectoryChange"
         />
       </div>
 
@@ -159,6 +225,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type {
@@ -167,7 +234,8 @@ import type {
   AdminDataAccount,
   AdminDataImportResult,
   AdminDataPayload,
-  AdminDataProxy
+  AdminDataProxy,
+  CodexSessionImportResult
 } from '@/types'
 
 interface Props {
@@ -191,12 +259,26 @@ const DATA_IMPORT_ACCOUNT_CHUNK_SIZE = 25
 const CPA_DATA_TYPE = 'cpa-auth-files'
 const TXT_RT_SEPARATOR = '----'
 const TXT_RT_EXPIRED_AT = '1970-01-01T00:00:00Z'
+const TXT_RT_ACCOUNT_NAME_PREFIX = 'openai-rt'
+const OPENAI_MOBILE_RT_CLIENT_ID = 'app_LlGpXReQgckcGGUo2JrYvtJK'
+
+type AccountImportFormat =
+  | AdminAccountDataFormat
+  | 'auto'
+  | 'txt-refresh-token'
+  | 'txt-mobile-refresh-token'
+  | 'codex-session'
 
 const importing = ref(false)
 const files = ref<File[]>([])
-const result = ref<AdminDataImportResult | null>(null)
-const format = ref<AdminAccountDataFormat | 'auto'>('auto')
+const result = ref<AccountImportResult | null>(null)
+const format = ref<AccountImportFormat>('auto')
 const fileDragDepth = ref(0)
+
+interface AccountImportResult extends AdminDataImportResult {
+  account_updated: number
+  account_skipped: number
+}
 
 type ImportProgressStage = 'reading' | 'importing'
 
@@ -214,13 +296,20 @@ interface ParsedImportFile {
   format?: AdminAccountDataFormat
 }
 
-interface ImportPayloadTask {
+interface ImportProgressTask {
   fileName: string
-  data: unknown
-  format?: AdminAccountDataFormat
   failureKind?: 'account' | 'proxy'
   failureCount?: number
   progressCount?: number
+}
+
+interface ImportPayloadTask extends ImportProgressTask {
+  data: unknown
+  format?: AdminAccountDataFormat
+}
+
+interface CodexImportPayloadTask extends ImportProgressTask {
+  content: string
 }
 
 interface PreparedImportPlan {
@@ -233,18 +322,46 @@ interface ChunkableCPADataPayload {
   accounts: AdminCPADataAccount[]
 }
 
+interface DroppedFileSystemEntry {
+  isFile: boolean
+  isDirectory: boolean
+  name: string
+  fullPath?: string
+}
+
+interface DroppedFileSystemFileEntry extends DroppedFileSystemEntry {
+  isFile: true
+  file: (successCallback: (file: File) => void, errorCallback?: (error: unknown) => void) => void
+}
+
+interface DroppedFileSystemDirectoryEntry extends DroppedFileSystemEntry {
+  isDirectory: true
+  createReader: () => {
+    readEntries: (
+      successCallback: (entries: DroppedFileSystemEntry[]) => void,
+      errorCallback?: (error: unknown) => void
+    ) => void
+  }
+}
+
 const importProgress = ref<ImportProgressState | null>(null)
 const formatOptions = computed(() => [
   { value: 'auto', label: t('admin.accounts.dataFormatAuto') },
   { value: 'sub2api', label: t('admin.accounts.dataFormatSub2API') },
-  { value: 'cpa', label: t('admin.accounts.dataFormatCPA') }
+  { value: 'cpa', label: t('admin.accounts.dataFormatCPA') },
+  { value: 'txt-refresh-token', label: t('admin.accounts.dataFormatOpenAIRTTxt') },
+  { value: 'txt-mobile-refresh-token', label: t('admin.accounts.dataFormatOpenAIMobileRTTxt') },
+  { value: 'codex-session', label: t('admin.accounts.dataFormatCodexSession') }
 ])
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const directoryInput = ref<HTMLInputElement | null>(null)
+const filePathOverrides = new WeakMap<File, string>()
+const IMPORT_FILE_EXTENSIONS = ['.json', '.txt']
 const isDraggingFiles = computed(() => fileDragDepth.value > 0)
 const fileName = computed(() => {
   if (files.value.length === 0) return ''
-  if (files.value.length === 1) return files.value[0].name
+  if (files.value.length === 1) return getImportFileDisplayName(files.value[0])
   return t('admin.accounts.dataImportSelectedFiles', { count: files.value.length })
 })
 
@@ -296,16 +413,47 @@ const importProgressFileText = computed(() => {
   return t('admin.accounts.dataImportProgressStarting')
 })
 
-const createEmptyImportResult = (): AdminDataImportResult => ({
+const getNativeImportFilePath = (file: File): string => {
+  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+  return typeof path === 'string' ? path : ''
+}
+
+const getImportFileDisplayName = (file: File): string => (
+  filePathOverrides.get(file) || getNativeImportFilePath(file) || file.name
+)
+
+const getImportFileKey = (file: File, index: number): string => (
+  `${getImportFileDisplayName(file)}-${file.size}-${file.lastModified}-${index}`
+)
+
+const isSupportedImportFile = (file: File): boolean => {
+  const name = getImportFileDisplayName(file).toLowerCase()
+  return IMPORT_FILE_EXTENSIONS.some((extension) => name.endsWith(extension))
+}
+
+const resetFileInputs = () => {
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+  if (directoryInput.value) {
+    directoryInput.value.value = ''
+  }
+}
+
+const createEmptyImportResult = (): AccountImportResult => ({
   account_created: 0,
+  account_updated: 0,
+  account_skipped: 0,
   account_failed: 0,
   proxy_created: 0,
   proxy_reused: 0,
   proxy_failed: 0
 })
 
-const addImportResult = (target: AdminDataImportResult, itemResult: AdminDataImportResult) => {
+const addImportResult = (target: AccountImportResult, itemResult: AdminDataImportResult) => {
   target.account_created += itemResult.account_created
+  target.account_updated += (itemResult as Partial<AccountImportResult>).account_updated || 0
+  target.account_skipped += (itemResult as Partial<AccountImportResult>).account_skipped || 0
   target.account_failed += itemResult.account_failed
   target.proxy_created += itemResult.proxy_created
   target.proxy_reused += itemResult.proxy_reused
@@ -349,7 +497,7 @@ const markRequestFailed = (
   return res
 }
 
-const getImportTaskProgressCount = (payload: ImportPayloadTask): number => (
+const getImportTaskProgressCount = (payload: ImportProgressTask): number => (
   Math.max(1, payload.progressCount ?? payload.failureCount ?? 1)
 )
 
@@ -361,8 +509,15 @@ const isSub2APIDataPayload = (value: unknown): value is AdminDataPayload => (
   isRecord(value) && Array.isArray(value.proxies) && Array.isArray(value.accounts)
 )
 
+const hasOwnRecordKey = (value: Record<string, unknown>, key: string): boolean => (
+  Object.prototype.hasOwnProperty.call(value, key)
+)
+
 const isCPAAccountData = (value: unknown): value is AdminCPADataAccount => (
-  isRecord(value) && typeof value.access_token === 'string'
+  isRecord(value) &&
+  typeof value.access_token === 'string' &&
+  !hasOwnRecordKey(value, 'credentials') &&
+  !hasOwnRecordKey(value, 'platform')
 )
 
 const isCPAAccountArray = (value: unknown): value is AdminCPADataAccount[] => (
@@ -390,6 +545,13 @@ const isCPADataCandidate = (value: unknown): boolean => (
   )
 )
 
+const isAutoCPADataCandidate = (value: unknown): boolean => (
+  isRecord(value) &&
+  value.type === CPA_DATA_TYPE &&
+  Array.isArray(value.accounts) &&
+  !Array.isArray(value.proxies)
+)
+
 const isChunkableCPADataPayload = (value: unknown): value is ChunkableCPADataPayload => (
   isRecord(value) &&
   Array.isArray(value.accounts) &&
@@ -400,9 +562,98 @@ const isChunkableCPADataPayload = (value: unknown): value is ChunkableCPADataPay
 )
 
 const resolveParsedFormat = (data: unknown): AdminAccountDataFormat => {
-  if (format.value !== 'auto') return format.value
-  if (isCPAAccountData(data) || isCPAAccountArray(data) || isCPADataCandidate(data)) return 'cpa'
+  if (format.value === 'sub2api' || format.value === 'cpa') return format.value
+  if (isAutoCPADataCandidate(data)) return 'cpa'
   return 'sub2api'
+}
+
+const getRecordStringValue = (value: Record<string, unknown>, key: string): string => (
+  hasOwnRecordKey(value, key) && typeof value[key] === 'string' ? String(value[key]).trim() : ''
+)
+
+const getNestedRecordStringValue = (
+  value: Record<string, unknown>,
+  parentKey: string,
+  childKey: string
+): string => {
+  const nested = value[parentKey]
+  if (!isRecord(nested)) return ''
+  return getRecordStringValue(nested, childKey)
+}
+
+const isCodexSessionJSONCandidate = (value: unknown): boolean => {
+  if (isCPAAccountData(value) || isCPADataCandidate(value)) {
+    return false
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 && value.some(isCodexSessionJSONCandidate)
+  }
+  if (!isRecord(value) || isSub2APIDataPayload(value)) {
+    return false
+  }
+
+  return Boolean(
+    getNestedRecordStringValue(value, 'tokens', 'access_token') ||
+    getNestedRecordStringValue(value, 'tokens', 'accessToken') ||
+    getRecordStringValue(value, 'accessToken')
+  )
+}
+
+const estimateCodexImportCount = (value: unknown): number => {
+  if (Array.isArray(value)) {
+    return value.reduce((sum, item) => sum + estimateCodexImportCount(item), 0)
+  }
+  return 1
+}
+
+const estimateCodexContentProgressCount = (content: string): number => {
+  const trimmed = content.replace(/^\uFEFF/, '').trim()
+  if (!trimmed) return 1
+
+  try {
+    return Math.max(1, estimateCodexImportCount(JSON.parse(trimmed)))
+  } catch {
+    return Math.max(1, getTxtRefreshTokenImportLines(trimmed).length)
+  }
+}
+
+const createCodexImportTasks = (
+  content: string,
+  sourceFileName: string
+): CodexImportPayloadTask[] => {
+  const trimmed = content.replace(/^\uFEFF/, '').trim()
+  if (!trimmed) {
+    throw new SyntaxError('Empty Codex import content')
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) {
+      return chunkArray(parsed, DATA_IMPORT_ACCOUNT_CHUNK_SIZE).map((items, index, chunks) => ({
+        fileName: chunks.length > 1 ? `${sourceFileName} #${index + 1}` : sourceFileName,
+        content: JSON.stringify(items),
+        failureCount: Math.max(1, estimateCodexImportCount(items)),
+        progressCount: Math.max(1, estimateCodexImportCount(items))
+      }))
+    }
+  } catch {
+    const lines = getTxtRefreshTokenImportLines(trimmed)
+    if (lines.length > 1) {
+      return chunkArray(lines, DATA_IMPORT_ACCOUNT_CHUNK_SIZE).map((items, index, chunks) => ({
+        fileName: chunks.length > 1 ? `${sourceFileName} #${index + 1}` : sourceFileName,
+        content: items.join('\n'),
+        failureCount: items.length,
+        progressCount: items.length
+      }))
+    }
+  }
+
+  return [{
+    fileName: sourceFileName,
+    content: trimmed,
+    failureCount: estimateCodexContentProgressCount(trimmed),
+    progressCount: estimateCodexContentProgressCount(trimmed)
+  }]
 }
 
 const resolveChunkableCPAAccounts = (data: unknown): AdminCPADataAccount[] | null => {
@@ -471,31 +722,74 @@ const looksLikeTxtRefreshTokenImport = (content: string): boolean => (
     .some((line) => line.includes(TXT_RT_SEPARATOR))
 )
 
-const parseTxtRefreshTokenImport = (content: string): AdminDataPayload => {
+const normalizeTxtTokenMarker = (
+  marker: string
+): 'access_token' | 'refresh_token' | 'mobile_refresh_token' | null => {
+  const normalizedMarker = marker.trim().toLowerCase()
+  if (['at', 'access_token'].includes(normalizedMarker)) return 'access_token'
+  if (['rt', 'refresh_token'].includes(normalizedMarker)) return 'refresh_token'
+  if (['mobile_rt', 'mobile_refresh_token'].includes(normalizedMarker)) return 'mobile_refresh_token'
+  return null
+}
+
+const looksLikeEmail = (value: string): boolean => (
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+)
+
+const buildTxtImportAccountName = (email: string | undefined, index: number): string => (
+  email || `${TXT_RT_ACCOUNT_NAME_PREFIX}-${index + 1}`
+)
+
+const parseTxtRefreshTokenImport = (content: string, options?: { mobile?: boolean }): AdminDataPayload => {
   const lines = getTxtRefreshTokenImportLines(content)
   const accounts = lines.map((line, index): AdminDataAccount => {
-    const parts = line.split(TXT_RT_SEPARATOR).map((part) => part.trim())
-    if (parts.length !== 4) {
+    const parts = line.includes(TXT_RT_SEPARATOR)
+      ? line.split(TXT_RT_SEPARATOR).map((part) => part.trim())
+      : [options?.mobile ? 'mobile_rt' : 'rt', line.trim()]
+    if (parts.length < 2) {
       throw new SyntaxError(`Invalid TXT refresh token import line ${index + 1}`)
     }
 
-    const [email, password, marker, refreshToken] = parts
-    const normalizedMarker = marker.toLowerCase()
-    if (!email || !password || !refreshToken || !['rt', 'refresh_token'].includes(normalizedMarker)) {
+    const tokenCredentials: Record<string, string> = {}
+    const identityParts: string[] = []
+    for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+      const credentialKey = normalizeTxtTokenMarker(parts[partIndex])
+      if (!credentialKey) {
+        identityParts.push(parts[partIndex])
+        continue
+      }
+
+      const credentialValue = parts[partIndex + 1]
+      if (!credentialValue) {
+        throw new SyntaxError(`Invalid TXT refresh token import line ${index + 1}`)
+      }
+      if (credentialKey === 'mobile_refresh_token') {
+        tokenCredentials.refresh_token = credentialValue
+        tokenCredentials.client_id = OPENAI_MOBILE_RT_CLIENT_ID
+      } else {
+        tokenCredentials[credentialKey] = credentialValue
+      }
+      partIndex += 1
+    }
+
+    const emailParts = identityParts.filter(looksLikeEmail)
+    if (emailParts.length > 1 || !tokenCredentials.refresh_token) {
       throw new SyntaxError(`Invalid TXT refresh token import line ${index + 1}`)
     }
+    const email = emailParts[0]
+    const accountName = buildTxtImportAccountName(email, index)
 
     return {
-      name: email,
+      name: accountName,
       platform: 'openai',
       type: 'oauth',
       credentials: {
-        refresh_token: refreshToken,
-        email,
+        ...tokenCredentials,
+        ...(email ? { email } : {}),
         expires_at: TXT_RT_EXPIRED_AT
       },
       extra: {
-        email,
+        ...(email ? { email } : {}),
         import_source: 'txt_refresh_token'
       },
       concurrency: 10,
@@ -632,7 +926,10 @@ const hasImportErrors = (res: AdminDataImportResult): boolean => (
 )
 
 const hasImportSuccess = (res: AdminDataImportResult): boolean => (
-  res.account_created > 0 || res.proxy_created > 0 || res.proxy_reused > 0
+  res.account_created > 0 ||
+  ((res as Partial<AccountImportResult>).account_updated || 0) > 0 ||
+  res.proxy_created > 0 ||
+  res.proxy_reused > 0
 )
 
 const importOnePayload = async (
@@ -650,16 +947,66 @@ const importOnePayload = async (
   }
 }
 
-const importPayloadsConcurrently = async (
-  dataPayloads: ImportPayloadTask[]
-): Promise<AdminDataImportResult> => {
+const mapCodexImportResult = (
+  itemResult: CodexSessionImportResult,
+  sourceFileName: string
+): AccountImportResult => {
   const res = createEmptyImportResult()
-  if (dataPayloads.length === 0) {
+  res.account_created = itemResult.created
+  res.account_updated = itemResult.updated
+  res.account_skipped = itemResult.skipped
+  res.account_failed = itemResult.failed
+
+  const mappedErrors = (itemResult.errors || []).map((item) => ({
+    kind: 'account' as const,
+    name: item.name || sourceFileName,
+    message: `${sourceFileName}: #${item.index} ${item.message}`
+  }))
+  const fallbackErrors = mappedErrors.length > 0
+    ? []
+    : (itemResult.items || [])
+        .filter((item) => item.action === 'failed' && item.message)
+        .map((item) => ({
+          kind: 'account' as const,
+          name: item.name || sourceFileName,
+          message: `${sourceFileName}: #${item.index} ${item.message}`
+        }))
+  const errors = [...mappedErrors, ...fallbackErrors]
+  if (errors.length > 0) {
+    res.errors = errors
+  }
+  return res
+}
+
+const importOneCodexPayload = async (
+  payload: CodexImportPayloadTask
+): Promise<AdminDataImportResult> => {
+  try {
+    const itemResult = await adminAPI.accounts.importCodexSession({
+      content: payload.content,
+      update_existing: true,
+      skip_default_group_bind: true
+    })
+    return mapCodexImportResult(itemResult, payload.fileName)
+  } catch (error: unknown) {
+    return markRequestFailed(payload.fileName, error, payload.failureKind, payload.failureCount)
+  }
+}
+
+interface QueuedImportTask extends ImportProgressTask {
+  run: () => Promise<AdminDataImportResult>
+}
+
+const importTasksConcurrently = async (
+  tasks: QueuedImportTask[]
+): Promise<AccountImportResult> => {
+  const res = createEmptyImportResult()
+  if (tasks.length === 0) {
     return res
   }
 
-  const total = dataPayloads.reduce((sum, payload) => sum + getImportTaskProgressCount(payload), 0)
-  const concurrency = Math.min(DATA_IMPORT_CONCURRENCY, dataPayloads.length)
+  const total = tasks.reduce((sum, payload) => sum + getImportTaskProgressCount(payload), 0)
+  const concurrency = Math.min(DATA_IMPORT_CONCURRENCY, tasks.length)
   const activeFileNames = new Set<string>()
   let completed = 0
   let nextIndex = 0
@@ -677,13 +1024,13 @@ const importPayloadsConcurrently = async (
   updateProgress()
 
   const runWorker = async () => {
-    while (nextIndex < dataPayloads.length) {
-      const payload = dataPayloads[nextIndex]
+    while (nextIndex < tasks.length) {
+      const payload = tasks[nextIndex]
       nextIndex += 1
       activeFileNames.add(payload.fileName)
       updateProgress()
 
-      const itemResult = await importOnePayload(payload)
+      const itemResult = await payload.run()
       addImportResult(res, itemResult)
 
       activeFileNames.delete(payload.fileName)
@@ -704,9 +1051,7 @@ watch(
       result.value = null
       importProgress.value = null
       format.value = 'auto'
-      if (fileInput.value) {
-        fileInput.value.value = ''
-      }
+      resetFileInputs()
     }
   }
 )
@@ -716,14 +1061,40 @@ const openFilePicker = () => {
   fileInput.value?.click()
 }
 
+const openDirectoryPicker = () => {
+  if (importing.value) return
+  directoryInput.value?.click()
+}
+
 const setSelectedFiles = (selectedFiles: File[]) => {
   if (importing.value) return
-  files.value = selectedFiles
+  files.value = selectedFiles.filter(isSupportedImportFile)
   result.value = null
   importProgress.value = null
 }
 
+const clearSelectedFiles = () => {
+  if (importing.value) return
+  files.value = []
+  result.value = null
+  importProgress.value = null
+  resetFileInputs()
+}
+
+const removeSelectedFile = (index: number) => {
+  if (importing.value) return
+  files.value = files.value.filter((_, fileIndex) => fileIndex !== index)
+  result.value = null
+  importProgress.value = null
+  resetFileInputs()
+}
+
 const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  setSelectedFiles(Array.from(target.files || []))
+}
+
+const handleDirectoryChange = (event: Event) => {
   const target = event.target as HTMLInputElement
   setSelectedFiles(Array.from(target.files || []))
 }
@@ -745,15 +1116,82 @@ const handleFileDragLeave = () => {
   fileDragDepth.value = Math.max(0, fileDragDepth.value - 1)
 }
 
-const handleFileDrop = (event: DragEvent) => {
+const readFileEntry = (entry: DroppedFileSystemFileEntry): Promise<File> => (
+  new Promise((resolve, reject) => {
+    entry.file((file) => {
+      const fullPath = entry.fullPath?.replace(/^\/+/, '')
+      if (fullPath) {
+        filePathOverrides.set(file, fullPath)
+      }
+      resolve(file)
+    }, reject)
+  })
+)
+
+const readDirectoryEntries = (entry: DroppedFileSystemDirectoryEntry): Promise<DroppedFileSystemEntry[]> => (
+  new Promise((resolve, reject) => {
+    const reader = entry.createReader()
+    const entries: DroppedFileSystemEntry[] = []
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (batch.length === 0) {
+          resolve(entries)
+          return
+        }
+        entries.push(...batch)
+        readBatch()
+      }, reject)
+    }
+    readBatch()
+  })
+)
+
+const readEntryFiles = async (entry: DroppedFileSystemEntry): Promise<File[]> => {
+  if (entry.isFile) {
+    return [await readFileEntry(entry as DroppedFileSystemFileEntry)]
+  }
+  if (!entry.isDirectory) return []
+
+  const children = await readDirectoryEntries(entry as DroppedFileSystemDirectoryEntry)
+  const nestedFiles = await Promise.all(children.map(readEntryFiles))
+  return nestedFiles.flat()
+}
+
+const isDroppedFileSystemEntry = (value: unknown): value is DroppedFileSystemEntry => (
+  isRecord(value) &&
+  typeof value.name === 'string' &&
+  typeof value.isFile === 'boolean' &&
+  typeof value.isDirectory === 'boolean'
+)
+
+const getDroppedFiles = async (event: DragEvent): Promise<File[]> => {
+  const items = Array.from(event.dataTransfer?.items || [])
+  const entries = items
+    .map((item) => {
+      const getAsEntry = (item as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry
+      return getAsEntry?.()
+    })
+    .filter(isDroppedFileSystemEntry)
+
+  if (entries.length > 0) {
+    const entryFiles = await Promise.all(entries.map(readEntryFiles))
+    return entryFiles.flat()
+  }
+
+  return Array.from(event.dataTransfer?.files || [])
+}
+
+const handleFileDrop = async (event: DragEvent) => {
   fileDragDepth.value = 0
   if (importing.value) return
-  const droppedFiles = Array.from(event.dataTransfer?.files || [])
-  if (droppedFiles.length > 0) {
-    setSelectedFiles(droppedFiles)
-    if (fileInput.value) {
-      fileInput.value.value = ''
+  try {
+    const droppedFiles = await getDroppedFiles(event)
+    if (droppedFiles.length > 0) {
+      setSelectedFiles(droppedFiles)
+      resetFileInputs()
     }
+  } catch (error: unknown) {
+    appStore.showError(getErrorMessage(error, t('admin.accounts.dataImportFailed')))
   }
 }
 
@@ -784,6 +1222,61 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+const pushParsedImportFile = (
+  sourceFileName: string,
+  text: string,
+  dataPayloads: ParsedImportFile[],
+  codexTasks: CodexImportPayloadTask[]
+) => {
+  if (format.value === 'txt-refresh-token' || format.value === 'txt-mobile-refresh-token') {
+    dataPayloads.push({
+      fileName: sourceFileName,
+      data: parseTxtRefreshTokenImport(text, {
+        mobile: format.value === 'txt-mobile-refresh-token'
+      }),
+      format: 'sub2api'
+    })
+    return
+  }
+
+  if (format.value === 'codex-session') {
+    codexTasks.push(...createCodexImportTasks(text, sourceFileName))
+    return
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    if (format.value === 'auto' && isCodexSessionJSONCandidate(parsed)) {
+      codexTasks.push(...createCodexImportTasks(text, sourceFileName))
+      return
+    }
+
+    dataPayloads.push({
+      fileName: sourceFileName,
+      data: parsed,
+      format: format.value === 'sub2api' || format.value === 'cpa' ? format.value : undefined
+    })
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) {
+      throw error
+    }
+
+    if (
+      format.value === 'auto' &&
+      looksLikeTxtRefreshTokenImport(text)
+    ) {
+      dataPayloads.push({
+        fileName: sourceFileName,
+        data: parseTxtRefreshTokenImport(text),
+        format: 'sub2api'
+      })
+      return
+    }
+
+    throw new SyntaxError()
+  }
+}
+
 const handleImport = async () => {
   if (files.value.length === 0) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
@@ -795,39 +1288,25 @@ const handleImport = async () => {
   importProgress.value = null
   try {
     const dataPayloads: ParsedImportFile[] = []
+    const codexTasks: CodexImportPayloadTask[] = []
     for (const [index, sourceFile] of files.value.entries()) {
+      const sourceFileName = getImportFileDisplayName(sourceFile)
       importProgress.value = {
         stage: 'reading',
         completed: index,
         total: files.value.length,
-        activeFileNames: [sourceFile.name],
+        activeFileNames: [sourceFileName],
         concurrency: 1
       }
       const text = await readFileAsText(sourceFile)
       try {
-        dataPayloads.push({
-          fileName: sourceFile.name,
-          data: JSON.parse(text)
-        })
+        pushParsedImportFile(sourceFileName, text, dataPayloads, codexTasks)
       } catch (error) {
         if (error instanceof SyntaxError) {
-          if (looksLikeTxtRefreshTokenImport(text)) {
-            try {
-              dataPayloads.push({
-                fileName: sourceFile.name,
-                data: parseTxtRefreshTokenImport(text),
-                format: 'sub2api'
-              })
-              continue
-            } catch (txtError) {
-              if (!(txtError instanceof SyntaxError)) {
-                throw txtError
-              }
-              appStore.showError(`${sourceFile.name}: ${txtError.message}`)
-              return
-            }
-          }
-          appStore.showError(`${sourceFile.name}: ${t('admin.accounts.dataImportParseFailed')}`)
+          const message = error.message
+          appStore.showError(`${sourceFileName}: ${
+            message ? message : t('admin.accounts.dataImportParseFailed')
+          }`)
           return
         }
         throw error
@@ -846,12 +1325,24 @@ const handleImport = async () => {
       }
       addImportResult(res, await importOnePayload(importPlan.proxyTask))
     }
-    addImportResult(res, await importPayloadsConcurrently(importPlan.accountTasks))
+    const accountImportTasks: QueuedImportTask[] = [
+      ...importPlan.accountTasks.map((payload) => ({
+        ...payload,
+        run: () => importOnePayload(payload)
+      })),
+      ...codexTasks.map((payload) => ({
+        ...payload,
+        run: () => importOneCodexPayload(payload)
+      }))
+    ]
+    addImportResult(res, await importTasksConcurrently(accountImportTasks))
 
     result.value = res
 
     const msgParams: Record<string, unknown> = {
       account_created: res.account_created,
+      account_updated: res.account_updated,
+      account_skipped: res.account_skipped,
       account_failed: res.account_failed,
       proxy_created: res.proxy_created,
       proxy_reused: res.proxy_reused,
