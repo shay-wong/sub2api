@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountTestModal from '../AccountTestModal.vue'
+import { ACCOUNT_TEST_RECENT_STORAGE_KEY } from '@/utils/accountTestRecent'
 
 const { getAvailableModels, copyToClipboard } = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
@@ -68,7 +69,8 @@ function mountModal() {
         name: 'Gemini Image Test',
         platform: 'gemini',
         type: 'apikey',
-        status: 'active'
+        status: 'active',
+        updated_at: '2026-06-09T00:00:00Z'
       }
     } as any,
     global: {
@@ -88,6 +90,7 @@ function mountModal() {
 
 describe('AccountTestModal', () => {
   beforeEach(() => {
+    const localStorageValues = new Map<string, string>([['auth_token', 'test-token']])
     getAvailableModels.mockResolvedValue([
       { id: 'gemini-2.0-flash', display_name: 'Gemini 2.0 Flash' },
       { id: 'gemini-2.5-flash-image', display_name: 'Gemini 2.5 Flash Image' },
@@ -96,10 +99,14 @@ describe('AccountTestModal', () => {
     copyToClipboard.mockReset()
     Object.defineProperty(globalThis, 'localStorage', {
       value: {
-        getItem: vi.fn((key: string) => (key === 'auth_token' ? 'test-token' : null)),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn()
+        getItem: vi.fn((key: string) => localStorageValues.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => {
+          localStorageValues.set(key, value)
+        }),
+        removeItem: vi.fn((key: string) => {
+          localStorageValues.delete(key)
+        }),
+        clear: vi.fn(() => localStorageValues.clear())
       },
       configurable: true
     })
@@ -143,5 +150,11 @@ describe('AccountTestModal', () => {
     const preview = wrapper.find('img[alt="test-image-1"]')
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
+    expect(JSON.parse(localStorage.getItem(ACCOUNT_TEST_RECENT_STORAGE_KEY) || '{}')).toMatchObject({
+      '42:default': {
+        accountUpdatedAt: '2026-06-09T00:00:00Z',
+        testedAt: expect.any(Number)
+      }
+    })
   })
 })

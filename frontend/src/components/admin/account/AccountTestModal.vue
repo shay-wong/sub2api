@@ -240,6 +240,7 @@ import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
 import { runAccountConnectionTest, type AccountTestEvent } from '@/utils/accountTestRunner'
+import { accountTestStateFingerprint, markAccountRecentlyTested } from '@/utils/accountTestRecent'
 import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
@@ -387,12 +388,13 @@ const scrollToBottom = async () => {
 }
 
 const startTest = async () => {
-  if (!props.account || !selectedModelId.value) return
+  const account = props.account
+  if (!account || !selectedModelId.value) return
 
   resetState()
   status.value = 'connecting'
-  addLine(t('admin.accounts.startingTestForAccount', { name: props.account.name }), 'text-blue-400')
-  addLine(t('admin.accounts.testAccountTypeLabel', { type: props.account.type }), 'text-gray-400')
+  addLine(t('admin.accounts.startingTestForAccount', { name: account.name }), 'text-blue-400')
+  addLine(t('admin.accounts.testAccountTypeLabel', { type: account.type }), 'text-gray-400')
   addLine('', 'text-gray-300')
 
   abortStream()
@@ -401,13 +403,14 @@ const startTest = async () => {
 
   try {
     await runAccountConnectionTest({
-      accountId: props.account.id,
+      accountId: account.id,
       authToken: localStorage.getItem('auth_token'),
       modelId: selectedModelId.value,
       prompt: supportsImageTest.value ? testPrompt.value.trim() : '',
       signal: abortController.signal,
       onEvent: handleEvent
     })
+    markAccountRecentlyTested(account.id, 'default', accountTestStateFingerprint(account))
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
@@ -417,6 +420,7 @@ const startTest = async () => {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     errorMessage.value = msg
     addLine(`Error: ${msg}`, 'text-red-400')
+    markAccountRecentlyTested(account.id, 'default', accountTestStateFingerprint(account))
   }
 }
 

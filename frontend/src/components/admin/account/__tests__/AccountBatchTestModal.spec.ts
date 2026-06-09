@@ -1,5 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  ACCOUNT_TEST_RECENT_SKIP_WINDOW_MINUTES,
+  ACCOUNT_TEST_RECENT_STORAGE_KEY
+} from '@/utils/accountTestRecent'
 import AccountBatchTestModal from '../AccountBatchTestModal.vue'
 
 const { getAvailableModels, deleteAccount } = vi.hoisted(() => ({
@@ -48,7 +52,7 @@ function createStreamResponse(success: boolean, error?: string) {
       ]
     : [
         'data: {"type":"test_start","model":"claude-sonnet-4-5"}\n',
-        `data: {"type":"error","error":"${error || 'failed'}"}\n`
+        `data: ${JSON.stringify({ type: 'error', error: error || 'failed' })}\n`
       ]
   let index = 0
   return {
@@ -83,27 +87,34 @@ function createNeverEndingResponse() {
   }
 }
 
+const accountFixture = (overrides: Record<string, unknown>) => ({
+  updated_at: '2026-06-09T00:00:00Z',
+  ...overrides
+})
+
 const accounts = [
-  {
+  accountFixture({
     id: 1,
     name: 'account-one',
     platform: 'anthropic',
     type: 'oauth',
     status: 'active'
-  },
-  {
+  }),
+  accountFixture({
     id: 2,
     name: 'account-two',
     platform: 'openai',
     type: 'apikey',
     status: 'active'
-  }
+  })
 ] as any
 
 const BATCH_TEST_CONCURRENCY = 20
 const MODEL_LOAD_CONCURRENCY = 10
 const BATCH_TEST_START_STAGGER_MIN_MS = 5
 const BATCH_TEST_START_STAGGER_MAX_MS = 25
+const BATCH_TEST_TIMEOUT_MS = 120_000
+const BATCH_TEST_RECENT_HINT_REFRESH_MS = 30_000
 const BATCH_TEST_STAGGER_RANGE_MS = BATCH_TEST_START_STAGGER_MAX_MS - BATCH_TEST_START_STAGGER_MIN_MS + 1
 
 const mockBatchTestStartStagger = (value = 0) => (
@@ -114,7 +125,12 @@ const mockedBatchTestStaggerMs = (value: number) => (
   BATCH_TEST_START_STAGGER_MIN_MS + Math.floor(value * BATCH_TEST_STAGGER_RANGE_MS)
 )
 
-const manyAccounts = Array.from({ length: BATCH_TEST_CONCURRENCY + 1 }, (_, index) => ({
+const withAbortSignal = (stream: ReturnType<typeof createNeverEndingResponse>, init?: RequestInit) => {
+  init?.signal?.addEventListener('abort', stream.abortRead)
+  return stream.response
+}
+
+const manyAccounts = Array.from({ length: BATCH_TEST_CONCURRENCY + 1 }, (_, index) => accountFixture({
   id: index + 1,
   name: `account-${index + 1}`,
   platform: index % 2 === 0 ? 'anthropic' : 'openai',
@@ -248,7 +264,7 @@ describe('AccountBatchTestModal', () => {
       modelLoadResolvers.push(resolve)
     }))
 
-    mountModal(Array.from({ length: MODEL_LOAD_CONCURRENCY + 1 }, (_, index) => ({
+    mountModal(Array.from({ length: MODEL_LOAD_CONCURRENCY + 1 }, (_, index) => accountFixture({
       id: index + 1,
       name: `account-${index + 1}`,
       platform: 'anthropic',
@@ -328,9 +344,9 @@ describe('AccountBatchTestModal', () => {
 
     try {
       const wrapper = mountModal([
-        { id: 1, name: 'account-one', platform: 'anthropic', type: 'oauth', status: 'active' },
-        { id: 2, name: 'account-two', platform: 'openai', type: 'apikey', status: 'active' },
-        { id: 3, name: 'account-three', platform: 'anthropic', type: 'oauth', status: 'active' }
+        accountFixture({ id: 1, name: 'account-one', platform: 'anthropic', type: 'oauth', status: 'active' }),
+        accountFixture({ id: 2, name: 'account-two', platform: 'openai', type: 'apikey', status: 'active' }),
+        accountFixture({ id: 3, name: 'account-three', platform: 'anthropic', type: 'oauth', status: 'active' })
       ] as any)
 
       await flushPromises()
@@ -354,6 +370,209 @@ describe('AccountBatchTestModal', () => {
 
       expect(global.fetch).toHaveBeenCalledTimes(3)
       expect(randomSpy).toHaveBeenCalled()
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips recently tested accounts by default', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T12:00:00Z'))
+    const randomSpy = mockBatchTestStartStagger()
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(true)) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await flushPromises()
+
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      expect(wrapper.emitted('completed')?.[0]?.[0]).toMatchObject({
+        success: 1,
+        failed: 0,
+        skipped: 0
+      })
+
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      expect(wrapper.text()).toContain(`admin.accounts.bulkTest.logSkippedRecent {"minutes":${ACCOUNT_TEST_RECENT_SKIP_WINDOW_MINUTES}}`)
+      expect(wrapper.emitted('completed')?.[1]?.[0]).toMatchObject({
+        success: 0,
+        failed: 0,
+        skipped: 1
+      })
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('can force retesting recently tested accounts when skip is disabled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T12:00:00Z'))
+    const randomSpy = mockBatchTestStartStagger()
+    localStorage.setItem(ACCOUNT_TEST_RECENT_STORAGE_KEY, JSON.stringify({
+      '1:default': { accountUpdatedAt: '2026-06-09T00:00:00Z', testedAt: Date.now() }
+    }))
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(true)) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      expect(wrapper.get('[data-test="batch-test-skip-recent-option"]').text()).toContain('"count":1')
+      await wrapper.get('[data-test="batch-test-skip-recent-option"] input').setValue(false)
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await flushPromises()
+
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      expect(wrapper.emitted('completed')?.[0]?.[0]).toMatchObject({
+        success: 1,
+        failed: 0,
+        skipped: 0
+      })
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not skip a recently tested account after the account was updated', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T12:00:00Z'))
+    const randomSpy = mockBatchTestStartStagger()
+    localStorage.setItem(ACCOUNT_TEST_RECENT_STORAGE_KEY, JSON.stringify({
+      '1:default': { accountUpdatedAt: '2026-06-09T00:00:00Z', testedAt: Date.now() }
+    }))
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse(true)) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({
+          id: 1,
+          name: 'account-one',
+          platform: 'openai',
+          type: 'oauth',
+          status: 'active',
+          updated_at: '2026-06-09T12:00:01Z'
+        })
+      ] as any)
+
+      await flushPromises()
+      expect(wrapper.get('[data-test="batch-test-skip-recent-option"]').text()).toContain('"count":0')
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await flushPromises()
+
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+      expect(wrapper.emitted('completed')?.[0]?.[0]).toMatchObject({
+        success: 1,
+        failed: 0,
+        skipped: 0
+      })
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('refreshes the recent-test skip estimate while the modal stays open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-09T12:00:00Z'))
+    localStorage.setItem(ACCOUNT_TEST_RECENT_STORAGE_KEY, JSON.stringify({
+      '1:default': {
+        accountUpdatedAt: '2026-06-09T00:00:00Z',
+        testedAt: Date.now() - (ACCOUNT_TEST_RECENT_SKIP_WINDOW_MINUTES * 60 * 1000) + 1000
+      }
+    }))
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      expect(wrapper.get('[data-test="batch-test-skip-recent-option"]').text()).toContain('"count":1')
+
+      await vi.advanceTimersByTimeAsync(BATCH_TEST_RECENT_HINT_REFRESH_MS)
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="batch-test-skip-recent-option"]').text()).toContain('"count":0')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks a stuck account test as failed after the per-account timeout', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const stream = createNeverEndingResponse()
+    global.fetch = vi.fn().mockImplementation((_url, init) => Promise.resolve(withAbortSignal(stream, init))) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="batch-test-summary"]').text()).toContain('"running":1')
+
+      await vi.advanceTimersByTimeAsync(BATCH_TEST_TIMEOUT_MS)
+      await flushPromises()
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('admin.accounts.bulkTest.logTimeout {"seconds":120}')
+      expect(wrapper.emitted('completed')?.[0]?.[0]).toMatchObject({
+        success: 0,
+        failed: 1,
+        failedIds: [1]
+      })
+      expect(wrapper.emitted('running-change')).toEqual([[true], [false]])
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('groups timed-out failed accounts as timeout instead of HTTP 120', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const stream = createNeverEndingResponse()
+    global.fetch = vi.fn().mockImplementation((_url, init) => Promise.resolve(withAbortSignal(stream, init))) as any
+
+    try {
+      const wrapper = mountModal([
+        accountFixture({ id: 1, name: 'account-one', platform: 'openai', type: 'oauth', status: 'active' })
+      ] as any)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+
+      await vi.advanceTimersByTimeAsync(BATCH_TEST_TIMEOUT_MS)
+      await flushPromises()
+      await flushPromises()
+
+      await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+
+      const confirmText = wrapper.get('[data-test="confirm-dialog"]').text()
+      expect(confirmText).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupTimeout')
+      expect(confirmText).not.toContain('admin.accounts.bulkTest.deleteFailedErrorGroupCode {"code":"120"}')
     } finally {
       randomSpy.mockRestore()
       vi.useRealTimers()
@@ -391,6 +610,11 @@ describe('AccountBatchTestModal', () => {
       expect(nativeConfirm).not.toHaveBeenCalled()
       expect(deleteAccount).not.toHaveBeenCalled()
       expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedSummary {"count":1}')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupUnknown')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).not.toContain('account-two')
+
+      await wrapper.get('[data-test="batch-test-delete-error-group"] button').trigger('click')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('account-two')
 
       await wrapper.get('[data-test="confirm-submit"]').trigger('click')
       await flushPromises()
@@ -410,10 +634,58 @@ describe('AccountBatchTestModal', () => {
     }
   })
 
+  it('groups failed-account deletion candidates by error code and treats 429 as warning', async () => {
+    vi.useFakeTimers()
+    const randomSpy = mockBatchTestStartStagger()
+    const failedAccounts = [
+      accountFixture({ id: 1, name: 'auth-failed', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 2, name: 'rate-limited-a', platform: 'openai', type: 'oauth', status: 'active' }),
+      accountFixture({ id: 3, name: 'rate-limited-b', platform: 'openai', type: 'oauth', status: 'active' })
+    ] as any
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 401: unauthorized'))
+      .mockResolvedValueOnce(createStreamResponse(false, 'API returned 429: rate limited'))
+      .mockResolvedValueOnce(createStreamResponse(false, '{"error":{"code":"429"}}')) as any
+
+    try {
+      const wrapper = mountModal(failedAccounts)
+
+      await flushPromises()
+      await wrapper.get('[data-test="batch-test-start"]').trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync((failedAccounts.length - 1) * mockedBatchTestStaggerMs(0))
+      await flushPromises()
+      await flushPromises()
+
+      await wrapper.get('[data-test="batch-test-delete-all-failed"]').trigger('click')
+      await flushPromises()
+
+      const groups = wrapper.findAll('[data-test="batch-test-delete-error-group"]')
+      expect(groups).toHaveLength(2)
+      expect(groups.map(group => group.attributes('data-severity'))).toEqual(['error', 'warning'])
+      expect(groups[0].text()).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupCode {"code":"401"}')
+      expect(groups[0].text()).toContain('admin.accounts.bulkTest.deleteFailedGroupCount {"count":1}')
+      expect(groups[1].text()).toContain('admin.accounts.bulkTest.deleteFailedErrorGroupCode {"code":"429"}')
+      expect(groups[1].text()).toContain('admin.accounts.bulkTest.deleteFailedGroupCount {"count":2}')
+      expect(wrapper.get('[data-test="confirm-dialog"]').text()).not.toContain('rate-limited-a')
+
+      await groups[1].find('button').trigger('click')
+      const detailAccounts = wrapper.findAll('[data-test="batch-test-delete-error-account"]')
+      expect(detailAccounts).toHaveLength(2)
+      expect(detailAccounts[0].text()).toContain('rate-limited-a')
+      expect(detailAccounts[0].text()).toContain('#2')
+      expect(detailAccounts[1].text()).toContain('rate-limited-b')
+      expect(detailAccounts[1].text()).toContain('#3')
+    } finally {
+      randomSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('fans out all failed account deletions like the original account bulk delete', async () => {
     vi.useFakeTimers()
     const randomSpy = mockBatchTestStartStagger()
-    const failedAccounts = Array.from({ length: 6 }, (_, index) => ({
+    const failedAccounts = Array.from({ length: 6 }, (_, index) => accountFixture({
       id: index + 1,
       name: `account-${index + 1}`,
       platform: 'anthropic',
@@ -449,8 +721,14 @@ describe('AccountBatchTestModal', () => {
 
       expect(deleteAccount).toHaveBeenCalledTimes(failedAccounts.length)
       expect(deleteAccount.mock.calls.map(([id]) => id)).toEqual([1, 2, 3, 4, 5, 6])
+      expect(wrapper.get('[data-test="batch-test-delete-progress"]').text()).toContain('admin.accounts.bulkTest.deleteFailedProgress {"completed":0,"total":6}')
 
-      deleteResolvers.forEach(resolve => resolve({ message: 'ok' }))
+      deleteResolvers[0]({ message: 'ok' })
+      deleteResolvers[1]({ message: 'ok' })
+      await flushPromises()
+      expect(wrapper.get('[data-test="batch-test-delete-progress"]').text()).toContain('admin.accounts.bulkTest.deleteFailedProgress {"completed":2,"total":6}')
+
+      deleteResolvers.slice(2).forEach(resolve => resolve({ message: 'ok' }))
       await flushPromises()
 
       expect(wrapper.emitted('deleted')?.[0]?.[0]).toEqual({
@@ -469,7 +747,7 @@ describe('AccountBatchTestModal', () => {
     vi.useFakeTimers()
     const randomSpy = mockBatchTestStartStagger()
     const failedAccounts = [
-      { id: 1, name: 'account-1', platform: 'anthropic', type: 'oauth', status: 'active' }
+      accountFixture({ id: 1, name: 'account-1', platform: 'anthropic', type: 'oauth', status: 'active' })
     ] as any
     let resolveDelete: ((value: { message: string }) => void) | undefined
     global.fetch = vi.fn().mockImplementation(() => Promise.resolve(createStreamResponse(false, 'token expired'))) as any

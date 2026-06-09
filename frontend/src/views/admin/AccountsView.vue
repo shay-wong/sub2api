@@ -1372,17 +1372,21 @@ const closeBatchTestModal = () => {
   batchTestRunning.value = false
   batchTestAccounts.value = []
 }
-const handleBatchTestCompleted = (payload: { success: number; failed: number; failedIds: number[]; errors: string[] }) => {
+const handleBatchTestCompleted = (payload: { success: number; failed: number; skipped: number; failedIds: number[]; errors: string[] }) => {
   if (payload.failed > 0) {
     setSelectedIds(payload.failedIds)
     appStore.showError(t('admin.accounts.bulkActions.testPartialSuccess', {
       success: payload.success,
       failed: payload.failed,
+      skipped: payload.skipped,
       errors: payload.errors.join('; ')
     }))
   } else {
     clearSelection()
-    appStore.showSuccess(t('admin.accounts.bulkActions.testSuccess', { count: payload.success }))
+    appStore.showSuccess(t('admin.accounts.bulkActions.testSuccess', {
+      count: payload.success,
+      skipped: payload.skipped
+    }))
   }
   reload()
 }
