@@ -41,7 +41,7 @@
           <span class="text-sm text-gray-700 dark:text-gray-300"
             >{{ t('pagination.perPage') }}:</span
           >
-          <div class="page-size-select w-20">
+          <div class="page-size-select min-w-[6.5rem]">
             <Select
               :model-value="pageSize"
               :options="pageSizeSelectOptions"
@@ -122,7 +122,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import Select from './Select.vue'
-import { getConfiguredTablePageSizeOptions, normalizeTablePageSize } from '@/utils/tablePreferences'
+import { getConfiguredTablePageSizeOptions } from '@/utils/tablePreferences'
 import { setPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
@@ -161,11 +161,18 @@ const toItem = computed(() => {
   return to > props.total ? props.total : to
 })
 
+const sortedPageSizeOptions = computed(() => (
+  Array.from(
+    new Set(props.pageSizeOptions.filter((size) => Number.isInteger(size) && size > 0))
+  ).sort((a, b) => a - b)
+))
+
 const pageSizeSelectOptions = computed(() => {
+  const currentPageSize = Number(props.pageSize)
   const options = Array.from(
     new Set([
-      ...getConfiguredTablePageSizeOptions(),
-      normalizeTablePageSize(props.pageSize)
+      ...sortedPageSizeOptions.value,
+      ...(Number.isInteger(currentPageSize) && currentPageSize > 0 ? [currentPageSize] : [])
     ])
   ).sort((a, b) => a - b)
 
@@ -176,6 +183,19 @@ const pageSizeSelectOptions = computed(() => {
 })
 
 const jumpPage = ref('')
+
+const normalizePageSizeToOptions = (value: string | number) => {
+  const size = Number(value)
+  const options = sortedPageSizeOptions.value
+  if (!Number.isInteger(size) || options.length === 0) {
+    return options[0] ?? props.pageSize
+  }
+
+  for (const option of options) {
+    if (option >= size) return option
+  }
+  return options[options.length - 1]
+}
 
 const visiblePages = computed(() => {
   const pages: (number | string)[] = []
@@ -224,7 +244,7 @@ const goToPage = (newPage: number) => {
 
 const handlePageSizeChange = (value: string | number | boolean | null) => {
   if (value === null || typeof value === 'boolean') return
-  const newPageSize = normalizeTablePageSize(typeof value === 'string' ? parseInt(value, 10) : value)
+  const newPageSize = normalizePageSizeToOptions(value)
   setPersistedPageSize(newPageSize)
   emit('update:pageSize', newPageSize)
 }
@@ -243,5 +263,9 @@ const submitJump = () => {
 <style scoped>
 .page-size-select :deep(.select-trigger) {
   @apply px-3 py-1.5 text-sm;
+}
+
+.page-size-select :deep(.select-value) {
+  @apply min-w-[4ch];
 }
 </style>
