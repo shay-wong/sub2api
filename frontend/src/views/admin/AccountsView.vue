@@ -394,6 +394,51 @@
     />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
+    <ConfirmDialog
+      :show="showBulkDeleteDialog"
+      :title="t('admin.accounts.bulkDeleteTitle')"
+      :message="t('admin.accounts.bulkDeleteConfirm', { count: bulkDeleteSelectedCount })"
+      :confirm-text="deletingBulk ? t('common.processing') : t('common.delete')"
+      :cancel-text="t('common.cancel')"
+      :danger="true"
+      :confirm-disabled="deletingBulk"
+      @confirm="confirmBulkDelete"
+      @cancel="closeBulkDeleteDialog"
+    >
+      <div class="space-y-3">
+        <div class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-900/20">
+          <div class="flex gap-2">
+            <Icon name="exclamationTriangle" size="sm" :stroke-width="2" class="mt-0.5 shrink-0 text-red-600 dark:text-red-300" />
+            <div class="space-y-1">
+              <p class="text-sm font-medium text-red-800 dark:text-red-200">
+                {{ t('admin.accounts.bulkDeleteSummary', { count: bulkDeleteSelectedCount }) }}
+              </p>
+              <p class="text-xs leading-relaxed text-red-700 dark:text-red-300">
+                {{ t('admin.accounts.bulkDeleteWarning') }}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div v-if="bulkDeletePreviewAccounts.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/70">
+          <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-300">
+            {{ t('admin.accounts.bulkDeletePreviewTitle') }}
+          </div>
+          <ul class="space-y-1.5">
+            <li
+              v-for="account in bulkDeletePreviewAccounts"
+              :key="account.id"
+              class="flex min-w-0 items-center justify-between gap-3 text-sm text-gray-700 dark:text-dark-200"
+            >
+              <span class="truncate">{{ account.name }}</span>
+              <span class="shrink-0 text-xs text-gray-400 dark:text-dark-400">#{{ account.id }}</span>
+            </li>
+          </ul>
+          <p v-if="bulkDeleteMoreCount > 0" class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+            {{ t('admin.accounts.bulkDeleteMore', { count: bulkDeleteMoreCount }) }}
+          </p>
+        </div>
+      </div>
+    </ConfirmDialog>
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
       <div class="space-y-3">
         <div>
@@ -514,6 +559,8 @@ const showBulkEdit = ref(false)
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
+const showBulkDeleteDialog = ref(false)
+const deletingBulk = ref(false)
 const showReAuth = ref(false)
 const showTest = ref(false)
 const showBatchTest = ref(false)
@@ -901,6 +948,7 @@ const isAnyModalOpen = computed(() => {
     showBulkEdit.value ||
     showTempUnsched.value ||
     showDeleteDialog.value ||
+    showBulkDeleteDialog.value ||
     showReAuth.value ||
     showTest.value ||
     showBatchTest.value ||
@@ -1258,7 +1306,54 @@ const toggleSelectAllVisible = (event: Event) => {
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
-const handleBulkDelete = async () => { if(!confirm(t('common.confirm'))) return; try { await Promise.all(selIds.value.map(id => adminAPI.accounts.delete(id))); clearSelection(); reload() } catch (error) { console.error('Failed to bulk delete accounts:', error) } }
+const bulkDeleteSelectedCount = computed(() => selIds.value.length)
+const selectedAccountsForBulkDelete = computed(() => {
+  const selected = new Set(selIds.value)
+  return accounts.value.filter(account => selected.has(account.id))
+})
+const bulkDeletePreviewAccounts = computed(() => selectedAccountsForBulkDelete.value.slice(0, 5))
+const bulkDeleteMoreCount = computed(() => Math.max(0, bulkDeleteSelectedCount.value - bulkDeletePreviewAccounts.value.length))
+const handleBulkDelete = () => {
+  if (selIds.value.length === 0) return
+  showBulkDeleteDialog.value = true
+}
+const closeBulkDeleteDialog = () => {
+  if (deletingBulk.value) return
+  showBulkDeleteDialog.value = false
+}
+const confirmBulkDelete = async () => {
+  if (deletingBulk.value) return
+  const accountIds = [...selIds.value]
+  if (accountIds.length === 0) {
+    showBulkDeleteDialog.value = false
+    return
+  }
+
+  deletingBulk.value = true
+  try {
+    const results = await Promise.allSettled(accountIds.map(id => adminAPI.accounts.delete(id)))
+    const deletedIds = accountIds.filter((_, index) => results[index].status === 'fulfilled')
+    const failedIds = accountIds.filter((_, index) => results[index].status === 'rejected')
+
+    if (deletedIds.length > 0) {
+      removeSelectedAccounts(deletedIds)
+    }
+    if (failedIds.length > 0) {
+      setSelectedIds(failedIds)
+      appStore.showError(t('admin.accounts.bulkDeletePartial', { success: deletedIds.length, failed: failedIds.length }))
+    } else {
+      clearSelection()
+      appStore.showSuccess(t('admin.accounts.bulkDeleteSuccess', { count: deletedIds.length }))
+    }
+    showBulkDeleteDialog.value = false
+    reload()
+  } catch (error) {
+    console.error('Failed to bulk delete accounts:', error)
+    appStore.showError(t('admin.accounts.bulkDeleteFailed'))
+  } finally {
+    deletingBulk.value = false
+  }
+}
 const openBatchTestModal = () => {
   const accountIds = [...selIds.value]
   if (accountIds.length === 0) return

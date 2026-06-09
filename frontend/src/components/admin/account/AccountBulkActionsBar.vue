@@ -25,7 +25,7 @@
     </div>
     <div class="flex gap-2">
       <template v-if="selectedIds.length > 0">
-        <button @click="$emit('delete')" class="btn btn-danger btn-sm">{{ t('admin.accounts.bulkActions.delete') }}</button>
+        <button @click="$emit('delete')" class="btn btn-danger btn-sm" data-test="bulk-delete-accounts">{{ t('admin.accounts.bulkActions.delete') }}</button>
         <button
           @click="$emit('test')"
           class="btn btn-secondary btn-sm"

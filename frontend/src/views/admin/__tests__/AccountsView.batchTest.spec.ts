@@ -9,6 +9,7 @@ const {
   getBatchTodayStats,
   getAllProxies,
   getAllGroups,
+  deleteAccount,
   showError,
   showSuccess,
   showInfo
@@ -18,6 +19,7 @@ const {
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
+  deleteAccount: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn()
@@ -29,7 +31,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      delete: vi.fn(),
+      delete: deleteAccount,
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
@@ -102,6 +104,20 @@ const ImportDataModalStub = {
   `
 }
 
+const ConfirmDialogStub = {
+  props: ['show', 'title', 'message', 'confirmText', 'cancelText', 'danger', 'confirmDisabled'],
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-test="confirm-dialog">
+      <div data-test="confirm-title">{{ title }}</div>
+      <div data-test="confirm-message">{{ message }}</div>
+      <slot />
+      <button data-test="confirm-cancel" @click="$emit('cancel')">{{ cancelText }}</button>
+      <button data-test="confirm-submit" :disabled="confirmDisabled" @click="$emit('confirm')">{{ confirmText }}</button>
+    </div>
+  `
+}
+
 describe('admin AccountsView batch test', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -114,6 +130,7 @@ describe('admin AccountsView batch test', () => {
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
+    deleteAccount.mockReset()
 
     listAccounts.mockResolvedValue({
       items: [
@@ -151,6 +168,7 @@ describe('admin AccountsView batch test', () => {
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
+    deleteAccount.mockResolvedValue({ message: 'ok' })
   })
 
   it('opens the batch test dialog for selected accounts', async () => {
@@ -322,5 +340,75 @@ describe('admin AccountsView batch test', () => {
 
     expect(listAccounts).toHaveBeenCalledTimes(3)
     expect(wrapper.get('[data-test="import-data-modal"]').attributes('data-show')).toBe('false')
+  })
+
+  it('uses the custom confirm dialog for bulk delete and deletes selected accounts', async () => {
+    const nativeConfirm = vi.fn()
+    vi.stubGlobal('confirm', nativeConfirm)
+
+    try {
+      const wrapper = mount(AccountsView, {
+        global: {
+          stubs: {
+            AppLayout: { template: '<div><slot /></div>' },
+            TablePageLayout: {
+              template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+            },
+            DataTable: DataTableStub,
+            Pagination: true,
+            ConfirmDialog: ConfirmDialogStub,
+            AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+            AccountTableFilters: { template: '<div></div>' },
+            AccountActionMenu: true,
+            AccountBatchTestModal: AccountBatchTestModalStub,
+            ImportDataModal: ImportDataModalStub,
+            ReAuthAccountModal: true,
+            AccountTestModal: true,
+            AccountStatsModal: true,
+            ScheduledTestsPanel: true,
+            SyncFromCrsModal: true,
+            TempUnschedStatusModal: true,
+            ErrorPassthroughRulesModal: true,
+            TLSFingerprintProfilesModal: true,
+            CreateAccountModal: true,
+            EditAccountModal: true,
+            BulkEditAccountModal: true,
+            PlatformTypeBadge: true,
+            AccountCapacityCell: true,
+            AccountStatusIndicator: true,
+            AccountTodayStatsCell: true,
+            AccountGroupsCell: true,
+            AccountUsageCell: true,
+            Icon: true
+          }
+        }
+      })
+
+      await flushPromises()
+      const rows = wrapper.findAll('[data-test="account-row"]')
+      await rows[0].find('input[type="checkbox"]').trigger('change')
+      await rows[1].find('input[type="checkbox"]').trigger('change')
+
+      await wrapper.get('[data-test="bulk-delete-accounts"]').trigger('click')
+      await flushPromises()
+
+      expect(nativeConfirm).not.toHaveBeenCalled()
+      const dialog = wrapper.get('[data-test="confirm-dialog"]')
+      expect(dialog.text()).toContain('admin.accounts.bulkDeleteTitle')
+      expect(dialog.text()).toContain('admin.accounts.bulkDeleteConfirm {"count":2}')
+      expect(dialog.text()).toContain('admin.accounts.bulkDeleteSummary {"count":2}')
+      expect(dialog.text()).toContain('account-one')
+      expect(dialog.text()).toContain('account-two')
+
+      await wrapper.get('[data-test="confirm-submit"]').trigger('click')
+      await flushPromises()
+
+      expect(deleteAccount).toHaveBeenCalledTimes(2)
+      expect(deleteAccount.mock.calls.map(([id]) => id)).toEqual([1, 2])
+      expect(showSuccess).toHaveBeenCalledWith('admin.accounts.bulkDeleteSuccess {"count":2}')
+      expect(listAccounts).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
