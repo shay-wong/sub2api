@@ -29,30 +29,24 @@
     </template>
 
     <!-- Error Info Indicator -->
-    <div v-if="hasError && account.error_message" class="group/error relative min-w-0">
-      <div
-        class="flex max-w-[18rem] items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-900/20 dark:text-red-300"
-        :title="account.error_message"
+    <div v-if="hasError && account.error_message" class="group/error relative">
+      <span
+        class="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
+        data-testid="account-error-code"
       >
         <Icon name="exclamationTriangle" size="xs" :stroke-width="2" class="shrink-0" />
-        <span
-          v-if="visibleErrorCode"
-          class="shrink-0 rounded bg-red-100 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-red-700 dark:bg-red-900/50 dark:text-red-200"
-        >
-          {{ visibleErrorCode }}
-        </span>
-        <span class="truncate">{{ visibleErrorSummary }}</span>
-      </div>
-      <!-- Tooltip - 向下显示 -->
+        {{ visibleErrorCode || 'error' }}
+      </span>
+      <!-- Tooltip -->
       <div
-        class="invisible absolute left-0 top-full z-[100] mt-1.5 min-w-[200px] max-w-[300px] rounded-lg bg-gray-800 px-3 py-2 text-xs text-white opacity-0 shadow-xl transition-all duration-200 group-hover/error:visible group-hover/error:opacity-100 dark:bg-gray-900"
+        class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 whitespace-normal rounded bg-gray-900 px-3 py-2 text-left text-xs leading-relaxed text-white opacity-0 transition-opacity group-hover/error:opacity-100 dark:bg-gray-700"
+        data-testid="account-error-tooltip"
       >
         <div class="whitespace-pre-wrap break-words leading-relaxed text-gray-300">
           {{ account.error_message }}
         </div>
-        <!-- 上方小三角 -->
         <div
-          class="absolute bottom-full left-3 border-[6px] border-transparent border-b-gray-800 dark:border-b-gray-900"
+          class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"
         ></div>
       </div>
     </div>
@@ -291,14 +285,15 @@ const hasError = computed(() => {
 
 const extractErrorCode = (message: string | null | undefined): string => {
   if (!message) return ''
+  const cleaned = message.trim()
   const patterns = [
-    /"(?:(?:error_)?code|status_code|status)"\s*:\s*"?(?<code>[A-Za-z0-9_.-]+)"?/i,
-    /\b(?:error_code|status_code|status|code|HTTP)\s*[:=]\s*["']?(?<code>[A-Za-z0-9_.-]+)["']?/i,
-    /\b(?:invalid_[a-z0-9_]+|rate_limit_exceeded|insufficient_quota|context_length_exceeded|upstream_error)\b/i,
+    /"(?:(?:error_)?code|status_code)"\s*:\s*"?(?<code>[A-Za-z0-9_.-]+)"?/i,
+    /\b(?:error_code|status_code|code|HTTP)\s*[:=]\s*["']?(?<code>[A-Za-z0-9_.-]+)["']?/i,
+    /\b(?:token_invalidated|app_session_terminated|refresh_token_reused|invalid_[a-z0-9_]+|rate_limit_exceeded|rate_limit_error|invalid_request_error|insufficient_quota|context_length_exceeded|upstream_error)\b/i,
     /\b(\d{3})\b/
   ]
   for (const pattern of patterns) {
-    const match = message.match(pattern)
+    const match = cleaned.match(pattern)
     if (!match) continue
     const rawCode = (match.groups?.code || match[1] || match[0]).replace(/^["']|["']$/g, '')
     if (!rawCode) continue
@@ -306,24 +301,12 @@ const extractErrorCode = (message: string | null | undefined): string => {
     if (/^\d{3}$/.test(rawCode) && (numericCode < 100 || numericCode > 599)) continue
     return rawCode
   }
+  const firstToken = cleaned.match(/^[A-Za-z][A-Za-z0-9_]*_[A-Za-z0-9_.-]+/)
+  if (firstToken) return firstToken[0]
   return ''
 }
 
-const summarizeErrorMessage = (message: string | null | undefined): string => {
-  const cleaned = String(message || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!cleaned) return ''
-
-  const colonIndex = cleaned.indexOf(':')
-  const summary = colonIndex >= 0 && colonIndex < cleaned.length - 1
-    ? cleaned.slice(colonIndex + 1).trim()
-    : cleaned
-  return summary || cleaned
-}
-
 const visibleErrorCode = computed(() => extractErrorCode(props.account.error_message))
-const visibleErrorSummary = computed(() => summarizeErrorMessage(props.account.error_message))
 
 const isQuotaExceeded = computed(() => {
   const exceeded = (used?: number | null, limit?: number | null) =>

@@ -160,7 +160,7 @@ describe('AccountStatusIndicator', () => {
     expect(wrapper.text()).toContain('admin.accounts.status.creditsExhausted')
   })
 
-  it('错误状态直接显示错误码和错误摘要', () => {
+  it('错误状态主界面只显示错误码，详情放在 tooltip', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {
         account: makeAccount({
@@ -177,17 +177,26 @@ describe('AccountStatusIndicator', () => {
     })
 
     expect(wrapper.text()).toContain('admin.accounts.status.error')
-    expect(wrapper.text()).toContain('429')
-    expect(wrapper.text()).toContain('rate limited')
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).toContain('429')
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).not.toContain('rate limited')
+    expect(wrapper.get('[data-testid="account-error-tooltip"]').text()).toContain('upstream status_code=429: rate limited')
   })
 
-  it('错误状态支持直接显示字符串错误码', () => {
+  it('错误状态支持字符串错误码且不在主界面暴露 JSON 详情', () => {
+    const errorMessage = `token_invalidated ${JSON.stringify({
+      error: {
+        message: 'Your session has ended. Please log in again.',
+        type: 'invalid_request_error',
+        code: 'token_invalidated'
+      }
+    })}`
+
     const wrapper = mount(AccountStatusIndicator, {
       props: {
         account: makeAccount({
           id: 6,
           status: 'error',
-          error_message: 'error_code=invalid_api_key: token revoked'
+          error_message: errorMessage
         })
       },
       global: {
@@ -197,7 +206,47 @@ describe('AccountStatusIndicator', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('invalid_api_key')
-    expect(wrapper.text()).toContain('token revoked')
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).toContain('token_invalidated')
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).not.toContain('Your session has ended')
+    expect(wrapper.get('[data-testid="account-error-tooltip"]').text()).toContain('Your session has ended')
+  })
+
+  it('错误状态优先显示真实 code，不把 status 当错误码', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 7,
+          status: 'error',
+          error_message: '{"status":"error","error":{"code":"token_invalidated","message":"detail"}}'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).toContain('token_invalidated')
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).not.toBe('error')
+  })
+
+  it('错误状态支持裸错误码', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          id: 8,
+          status: 'error',
+          error_message: 'token_invalidated'
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.get('[data-testid="account-error-code"]').text()).toContain('token_invalidated')
   })
 })
