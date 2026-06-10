@@ -215,6 +215,76 @@ describe('admin UsageView distribution metric toggles', () => {
     wrapper.unmount()
   })
 
+  it('reuses the exact total while only the usage page changes', async () => {
+    list
+      .mockResolvedValueOnce({
+        items: [{ id: 1 }],
+        total: 21,
+        pages: 2,
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: 2 }],
+        total: 41,
+        pages: 3,
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: 2 }],
+        total: 41,
+        pages: 3,
+      })
+    count
+      .mockResolvedValueOnce({ total: 45 })
+      .mockResolvedValueOnce({ total: 46 })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          AuditLogModal: true,
+          Pagination: {
+            props: ['total', 'totalKnown', 'totalLoading', 'hasNextPage'],
+            template: '<div data-test="pagination" :data-total="total" :data-total-known="String(totalKnown)" :data-total-loading="String(totalLoading)" :data-has-next-page="String(hasNextPage)" />',
+          },
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(count).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total')).toBe('45')
+
+    ;(wrapper.vm as any).handlePageChange(2)
+    await flushPromises()
+    await flushPromises()
+
+    expect(list.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ page: 2 }))
+    expect(count).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total')).toBe('45')
+
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    await flushPromises()
+
+    expect(count).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="pagination"]').attributes('data-total')).toBe('46')
+    wrapper.unmount()
+  })
+
   it('keeps previous model stats visible during refresh until new data arrives', async () => {
     // 首次加载返回 A
     getModelStats.mockResolvedValueOnce({ models: [{ model: 'A', total_tokens: 10 }] })

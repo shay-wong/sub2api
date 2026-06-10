@@ -210,6 +210,8 @@ let chartReqSeq = 0
 let statsReqSeq = 0
 let modelStatsReqSeq = 0
 let usageCountReqSeq = 0
+let usageCountInFlightKey = ''
+let exactUsageTotalCache: { key: string; total: number } | null = null
 const USAGE_COUNT_TIMEOUT_MS = 6000
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
@@ -336,12 +338,55 @@ const buildUsageListParams = (
   }
 }
 
+const stableUsageQueryKey = (params: AdminUsageQueryParams): string => {
+  const normalized: Record<string, unknown> = {}
+  Object.keys(params).sort().forEach((key) => {
+    const value = (params as Record<string, unknown>)[key]
+    if (value !== undefined && value !== null && value !== '') {
+      normalized[key] = value
+    }
+  })
+  return JSON.stringify(normalized)
+}
+
+const buildUsageTotalCacheKey = () => stableUsageQueryKey(
+  buildUsageListParams(1, pagination.page_size, false)
+)
+
+const getCachedExactUsageTotal = (key: string): number | null => (
+  exactUsageTotalCache?.key === key ? exactUsageTotalCache.total : null
+)
+
+const cacheExactUsageTotal = (key: string, total: number) => {
+  exactUsageTotalCache = { key, total }
+}
+
+const applyExactUsageTotal = (total: number) => {
+  pagination.total = total
+  pagination.totalKnown = true
+  pagination.totalLoading = false
+  pagination.hasNextPage = pagination.page * pagination.page_size < total
+}
+
+const invalidateUsageTotalCache = () => {
+  exactUsageTotalCache = null
+  usageCountInFlightKey = ''
+  usageCountReqSeq += 1
+  usageCountAbortController?.abort()
+  usageCountAbortController = null
+}
+
 const loadLogs = async () => {
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
-  usageCountAbortController?.abort()
-  pagination.totalKnown = false
-  pagination.totalLoading = false
-  pagination.hasNextPage = false
+  const totalCacheKey = buildUsageTotalCacheKey()
+  const cachedTotal = getCachedExactUsageTotal(totalCacheKey)
+  if (cachedTotal !== null) {
+    applyExactUsageTotal(cachedTotal)
+  } else {
+    pagination.totalKnown = false
+    pagination.totalLoading = false
+    pagination.hasNextPage = false
+  }
   try {
     const res = await adminAPI.usage.list(
       buildUsageListParams(pagination.page, pagination.page_size, false),
@@ -351,20 +396,23 @@ const loadLogs = async () => {
       usageLogs.value = res.items
       const currentPageEnd = pagination.page * pagination.page_size
       pagination.hasNextPage = res.total > currentPageEnd
-      if (pagination.hasNextPage) {
+      const latestCachedTotal = getCachedExactUsageTotal(totalCacheKey)
+      if (latestCachedTotal !== null) {
+        applyExactUsageTotal(latestCachedTotal)
+      } else if (pagination.hasNextPage) {
         pagination.total = 0
         pagination.totalKnown = false
         pagination.totalLoading = true
-        void loadExactUsageTotal()
+        void loadExactUsageTotal(totalCacheKey)
       } else if (pagination.page > 1 && res.items.length === 0) {
         pagination.total = 0
         pagination.totalKnown = false
         pagination.totalLoading = true
-        void loadExactUsageTotal()
+        void loadExactUsageTotal(totalCacheKey)
       } else {
-        pagination.total = (pagination.page - 1) * pagination.page_size + res.items.length
-        pagination.totalKnown = true
-        pagination.totalLoading = false
+        const inferredTotal = (pagination.page - 1) * pagination.page_size + res.items.length
+        cacheExactUsageTotal(totalCacheKey, inferredTotal)
+        applyExactUsageTotal(inferredTotal)
       }
     }
   } catch (error: any) { if(!isAbortLikeError(error)) console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
@@ -374,20 +422,29 @@ const isAbortLikeError = (error: any) => (
   error?.name === 'AbortError' || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError'
 )
 
-const loadExactUsageTotal = async () => {
+const loadExactUsageTotal = async (cacheKey = buildUsageTotalCacheKey()) => {
+  const cachedTotal = getCachedExactUsageTotal(cacheKey)
+  if (cachedTotal !== null) {
+    applyExactUsageTotal(cachedTotal)
+    return
+  }
+  if (usageCountInFlightKey === cacheKey) {
+    pagination.totalLoading = true
+    return
+  }
+  usageCountAbortController?.abort()
   const seq = ++usageCountReqSeq
   const c = new AbortController()
   usageCountAbortController = c
+  usageCountInFlightKey = cacheKey
   try {
-    const res = await adminUsageAPI.count(buildUsageListParams(1, 1, false), {
+    const res = await adminUsageAPI.count(buildUsageListParams(1, pagination.page_size, false), {
       signal: c.signal,
       timeout: USAGE_COUNT_TIMEOUT_MS
     })
-    if (seq !== usageCountReqSeq || c.signal.aborted) return
-    pagination.total = res.total
-    pagination.totalKnown = true
-    pagination.totalLoading = false
-    pagination.hasNextPage = pagination.page * pagination.page_size < res.total
+    if (seq !== usageCountReqSeq || c.signal.aborted || cacheKey !== buildUsageTotalCacheKey()) return
+    cacheExactUsageTotal(cacheKey, res.total)
+    applyExactUsageTotal(res.total)
   } catch (error: any) {
     if (seq === usageCountReqSeq && !isAbortLikeError(error)) {
       console.error('Failed to load exact usage total:', error)
@@ -395,7 +452,10 @@ const loadExactUsageTotal = async () => {
       pagination.totalKnown = false
     }
   } finally {
-    if (usageCountAbortController === c) usageCountAbortController = null
+    if (usageCountAbortController === c) {
+      usageCountAbortController = null
+      usageCountInFlightKey = ''
+    }
   }
 }
 const loadStats = async (force = false) => {
@@ -515,6 +575,7 @@ const loadChartData = async () => {
 }
 const applyFilters = () => {
   pagination.page = 1
+  invalidateUsageTotalCache()
   invalidateModelStatsCache()
   loadLogs()
   loadStats()
@@ -528,6 +589,7 @@ const applyFilters = () => {
   }
 }
 const refreshData = () => {
+  invalidateUsageTotalCache()
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
@@ -544,11 +606,12 @@ const resetFilters = () => {
   applyFilters()
 }
 const handlePageChange = (p: number) => { pagination.page = p; loadLogs() }
-const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; loadLogs() }
+const handlePageSizeChange = (s: number) => { pagination.page_size = s; pagination.page = 1; invalidateUsageTotalCache(); loadLogs() }
 const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_by = key
   sortState.sort_order = order
   pagination.page = 1
+  invalidateUsageTotalCache()
   loadLogs()
 }
 const cancelExport = () => exportAbortController?.abort()
