@@ -33,6 +33,7 @@ const privacyOpts = computed(() => [
   { value: '__unset__', label: t('admin.accounts.privacyUnset') },
   { value: 'training_off', label: 'Privacy' },
   { value: 'training_set_cf_blocked', label: 'CF' },
+  { value: 'training_set_html_blocked', label: 'HTML' },
   { value: 'training_set_failed', label: 'Fail' }
 ])
 const gOpts = computed(() => [

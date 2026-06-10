@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
 	"github.com/imroc/req/v3"
 )
 
@@ -20,6 +22,7 @@ const (
 	PrivacyModeTrainingOff = "training_off"
 	PrivacyModeFailed      = "training_set_failed"
 	PrivacyModeCFBlocked   = "training_set_cf_blocked"
+	PrivacyModeHTMLBlocked = "training_set_html_blocked"
 )
 
 func shouldSkipOpenAIPrivacyEnsure(extra map[string]any) bool {
@@ -32,11 +35,16 @@ func shouldSkipOpenAIPrivacyEnsure(extra map[string]any) bool {
 	}
 	mode, _ := raw.(string)
 	mode = strings.TrimSpace(mode)
-	return mode != PrivacyModeFailed && mode != PrivacyModeCFBlocked
+	switch mode {
+	case "", PrivacyModeFailed, PrivacyModeCFBlocked, PrivacyModeHTMLBlocked:
+		return false
+	default:
+		return true
+	}
 }
 
 // disableOpenAITraining calls ChatGPT settings API to turn off "Improve the model for everyone".
-// Returns privacy_mode value: "training_off" on success, "cf_blocked" / "failed" on failure.
+// Returns privacy_mode value: "training_off" on success, or a failure mode on failure.
 func disableOpenAITraining(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL string) string {
 	if accessToken == "" || clientFactory == nil {
 		return ""
@@ -69,21 +77,50 @@ func disableOpenAITraining(ctx context.Context, clientFactory PrivacyClientFacto
 		return PrivacyModeFailed
 	}
 
-	if resp.StatusCode == 403 || resp.StatusCode == 503 {
-		body := resp.String()
-		if strings.Contains(body, "cloudflare") || strings.Contains(body, "cf-") || strings.Contains(body, "Just a moment") {
-			slog.Warn("openai_privacy_cf_blocked", "status", resp.StatusCode)
-			return PrivacyModeCFBlocked
-		}
-	}
-
+	body := resp.String()
+	contentType := resp.Header.Get("Content-Type")
 	if !resp.IsSuccessState() {
-		slog.Warn("openai_privacy_failed", "status", resp.StatusCode, "body", truncate(resp.String(), 200))
-		return PrivacyModeFailed
+		mode := classifyOpenAIPrivacyFailure(resp.StatusCode, resp.Header, body)
+		switch mode {
+		case PrivacyModeCFBlocked:
+			slog.Warn("openai_privacy_cf_blocked", "status", resp.StatusCode, "content_type", contentType, "body", truncate(body, 200))
+		case PrivacyModeHTMLBlocked:
+			slog.Warn("openai_privacy_html_blocked", "status", resp.StatusCode, "content_type", contentType, "body", truncate(body, 200))
+		default:
+			slog.Warn("openai_privacy_failed", "status", resp.StatusCode, "content_type", contentType, "body", truncate(body, 200))
+		}
+		return mode
 	}
 
 	slog.Info("openai_privacy_training_disabled")
 	return PrivacyModeTrainingOff
+}
+
+func classifyOpenAIPrivacyFailure(statusCode int, headers http.Header, body string) string {
+	if statusCode != 403 && statusCode != 503 {
+		return PrivacyModeFailed
+	}
+	if httputil.IsCloudflareChallengeResponse(statusCode, headers, []byte(body)) {
+		return PrivacyModeCFBlocked
+	}
+	lowerBody := strings.ToLower(body)
+	if isHTMLResponse(headers, lowerBody) {
+		return PrivacyModeHTMLBlocked
+	}
+	return PrivacyModeFailed
+}
+
+func isHTMLResponse(headers http.Header, lowerBody string) bool {
+	contentType := ""
+	if headers != nil {
+		contentType = headers.Get("Content-Type")
+	}
+	lowerContentType := strings.ToLower(contentType)
+	if strings.Contains(lowerContentType, "text/html") {
+		return true
+	}
+	body := strings.TrimSpace(lowerBody)
+	return strings.HasPrefix(body, "<!doctype html") || strings.HasPrefix(body, "<html")
 }
 
 // ChatGPTAccountInfo 从 chatgpt.com/backend-api/accounts/check 获取的账号信息

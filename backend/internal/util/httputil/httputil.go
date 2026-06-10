@@ -14,15 +14,17 @@ var (
 	htmlChallenge = []string{
 		"window._cf_chl_opt",
 		"just a moment",
+		"attention required",
 		"enable javascript and cookies to continue",
 		"__cf_chl_",
 		"challenge-platform",
+		"turnstile",
 	}
 )
 
 // IsCloudflareChallengeResponse reports whether the upstream response matches Cloudflare challenge behavior.
 func IsCloudflareChallengeResponse(statusCode int, headers http.Header, body []byte) bool {
-	if statusCode != http.StatusForbidden && statusCode != http.StatusTooManyRequests {
+	if statusCode != http.StatusForbidden && statusCode != http.StatusTooManyRequests && statusCode != http.StatusServiceUnavailable {
 		return false
 	}
 

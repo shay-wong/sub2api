@@ -3211,6 +3211,7 @@ export default {
       privacyUnset: 'Unset',
       privacyTrainingOff: 'Training data sharing disabled',
       privacyCfBlocked: 'Blocked by Cloudflare, training may still be on',
+      privacyHtmlBlocked: 'Blocked by an HTML protection page, training may still be on',
       privacyFailed: 'Failed to disable training',
       privacyAntigravitySet: 'Telemetry and marketing emails disabled',
       privacyAntigravityFailed: 'Privacy setting failed',

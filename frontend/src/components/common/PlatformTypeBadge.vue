@@ -179,6 +179,8 @@ const privacyBadge = computed(() => {
       return { label: 'Private', icon: shieldCheck, title: t('admin.accounts.privacyTrainingOff'), class: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' }
     case 'training_set_cf_blocked':
       return { label: 'CF', icon: shieldX, title: t('admin.accounts.privacyCfBlocked'), class: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' }
+    case 'training_set_html_blocked':
+      return { label: 'HTML', icon: shieldX, title: t('admin.accounts.privacyHtmlBlocked'), class: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' }
     case 'training_set_failed':
       return { label: 'Fail', icon: shieldX, title: t('admin.accounts.privacyFailed'), class: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' }
     // Antigravity states
