@@ -3066,6 +3066,7 @@ func scopedAccountGroupIDs(account *Account, requestedGroupIDs []int64, scopeGro
 		seen[id] = struct{}{}
 		out = append(out, id)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 

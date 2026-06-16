@@ -7,9 +7,9 @@ type OpsOpenAITokenStatsFilter struct {
 	StartTime time.Time
 	EndTime   time.Time
 
-	Platform string
-	GroupID  *int64
-	GroupIDs []int64
+	Platform        string
+	GroupID         *int64
+	GroupIDs        []int64
 	GroupScopeEmpty bool
 
 	// Pagination mode (default): page/page_size
