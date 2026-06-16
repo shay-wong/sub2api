@@ -30,3 +30,26 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar operator hierarchy', () => {
+  it('renders admin-console navigation for operator-capable roles', () => {
+    expect(componentSource).toContain('<template v-if="canAccessAdminConsole">')
+    expect(componentSource).toContain('const canAccessAdminConsole = computed(() => authStore.canAccessAdminConsole)')
+  })
+
+  it('keeps user navigation available to operator-capable roles', () => {
+    expect(componentSource).toContain('authStore.hasUserAccess')
+    expect(componentSource).not.toContain('!authStore.isSimpleMode && authStore.isAdmin')
+  })
+
+  it('does not fetch admin-only settings for operator accounts', () => {
+    const adminSettingsWatchMatch = componentSource.match(/watch\(\s*\n\s*\(\) => authStore\.(\w+)/)
+    expect(adminSettingsWatchMatch?.[1]).toBe('isAdmin')
+  })
+
+  it('does not hide operator ops navigation behind admin-only settings cache', () => {
+    const operatorItemsMatch = componentSource.match(/const operatorItems: NavItem\[] = \[[\s\S]*?\n  \]/)
+    expect(operatorItemsMatch?.[0]).toContain("path: '/admin/ops'")
+    expect(operatorItemsMatch?.[0]).not.toContain('featureFlag: flagOpsMonitoring')
+  })
+})

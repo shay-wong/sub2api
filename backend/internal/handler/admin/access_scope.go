@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"context"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -13,15 +15,19 @@ type adminAccessScope struct {
 	groupSet     map[int64]struct{}
 }
 
+type accountScopedProxyLookup interface {
+	GetAccount(context.Context, int64) (*service.Account, error)
+}
+
 func resolveAdminAccessScope(c *gin.Context, permissionService *service.PermissionService) (*adminAccessScope, error) {
 	role, hasRole := middleware.GetUserRoleFromContext(c)
 	if !hasRole && permissionService == nil {
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
-	if role == service.RoleAdmin {
+	if service.RoleIsAdmin(role) {
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
-	if role != service.RoleOperator {
+	if !service.RoleIsOperator(role) {
 		return nil, errors.Forbidden("FORBIDDEN", "admin console access required")
 	}
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
@@ -84,6 +90,33 @@ func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) 
 		if err := s.ensureGroup(id); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
+	if s == nil || s.Unrestricted || proxyID == nil {
+		return nil
+	}
+	return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
+}
+
+func (s *adminAccessScope) ensureOAuthProxyUse(c *gin.Context, adminService accountScopedProxyLookup, accountID *int64, proxyID *int64) error {
+	if s == nil || s.Unrestricted || proxyID == nil || *proxyID == 0 {
+		return nil
+	}
+	if accountID == nil || *accountID <= 0 || adminService == nil {
+		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
+	}
+	account, err := adminService.GetAccount(c.Request.Context(), *accountID)
+	if err != nil {
+		return err
+	}
+	if !s.accountVisible(account) {
+		return service.ErrOperatorAccountForbidden
+	}
+	if account.ProxyID == nil || *account.ProxyID != *proxyID {
+		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
 	}
 	return nil
 }

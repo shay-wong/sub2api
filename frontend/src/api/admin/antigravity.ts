@@ -13,6 +13,7 @@ export interface AntigravityAuthUrlResponse {
 
 export interface AntigravityAuthUrlRequest {
   proxy_id?: number
+  account_id?: number
 }
 
 export interface AntigravityExchangeCodeRequest {
@@ -20,6 +21,7 @@ export interface AntigravityExchangeCodeRequest {
   state: string
   code: string
   proxy_id?: number
+  account_id?: number
 }
 
 export interface AntigravityTokenInfo {

@@ -24,8 +24,8 @@
                 <h2 class="truncate text-2xl font-semibold text-gray-900 dark:text-white">
                   {{ displayName }}
                 </h2>
-                <span :class="['badge', user?.role === 'admin' ? 'badge-primary' : 'badge-gray']">
-                  {{ user?.role === 'admin' ? t('profile.administrator') : t('profile.user') }}
+                <span :class="['badge', user?.role === 'admin' ? 'badge-primary' : user?.role === 'operator' ? 'badge-warning' : 'badge-gray']">
+                  {{ roleLabel }}
                 </span>
                 <span
                   :class="['badge', user?.status === 'active' ? 'badge-success' : 'badge-danger']"
@@ -234,6 +234,18 @@ function isEmailBound(user: User | null | undefined): boolean {
 
 const avatarUrl = computed(() => props.user?.avatar_url?.trim() || '')
 const displayName = computed(() => props.user?.username?.trim() || props.user?.email?.trim() || t('profile.user'))
+const roleLabel = computed(() => {
+  switch (props.user?.role) {
+    case 'admin':
+      return t('profile.administrator')
+    case 'operator':
+      return t('profile.operator')
+    case 'user':
+      return t('profile.user')
+    default:
+      return props.user?.role || ''
+  }
+})
 const primaryEmailDisplay = computed(() => {
   const email = props.user?.email?.trim() || ''
   if (!email) {

@@ -163,6 +163,8 @@ func newOperatorAccountScopeRouter(adminSvc *stubAdminService, groupIDs []int64)
 	})
 	router.GET("/api/v1/admin/accounts", handler.List)
 	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	router.POST("/api/v1/admin/accounts", handler.Create)
+	router.PUT("/api/v1/admin/accounts/:id", handler.Update)
 	router.POST("/api/v1/admin/accounts/bulk-update", handler.BulkUpdate)
 	return router
 }
@@ -192,6 +194,34 @@ func TestOperatorAccountListUsesAssignedGroupScope(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 2, resp.Data.Total)
 	require.Equal(t, []int64{1, 3}, []int64{resp.Data.Items[0].ID, resp.Data.Items[1].ID})
+}
+
+func TestOperatorAccountListPreservesScopedTotalAcrossPages(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "visible-a", Status: service.StatusActive, GroupIDs: []int64{10}},
+		{ID: 2, Name: "hidden", Status: service.StatusActive, GroupIDs: []int64{30}},
+		{ID: 3, Name: "visible-b", Status: service.StatusActive, GroupIDs: []int64{20}},
+	}
+	router := newOperatorAccountScopeRouter(adminSvc, []int64{10, 20})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=1", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data struct {
+			Total int `json:"total"`
+			Items []struct {
+				ID int64 `json:"id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 2, resp.Data.Total)
+	require.Len(t, resp.Data.Items, 1)
+	require.Equal(t, int64(1), resp.Data.Items[0].ID)
 }
 
 func TestOperatorAccountListTrimsOutOfScopeGroups(t *testing.T) {
@@ -320,6 +350,65 @@ func TestOperatorAccountDetailRejectsOutOfScopeAccount(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
 }
 
+func TestOperatorAccountCreateRejectsProxyAssignment(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
+	body, _ := json.Marshal(map[string]any{
+		"name":        "operator-created",
+		"platform":    service.PlatformAnthropic,
+		"type":        service.AccountTypeAPIKey,
+		"credentials": map[string]any{"api_key": "sk-test"},
+		"group_ids":   []int64{10},
+		"proxy_id":    4,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
+	require.Empty(t, adminSvc.createdAccounts)
+}
+
+func TestOperatorAccountUpdateRejectsProxyAssignment(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{ID: 1, Name: "visible", Status: service.StatusActive, GroupIDs: []int64{10}}}
+	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
+	body, _ := json.Marshal(map[string]any{
+		"name":     "operator-updated",
+		"proxy_id": 4,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
+}
+
+func TestOperatorAccountUpdateRejectsProxyClear(t *testing.T) {
+	adminSvc := newStubAdminService()
+	proxyID := int64(4)
+	adminSvc.accounts = []service.Account{{ID: 1, Name: "visible", Status: service.StatusActive, GroupIDs: []int64{10}, ProxyID: &proxyID}}
+	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
+	body, _ := json.Marshal(map[string]any{
+		"name":     "operator-updated",
+		"proxy_id": 0,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
+}
+
 func TestOperatorBulkUpdateRejectsFilterOutsideScope(t *testing.T) {
 	adminSvc := newStubAdminService()
 	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
@@ -335,4 +424,25 @@ func TestOperatorBulkUpdateRejectsFilterOutsideScope(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Contains(t, rec.Body.String(), "OPERATOR_SCOPE_FORBIDDEN")
+}
+
+func TestOperatorBulkUpdateFilterUsesAllAssignedGroups(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := newOperatorAccountScopeRouter(adminSvc, []int64{10, 20})
+	body, _ := json.Marshal(map[string]any{
+		"filters":     map[string]any{"platform": service.PlatformOpenAI},
+		"schedulable": true,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, adminSvc.lastBulkUpdateInput)
+	require.Empty(t, adminSvc.lastBulkUpdateInput.AccountIDs)
+	require.NotNil(t, adminSvc.lastBulkUpdateInput.Filters)
+	require.Equal(t, service.PlatformOpenAI, adminSvc.lastBulkUpdateInput.Filters.Platform)
+	require.Equal(t, []int64{10, 20}, adminSvc.lastBulkUpdateInput.GroupScopeIDs)
 }

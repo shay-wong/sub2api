@@ -33,13 +33,21 @@ import (
 
 // OAuthHandler handles OAuth-related operations for accounts
 type OAuthHandler struct {
-	oauthService *service.OAuthService
+	oauthService      *service.OAuthService
+	adminService      service.AdminService
+	permissionService *service.PermissionService
 }
 
 // NewOAuthHandler creates a new OAuth handler
-func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
+func NewOAuthHandler(oauthService *service.OAuthService, adminService service.AdminService, permissionService ...*service.PermissionService) *OAuthHandler {
+	var perm *service.PermissionService
+	if len(permissionService) > 0 {
+		perm = permissionService[0]
+	}
 	return &OAuthHandler{
-		oauthService: oauthService,
+		oauthService:      oauthService,
+		adminService:      adminService,
+		permissionService: perm,
 	}
 }
 
@@ -295,11 +303,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var accounts []service.Account
 	var total int64
 	var listErr error
+	usedScopedList := false
 	if scope.isScoped() && groupID == 0 {
 		if scopedList, ok := h.adminService.(interface {
 			ListAccountsByGroupScope(context.Context, int, int, string, string, string, string, []int64, string, string, string) ([]service.Account, int64, error)
 		}); ok {
 			accounts, total, listErr = scopedList.ListAccountsByGroupScope(c.Request.Context(), page, pageSize, platform, accountType, status, search, scope.GroupIDs, privacyMode, sortBy, sortOrder)
+			usedScopedList = true
 		} else {
 			accounts, total, listErr = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
 		}
@@ -318,7 +328,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 		accounts = filtered
-		total = int64(len(accounts))
+		if !usedScopedList {
+			total = int64(len(accounts))
+		}
 	}
 
 	// Get current concurrency counts for all accounts
@@ -608,6 +620,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
+	if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if err := scope.ensureGroups(req.GroupIDs, true); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -700,6 +716,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		return
 	}
 	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -1566,6 +1586,10 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 	}
 	if scope.isScoped() {
 		for _, item := range req.Accounts {
+			if err := scope.ensureProxyMutation(item.ProxyID); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
 			if err := scope.ensureGroups(item.GroupIDs, true); err != nil {
 				response.ErrorFrom(c, err)
 				return
@@ -1800,6 +1824,10 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		return
 	}
 	if scope.isScoped() {
+		if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 		if len(req.AccountIDs) > 0 {
 			if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
 				response.ErrorFrom(c, err)
@@ -1823,12 +1851,9 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 					response.ErrorFrom(c, err)
 					return
 				}
-			} else if len(req.AccountIDs) == 0 {
-				if len(scope.GroupIDs) != 1 {
-					response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
-					return
-				}
-				req.Filters.Group = strconv.FormatInt(scope.GroupIDs[0], 10)
+			} else if len(req.AccountIDs) == 0 && len(scope.GroupIDs) == 0 {
+				response.ErrorFrom(c, service.ErrOperatorAccountScopeRequired)
+				return
 			}
 		}
 	}
@@ -1934,16 +1959,26 @@ func accountMutationGroupScope(scope *adminAccessScope) []int64 {
 
 // GenerateAuthURLRequest represents the request for generating auth URL
 type GenerateAuthURLRequest struct {
-	ProxyID *int64 `json:"proxy_id"`
+	ProxyID   *int64 `json:"proxy_id"`
+	AccountID *int64 `json:"account_id"`
 }
 
 // GenerateAuthURL generates OAuth authorization URL with full scope
 // POST /api/v1/admin/accounts/generate-auth-url
 func (h *OAuthHandler) GenerateAuthURL(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Allow empty body
 		req = GenerateAuthURLRequest{}
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	result, err := h.oauthService.GenerateAuthURL(c.Request.Context(), req.ProxyID)
@@ -1958,10 +1993,19 @@ func (h *OAuthHandler) GenerateAuthURL(c *gin.Context) {
 // GenerateSetupTokenURL generates OAuth authorization URL for setup token (inference only)
 // POST /api/v1/admin/accounts/generate-setup-token-url
 func (h *OAuthHandler) GenerateSetupTokenURL(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Allow empty body
 		req = GenerateAuthURLRequest{}
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	result, err := h.oauthService.GenerateSetupTokenURL(c.Request.Context(), req.ProxyID)
@@ -1978,14 +2022,24 @@ type ExchangeCodeRequest struct {
 	SessionID string `json:"session_id" binding:"required"`
 	Code      string `json:"code" binding:"required"`
 	ProxyID   *int64 `json:"proxy_id"`
+	AccountID *int64 `json:"account_id"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
 // POST /api/v1/admin/accounts/exchange-code
 func (h *OAuthHandler) ExchangeCode(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req ExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -2005,9 +2059,18 @@ func (h *OAuthHandler) ExchangeCode(c *gin.Context) {
 // ExchangeSetupTokenCode exchanges authorization code for setup token
 // POST /api/v1/admin/accounts/exchange-setup-token-code
 func (h *OAuthHandler) ExchangeSetupTokenCode(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req ExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -2028,14 +2091,24 @@ func (h *OAuthHandler) ExchangeSetupTokenCode(c *gin.Context) {
 type CookieAuthRequest struct {
 	SessionKey string `json:"code" binding:"required"` // Using 'code' field as sessionKey (frontend sends it this way)
 	ProxyID    *int64 `json:"proxy_id"`
+	AccountID  *int64 `json:"account_id"`
 }
 
 // CookieAuth performs OAuth using sessionKey (cookie-based auto-auth)
 // POST /api/v1/admin/accounts/cookie-auth
 func (h *OAuthHandler) CookieAuth(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req CookieAuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -2055,9 +2128,18 @@ func (h *OAuthHandler) CookieAuth(c *gin.Context) {
 // SetupTokenCookieAuth performs OAuth using sessionKey for setup token (inference only)
 // POST /api/v1/admin/accounts/setup-token-cookie-auth
 func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req CookieAuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 

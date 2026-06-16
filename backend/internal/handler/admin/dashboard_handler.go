@@ -20,6 +20,7 @@ type DashboardHandler struct {
 	dashboardService   *service.DashboardService
 	aggregationService *service.DashboardAggregationService
 	permissionService  *service.PermissionService
+	adminService       service.AdminService
 	startTime          time.Time // Server start time for uptime calculation
 }
 
@@ -35,6 +36,10 @@ func NewDashboardHandler(dashboardService *service.DashboardService, aggregation
 		permissionService:  perm,
 		startTime:          time.Now(),
 	}
+}
+
+func (h *DashboardHandler) SetAdminService(adminService service.AdminService) {
+	h.adminService = adminService
 }
 
 // parseTimeRange parses start_date, end_date query parameters

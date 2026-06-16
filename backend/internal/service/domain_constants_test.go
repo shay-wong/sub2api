@@ -21,3 +21,36 @@ func TestSettingKeyAuthSourcePlatformQuotas(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, "auth_source_default_dingtalk_platform_quotas")
 	}
 }
+
+func TestRoleHierarchyHelpers(t *testing.T) {
+	tests := []struct {
+		role             string
+		wantAdmin        bool
+		wantOperator     bool
+		wantUserAccess   bool
+		wantAdminConsole bool
+	}{
+		{role: RoleAdmin, wantAdmin: true, wantUserAccess: true, wantAdminConsole: true},
+		{role: RoleOperator, wantOperator: true, wantUserAccess: true, wantAdminConsole: true},
+		{role: RoleUser, wantUserAccess: true},
+		{role: ""},
+		{role: "unknown"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.role, func(t *testing.T) {
+			if got := RoleIsAdmin(tc.role); got != tc.wantAdmin {
+				t.Fatalf("RoleIsAdmin(%q) = %v, want %v", tc.role, got, tc.wantAdmin)
+			}
+			if got := RoleIsOperator(tc.role); got != tc.wantOperator {
+				t.Fatalf("RoleIsOperator(%q) = %v, want %v", tc.role, got, tc.wantOperator)
+			}
+			if got := RoleHasUserAccess(tc.role); got != tc.wantUserAccess {
+				t.Fatalf("RoleHasUserAccess(%q) = %v, want %v", tc.role, got, tc.wantUserAccess)
+			}
+			if got := RoleCanAccessAdminConsole(tc.role); got != tc.wantAdminConsole {
+				t.Fatalf("RoleCanAccessAdminConsole(%q) = %v, want %v", tc.role, got, tc.wantAdminConsole)
+			}
+		})
+	}
+}

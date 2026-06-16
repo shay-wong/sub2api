@@ -327,16 +327,16 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
+    await openaiOAuth.generateAuthUrl(props.account.proxy_id, undefined, props.account.id)
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
     const projectId = geminiOAuthType.value === 'code_assist' ? oauthFlowRef.value?.projectId : undefined
-    await geminiOAuth.generateAuthUrl(props.account.proxy_id, projectId, geminiOAuthType.value, tierId)
+    await geminiOAuth.generateAuthUrl(props.account.proxy_id, projectId, geminiOAuthType.value, tierId, props.account.id)
   } else if (isAntigravity.value) {
-    await antigravityOAuth.generateAuthUrl(props.account.proxy_id)
+    await antigravityOAuth.generateAuthUrl(props.account.proxy_id, props.account.id)
   } else {
-    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
+    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, props.account.id)
   }
 }
 
@@ -362,7 +362,8 @@ const handleExchangeCode = async () => {
       authCode.trim(),
       sessionId,
       stateToUse,
-      props.account.proxy_id
+      props.account.proxy_id,
+      props.account.id
     )
     if (!tokenInfo) return
 
@@ -397,6 +398,7 @@ const handleExchangeCode = async () => {
       sessionId,
       state: stateToUse,
       proxyId: props.account.proxy_id,
+      accountId: props.account.id,
       oauthType: geminiOAuthType.value,
       tierId: typeof (props.account.credentials as any)?.tier_id === 'string' ? ((props.account.credentials as any).tier_id as string) : undefined
     })
@@ -430,7 +432,8 @@ const handleExchangeCode = async () => {
       code: authCode.trim(),
       sessionId,
       state: stateToUse,
-      proxyId: props.account.proxy_id
+      proxyId: props.account.proxy_id,
+      accountId: props.account.id
     })
     if (!tokenInfo) return
 
@@ -458,7 +461,7 @@ const handleExchangeCode = async () => {
     claudeOAuth.error.value = ''
 
     try {
-      const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
+      const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id, account_id: props.account.id } : {}
       const endpoint =
         addMethod.value === 'oauth'
           ? '/admin/accounts/exchange-code'
@@ -497,7 +500,7 @@ const handleCookieAuth = async (sessionKey: string) => {
   claudeOAuth.error.value = ''
 
   try {
-    const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
+    const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id, account_id: props.account.id } : {}
     const endpoint =
       addMethod.value === 'oauth'
         ? '/admin/accounts/cookie-auth'

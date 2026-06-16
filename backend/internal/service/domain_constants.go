@@ -23,6 +23,27 @@ const (
 	RoleUser     = domain.RoleUser
 )
 
+func RoleIsAdmin(role string) bool {
+	return role == RoleAdmin
+}
+
+func RoleIsOperator(role string) bool {
+	return role == RoleOperator
+}
+
+func RoleHasUserAccess(role string) bool {
+	switch role {
+	case RoleAdmin, RoleOperator, RoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+func RoleCanAccessAdminConsole(role string) bool {
+	return role == RoleAdmin || role == RoleOperator
+}
+
 // Affiliate rebate settings
 const (
 	AffiliateRebateRateDefault          = 20.0

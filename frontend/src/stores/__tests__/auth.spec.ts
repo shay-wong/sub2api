@@ -353,6 +353,7 @@ describe('useAuthStore', () => {
 
       expect(store.isAdmin).toBe(false)
       expect(store.isOperator).toBe(true)
+      expect(store.hasUserAccess).toBe(true)
       expect(store.canAccessAdminConsole).toBe(true)
     })
 

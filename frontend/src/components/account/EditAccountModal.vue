@@ -1281,7 +1281,7 @@
         </div>
       </div>
 
-      <div>
+      <div v-if="authStore.isAdmin">
         <div class="mb-1 flex items-center gap-2">
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
@@ -3667,9 +3667,13 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
-    // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    if (updatePayload.proxy_id === null) {
-      updatePayload.proxy_id = 0
+    if (authStore.isAdmin) {
+      // 后端期望 proxy_id: 0 表示清除代理，而不是 null
+      if (updatePayload.proxy_id === null) {
+        updatePayload.proxy_id = 0
+      }
+    } else {
+      delete updatePayload.proxy_id
     }
     if (form.expires_at === null) {
       updatePayload.expires_at = 0

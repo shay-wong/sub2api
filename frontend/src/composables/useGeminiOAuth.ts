@@ -39,7 +39,8 @@ export function useGeminiOAuth() {
     proxyId: number | null | undefined,
     projectId?: string | null,
     oauthType?: string,
-    tierId?: string
+    tierId?: string,
+    accountId?: number | null
   ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
@@ -50,6 +51,7 @@ export function useGeminiOAuth() {
     try {
       const payload: Record<string, unknown> = {}
       if (proxyId) payload.proxy_id = proxyId
+      if (accountId) payload.account_id = accountId
       const trimmedProjectID = projectId?.trim()
       if (trimmedProjectID) payload.project_id = trimmedProjectID
       if (oauthType) payload.oauth_type = oauthType
@@ -75,6 +77,7 @@ export function useGeminiOAuth() {
     sessionId: string
     state: string
     proxyId?: number | null
+    accountId?: number | null
     oauthType?: string
     tierId?: string
   }): Promise<GeminiTokenInfo | null> => {
@@ -94,6 +97,7 @@ export function useGeminiOAuth() {
         code
       }
       if (params.proxyId) payload.proxy_id = params.proxyId
+      if (params.accountId) payload.account_id = params.accountId
       if (params.oauthType) payload.oauth_type = params.oauthType
       const trimmedTierID = params.tierId?.trim()
       if (trimmedTierID) payload.tier_id = trimmedTierID

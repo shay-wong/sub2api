@@ -18,6 +18,7 @@ export interface GeminiOAuthCapabilities {
 
 export interface GeminiAuthUrlRequest {
   proxy_id?: number
+  account_id?: number
   project_id?: string
   oauth_type?: 'code_assist' | 'google_one' | 'ai_studio'
   tier_id?: string
@@ -28,6 +29,7 @@ export interface GeminiExchangeCodeRequest {
   state: string
   code: string
   proxy_id?: number
+  account_id?: number
   oauth_type?: 'code_assist' | 'google_one' | 'ai_studio'
   tier_id?: string
 }

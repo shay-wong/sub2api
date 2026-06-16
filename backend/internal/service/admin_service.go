@@ -2900,7 +2900,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
-		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters)
+		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters, input.GroupScopeIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -3122,7 +3122,7 @@ func normalizePositiveInt64IDsForService(values []int64) []int64 {
 	return out
 }
 
-func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {
+func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters, groupScopeIDs []int64) ([]int64, error) {
 	if filters == nil {
 		return nil, nil
 	}
@@ -3145,19 +3145,38 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	accountIDs := make([]int64, 0, pageSize)
 
 	for {
-		accounts, total, err := s.ListAccounts(
-			ctx,
-			page,
-			pageSize,
-			filters.Platform,
-			filters.Type,
-			filters.Status,
-			filters.Search,
-			groupID,
-			filters.PrivacyMode,
-			"",
-			"",
-		)
+		var accounts []Account
+		var total int64
+		var err error
+		if groupID == 0 && len(groupScopeIDs) > 0 {
+			accounts, total, err = s.ListAccountsByGroupScope(
+				ctx,
+				page,
+				pageSize,
+				filters.Platform,
+				filters.Type,
+				filters.Status,
+				filters.Search,
+				groupScopeIDs,
+				filters.PrivacyMode,
+				"",
+				"",
+			)
+		} else {
+			accounts, total, err = s.ListAccounts(
+				ctx,
+				page,
+				pageSize,
+				filters.Platform,
+				filters.Type,
+				filters.Status,
+				filters.Search,
+				groupID,
+				filters.PrivacyMode,
+				"",
+				"",
+			)
+		}
 		if err != nil {
 			return nil, err
 		}

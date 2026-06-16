@@ -16,6 +16,7 @@ import (
 type OpenAIOAuthHandler struct {
 	openaiOAuthService *service.OpenAIOAuthService
 	adminService       service.AdminService
+	permissionService  *service.PermissionService
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
@@ -23,26 +24,37 @@ func oauthPlatformFromPath(c *gin.Context) string {
 }
 
 // NewOpenAIOAuthHandler creates a new OpenAI OAuth handler
-func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService) *OpenAIOAuthHandler {
+func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService, permissionService *service.PermissionService) *OpenAIOAuthHandler {
 	return &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
 		adminService:       adminService,
+		permissionService:  permissionService,
 	}
 }
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL
 type OpenAIGenerateAuthURLRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
+	AccountID   *int64 `json:"account_id"`
 	RedirectURI string `json:"redirect_uri"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
 // POST /api/v1/admin/openai/generate-auth-url
 func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req OpenAIGenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// Allow empty body
 		req = OpenAIGenerateAuthURLRequest{}
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	result, err := h.openaiOAuthService.GenerateAuthURL(
@@ -66,14 +78,24 @@ type OpenAIExchangeCodeRequest struct {
 	State       string `json:"state" binding:"required"`
 	RedirectURI string `json:"redirect_uri"`
 	ProxyID     *int64 `json:"proxy_id"`
+	AccountID   *int64 `json:"account_id"`
 }
 
 // ExchangeCode exchanges OpenAI authorization code for tokens
 // POST /api/v1/admin/openai/exchange-code
 func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req OpenAIExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -98,11 +120,17 @@ type OpenAIRefreshTokenRequest struct {
 	RT           string `json:"rt"`
 	ClientID     string `json:"client_id"`
 	ProxyID      *int64 `json:"proxy_id"`
+	AccountID    *int64 `json:"account_id"`
 }
 
 // RefreshToken refreshes an OpenAI OAuth token
 // POST /api/v1/admin/openai/refresh-token
 func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req OpenAIRefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -114,6 +142,10 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 	}
 	if refreshToken == "" {
 		response.BadRequest(c, "refresh_token is required")
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -144,6 +176,11 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 // RefreshAccountToken refreshes token for a specific OpenAI account
 // POST /api/v1/admin/openai/accounts/:id/refresh
 func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -154,6 +191,10 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 
@@ -194,12 +235,17 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(updatedAccount))
+	response.Success(c, dto.AccountFromService(scope.accountForResponse(updatedAccount)))
 }
 
 // CreateAccountFromOAuth creates a new OpenAI OAuth account from token info
 // POST /api/v1/admin/openai/create-from-oauth
 func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		SessionID   string  `json:"session_id" binding:"required"`
 		Code        string  `json:"code" binding:"required"`
@@ -213,6 +259,14 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureGroups(req.GroupIDs, true); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -260,5 +314,5 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, dto.AccountFromService(scope.accountForResponse(account)))
 }

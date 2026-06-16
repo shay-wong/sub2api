@@ -291,6 +291,11 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBe('/admin/dashboard')
     })
 
+    it('访问支付后台页面重定向到后台仪表盘', () => {
+      const redirect = simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)
+      expect(redirect).toBe('/admin/dashboard')
+    })
+
     it('访问未在运营白名单内的后台页面重定向到后台仪表盘', () => {
       const redirect = simulateGuard('/admin/users', { requiresAdmin: true }, authState)
       expect(redirect).toBe('/admin/dashboard')

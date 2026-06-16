@@ -50,7 +50,8 @@ export function useOpenAIOAuth() {
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
     proxyId?: number | null,
-    redirectUri?: string
+    redirectUri?: string,
+    accountId?: number | null
   ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
@@ -62,6 +63,9 @@ export function useOpenAIOAuth() {
       const payload: Record<string, unknown> = {}
       if (proxyId) {
         payload.proxy_id = proxyId
+      }
+      if (accountId) {
+        payload.account_id = accountId
       }
       if (redirectUri) {
         payload.redirect_uri = redirectUri
@@ -94,7 +98,8 @@ export function useOpenAIOAuth() {
     code: string,
     currentSessionId: string,
     state: string,
-    proxyId?: number | null
+    proxyId?: number | null,
+    accountId?: number | null
   ): Promise<OpenAITokenInfo | null> => {
     if (!code.trim() || !currentSessionId || !state.trim()) {
       error.value = 'Missing auth code, session ID, or state'
@@ -105,13 +110,16 @@ export function useOpenAIOAuth() {
     error.value = ''
 
     try {
-      const payload: { session_id: string; code: string; state: string; proxy_id?: number } = {
+      const payload: { session_id: string; code: string; state: string; proxy_id?: number; account_id?: number } = {
         session_id: currentSessionId,
         code: code.trim(),
         state: state.trim()
       }
       if (proxyId) {
         payload.proxy_id = proxyId
+      }
+      if (accountId) {
+        payload.account_id = accountId
       }
 
       const tokenInfo = await adminAPI.accounts.exchangeCode(`${endpointPrefix}/exchange-code`, payload)

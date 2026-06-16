@@ -242,7 +242,7 @@ func (h *PageHandler) checkSlugVisibility(c *gin.Context, slug string) bool {
 	}
 	if visibility == "admin" {
 		role, _ := middleware2.GetUserRoleFromContext(c)
-		return role == "admin"
+		return service.RoleIsAdmin(role)
 	}
 	return true
 }
@@ -278,6 +278,7 @@ func RegisterPageRoutes(v1 *gin.RouterGroup, dataDir string, jwtAuth gin.Handler
 	adminPages := v1.Group("/pages")
 	adminPages.Use(adminAuth)
 	adminPages.Use(middleware2.AdminComplianceGuard(settingService))
+	adminPages.Use(middleware2.RequireAdminOnly())
 	{
 		adminPages.GET("", h.ListPages)
 	}

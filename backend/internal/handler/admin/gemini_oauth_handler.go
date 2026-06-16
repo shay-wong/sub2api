@@ -12,10 +12,16 @@ import (
 
 type GeminiOAuthHandler struct {
 	geminiOAuthService *service.GeminiOAuthService
+	adminService       service.AdminService
+	permissionService  *service.PermissionService
 }
 
-func NewGeminiOAuthHandler(geminiOAuthService *service.GeminiOAuthService) *GeminiOAuthHandler {
-	return &GeminiOAuthHandler{geminiOAuthService: geminiOAuthService}
+func NewGeminiOAuthHandler(geminiOAuthService *service.GeminiOAuthService, adminService service.AdminService, permissionService *service.PermissionService) *GeminiOAuthHandler {
+	return &GeminiOAuthHandler{
+		geminiOAuthService: geminiOAuthService,
+		adminService:       adminService,
+		permissionService:  permissionService,
+	}
 }
 
 // GetCapabilities returns the Gemini OAuth configuration capabilities.
@@ -27,6 +33,7 @@ func (h *GeminiOAuthHandler) GetCapabilities(c *gin.Context) {
 
 type GeminiGenerateAuthURLRequest struct {
 	ProxyID   *int64 `json:"proxy_id"`
+	AccountID *int64 `json:"account_id"`
 	ProjectID string `json:"project_id"`
 	// OAuth 类型: "code_assist" (需要 project_id) 或 "ai_studio" (不需要 project_id)
 	// 默认为 "code_assist" 以保持向后兼容
@@ -38,9 +45,18 @@ type GeminiGenerateAuthURLRequest struct {
 // GenerateAuthURL generates Google OAuth authorization URL for Gemini.
 // POST /api/v1/admin/gemini/oauth/auth-url
 func (h *GeminiOAuthHandler) GenerateAuthURL(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GeminiGenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -81,6 +97,7 @@ type GeminiExchangeCodeRequest struct {
 	State     string `json:"state" binding:"required"`
 	Code      string `json:"code" binding:"required"`
 	ProxyID   *int64 `json:"proxy_id"`
+	AccountID *int64 `json:"account_id"`
 	// OAuth 类型: "code_assist" 或 "ai_studio"，需要与 GenerateAuthURL 时的类型一致
 	OAuthType string `json:"oauth_type"`
 	// TierID is a user-selected tier to be used when auto detection is unavailable or fails.
@@ -91,9 +108,18 @@ type GeminiExchangeCodeRequest struct {
 // ExchangeCode exchanges authorization code for tokens.
 // POST /api/v1/admin/gemini/oauth/exchange-code
 func (h *GeminiOAuthHandler) ExchangeCode(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GeminiExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 

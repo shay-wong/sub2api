@@ -64,15 +64,19 @@ type User struct {
 }
 
 func (u *User) IsAdmin() bool {
-	return u.Role == RoleAdmin
+	return u != nil && RoleIsAdmin(u.Role)
 }
 
 func (u *User) IsOperator() bool {
-	return u.Role == RoleOperator
+	return u != nil && RoleIsOperator(u.Role)
+}
+
+func (u *User) HasUserAccess() bool {
+	return u != nil && RoleHasUserAccess(u.Role)
 }
 
 func (u *User) CanAccessAdminConsole() bool {
-	return u.IsAdmin() || u.IsOperator()
+	return u != nil && RoleCanAccessAdminConsole(u.Role)
 }
 
 func (u *User) IsActive() bool {

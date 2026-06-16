@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -224,6 +226,45 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups/2/api-keys", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestOperatorGroupGetAllFiltersAssignedGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	adminSvc := newStubAdminService()
+	adminSvc.groups = []service.Group{
+		{ID: 10, Name: "visible", Status: service.StatusActive},
+		{ID: 30, Name: "hidden", Status: service.StatusActive},
+	}
+	permissionSvc := service.NewPermissionService(
+		&operatorPermissionRepoStub{scopes: map[int64][]int64{101: {10}}},
+		operatorUserRepoStub{},
+		operatorGroupRepoStub{},
+	)
+	groupHandler := NewGroupHandler(adminSvc, nil, nil, permissionSvc)
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleOperator)
+		c.Next()
+	})
+	router.GET("/api/v1/admin/groups/all", groupHandler.GetAll)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups/all", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, int64(10), resp.Data[0].ID)
+	require.Equal(t, "visible", resp.Data[0].Name)
+	require.NotContains(t, rec.Body.String(), "hidden")
 }
 
 func TestProxyHandlerEndpoints(t *testing.T) {

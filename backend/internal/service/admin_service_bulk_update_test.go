@@ -14,31 +14,40 @@ import (
 
 type accountRepoStubForBulkUpdate struct {
 	accountRepoStub
-	bulkUpdateErr    error
-	bulkUpdateIDs    []int64
-	bindGroupErrByID map[int64]error
-	bindGroupsCalls  []int64
-	boundGroupsByID  map[int64][]int64
-	getByIDsAccounts []*Account
-	getByIDsErr      error
-	getByIDsCalled   bool
-	getByIDsIDs      []int64
-	getByIDAccounts  map[int64]*Account
-	getByIDErrByID   map[int64]error
-	getByIDCalled    []int64
-	listByGroupData  map[int64][]Account
-	listByGroupErr   map[int64]error
-	listData         []Account
-	listResult       *pagination.PaginationResult
-	listErr          error
-	listCalled       bool
-	lastListParams   pagination.PaginationParams
-	lastListFilters  struct {
+	bulkUpdateErr        error
+	bulkUpdateIDs        []int64
+	bindGroupErrByID     map[int64]error
+	bindGroupsCalls      []int64
+	boundGroupsByID      map[int64][]int64
+	getByIDsAccounts     []*Account
+	getByIDsErr          error
+	getByIDsCalled       bool
+	getByIDsIDs          []int64
+	getByIDAccounts      map[int64]*Account
+	getByIDErrByID       map[int64]error
+	getByIDCalled        []int64
+	listByGroupData      map[int64][]Account
+	listByGroupErr       map[int64]error
+	listData             []Account
+	listResult           *pagination.PaginationResult
+	listErr              error
+	listCalled           bool
+	listGroupScopeCalled bool
+	lastListParams       pagination.PaginationParams
+	lastListFilters      struct {
 		platform    string
 		accountType string
 		status      string
 		search      string
 		groupID     int64
+		privacyMode string
+	}
+	lastGroupScopeFilters struct {
+		platform    string
+		accountType string
+		status      string
+		search      string
+		groupIDs    []int64
 		privacyMode string
 	}
 }
@@ -102,6 +111,24 @@ func (s *accountRepoStubForBulkUpdate) ListWithFilters(_ context.Context, params
 	s.lastListFilters.search = search
 	s.lastListFilters.groupID = groupID
 	s.lastListFilters.privacyMode = privacyMode
+	if s.listErr != nil {
+		return nil, nil, s.listErr
+	}
+	if s.listResult != nil {
+		return s.listData, s.listResult, nil
+	}
+	return s.listData, &pagination.PaginationResult{Total: int64(len(s.listData))}, nil
+}
+
+func (s *accountRepoStubForBulkUpdate) ListWithGroupScope(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+	s.listGroupScopeCalled = true
+	s.lastListParams = params
+	s.lastGroupScopeFilters.platform = platform
+	s.lastGroupScopeFilters.accountType = accountType
+	s.lastGroupScopeFilters.status = status
+	s.lastGroupScopeFilters.search = search
+	s.lastGroupScopeFilters.groupIDs = append([]int64(nil), groupIDs...)
+	s.lastGroupScopeFilters.privacyMode = privacyMode
 	if s.listErr != nil {
 		return nil, nil, s.listErr
 	}
@@ -249,6 +276,44 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, []int64{7, 11}, repo.bulkUpdateIDs)
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
+	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ResolvesFilterTargetsWithinGroupScope(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData: []Account{
+			{ID: 7},
+			{ID: 11},
+		},
+		listResult: &pagination.PaginationResult{Total: 2},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	schedulable := true
+	input := &BulkUpdateAccountsInput{
+		Filters: &BulkUpdateAccountFilters{
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Search:      "bulk-target",
+			PrivacyMode: PrivacyModeCFBlocked,
+		},
+		GroupScopeIDs: []int64{10, 20},
+		Schedulable:   &schedulable,
+	}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, repo.listGroupScopeCalled)
+	require.False(t, repo.listCalled)
+	require.Equal(t, PlatformOpenAI, repo.lastGroupScopeFilters.platform)
+	require.Equal(t, AccountTypeOAuth, repo.lastGroupScopeFilters.accountType)
+	require.Equal(t, StatusActive, repo.lastGroupScopeFilters.status)
+	require.Equal(t, "bulk-target", repo.lastGroupScopeFilters.search)
+	require.Equal(t, []int64{10, 20}, repo.lastGroupScopeFilters.groupIDs)
+	require.Equal(t, PrivacyModeCFBlocked, repo.lastGroupScopeFilters.privacyMode)
+	require.Equal(t, []int64{7, 11}, repo.bulkUpdateIDs)
+	require.Equal(t, 2, result.Success)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
 }
 

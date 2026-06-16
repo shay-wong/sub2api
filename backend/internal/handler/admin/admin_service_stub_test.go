@@ -46,7 +46,8 @@ type stubAdminService struct {
 		sortOrder   string
 		calls       int
 	}
-	lastListUsers struct {
+	lastBulkUpdateInput *service.BulkUpdateAccountsInput
+	lastListUsers       struct {
 		page      int
 		pageSize  int
 		filters   service.UserListFilters
@@ -364,6 +365,69 @@ func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int,
 	return s.accounts, int64(len(s.accounts)), nil
 }
 
+func (s *stubAdminService) ListAccountsByGroupScope(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupIDs []int64, privacyMode string, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.platform = platform
+	s.lastListAccounts.accountType = accountType
+	s.lastListAccounts.status = status
+	s.lastListAccounts.search = search
+	s.lastListAccounts.privacyMode = privacyMode
+	s.lastListAccounts.sortBy = sortBy
+	s.lastListAccounts.sortOrder = sortOrder
+	s.lastListAccounts.calls++
+
+	groupSet := make(map[int64]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		if id > 0 {
+			groupSet[id] = struct{}{}
+		}
+	}
+	filtered := make([]service.Account, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if !stubAccountInAnyGroup(account, groupSet) {
+			continue
+		}
+		filtered = append(filtered, account)
+	}
+
+	total := int64(len(filtered))
+	if pageSize <= 0 {
+		return filtered, total, nil
+	}
+	if page <= 0 {
+		page = 1
+	}
+	start := (page - 1) * pageSize
+	if start >= len(filtered) {
+		return []service.Account{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[start:end], total, nil
+}
+
+func stubAccountInAnyGroup(account service.Account, groupSet map[int64]struct{}) bool {
+	for _, id := range account.GroupIDs {
+		if _, ok := groupSet[id]; ok {
+			return true
+		}
+	}
+	for _, group := range account.Groups {
+		if group != nil {
+			if _, ok := groupSet[group.ID]; ok {
+				return true
+			}
+		}
+	}
+	for _, accountGroup := range account.AccountGroups {
+		if _, ok := groupSet[accountGroup.GroupID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.Account, error) {
 	for i := range s.accounts {
 		if s.accounts[i].ID == id {
@@ -436,6 +500,12 @@ func (s *stubAdminService) SetAccountSchedulable(ctx context.Context, id int64, 
 func (s *stubAdminService) BulkUpdateAccounts(ctx context.Context, input *service.BulkUpdateAccountsInput) (*service.BulkUpdateAccountsResult, error) {
 	if s.bulkUpdateAccountErr != nil {
 		return nil, s.bulkUpdateAccountErr
+	}
+	if input != nil {
+		copied := *input
+		copied.AccountIDs = append([]int64(nil), input.AccountIDs...)
+		copied.GroupScopeIDs = append([]int64(nil), input.GroupScopeIDs...)
+		s.lastBulkUpdateInput = &copied
 	}
 	return &service.BulkUpdateAccountsResult{Success: len(input.AccountIDs), Failed: 0, SuccessIDs: input.AccountIDs}, nil
 }

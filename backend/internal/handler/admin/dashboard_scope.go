@@ -145,6 +145,21 @@ func (h *DashboardHandler) getDashboardStatsForScope(ctx context.Context, scope 
 		return &usagestats.DashboardStats{StatsStale: true}, nil
 	}
 	var merged usagestats.DashboardStats
+	useAccountStats := false
+	if h.adminService != nil {
+		stats, ok, err := h.getScopedAccountStats(ctx, scope.GroupIDs)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			useAccountStats = true
+			merged.TotalAccounts = stats.TotalAccounts
+			merged.NormalAccounts = stats.NormalAccounts
+			merged.ErrorAccounts = stats.ErrorAccounts
+			merged.RateLimitAccounts = stats.RateLimitAccounts
+			merged.OverloadAccounts = stats.OverloadAccounts
+		}
+	}
 	for _, groupID := range scope.GroupIDs {
 		stats, err := h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, "day", 0, 0, 0, groupID, "", nil, nil, nil)
 		if err != nil {
@@ -173,18 +188,69 @@ func (h *DashboardHandler) getDashboardStatsForScope(ctx context.Context, scope 
 			merged.TodayCost += point.Cost
 			merged.TodayActualCost += point.ActualCost
 		}
-		groupStats, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, 0, 0, 0, groupID, nil, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if len(groupStats) > 0 {
-			merged.TotalAccounts++
+		if !useAccountStats {
+			groupStats, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, 0, 0, 0, groupID, nil, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			if len(groupStats) > 0 {
+				merged.TotalAccounts++
+			}
 		}
 	}
 	merged.TotalTokens = merged.TotalInputTokens + merged.TotalOutputTokens + merged.TotalCacheCreationTokens + merged.TotalCacheReadTokens
 	merged.TodayTokens = merged.TodayInputTokens + merged.TodayOutputTokens + merged.TodayCacheCreationTokens + merged.TodayCacheReadTokens
 	merged.StatsStale = true
 	return &merged, nil
+}
+
+func (h *DashboardHandler) getScopedAccountStats(ctx context.Context, groupIDs []int64) (*usagestats.DashboardStats, bool, error) {
+	stats := &usagestats.DashboardStats{}
+	if h.adminService == nil || len(groupIDs) == 0 {
+		return stats, true, nil
+	}
+	scopedList, ok := h.adminService.(interface {
+		ListAccountsByGroupScope(context.Context, int, int, string, string, string, string, []int64, string, string, string) ([]service.Account, int64, error)
+	})
+	if !ok {
+		return stats, false, nil
+	}
+	now := time.Now()
+	seen := make(map[int64]struct{})
+	const pageSize = 500
+	for page := 1; ; page++ {
+		accounts, total, err := scopedList.ListAccountsByGroupScope(ctx, page, pageSize, "", "", "", "", groupIDs, "", "id", "asc")
+		if err != nil {
+			return nil, true, err
+		}
+		for i := range accounts {
+			account := accounts[i]
+			if account.ID <= 0 {
+				continue
+			}
+			if _, ok := seen[account.ID]; ok {
+				continue
+			}
+			seen[account.ID] = struct{}{}
+			stats.TotalAccounts++
+			if account.Status == service.StatusActive && account.Schedulable {
+				stats.NormalAccounts++
+			}
+			if account.Status == service.StatusError {
+				stats.ErrorAccounts++
+			}
+			if account.RateLimitedAt != nil && account.RateLimitResetAt != nil && account.RateLimitResetAt.After(now) {
+				stats.RateLimitAccounts++
+			}
+			if account.OverloadUntil != nil && account.OverloadUntil.After(now) {
+				stats.OverloadAccounts++
+			}
+		}
+		if len(accounts) < pageSize || (total > 0 && int64(len(seen)) >= total) {
+			break
+		}
+	}
+	return stats, true, nil
 }
 
 func trendMapToSortedSlice(values map[string]*usagestats.TrendDataPoint) []usagestats.TrendDataPoint {

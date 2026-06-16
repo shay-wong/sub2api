@@ -97,8 +97,10 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	return h
 }
 
-func ProvideAdminDashboardHandler(dashboardService *service.DashboardService, aggregationService *service.DashboardAggregationService, permissionService *service.PermissionService) *admin.DashboardHandler {
-	return admin.NewDashboardHandler(dashboardService, aggregationService, permissionService)
+func ProvideAdminDashboardHandler(dashboardService *service.DashboardService, aggregationService *service.DashboardAggregationService, permissionService *service.PermissionService, adminService service.AdminService) *admin.DashboardHandler {
+	h := admin.NewDashboardHandler(dashboardService, aggregationService, permissionService)
+	h.SetAdminService(adminService)
+	return h
 }
 
 func ProvideAdminGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, permissionService *service.PermissionService) *admin.GroupHandler {

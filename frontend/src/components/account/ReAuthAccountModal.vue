@@ -195,7 +195,7 @@ import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
+import OAuthAuthorizationFlow from '@/components/account/OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
 // Note: defineExpose automatically unwraps refs, so we use the unwrapped types
@@ -216,7 +216,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  reauthorized: []
+  reauthorized: [account: Account]
 }>()
 
 const appStore = useAppStore()
@@ -327,16 +327,16 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id)
+    await openaiOAuth.generateAuthUrl(props.account.proxy_id, undefined, props.account.id)
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
     const projectId = geminiOAuthType.value === 'code_assist' ? oauthFlowRef.value?.projectId : undefined
-    await geminiOAuth.generateAuthUrl(props.account.proxy_id, projectId, geminiOAuthType.value, tierId)
+    await geminiOAuth.generateAuthUrl(props.account.proxy_id, projectId, geminiOAuthType.value, tierId, props.account.id)
   } else if (isAntigravity.value) {
-    await antigravityOAuth.generateAuthUrl(props.account.proxy_id)
+    await antigravityOAuth.generateAuthUrl(props.account.proxy_id, props.account.id)
   } else {
-    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
+    await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id, props.account.id)
   }
 }
 
@@ -362,7 +362,8 @@ const handleExchangeCode = async () => {
       authCode.trim(),
       sessionId,
       stateToUse,
-      props.account.proxy_id
+      props.account.proxy_id,
+      props.account.id
     )
     if (!tokenInfo) return
 
@@ -371,18 +372,14 @@ const handleExchangeCode = async () => {
     const extra = oauthClient.buildExtraInfo(tokenInfo)
 
     try {
-      // Update account with new credentials
-      await adminAPI.accounts.update(props.account.id, {
-        type: 'oauth', // OpenAI OAuth is always 'oauth' type
+      const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+        type: 'oauth',
         credentials,
         extra
       })
 
-      // Clear error status after successful re-authorization
-      await adminAPI.accounts.clearError(props.account.id)
-
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-      emit('reauthorized')
+      emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
       oauthClient.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -401,6 +398,7 @@ const handleExchangeCode = async () => {
       sessionId,
       state: stateToUse,
       proxyId: props.account.proxy_id,
+      accountId: props.account.id,
       oauthType: geminiOAuthType.value,
       tierId: typeof (props.account.credentials as any)?.tier_id === 'string' ? ((props.account.credentials as any).tier_id as string) : undefined
     })
@@ -413,9 +411,9 @@ const handleExchangeCode = async () => {
         type: 'oauth',
         credentials
       })
-      await adminAPI.accounts.clearError(props.account.id)
+      const updatedAccount = await adminAPI.accounts.clearError(props.account.id)
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-      emit('reauthorized')
+      emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
       geminiOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -434,7 +432,8 @@ const handleExchangeCode = async () => {
       code: authCode.trim(),
       sessionId,
       state: stateToUse,
-      proxyId: props.account.proxy_id
+      proxyId: props.account.proxy_id,
+      accountId: props.account.id
     })
     if (!tokenInfo) return
 
@@ -445,9 +444,9 @@ const handleExchangeCode = async () => {
         type: 'oauth',
         credentials
       })
-      await adminAPI.accounts.clearError(props.account.id)
+      const updatedAccount = await adminAPI.accounts.clearError(props.account.id)
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-      emit('reauthorized')
+      emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
       antigravityOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -462,7 +461,7 @@ const handleExchangeCode = async () => {
     claudeOAuth.error.value = ''
 
     try {
-      const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
+      const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id, account_id: props.account.id } : {}
       const endpoint =
         addMethod.value === 'oauth'
           ? '/admin/accounts/exchange-code'
@@ -476,18 +475,14 @@ const handleExchangeCode = async () => {
 
       const extra = claudeOAuth.buildExtraInfo(tokenInfo)
 
-      // Update account with new credentials and type
-      await adminAPI.accounts.update(props.account.id, {
-        type: addMethod.value, // Update type based on selected method
-        credentials: tokenInfo,
+      const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+        type: addMethod.value as 'oauth' | 'setup-token',
+        credentials: tokenInfo as unknown as Record<string, unknown>,
         extra
       })
 
-      // Clear error status after successful re-authorization
-      await adminAPI.accounts.clearError(props.account.id)
-
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-      emit('reauthorized')
+      emit('reauthorized', updatedAccount)
       handleClose()
     } catch (error: any) {
       claudeOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
@@ -505,7 +500,7 @@ const handleCookieAuth = async (sessionKey: string) => {
   claudeOAuth.error.value = ''
 
   try {
-    const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id } : {}
+    const proxyConfig = props.account.proxy_id ? { proxy_id: props.account.proxy_id, account_id: props.account.id } : {}
     const endpoint =
       addMethod.value === 'oauth'
         ? '/admin/accounts/cookie-auth'
@@ -519,18 +514,14 @@ const handleCookieAuth = async (sessionKey: string) => {
 
     const extra = claudeOAuth.buildExtraInfo(tokenInfo)
 
-    // Update account with new credentials and type
-    await adminAPI.accounts.update(props.account.id, {
-      type: addMethod.value, // Update type based on selected method
-      credentials: tokenInfo,
+    const updatedAccount = await adminAPI.accounts.applyOAuthCredentials(props.account.id, {
+      type: addMethod.value as 'oauth' | 'setup-token',
+      credentials: tokenInfo as unknown as Record<string, unknown>,
       extra
     })
 
-    // Clear error status after successful re-authorization
-    await adminAPI.accounts.clearError(props.account.id)
-
     appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
-    emit('reauthorized')
+    emit('reauthorized', updatedAccount)
     handleClose()
   } catch (error: any) {
     claudeOAuth.error.value =

@@ -16,7 +16,7 @@
             <input
               v-model.trim="search"
               type="search"
-              class="input-field w-64 pl-9"
+              class="input w-64 pl-9"
               :placeholder="t('admin.permissions.searchPlaceholder')"
             />
           </div>
@@ -66,7 +66,7 @@
                   </div>
                 </td>
                 <td class="px-4 py-4">
-                  <select v-model="drafts[subject.id].role" class="input-field w-36">
+                  <select v-model="drafts[subject.id].role" class="input w-36">
                     <option value="user">{{ t('admin.permissions.roleUser') }}</option>
                     <option value="operator">{{ t('admin.permissions.roleOperator') }}</option>
                   </select>
@@ -77,7 +77,7 @@
                       v-model="drafts[subject.id].groupIDs"
                       multiple
                       :disabled="drafts[subject.id].role !== 'operator'"
-                      class="input-field min-h-32 w-full min-w-80 disabled:cursor-not-allowed disabled:opacity-50"
+                      class="input min-h-32 w-full min-w-80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option v-for="group in groups" :key="group.id" :value="group.id">
                         {{ group.name }}

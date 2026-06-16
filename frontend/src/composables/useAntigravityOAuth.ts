@@ -22,7 +22,10 @@ export function useAntigravityOAuth() {
     error.value = ''
   }
 
-  const generateAuthUrl = async (proxyId: number | null | undefined): Promise<boolean> => {
+  const generateAuthUrl = async (
+    proxyId: number | null | undefined,
+    accountId?: number | null
+  ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
     sessionId.value = ''
@@ -32,6 +35,7 @@ export function useAntigravityOAuth() {
     try {
       const payload: Record<string, unknown> = {}
       if (proxyId) payload.proxy_id = proxyId
+      if (accountId) payload.account_id = accountId
 
       const response = await adminAPI.antigravity.generateAuthUrl(payload as any)
       authUrl.value = response.auth_url
@@ -53,6 +57,7 @@ export function useAntigravityOAuth() {
     sessionId: string
     state: string
     proxyId?: number | null
+    accountId?: number | null
   }): Promise<AntigravityTokenInfo | null> => {
     const code = params.code?.trim()
     if (!code || !params.sessionId || !params.state) {
@@ -70,6 +75,7 @@ export function useAntigravityOAuth() {
         code
       }
       if (params.proxyId) payload.proxy_id = params.proxyId
+      if (params.accountId) payload.account_id = params.accountId
 
       const tokenInfo = await adminAPI.antigravity.exchangeCode(payload as any)
       return tokenInfo as AntigravityTokenInfo

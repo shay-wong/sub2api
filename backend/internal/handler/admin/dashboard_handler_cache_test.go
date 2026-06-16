@@ -210,3 +210,61 @@ func TestDashboardSnapshotV2OperatorEmptyScopeDoesNotReuseAdminCache(t *testing.
 	require.NoError(t, json.Unmarshal(operatorRec.Body.Bytes(), &resp))
 	require.Equal(t, int64(0), resp.Data.Stats.TotalAccounts)
 }
+
+func TestDashboardSnapshotV2OperatorStatsUsesScopedAccounts(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	rateLimitedAt := now.Add(-time.Minute)
+	rateLimitResetAt := now.Add(time.Hour)
+	overloadUntil := now.Add(time.Hour)
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "normal", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{10}},
+		{ID: 2, Name: "error", Status: service.StatusError, GroupIDs: []int64{10}},
+		{ID: 3, Name: "rate-limited", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{20}, RateLimitedAt: &rateLimitedAt, RateLimitResetAt: &rateLimitResetAt},
+		{ID: 4, Name: "overload", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{20}, OverloadUntil: &overloadUntil},
+		{ID: 5, Name: "hidden", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{30}},
+	}
+	repo := &dashboardUsageRepoCacheProbe{}
+	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
+	permissionSvc := service.NewPermissionService(
+		&operatorPermissionRepoStub{scopes: map[int64][]int64{101: []int64{10, 20}}},
+		operatorUserRepoStub{},
+		operatorGroupRepoStub{},
+	)
+	handler := NewDashboardHandler(dashboardSvc, nil, permissionSvc)
+	handler.SetAdminService(adminSvc)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleOperator)
+		c.Next()
+	})
+	router.GET("/admin/dashboard/snapshot-v2", handler.GetSnapshotV2)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?start_date=2026-03-01&end_date=2026-03-07&include_trend=false&include_model_stats=false&include_group_stats=false", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data struct {
+			Stats struct {
+				TotalAccounts     int64 `json:"total_accounts"`
+				NormalAccounts    int64 `json:"normal_accounts"`
+				ErrorAccounts     int64 `json:"error_accounts"`
+				RateLimitAccounts int64 `json:"ratelimit_accounts"`
+				OverloadAccounts  int64 `json:"overload_accounts"`
+			} `json:"stats"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, int64(4), resp.Data.Stats.TotalAccounts)
+	require.Equal(t, int64(3), resp.Data.Stats.NormalAccounts)
+	require.Equal(t, int64(1), resp.Data.Stats.ErrorAccounts)
+	require.Equal(t, int64(1), resp.Data.Stats.RateLimitAccounts)
+	require.Equal(t, int64(1), resp.Data.Stats.OverloadAccounts)
+}

@@ -1,9 +1,15 @@
 package handler
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 func TestCleanPageImageRelativePath(t *testing.T) {
@@ -98,6 +104,31 @@ func TestResolvePageImagePathRejectsSymlinkEscape(t *testing.T) {
 
 	if got, ok := resolvePageImagePath(pagesDir, base, "images/secret.png"); ok {
 		t.Fatalf("expected symlink escape to be rejected, got %q", got)
+	}
+}
+
+func TestRegisterPageRoutesListPagesRequiresAdminOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+
+	RegisterPageRoutes(
+		v1,
+		t.TempDir(),
+		func(c *gin.Context) { c.Next() },
+		func(c *gin.Context) {
+			c.Set(string(middleware2.ContextKeyUserRole), service.RoleOperator)
+			c.Next()
+		},
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pages", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
 	}
 }
 

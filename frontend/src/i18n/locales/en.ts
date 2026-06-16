@@ -1213,6 +1213,7 @@ export default {
     securityTitle: 'Security Settings',
     securityDescription: 'Password, two-factor authentication, and alerts live in the right rail.',
     administrator: 'Administrator',
+    operator: 'Operator',
     user: 'User',
     username: 'Username',
     email: 'Email',
@@ -2026,6 +2027,7 @@ export default {
       totalRecharged: 'Total Recharged',
       roles: {
         admin: 'Admin',
+        operator: 'Operator',
         user: 'User'
       },
       // Settings Dropdowns

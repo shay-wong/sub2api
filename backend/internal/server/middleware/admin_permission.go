@@ -10,7 +10,7 @@ import (
 func RequireAdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := GetUserRoleFromContext(c)
-		if role == service.RoleAdmin {
+		if service.RoleIsAdmin(role) {
 			c.Next()
 			return
 		}
@@ -21,11 +21,11 @@ func RequireAdminOnly() gin.HandlerFunc {
 func RequireAdminPermission(permission string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := GetUserRoleFromContext(c)
-		if role == service.RoleAdmin {
+		if service.RoleIsAdmin(role) {
 			c.Next()
 			return
 		}
-		if role == service.RoleOperator && operatorHasAdminPermission(permission) {
+		if service.RoleIsOperator(role) && operatorHasAdminPermission(permission) {
 			c.Next()
 			return
 		}

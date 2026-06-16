@@ -32,6 +32,11 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
+		// 账号 OAuth 授权前置流程
+		registerOpenAIOAuthRoutes(admin, h)
+		registerGeminiOAuthRoutes(admin, h)
+		registerAntigravityOAuthRoutes(admin, h)
+
 		// 运维监控（Ops）
 		registerOpsRoutes(admin, h)
 
@@ -46,15 +51,6 @@ func RegisterAdminRoutes(
 
 		// 公告管理
 		registerAnnouncementRoutes(adminOnly, h)
-
-		// OpenAI OAuth
-		registerOpenAIOAuthRoutes(adminOnly, h)
-
-		// Gemini OAuth
-		registerGeminiOAuthRoutes(adminOnly, h)
-
-		// Antigravity OAuth
-		registerAntigravityOAuthRoutes(adminOnly, h)
 
 		// 代理管理
 		registerProxyRoutes(adminOnly, h)
@@ -359,12 +355,12 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.GET("/antigravity/default-model-mapping", h.Admin.Account.GetAntigravityDefaultModelMapping)
 
 		// Claude OAuth routes
-		accounts.POST("/generate-auth-url", middleware.RequireAdminOnly(), h.Admin.OAuth.GenerateAuthURL)
-		accounts.POST("/generate-setup-token-url", middleware.RequireAdminOnly(), h.Admin.OAuth.GenerateSetupTokenURL)
-		accounts.POST("/exchange-code", middleware.RequireAdminOnly(), h.Admin.OAuth.ExchangeCode)
-		accounts.POST("/exchange-setup-token-code", middleware.RequireAdminOnly(), h.Admin.OAuth.ExchangeSetupTokenCode)
-		accounts.POST("/cookie-auth", middleware.RequireAdminOnly(), h.Admin.OAuth.CookieAuth)
-		accounts.POST("/setup-token-cookie-auth", middleware.RequireAdminOnly(), h.Admin.OAuth.SetupTokenCookieAuth)
+		accounts.POST("/generate-auth-url", h.Admin.OAuth.GenerateAuthURL)
+		accounts.POST("/generate-setup-token-url", h.Admin.OAuth.GenerateSetupTokenURL)
+		accounts.POST("/exchange-code", h.Admin.OAuth.ExchangeCode)
+		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
+		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
+		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
 	}
 }
 
@@ -383,29 +379,35 @@ func registerAnnouncementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	openai := admin.Group("/openai")
 	{
-		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
-		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
-		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
-		openai.POST("/accounts/:id/refresh", h.Admin.OpenAIOAuth.RefreshAccountToken)
-		openai.POST("/create-from-oauth", h.Admin.OpenAIOAuth.CreateAccountFromOAuth)
+		accountWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+
+		openai.POST("/generate-auth-url", accountWrite, h.Admin.OpenAIOAuth.GenerateAuthURL)
+		openai.POST("/exchange-code", accountWrite, h.Admin.OpenAIOAuth.ExchangeCode)
+		openai.POST("/refresh-token", accountWrite, h.Admin.OpenAIOAuth.RefreshToken)
+		openai.POST("/accounts/:id/refresh", accountWrite, h.Admin.OpenAIOAuth.RefreshAccountToken)
+		openai.POST("/create-from-oauth", accountWrite, h.Admin.OpenAIOAuth.CreateAccountFromOAuth)
 	}
 }
 
 func registerGeminiOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	gemini := admin.Group("/gemini")
 	{
-		gemini.POST("/oauth/auth-url", h.Admin.GeminiOAuth.GenerateAuthURL)
-		gemini.POST("/oauth/exchange-code", h.Admin.GeminiOAuth.ExchangeCode)
-		gemini.GET("/oauth/capabilities", h.Admin.GeminiOAuth.GetCapabilities)
+		accountWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+
+		gemini.POST("/oauth/auth-url", accountWrite, h.Admin.GeminiOAuth.GenerateAuthURL)
+		gemini.POST("/oauth/exchange-code", accountWrite, h.Admin.GeminiOAuth.ExchangeCode)
+		gemini.GET("/oauth/capabilities", accountWrite, h.Admin.GeminiOAuth.GetCapabilities)
 	}
 }
 
 func registerAntigravityOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	antigravity := admin.Group("/antigravity")
 	{
-		antigravity.POST("/oauth/auth-url", h.Admin.AntigravityOAuth.GenerateAuthURL)
-		antigravity.POST("/oauth/exchange-code", h.Admin.AntigravityOAuth.ExchangeCode)
-		antigravity.POST("/oauth/refresh-token", h.Admin.AntigravityOAuth.RefreshToken)
+		accountWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+
+		antigravity.POST("/oauth/auth-url", accountWrite, h.Admin.AntigravityOAuth.GenerateAuthURL)
+		antigravity.POST("/oauth/exchange-code", accountWrite, h.Admin.AntigravityOAuth.ExchangeCode)
+		antigravity.POST("/oauth/refresh-token", accountWrite, h.Admin.AntigravityOAuth.RefreshToken)
 	}
 }
 
