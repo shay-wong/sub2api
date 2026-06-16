@@ -17,6 +17,7 @@ type OpenAIOAuthHandler struct {
 	openaiOAuthService *service.OpenAIOAuthService
 	adminService       service.AdminService
 	permissionService  *service.PermissionService
+	quotaService       *service.OpenAIQuotaService
 }
 
 func oauthPlatformFromPath(c *gin.Context) string {
@@ -24,11 +25,17 @@ func oauthPlatformFromPath(c *gin.Context) string {
 }
 
 // NewOpenAIOAuthHandler creates a new OpenAI OAuth handler
-func NewOpenAIOAuthHandler(openaiOAuthService *service.OpenAIOAuthService, adminService service.AdminService, permissionService *service.PermissionService) *OpenAIOAuthHandler {
+func NewOpenAIOAuthHandler(
+	openaiOAuthService *service.OpenAIOAuthService,
+	adminService service.AdminService,
+	permissionService *service.PermissionService,
+	quotaService *service.OpenAIQuotaService,
+) *OpenAIOAuthHandler {
 	return &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
 		adminService:       adminService,
 		permissionService:  permissionService,
+		quotaService:       quotaService,
 	}
 }
 
@@ -315,4 +322,72 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	}
 
 	response.Success(c, dto.AccountFromService(scope.accountForResponse(account)))
+}
+
+// QueryQuota queries the rate-limit / quota usage for an OpenAI account.
+// GET /api/v1/admin/openai/accounts/:id/quota
+func (h *OpenAIOAuthHandler) QueryQuota(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		return
+	}
+	if h.quotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	usage, err := h.quotaService.QueryUsage(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, usage)
+}
+
+// ResetQuota consumes one rate-limit reset credit for an OpenAI account.
+// POST /api/v1/admin/openai/accounts/:id/reset-quota
+func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		return
+	}
+	if h.quotaService == nil {
+		response.BadRequest(c, "openai quota service is not enabled")
+		return
+	}
+	result, err := h.quotaService.ResetCredit(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

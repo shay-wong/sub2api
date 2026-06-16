@@ -386,6 +386,8 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/refresh-token", accountWrite, h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", accountWrite, h.Admin.OpenAIOAuth.RefreshAccountToken)
 		openai.POST("/create-from-oauth", accountWrite, h.Admin.OpenAIOAuth.CreateAccountFromOAuth)
+		openai.GET("/accounts/:id/quota", accountWrite, h.Admin.OpenAIOAuth.QueryQuota)
+		openai.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.OpenAIOAuth.ResetQuota)
 	}
 }
 

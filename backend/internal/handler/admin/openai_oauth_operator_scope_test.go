@@ -21,13 +21,15 @@ func newOperatorOpenAIOAuthScopeRouter(adminSvc *stubAdminService, groupIDs []in
 		operatorUserRepoStub{},
 		operatorGroupRepoStub{},
 	)
-	handler := NewOpenAIOAuthHandler(nil, adminSvc, permissionSvc)
+	handler := NewOpenAIOAuthHandler(nil, adminSvc, permissionSvc, nil)
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleOperator)
 		c.Next()
 	})
 	router.POST("/api/v1/admin/openai/accounts/:id/refresh", handler.RefreshAccountToken)
+	router.GET("/api/v1/admin/openai/accounts/:id/quota", handler.QueryQuota)
+	router.POST("/api/v1/admin/openai/accounts/:id/reset-quota", handler.ResetQuota)
 	router.POST("/api/v1/admin/openai/generate-auth-url", handler.GenerateAuthURL)
 	router.POST("/api/v1/admin/openai/create-from-oauth", handler.CreateAccountFromOAuth)
 	return router
@@ -48,6 +50,46 @@ func TestOperatorOpenAIOAuthRefreshRejectsOutOfScopeAccount(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/accounts/1/refresh", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
+}
+
+func TestOperatorOpenAIOAuthQueryQuotaRejectsOutOfScopeAccount(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{
+		ID:       1,
+		Name:     "hidden-openai",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Status:   service.StatusActive,
+		GroupIDs: []int64{30},
+	}}
+	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/openai/accounts/1/quota", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
+}
+
+func TestOperatorOpenAIOAuthResetQuotaRejectsOutOfScopeAccount(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{
+		ID:       1,
+		Name:     "hidden-openai",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Status:   service.StatusActive,
+		GroupIDs: []int64{30},
+	}}
+	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/accounts/1/reset-quota", nil)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
