@@ -48,26 +48,34 @@ type dashboardSnapshotV2Filters struct {
 }
 
 type dashboardSnapshotV2CacheKey struct {
-	StartTime         string `json:"start_time"`
-	EndTime           string `json:"end_time"`
-	Granularity       string `json:"granularity"`
-	UserID            int64  `json:"user_id"`
-	APIKeyID          int64  `json:"api_key_id"`
-	AccountID         int64  `json:"account_id"`
-	GroupID           int64  `json:"group_id"`
-	Model             string `json:"model"`
-	RequestType       *int16 `json:"request_type"`
-	Stream            *bool  `json:"stream"`
-	BillingType       *int8  `json:"billing_type"`
-	IncludeStats      bool   `json:"include_stats"`
-	IncludeTrend      bool   `json:"include_trend"`
-	IncludeModels     bool   `json:"include_models"`
-	IncludeGroups     bool   `json:"include_groups"`
-	IncludeUsersTrend bool   `json:"include_users_trend"`
-	UsersTrendLimit   int    `json:"users_trend_limit"`
+	StartTime         string  `json:"start_time"`
+	EndTime           string  `json:"end_time"`
+	Granularity       string  `json:"granularity"`
+	Scoped            bool    `json:"scoped"`
+	ScopeEmpty        bool    `json:"scope_empty"`
+	ScopeGroupIDs     []int64 `json:"scope_group_ids"`
+	UserID            int64   `json:"user_id"`
+	APIKeyID          int64   `json:"api_key_id"`
+	AccountID         int64   `json:"account_id"`
+	GroupID           int64   `json:"group_id"`
+	Model             string  `json:"model"`
+	RequestType       *int16  `json:"request_type"`
+	Stream            *bool   `json:"stream"`
+	BillingType       *int8   `json:"billing_type"`
+	IncludeStats      bool    `json:"include_stats"`
+	IncludeTrend      bool    `json:"include_trend"`
+	IncludeModels     bool    `json:"include_models"`
+	IncludeGroups     bool    `json:"include_groups"`
+	IncludeUsersTrend bool    `json:"include_users_trend"`
+	UsersTrendLimit   int     `json:"users_trend_limit"`
 }
 
 func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	startTime, endTime := parseTimeRange(c)
 	granularity := strings.TrimSpace(c.DefaultQuery("granularity", "day"))
 	if granularity != "hour" {
@@ -91,11 +99,22 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	scopeGroupIDs, err := scope.dashboardGroupIDs(filters.GroupID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if scope.isScoped() {
+		includeUsersTrend = false
+	}
 
 	keyRaw, _ := json.Marshal(dashboardSnapshotV2CacheKey{
 		StartTime:         startTime.UTC().Format(time.RFC3339),
 		EndTime:           endTime.UTC().Format(time.RFC3339),
 		Granularity:       granularity,
+		Scoped:            scope.isScoped(),
+		ScopeEmpty:        scope.isScoped() && len(scopeGroupIDs) == 0,
+		ScopeGroupIDs:     scopeGroupIDs,
 		UserID:            filters.UserID,
 		APIKeyID:          filters.APIKeyID,
 		AccountID:         filters.AccountID,
@@ -119,6 +138,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 			startTime,
 			endTime,
 			granularity,
+			scope,
 			filters,
 			includeStats,
 			includeTrend,
@@ -148,6 +168,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	granularity string,
+	scope *adminAccessScope,
 	filters *dashboardSnapshotV2Filters,
 	includeStats, includeTrend, includeModels, includeGroups, includeUsersTrend bool,
 	usersTrendLimit int,
@@ -160,7 +181,13 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeStats {
-		stats, err := h.dashboardService.GetDashboardStats(ctx)
+		var stats *usagestats.DashboardStats
+		var err error
+		if scope != nil && scope.isScoped() {
+			stats, err = h.getDashboardStatsForScope(ctx, scope, startTime, endTime)
+		} else {
+			stats, err = h.dashboardService.GetDashboardStats(ctx)
+		}
 		if err != nil {
 			return nil, errors.New("failed to get dashboard statistics")
 		}
@@ -171,20 +198,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeTrend {
-		trend, _, err := h.getUsageTrendCached(
-			ctx,
-			startTime,
-			endTime,
-			granularity,
-			filters.UserID,
-			filters.APIKeyID,
-			filters.AccountID,
-			filters.GroupID,
-			filters.Model,
-			filters.RequestType,
-			filters.Stream,
-			filters.BillingType,
-		)
+		trend, _, err := h.getUsageTrendForScope(ctx, scope, startTime, endTime, granularity, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
 		if err != nil {
 			return nil, errors.New("failed to get usage trend")
 		}
@@ -192,19 +206,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeModels {
-		models, _, err := h.getModelStatsCached(
-			ctx,
-			startTime,
-			endTime,
-			filters.UserID,
-			filters.APIKeyID,
-			filters.AccountID,
-			filters.GroupID,
-			usagestats.ModelSourceRequested,
-			filters.RequestType,
-			filters.Stream,
-			filters.BillingType,
-		)
+		models, _, err := h.getModelStatsForScope(ctx, scope, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, usagestats.ModelSourceRequested, filters.RequestType, filters.Stream, filters.BillingType)
 		if err != nil {
 			return nil, errors.New("failed to get model statistics")
 		}
@@ -212,18 +214,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeGroups {
-		groups, _, err := h.getGroupStatsCached(
-			ctx,
-			startTime,
-			endTime,
-			filters.UserID,
-			filters.APIKeyID,
-			filters.AccountID,
-			filters.GroupID,
-			filters.RequestType,
-			filters.Stream,
-			filters.BillingType,
-		)
+		groups, _, err := h.getGroupStatsForScope(ctx, scope, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.RequestType, filters.Stream, filters.BillingType)
 		if err != nil {
 			return nil, errors.New("failed to get group statistics")
 		}

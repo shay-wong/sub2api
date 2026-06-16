@@ -20,6 +20,7 @@ type GroupHandler struct {
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
+	permissionService    *service.PermissionService
 }
 
 type optionalLimitField struct {
@@ -128,11 +129,16 @@ func (f optionalGroupRateLimitField) ToUpdateServiceInput() *float64 {
 }
 
 // NewGroupHandler creates a new admin group handler
-func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
+func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, permissionService ...*service.PermissionService) *GroupHandler {
+	var perm *service.PermissionService
+	if len(permissionService) > 0 {
+		perm = permissionService[0]
+	}
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
+		permissionService:    perm,
 	}
 }
 
@@ -260,11 +266,15 @@ func (h *GroupHandler) List(c *gin.Context) {
 // bound to them even after the group is disabled).
 // GET /api/v1/admin/groups/all
 func (h *GroupHandler) GetAll(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	platform := c.Query("platform")
 	includeInactive := c.Query("include_inactive") == "true"
 
 	var groups []service.Group
-	var err error
 
 	if includeInactive {
 		groups, err = h.adminService.GetAllGroupsIncludingInactive(c.Request.Context())
@@ -277,6 +287,15 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if scope.isScoped() {
+		filtered := groups[:0]
+		for _, group := range groups {
+			if scope.containsGroup(group.ID) {
+				filtered = append(filtered, group)
+			}
+		}
+		groups = filtered
 	}
 
 	outGroups := make([]dto.AdminGroup, 0, len(groups))

@@ -46,3 +46,26 @@ func TestBuildOpsErrorLogsWhere_UserQueryUsesExistsSubquery(t *testing.T) {
 		t.Fatalf("where should include EXISTS user email condition: %s", where)
 	}
 }
+
+func TestBuildOpsErrorLogsWhere_AppliesOperatorGroupScope(t *testing.T) {
+	filter := &service.OpsErrorLogFilter{
+		GroupIDs: []int64{10, 20, 0, -1},
+	}
+
+	where, args := buildOpsErrorLogsWhere(filter)
+	if !strings.Contains(where, "e.group_id = ANY($") {
+		t.Fatalf("where should include group scope ANY condition: %s", where)
+	}
+	if len(args) != 1 {
+		t.Fatalf("args len = %d, want 1", len(args))
+	}
+}
+
+func TestBuildOpsErrorLogsWhere_EmptyOperatorScopeReturnsNoRows(t *testing.T) {
+	filter := &service.OpsErrorLogFilter{GroupScopeEmpty: true}
+
+	where, _ := buildOpsErrorLogsWhere(filter)
+	if !strings.Contains(where, "1 = 0") {
+		t.Fatalf("where should include impossible predicate for empty scope: %s", where)
+	}
+}

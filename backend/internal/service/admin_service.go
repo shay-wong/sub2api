@@ -314,6 +314,7 @@ type UpdateAccountInput struct {
 	LoadFactor            *int
 	Status                string
 	GroupIDs              *[]int64
+	GroupScopeIDs         []int64
 	ExpiresAt             *int64
 	AutoPauseOnExpired    *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
@@ -332,6 +333,7 @@ type BulkUpdateAccountsInput struct {
 	Status         string
 	Schedulable    *bool
 	GroupIDs       *[]int64
+	GroupScopeIDs  []int64
 	Credentials    map[string]any
 	Extra          map[string]any
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
@@ -2611,6 +2613,27 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 	return accounts, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListAccountsByGroupScope(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupIDs []int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
+	if len(groupIDs) == 0 {
+		return []Account{}, 0, nil
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	groupScopeRepo, ok := s.accountRepo.(interface {
+		ListWithGroupScope(context.Context, pagination.PaginationParams, string, string, string, string, []int64, string) ([]Account, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		if len(groupIDs) == 1 {
+			return s.ListAccounts(ctx, page, pageSize, platform, accountType, status, search, groupIDs[0], privacyMode, sortBy, sortOrder)
+		}
+		return nil, 0, fmt.Errorf("account repository does not support group scope listing")
+	}
+	accounts, result, err := groupScopeRepo.ListWithGroupScope(ctx, params, platform, accountType, status, search, groupIDs, privacyMode)
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
 func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, error) {
 	return s.accountRepo.GetByID(ctx, id)
 }
@@ -2831,16 +2854,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
-		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
+		nextGroupIDs := scopedAccountGroupIDs(account, *input.GroupIDs, input.GroupScopeIDs)
+		if err := s.validateGroupIDsExist(ctx, nextGroupIDs); err != nil {
 			return nil, err
 		}
 
 		// 检查混合渠道风险（除非用户已确认）
 		if !input.SkipMixedChannelCheck {
-			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, *input.GroupIDs); err != nil {
+			if err := s.checkMixedChannelRisk(ctx, account.ID, account.Platform, nextGroupIDs); err != nil {
 				return nil, err
 			}
 		}
+		input.GroupIDs = &nextGroupIDs
 	}
 
 	if err := s.accountRepo.Update(ctx, account); err != nil {
@@ -2901,14 +2926,23 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预加载账号平台信息（混合渠道检查需要）。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
+	accountByID := map[int64]*Account{}
+	if needMixedChannelCheck || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		for _, account := range accounts {
 			if account != nil {
+				accountByID[account.ID] = account
 				platformByID[account.ID] = account.Platform
+			}
+		}
+		if input.GroupIDs != nil && len(input.GroupScopeIDs) > 0 {
+			for _, accountID := range input.AccountIDs {
+				if accountByID[accountID] == nil {
+					return nil, ErrAccountNotFound
+				}
 			}
 		}
 	}
@@ -2920,7 +2954,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if platform == "" {
 				continue
 			}
-			if err := s.checkMixedChannelRisk(ctx, accountID, platform, *input.GroupIDs); err != nil {
+			nextGroupIDs := scopedAccountGroupIDs(accountByID[accountID], *input.GroupIDs, input.GroupScopeIDs)
+			if err := s.checkMixedChannelRisk(ctx, accountID, platform, nextGroupIDs); err != nil {
 				return nil, err
 			}
 		}
@@ -2978,7 +3013,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		entry := BulkUpdateAccountResult{AccountID: accountID}
 
 		if input.GroupIDs != nil {
-			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
+			nextGroupIDs := scopedAccountGroupIDs(accountByID[accountID], *input.GroupIDs, input.GroupScopeIDs)
+			if err := s.accountRepo.BindGroups(ctx, accountID, nextGroupIDs); err != nil {
 				entry.Success = false
 				entry.Error = err.Error()
 				result.Failed++
@@ -2995,6 +3031,94 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	return result, nil
+}
+
+func scopedAccountGroupIDs(account *Account, requestedGroupIDs []int64, scopeGroupIDs []int64) []int64 {
+	scopeSet := positiveInt64Set(scopeGroupIDs)
+	if len(scopeSet) == 0 {
+		return normalizePositiveInt64IDsForService(requestedGroupIDs)
+	}
+	out := make([]int64, 0, len(requestedGroupIDs)+len(scopeGroupIDs))
+	seen := make(map[int64]struct{}, len(requestedGroupIDs)+len(scopeGroupIDs))
+	for _, id := range currentAccountGroupIDs(account) {
+		if id <= 0 {
+			continue
+		}
+		if _, scoped := scopeSet[id]; scoped {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range requestedGroupIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, scoped := scopeSet[id]; !scoped {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func currentAccountGroupIDs(account *Account) []int64 {
+	if account == nil {
+		return nil
+	}
+	if len(account.GroupIDs) > 0 {
+		return account.GroupIDs
+	}
+	if len(account.AccountGroups) > 0 {
+		out := make([]int64, 0, len(account.AccountGroups))
+		for _, accountGroup := range account.AccountGroups {
+			out = append(out, accountGroup.GroupID)
+		}
+		return out
+	}
+	if len(account.Groups) > 0 {
+		out := make([]int64, 0, len(account.Groups))
+		for _, group := range account.Groups {
+			if group != nil {
+				out = append(out, group.ID)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func positiveInt64Set(values []int64) map[int64]struct{} {
+	out := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		if value > 0 {
+			out[value] = struct{}{}
+		}
+	}
+	return out
+}
+
+func normalizePositiveInt64IDsForService(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters) ([]int64, error) {

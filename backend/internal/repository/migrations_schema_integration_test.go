@@ -101,6 +101,20 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.user_allowed_groups')").Scan(&uagRegclass))
 	require.True(t, uagRegclass.Valid, "expected user_allowed_groups table to exist")
 
+	// operator_group_scopes: admin-console scope table for operator role.
+	var operatorScopesRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.operator_group_scopes')").Scan(&operatorScopesRegclass))
+	require.True(t, operatorScopesRegclass.Valid, "expected operator_group_scopes table to exist")
+	requireColumn(t, tx, "operator_group_scopes", "user_id", "bigint", 0, false)
+	requireColumn(t, tx, "operator_group_scopes", "group_id", "bigint", 0, false)
+	requireColumn(t, tx, "operator_group_scopes", "created_by", "bigint", 0, true)
+	requireColumn(t, tx, "operator_group_scopes", "created_at", "timestamp with time zone", 0, false)
+	requireIndex(t, tx, "operator_group_scopes", "operator_group_scopes_pkey")
+	requireIndex(t, tx, "operator_group_scopes", "idx_operator_group_scopes_group_id")
+	requireForeignKeyOnDelete(t, tx, "operator_group_scopes", "user_id", "users", "CASCADE")
+	requireForeignKeyOnDelete(t, tx, "operator_group_scopes", "group_id", "groups", "CASCADE")
+	requireForeignKeyOnDelete(t, tx, "operator_group_scopes", "created_by", "users", "SET NULL")
+
 	// user_subscriptions: deleted_at for soft delete support (migration 012)
 	requireColumn(t, tx, "user_subscriptions", "deleted_at", "timestamp with time zone", 0, true)
 

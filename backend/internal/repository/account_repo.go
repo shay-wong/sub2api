@@ -466,6 +466,16 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+	groupIDs := []int64(nil)
+	if groupID == service.AccountListGroupUngrouped {
+		groupIDs = []int64{service.AccountListGroupUngrouped}
+	} else if groupID > 0 {
+		groupIDs = []int64{groupID}
+	}
+	return r.ListWithGroupScope(ctx, params, platform, accountType, status, search, groupIDs, privacyMode)
+}
+
+func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -538,10 +548,13 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	if search != "" {
 		q = q.Where(dbaccount.NameContainsFold(search))
 	}
-	if groupID == service.AccountListGroupUngrouped {
-		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
-	} else if groupID > 0 {
-		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)))
+	groupIDs = normalizeAccountGroupFilterIDs(groupIDs)
+	if len(groupIDs) > 0 {
+		if len(groupIDs) == 1 && groupIDs[0] == service.AccountListGroupUngrouped {
+			q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
+		} else {
+			q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDIn(groupIDs...)))
+		}
 	}
 	if privacyMode != "" {
 		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
@@ -580,6 +593,31 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 		return nil, nil, err
 	}
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
+}
+
+func normalizeAccountGroupFilterIDs(values []int64) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value == service.AccountListGroupUngrouped {
+			if len(values) == 1 {
+				return []int64{service.AccountListGroupUngrouped}
+			}
+			continue
+		}
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {

@@ -9,7 +9,7 @@ import (
 // GetAccountAvailabilityStats returns current account availability stats.
 //
 // Query-level filtering is intentionally limited to platform/group to match the dashboard scope.
-func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFilter string, groupIDFilter *int64) (
+func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFilter string, groupIDFilter *int64, groupIDScope ...int64) (
 	map[string]*PlatformAvailability,
 	map[int64]*GroupAvailability,
 	map[int64]*AccountAvailability,
@@ -20,22 +20,14 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 		return nil, nil, nil, nil, err
 	}
 
-	accounts, err := s.listAllAccountsForOps(ctx, platformFilter)
+	if groupIDFilter != nil && *groupIDFilter > 0 {
+		groupIDScope = []int64{*groupIDFilter}
+	}
+	groupIDScope = normalizeOperatorScopeGroupIDs(groupIDScope)
+	scopeSet := opsGroupScopeSet(groupIDScope)
+	accounts, err := s.listAllAccountsForOps(ctx, platformFilter, groupIDScope...)
 	if err != nil {
 		return nil, nil, nil, nil, err
-	}
-
-	if groupIDFilter != nil && *groupIDFilter > 0 {
-		filtered := make([]Account, 0, len(accounts))
-		for _, acc := range accounts {
-			for _, grp := range acc.Groups {
-				if grp != nil && grp.ID == *groupIDFilter {
-					filtered = append(filtered, acc)
-					break
-				}
-			}
-		}
-		accounts = filtered
 	}
 
 	now := time.Now()
@@ -47,6 +39,10 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 
 	for _, acc := range accounts {
 		if acc.ID <= 0 {
+			continue
+		}
+		scopedGroups := opsAccountGroupsInScope(acc, groupIDFilter, scopeSet)
+		if groupIDFilter != nil && *groupIDFilter > 0 && len(scopedGroups) == 0 {
 			continue
 		}
 
@@ -86,7 +82,7 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 			}
 		}
 
-		for _, grp := range acc.Groups {
+		for _, grp := range scopedGroups {
 			if grp == nil || grp.ID <= 0 {
 				continue
 			}
@@ -112,9 +108,9 @@ func (s *OpsService) GetAccountAvailabilityStats(ctx context.Context, platformFi
 
 		displayGroupID := int64(0)
 		displayGroupName := ""
-		if len(acc.Groups) > 0 && acc.Groups[0] != nil {
-			displayGroupID = acc.Groups[0].ID
-			displayGroupName = acc.Groups[0].Name
+		if len(scopedGroups) > 0 && scopedGroups[0] != nil {
+			displayGroupID = scopedGroups[0].ID
+			displayGroupName = scopedGroups[0].Name
 		}
 
 		item := &AccountAvailability{

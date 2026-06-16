@@ -10,6 +10,10 @@ import (
 // GetWindowStats returns lightweight request/token counts for the provided window.
 // It is intended for realtime sampling (e.g. WebSocket QPS push) without computing percentiles/peaks.
 func (s *OpsService) GetWindowStats(ctx context.Context, startTime, endTime time.Time) (*OpsWindowStats, error) {
+	return s.GetWindowStatsWithGroupScope(ctx, startTime, endTime, nil, false)
+}
+
+func (s *OpsService) GetWindowStatsWithGroupScope(ctx context.Context, startTime, endTime time.Time, groupIDs []int64, groupScopeEmpty bool) (*OpsWindowStats, error) {
 	if err := s.RequireMonitoringEnabled(ctx); err != nil {
 		return nil, err
 	}
@@ -17,8 +21,10 @@ func (s *OpsService) GetWindowStats(ctx context.Context, startTime, endTime time
 		return nil, infraerrors.ServiceUnavailable("OPS_REPO_UNAVAILABLE", "Ops repository not available")
 	}
 	filter := &OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		GroupIDs:        normalizeOperatorScopeGroupIDs(groupIDs),
+		GroupScopeEmpty: groupScopeEmpty,
 	}
 	return s.opsRepo.GetWindowStats(ctx, filter)
 }

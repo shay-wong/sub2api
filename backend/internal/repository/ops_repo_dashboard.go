@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 const (
@@ -388,15 +389,30 @@ func (r *opsRepository) listHourlyMetricsRows(ctx context.Context, filter *servi
 
 	platform := ""
 	groupID := (*int64)(nil)
+	groupIDs := []int64(nil)
+	groupScopeEmpty := false
 	if filter != nil {
 		platform = strings.TrimSpace(strings.ToLower(filter.Platform))
 		groupID = filter.GroupID
+		groupIDs = normalizePositiveInt64IDs(filter.GroupIDs)
+		groupScopeEmpty = filter.GroupScopeEmpty
 	}
 
 	switch {
+	case groupScopeEmpty:
+		where += " AND 1 = 0"
 	case groupID != nil && *groupID > 0:
 		where += fmt.Sprintf(" AND group_id = $%d", idx)
 		args = append(args, *groupID)
+		idx++
+		if platform != "" {
+			where += fmt.Sprintf(" AND platform = $%d", idx)
+			args = append(args, platform)
+			// idx++ removed - not used after this
+		}
+	case len(groupIDs) > 0:
+		where += fmt.Sprintf(" AND group_id = ANY($%d)", idx)
+		args = append(args, pq.Array(groupIDs))
 		idx++
 		if platform != "" {
 			where += fmt.Sprintf(" AND platform = $%d", idx)
@@ -975,9 +991,13 @@ func isQueryTimeoutErr(err error) bool {
 func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (join string, where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
+	groupIDs := []int64(nil)
+	groupScopeEmpty := false
 	if filter != nil {
 		platform = strings.TrimSpace(strings.ToLower(filter.Platform))
 		groupID = filter.GroupID
+		groupIDs = normalizePositiveInt64IDs(filter.GroupIDs)
+		groupScopeEmpty = filter.GroupScopeEmpty
 	}
 
 	idx := startIndex
@@ -991,9 +1011,15 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 	clauses = append(clauses, fmt.Sprintf("ul.created_at < $%d", idx))
 	idx++
 
-	if groupID != nil && *groupID > 0 {
+	if groupScopeEmpty {
+		clauses = append(clauses, "1 = 0")
+	} else if groupID != nil && *groupID > 0 {
 		args = append(args, *groupID)
 		clauses = append(clauses, fmt.Sprintf("ul.group_id = $%d", idx))
+		idx++
+	} else if len(groupIDs) > 0 {
+		args = append(args, pq.Array(groupIDs))
+		clauses = append(clauses, fmt.Sprintf("ul.group_id = ANY($%d)", idx))
 		idx++
 	}
 	if platform != "" {
@@ -1012,9 +1038,13 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
+	groupIDs := []int64(nil)
+	groupScopeEmpty := false
 	if filter != nil {
 		platform = strings.TrimSpace(strings.ToLower(filter.Platform))
 		groupID = filter.GroupID
+		groupIDs = normalizePositiveInt64IDs(filter.GroupIDs)
+		groupScopeEmpty = filter.GroupScopeEmpty
 	}
 
 	idx := startIndex
@@ -1030,9 +1060,15 @@ func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 
 	clauses = append(clauses, "is_count_tokens = FALSE")
 
-	if groupID != nil && *groupID > 0 {
+	if groupScopeEmpty {
+		clauses = append(clauses, "1 = 0")
+	} else if groupID != nil && *groupID > 0 {
 		args = append(args, *groupID)
 		clauses = append(clauses, fmt.Sprintf("group_id = $%d", idx))
+		idx++
+	} else if len(groupIDs) > 0 {
+		args = append(args, pq.Array(groupIDs))
+		clauses = append(clauses, fmt.Sprintf("group_id = ANY($%d)", idx))
 		idx++
 	}
 	if platform != "" {

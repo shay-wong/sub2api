@@ -40,6 +40,7 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
+	permissionHandler *admin.PermissionHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -73,6 +74,7 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
+		Permission:             permissionHandler,
 	}
 }
 
@@ -93,6 +95,52 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
 	h.SetNotificationEmailService(notificationEmailService)
 	return h
+}
+
+func ProvideAdminDashboardHandler(dashboardService *service.DashboardService, aggregationService *service.DashboardAggregationService, permissionService *service.PermissionService) *admin.DashboardHandler {
+	return admin.NewDashboardHandler(dashboardService, aggregationService, permissionService)
+}
+
+func ProvideAdminGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, permissionService *service.PermissionService) *admin.GroupHandler {
+	return admin.NewGroupHandler(adminService, dashboardService, groupCapacityService, permissionService)
+}
+
+func ProvideAdminAccountHandler(
+	adminService service.AdminService,
+	oauthService *service.OAuthService,
+	openaiOAuthService *service.OpenAIOAuthService,
+	geminiOAuthService *service.GeminiOAuthService,
+	antigravityOAuthService *service.AntigravityOAuthService,
+	rateLimitService *service.RateLimitService,
+	accountUsageService *service.AccountUsageService,
+	accountTestService *service.AccountTestService,
+	concurrencyService *service.ConcurrencyService,
+	crsSyncService *service.CRSSyncService,
+	sessionLimitCache service.SessionLimitCache,
+	rpmCache service.RPMCache,
+	tokenCacheInvalidator service.TokenCacheInvalidator,
+	permissionService *service.PermissionService,
+) *admin.AccountHandler {
+	return admin.NewAccountHandler(
+		adminService,
+		oauthService,
+		openaiOAuthService,
+		geminiOAuthService,
+		antigravityOAuthService,
+		rateLimitService,
+		accountUsageService,
+		accountTestService,
+		concurrencyService,
+		crsSyncService,
+		sessionLimitCache,
+		rpmCache,
+		tokenCacheInvalidator,
+		permissionService,
+	)
+}
+
+func ProvideAdminOpsHandler(opsService *service.OpsService, permissionService *service.PermissionService) *admin.OpsHandler {
+	return admin.NewOpsHandler(opsService, permissionService)
 }
 
 // ProvideHandlers creates the Handlers struct
@@ -156,10 +204,10 @@ var ProviderSet = wire.NewSet(
 	NewAvailableChannelHandler,
 
 	// Admin handlers
-	admin.NewDashboardHandler,
+	ProvideAdminDashboardHandler,
 	admin.NewUserHandler,
-	admin.NewGroupHandler,
-	admin.NewAccountHandler,
+	ProvideAdminGroupHandler,
+	ProvideAdminAccountHandler,
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,
@@ -171,7 +219,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewRedeemHandler,
 	admin.NewPromoHandler,
 	ProvideAdminSettingHandler,
-	admin.NewOpsHandler,
+	ProvideAdminOpsHandler,
 	ProvideSystemHandler,
 	admin.NewSubscriptionHandler,
 	admin.NewUsageHandler,
@@ -187,6 +235,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
+	admin.NewPermissionHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

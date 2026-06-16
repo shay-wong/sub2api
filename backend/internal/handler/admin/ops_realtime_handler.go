@@ -14,6 +14,11 @@ import (
 // GetConcurrencyStats returns real-time concurrency usage aggregated by platform/group/account.
 // GET /api/v1/admin/ops/concurrency
 func (h *OpsHandler) GetConcurrencyStats(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -44,8 +49,25 @@ func (h *OpsHandler) GetConcurrencyStats(c *gin.Context) {
 		}
 		groupID = &id
 	}
+	if scope.isScoped() {
+		if groupID != nil {
+			if err := scope.ensureGroup(*groupID); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		} else if len(scope.GroupIDs) == 0 {
+			response.Success(c, gin.H{
+				"enabled":   true,
+				"platform":  map[string]*service.PlatformConcurrencyInfo{},
+				"group":     map[int64]*service.GroupConcurrencyInfo{},
+				"account":   map[int64]*service.AccountConcurrencyInfo{},
+				"timestamp": time.Now().UTC(),
+			})
+			return
+		}
+	}
 
-	platform, group, account, collectedAt, err := h.opsService.GetConcurrencyStats(c.Request.Context(), platformFilter, groupID)
+	platform, group, account, collectedAt, err := h.opsService.GetConcurrencyStats(c.Request.Context(), platformFilter, groupID, scope.GroupIDs...)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -107,6 +129,11 @@ func (h *OpsHandler) GetUserConcurrencyStats(c *gin.Context) {
 // - platform: optional
 // - group_id: optional
 func (h *OpsHandler) GetAccountAvailability(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -137,8 +164,25 @@ func (h *OpsHandler) GetAccountAvailability(c *gin.Context) {
 		}
 		groupID = &id
 	}
+	if scope.isScoped() {
+		if groupID != nil {
+			if err := scope.ensureGroup(*groupID); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		} else if len(scope.GroupIDs) == 0 {
+			response.Success(c, gin.H{
+				"enabled":   true,
+				"platform":  map[string]*service.PlatformAvailability{},
+				"group":     map[int64]*service.GroupAvailability{},
+				"account":   map[int64]*service.AccountAvailability{},
+				"timestamp": time.Now().UTC(),
+			})
+			return
+		}
+	}
 
-	platformStats, groupStats, accountStats, collectedAt, err := h.opsService.GetAccountAvailabilityStats(c.Request.Context(), platform, groupID)
+	platformStats, groupStats, accountStats, collectedAt, err := h.opsService.GetAccountAvailabilityStats(c.Request.Context(), platform, groupID, scope.GroupIDs...)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -179,6 +223,11 @@ func parseOpsRealtimeWindow(v string) (time.Duration, string, bool) {
 // - platform: optional
 // - group_id: optional
 func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -232,6 +281,10 @@ func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
 		Platform:  platform,
 		GroupID:   groupID,
 		QueryMode: service.OpsQueryModeRaw,
+	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	summary, err := h.opsService.GetRealtimeTrafficSummary(c.Request.Context(), filter)

@@ -17,6 +17,7 @@ import (
 type mockAccountRepoForGemini struct {
 	accounts           []Account
 	accountsByID       map[int64]*Account
+	boundGroupsByID    map[int64][]int64
 	listByGroupFunc    func(ctx context.Context, groupID int64, platforms []string) ([]Account, error)
 	listByPlatformFunc func(ctx context.Context, platforms []string) ([]Account, error)
 }
@@ -108,6 +109,10 @@ func (m *mockAccountRepoForGemini) AutoPauseExpiredAccounts(ctx context.Context,
 	return 0, nil
 }
 func (m *mockAccountRepoForGemini) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
+	if m.boundGroupsByID == nil {
+		m.boundGroupsByID = map[int64][]int64{}
+	}
+	m.boundGroupsByID[accountID] = append([]int64(nil), groupIDs...)
 	return nil
 }
 func (m *mockAccountRepoForGemini) ListSchedulable(ctx context.Context) ([]Account, error) {

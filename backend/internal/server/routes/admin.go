@@ -26,83 +26,89 @@ func RegisterAdminRoutes(
 		// 仪表盘
 		registerDashboardRoutes(admin, h)
 
-		// 用户管理
-		registerUserManagementRoutes(admin, h)
-
 		// 分组管理
 		registerGroupRoutes(admin, h)
 
 		// 账号管理
 		registerAccountRoutes(admin, h)
 
-		// 公告管理
-		registerAnnouncementRoutes(admin, h)
-
-		// OpenAI OAuth
-		registerOpenAIOAuthRoutes(admin, h)
-
-		// Gemini OAuth
-		registerGeminiOAuthRoutes(admin, h)
-
-		// Antigravity OAuth
-		registerAntigravityOAuthRoutes(admin, h)
-
-		// 代理管理
-		registerProxyRoutes(admin, h)
-
-		// 卡密管理
-		registerRedeemCodeRoutes(admin, h)
-
-		// 优惠码管理
-		registerPromoCodeRoutes(admin, h)
-
-		// 系统设置
-		registerSettingsRoutes(admin, h)
-
-		// 数据管理
-		registerDataManagementRoutes(admin, h)
-
-		// 数据库备份恢复
-		registerBackupRoutes(admin, h)
-
 		// 运维监控（Ops）
 		registerOpsRoutes(admin, h)
 
+		adminOnly := admin.Group("")
+		adminOnly.Use(middleware.RequireAdminOnly())
+
+		// 权限管理
+		registerPermissionRoutes(adminOnly, h)
+
+		// 用户管理
+		registerUserManagementRoutes(adminOnly, h)
+
+		// 公告管理
+		registerAnnouncementRoutes(adminOnly, h)
+
+		// OpenAI OAuth
+		registerOpenAIOAuthRoutes(adminOnly, h)
+
+		// Gemini OAuth
+		registerGeminiOAuthRoutes(adminOnly, h)
+
+		// Antigravity OAuth
+		registerAntigravityOAuthRoutes(adminOnly, h)
+
+		// 代理管理
+		registerProxyRoutes(adminOnly, h)
+
+		// 卡密管理
+		registerRedeemCodeRoutes(adminOnly, h)
+
+		// 优惠码管理
+		registerPromoCodeRoutes(adminOnly, h)
+
+		// 系统设置
+		registerSettingsRoutes(adminOnly, h)
+
+		// 数据管理
+		registerDataManagementRoutes(adminOnly, h)
+
+		// 数据库备份恢复
+		registerBackupRoutes(adminOnly, h)
+
 		// 系统管理
-		registerSystemRoutes(admin, h)
+		registerSystemRoutes(adminOnly, h)
 
 		// 订阅管理
-		registerSubscriptionRoutes(admin, h)
+		registerSubscriptionRoutes(adminOnly, h)
 
 		// 使用记录管理
-		registerUsageRoutes(admin, h)
+		registerUsageRoutes(adminOnly, h)
 
 		// 用户属性管理
-		registerUserAttributeRoutes(admin, h)
+		registerUserAttributeRoutes(adminOnly, h)
 
 		// 错误透传规则管理
-		registerErrorPassthroughRoutes(admin, h)
+		registerErrorPassthroughRoutes(adminOnly, h)
 
 		// TLS 指纹模板管理
-		registerTLSFingerprintProfileRoutes(admin, h)
+		registerTLSFingerprintProfileRoutes(adminOnly, h)
 
 		// API Key 管理
-		registerAdminAPIKeyRoutes(admin, h)
+		registerAdminAPIKeyRoutes(adminOnly, h)
 
 		// 定时测试计划
-		registerScheduledTestRoutes(admin, h)
+		registerScheduledTestRoutes(adminOnly, h)
 
 		// 渠道管理
-		registerChannelRoutes(admin, h)
+		registerChannelRoutes(adminOnly, h)
 
 		// 渠道监控
-		registerChannelMonitorRoutes(admin, h)
+		registerChannelMonitorRoutes(adminOnly, h)
 
 		// 风控中心
-		registerContentModerationRoutes(admin, h)
+		registerContentModerationRoutes(adminOnly, h)
 
 		// 邀请返利（专属用户管理）
-		registerAffiliateRoutes(admin, h)
+		registerAffiliateRoutes(adminOnly, h)
 	}
 }
 
@@ -111,6 +117,14 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	{
 		compliance.GET("", h.Admin.Compliance.GetStatus)
 		compliance.POST("/accept", h.Admin.Compliance.Accept)
+	}
+}
+
+func registerPermissionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	permissions := admin.Group("/permissions")
+	{
+		permissions.GET("/operators", h.Admin.Permission.ListOperators)
+		permissions.PUT("/operators/:id", h.Admin.Permission.UpdateOperator)
 	}
 }
 
@@ -138,104 +152,110 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	ops := admin.Group("/ops")
 	{
+		opsRead := middleware.RequireAdminPermission(service.AdminPermissionOpsRead)
+		adminOnly := middleware.RequireAdminOnly()
+
 		// Realtime ops signals
-		ops.GET("/concurrency", h.Admin.Ops.GetConcurrencyStats)
-		ops.GET("/user-concurrency", h.Admin.Ops.GetUserConcurrencyStats)
-		ops.GET("/account-availability", h.Admin.Ops.GetAccountAvailability)
-		ops.GET("/realtime-traffic", h.Admin.Ops.GetRealtimeTrafficSummary)
+		ops.GET("/concurrency", opsRead, h.Admin.Ops.GetConcurrencyStats)
+		ops.GET("/user-concurrency", adminOnly, h.Admin.Ops.GetUserConcurrencyStats)
+		ops.GET("/account-availability", opsRead, h.Admin.Ops.GetAccountAvailability)
+		ops.GET("/realtime-traffic", opsRead, h.Admin.Ops.GetRealtimeTrafficSummary)
 
 		// Alerts (rules + events)
-		ops.GET("/alert-rules", h.Admin.Ops.ListAlertRules)
-		ops.POST("/alert-rules", h.Admin.Ops.CreateAlertRule)
-		ops.PUT("/alert-rules/:id", h.Admin.Ops.UpdateAlertRule)
-		ops.DELETE("/alert-rules/:id", h.Admin.Ops.DeleteAlertRule)
-		ops.GET("/alert-events", h.Admin.Ops.ListAlertEvents)
-		ops.GET("/alert-events/:id", h.Admin.Ops.GetAlertEvent)
-		ops.PUT("/alert-events/:id/status", h.Admin.Ops.UpdateAlertEventStatus)
-		ops.POST("/alert-silences", h.Admin.Ops.CreateAlertSilence)
+		ops.GET("/alert-rules", adminOnly, h.Admin.Ops.ListAlertRules)
+		ops.POST("/alert-rules", adminOnly, h.Admin.Ops.CreateAlertRule)
+		ops.PUT("/alert-rules/:id", adminOnly, h.Admin.Ops.UpdateAlertRule)
+		ops.DELETE("/alert-rules/:id", adminOnly, h.Admin.Ops.DeleteAlertRule)
+		ops.GET("/alert-events", opsRead, h.Admin.Ops.ListAlertEvents)
+		ops.GET("/alert-events/:id", opsRead, h.Admin.Ops.GetAlertEvent)
+		ops.PUT("/alert-events/:id/status", adminOnly, h.Admin.Ops.UpdateAlertEventStatus)
+		ops.POST("/alert-silences", adminOnly, h.Admin.Ops.CreateAlertSilence)
 
 		// Email notification config (DB-backed)
-		ops.GET("/email-notification/config", h.Admin.Ops.GetEmailNotificationConfig)
-		ops.PUT("/email-notification/config", h.Admin.Ops.UpdateEmailNotificationConfig)
+		ops.GET("/email-notification/config", adminOnly, h.Admin.Ops.GetEmailNotificationConfig)
+		ops.PUT("/email-notification/config", adminOnly, h.Admin.Ops.UpdateEmailNotificationConfig)
 
 		// Runtime settings (DB-backed)
 		runtime := ops.Group("/runtime")
 		{
-			runtime.GET("/alert", h.Admin.Ops.GetAlertRuntimeSettings)
-			runtime.PUT("/alert", h.Admin.Ops.UpdateAlertRuntimeSettings)
-			runtime.GET("/logging", h.Admin.Ops.GetRuntimeLogConfig)
-			runtime.PUT("/logging", h.Admin.Ops.UpdateRuntimeLogConfig)
-			runtime.POST("/logging/reset", h.Admin.Ops.ResetRuntimeLogConfig)
+			runtime.GET("/alert", adminOnly, h.Admin.Ops.GetAlertRuntimeSettings)
+			runtime.PUT("/alert", adminOnly, h.Admin.Ops.UpdateAlertRuntimeSettings)
+			runtime.GET("/logging", adminOnly, h.Admin.Ops.GetRuntimeLogConfig)
+			runtime.PUT("/logging", adminOnly, h.Admin.Ops.UpdateRuntimeLogConfig)
+			runtime.POST("/logging/reset", adminOnly, h.Admin.Ops.ResetRuntimeLogConfig)
 		}
 
 		// Advanced settings (DB-backed)
-		ops.GET("/advanced-settings", h.Admin.Ops.GetAdvancedSettings)
-		ops.PUT("/advanced-settings", h.Admin.Ops.UpdateAdvancedSettings)
+		ops.GET("/advanced-settings", adminOnly, h.Admin.Ops.GetAdvancedSettings)
+		ops.PUT("/advanced-settings", adminOnly, h.Admin.Ops.UpdateAdvancedSettings)
 
 		// Settings group (DB-backed)
 		settings := ops.Group("/settings")
 		{
-			settings.GET("/metric-thresholds", h.Admin.Ops.GetMetricThresholds)
-			settings.PUT("/metric-thresholds", h.Admin.Ops.UpdateMetricThresholds)
+			settings.GET("/metric-thresholds", adminOnly, h.Admin.Ops.GetMetricThresholds)
+			settings.PUT("/metric-thresholds", adminOnly, h.Admin.Ops.UpdateMetricThresholds)
 		}
 
 		// WebSocket realtime (QPS/TPS)
 		ws := ops.Group("/ws")
 		{
-			ws.GET("/qps", h.Admin.Ops.QPSWSHandler)
+			ws.GET("/qps", opsRead, h.Admin.Ops.QPSWSHandler)
 		}
 
 		// Error logs (legacy)
-		ops.GET("/errors", h.Admin.Ops.GetErrorLogs)
-		ops.GET("/errors/:id", h.Admin.Ops.GetErrorLogByID)
-		ops.PUT("/errors/:id/resolve", h.Admin.Ops.UpdateErrorResolution)
+		ops.GET("/errors", opsRead, h.Admin.Ops.GetErrorLogs)
+		ops.GET("/errors/:id", opsRead, h.Admin.Ops.GetErrorLogByID)
+		ops.PUT("/errors/:id/resolve", adminOnly, h.Admin.Ops.UpdateErrorResolution)
 
 		// Request errors (client-visible failures)
-		ops.GET("/request-errors", h.Admin.Ops.ListRequestErrors)
-		ops.GET("/request-errors/:id", h.Admin.Ops.GetRequestError)
-		ops.GET("/request-errors/:id/upstream-errors", h.Admin.Ops.ListRequestErrorUpstreamErrors)
-		ops.PUT("/request-errors/:id/resolve", h.Admin.Ops.ResolveRequestError)
+		ops.GET("/request-errors", opsRead, h.Admin.Ops.ListRequestErrors)
+		ops.GET("/request-errors/:id", opsRead, h.Admin.Ops.GetRequestError)
+		ops.GET("/request-errors/:id/upstream-errors", opsRead, h.Admin.Ops.ListRequestErrorUpstreamErrors)
+		ops.PUT("/request-errors/:id/resolve", adminOnly, h.Admin.Ops.ResolveRequestError)
 
 		// Upstream errors (independent upstream failures)
-		ops.GET("/upstream-errors", h.Admin.Ops.ListUpstreamErrors)
-		ops.GET("/upstream-errors/:id", h.Admin.Ops.GetUpstreamError)
-		ops.PUT("/upstream-errors/:id/resolve", h.Admin.Ops.ResolveUpstreamError)
+		ops.GET("/upstream-errors", opsRead, h.Admin.Ops.ListUpstreamErrors)
+		ops.GET("/upstream-errors/:id", opsRead, h.Admin.Ops.GetUpstreamError)
+		ops.PUT("/upstream-errors/:id/resolve", adminOnly, h.Admin.Ops.ResolveUpstreamError)
 
 		// Request drilldown (success + error)
-		ops.GET("/requests", h.Admin.Ops.ListRequestDetails)
+		ops.GET("/requests", opsRead, h.Admin.Ops.ListRequestDetails)
 
 		// Indexed system logs
-		ops.GET("/system-logs", h.Admin.Ops.ListSystemLogs)
-		ops.POST("/system-logs/cleanup", h.Admin.Ops.CleanupSystemLogs)
-		ops.GET("/system-logs/health", h.Admin.Ops.GetSystemLogIngestionHealth)
+		ops.GET("/system-logs", adminOnly, h.Admin.Ops.ListSystemLogs)
+		ops.POST("/system-logs/cleanup", adminOnly, h.Admin.Ops.CleanupSystemLogs)
+		ops.GET("/system-logs/health", adminOnly, h.Admin.Ops.GetSystemLogIngestionHealth)
 
 		// Dashboard (vNext - raw path for MVP)
-		ops.GET("/dashboard/snapshot-v2", h.Admin.Ops.GetDashboardSnapshotV2)
-		ops.GET("/dashboard/overview", h.Admin.Ops.GetDashboardOverview)
-		ops.GET("/dashboard/throughput-trend", h.Admin.Ops.GetDashboardThroughputTrend)
-		ops.GET("/dashboard/latency-histogram", h.Admin.Ops.GetDashboardLatencyHistogram)
-		ops.GET("/dashboard/error-trend", h.Admin.Ops.GetDashboardErrorTrend)
-		ops.GET("/dashboard/error-distribution", h.Admin.Ops.GetDashboardErrorDistribution)
-		ops.GET("/dashboard/openai-token-stats", h.Admin.Ops.GetDashboardOpenAITokenStats)
+		ops.GET("/dashboard/snapshot-v2", opsRead, h.Admin.Ops.GetDashboardSnapshotV2)
+		ops.GET("/dashboard/overview", opsRead, h.Admin.Ops.GetDashboardOverview)
+		ops.GET("/dashboard/throughput-trend", opsRead, h.Admin.Ops.GetDashboardThroughputTrend)
+		ops.GET("/dashboard/latency-histogram", opsRead, h.Admin.Ops.GetDashboardLatencyHistogram)
+		ops.GET("/dashboard/error-trend", opsRead, h.Admin.Ops.GetDashboardErrorTrend)
+		ops.GET("/dashboard/error-distribution", opsRead, h.Admin.Ops.GetDashboardErrorDistribution)
+		ops.GET("/dashboard/openai-token-stats", opsRead, h.Admin.Ops.GetDashboardOpenAITokenStats)
 	}
 }
 
 func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	dashboard := admin.Group("/dashboard")
 	{
-		dashboard.GET("/snapshot-v2", h.Admin.Dashboard.GetSnapshotV2)
-		dashboard.GET("/stats", h.Admin.Dashboard.GetStats)
-		dashboard.GET("/realtime", h.Admin.Dashboard.GetRealtimeMetrics)
-		dashboard.GET("/trend", h.Admin.Dashboard.GetUsageTrend)
-		dashboard.GET("/models", h.Admin.Dashboard.GetModelStats)
-		dashboard.GET("/groups", h.Admin.Dashboard.GetGroupStats)
-		dashboard.GET("/api-keys-trend", h.Admin.Dashboard.GetAPIKeyUsageTrend)
-		dashboard.GET("/users-trend", h.Admin.Dashboard.GetUserUsageTrend)
-		dashboard.GET("/users-ranking", h.Admin.Dashboard.GetUserSpendingRanking)
-		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
-		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
-		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
-		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
+		dashboardRead := middleware.RequireAdminPermission(service.AdminPermissionDashboardRead)
+		adminOnly := middleware.RequireAdminOnly()
+
+		dashboard.GET("/snapshot-v2", dashboardRead, h.Admin.Dashboard.GetSnapshotV2)
+		dashboard.GET("/stats", dashboardRead, h.Admin.Dashboard.GetStats)
+		dashboard.GET("/realtime", dashboardRead, h.Admin.Dashboard.GetRealtimeMetrics)
+		dashboard.GET("/trend", dashboardRead, h.Admin.Dashboard.GetUsageTrend)
+		dashboard.GET("/models", dashboardRead, h.Admin.Dashboard.GetModelStats)
+		dashboard.GET("/groups", dashboardRead, h.Admin.Dashboard.GetGroupStats)
+		dashboard.GET("/api-keys-trend", adminOnly, h.Admin.Dashboard.GetAPIKeyUsageTrend)
+		dashboard.GET("/users-trend", adminOnly, h.Admin.Dashboard.GetUserUsageTrend)
+		dashboard.GET("/users-ranking", adminOnly, h.Admin.Dashboard.GetUserSpendingRanking)
+		dashboard.POST("/users-usage", adminOnly, h.Admin.Dashboard.GetBatchUsersUsage)
+		dashboard.POST("/api-keys-usage", adminOnly, h.Admin.Dashboard.GetBatchAPIKeysUsage)
+		dashboard.GET("/user-breakdown", adminOnly, h.Admin.Dashboard.GetUserBreakdown)
+		dashboard.POST("/aggregation/backfill", adminOnly, h.Admin.Dashboard.BackfillAggregation)
 	}
 }
 
@@ -270,36 +290,40 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	groups := admin.Group("/groups")
 	{
-		groups.GET("", h.Admin.Group.List)
-		groups.GET("/all", h.Admin.Group.GetAll)
-		groups.GET("/usage-summary", h.Admin.Group.GetUsageSummary)
-		groups.GET("/capacity-summary", h.Admin.Group.GetCapacitySummary)
-		groups.PUT("/sort-order", h.Admin.Group.UpdateSortOrder)
-		groups.GET("/:id/models-list-candidates", h.Admin.Group.GetModelsListCandidates)
-		groups.GET("/:id", h.Admin.Group.GetByID)
-		groups.POST("", h.Admin.Group.Create)
-		groups.PUT("/:id", h.Admin.Group.Update)
-		groups.DELETE("/:id", h.Admin.Group.Delete)
-		groups.GET("/:id/stats", h.Admin.Group.GetStats)
-		groups.GET("/:id/rate-multipliers", h.Admin.Group.GetGroupRateMultipliers)
-		groups.PUT("/:id/rate-multipliers", h.Admin.Group.BatchSetGroupRateMultipliers)
-		groups.DELETE("/:id/rate-multipliers", h.Admin.Group.ClearGroupRateMultipliers)
-		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
-		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
-		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
+		adminOnly := middleware.RequireAdminOnly()
+		accountRead := middleware.RequireAdminPermission(service.AdminPermissionAccountsRead)
+
+		groups.GET("", adminOnly, h.Admin.Group.List)
+		groups.GET("/all", accountRead, h.Admin.Group.GetAll)
+		groups.GET("/usage-summary", adminOnly, h.Admin.Group.GetUsageSummary)
+		groups.GET("/capacity-summary", adminOnly, h.Admin.Group.GetCapacitySummary)
+		groups.PUT("/sort-order", adminOnly, h.Admin.Group.UpdateSortOrder)
+		groups.GET("/:id/models-list-candidates", adminOnly, h.Admin.Group.GetModelsListCandidates)
+		groups.GET("/:id", adminOnly, h.Admin.Group.GetByID)
+		groups.POST("", adminOnly, h.Admin.Group.Create)
+		groups.PUT("/:id", adminOnly, h.Admin.Group.Update)
+		groups.DELETE("/:id", adminOnly, h.Admin.Group.Delete)
+		groups.GET("/:id/stats", adminOnly, h.Admin.Group.GetStats)
+		groups.GET("/:id/rate-multipliers", adminOnly, h.Admin.Group.GetGroupRateMultipliers)
+		groups.PUT("/:id/rate-multipliers", adminOnly, h.Admin.Group.BatchSetGroupRateMultipliers)
+		groups.DELETE("/:id/rate-multipliers", adminOnly, h.Admin.Group.ClearGroupRateMultipliers)
+		groups.PUT("/:id/rpm-overrides", adminOnly, h.Admin.Group.BatchSetGroupRPMOverrides)
+		groups.DELETE("/:id/rpm-overrides", adminOnly, h.Admin.Group.ClearGroupRPMOverrides)
+		groups.GET("/:id/api-keys", adminOnly, h.Admin.Group.GetGroupAPIKeys)
 	}
 }
 
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	accounts := admin.Group("/accounts")
+	accounts.Use(middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite))
 	{
 		accounts.GET("", h.Admin.Account.List)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)
-		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
-		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
-		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
+		accounts.POST("/import/codex-session", middleware.RequireAdminOnly(), h.Admin.Account.ImportCodexSession)
+		accounts.POST("/sync/crs", middleware.RequireAdminOnly(), h.Admin.Account.SyncFromCRS)
+		accounts.POST("/sync/crs/preview", middleware.RequireAdminOnly(), h.Admin.Account.PreviewFromCRS)
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
@@ -323,8 +347,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)
 		accounts.POST("/:id/models/sync-upstream", h.Admin.Account.SyncUpstreamModels)
 		accounts.POST("/batch", h.Admin.Account.BatchCreate)
-		accounts.GET("/data", h.Admin.Account.ExportData)
-		accounts.POST("/data", h.Admin.Account.ImportData)
+		accounts.GET("/data", middleware.RequireAdminOnly(), h.Admin.Account.ExportData)
+		accounts.POST("/data", middleware.RequireAdminOnly(), h.Admin.Account.ImportData)
 		accounts.POST("/batch-update-credentials", h.Admin.Account.BatchUpdateCredentials)
 		accounts.POST("/batch-refresh-tier", h.Admin.Account.BatchRefreshTier)
 		accounts.POST("/bulk-update", h.Admin.Account.BulkUpdate)
@@ -335,12 +359,12 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.GET("/antigravity/default-model-mapping", h.Admin.Account.GetAntigravityDefaultModelMapping)
 
 		// Claude OAuth routes
-		accounts.POST("/generate-auth-url", h.Admin.OAuth.GenerateAuthURL)
-		accounts.POST("/generate-setup-token-url", h.Admin.OAuth.GenerateSetupTokenURL)
-		accounts.POST("/exchange-code", h.Admin.OAuth.ExchangeCode)
-		accounts.POST("/exchange-setup-token-code", h.Admin.OAuth.ExchangeSetupTokenCode)
-		accounts.POST("/cookie-auth", h.Admin.OAuth.CookieAuth)
-		accounts.POST("/setup-token-cookie-auth", h.Admin.OAuth.SetupTokenCookieAuth)
+		accounts.POST("/generate-auth-url", middleware.RequireAdminOnly(), h.Admin.OAuth.GenerateAuthURL)
+		accounts.POST("/generate-setup-token-url", middleware.RequireAdminOnly(), h.Admin.OAuth.GenerateSetupTokenURL)
+		accounts.POST("/exchange-code", middleware.RequireAdminOnly(), h.Admin.OAuth.ExchangeCode)
+		accounts.POST("/exchange-setup-token-code", middleware.RequireAdminOnly(), h.Admin.OAuth.ExchangeSetupTokenCode)
+		accounts.POST("/cookie-auth", middleware.RequireAdminOnly(), h.Admin.OAuth.CookieAuth)
+		accounts.POST("/setup-token-cookie-auth", middleware.RequireAdminOnly(), h.Admin.OAuth.SetupTokenCookieAuth)
 	}
 }
 

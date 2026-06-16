@@ -939,6 +939,11 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	if filter.GroupID != nil && *filter.GroupID > 0 {
 		args = append(args, *filter.GroupID)
 		clauses = append(clauses, "e.group_id = $"+itoa(len(args)))
+	} else if filter.GroupScopeEmpty {
+		clauses = append(clauses, "1 = 0")
+	} else if groupIDs := normalizePositiveInt64IDs(filter.GroupIDs); len(groupIDs) > 0 {
+		args = append(args, pq.Array(groupIDs))
+		clauses = append(clauses, "e.group_id = ANY($"+itoa(len(args))+")")
 	}
 	if filter.AccountID != nil && *filter.AccountID > 0 {
 		args = append(args, *filter.AccountID)

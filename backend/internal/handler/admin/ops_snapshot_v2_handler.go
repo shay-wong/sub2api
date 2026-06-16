@@ -28,6 +28,8 @@ type opsDashboardSnapshotV2CacheKey struct {
 	EndTime      string               `json:"end_time"`
 	Platform     string               `json:"platform"`
 	GroupID      *int64               `json:"group_id"`
+	GroupIDs     []int64              `json:"group_ids,omitempty"`
+	ScopeEmpty   bool                 `json:"scope_empty,omitempty"`
 	QueryMode    service.OpsQueryMode `json:"mode"`
 	BucketSecond int                  `json:"bucket_second"`
 }
@@ -35,6 +37,11 @@ type opsDashboardSnapshotV2CacheKey struct {
 // GetDashboardSnapshotV2 returns ops dashboard core snapshot in one request.
 // GET /api/v1/admin/ops/dashboard/snapshot-v2
 func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -64,6 +71,10 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 		}
 		filter.GroupID = &id
 	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
 
 	keyRaw, _ := json.Marshal(opsDashboardSnapshotV2CacheKey{
@@ -71,6 +82,8 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 		EndTime:      endTime.UTC().Format(time.RFC3339),
 		Platform:     filter.Platform,
 		GroupID:      filter.GroupID,
+		GroupIDs:     filter.GroupIDs,
+		ScopeEmpty:   filter.GroupScopeEmpty,
 		QueryMode:    filter.QueryMode,
 		BucketSecond: bucketSeconds,
 	})

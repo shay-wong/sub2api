@@ -90,6 +90,8 @@ type OpsAlertEventFilter struct {
 	EndTime   *time.Time
 
 	// Dimensions filters (best-effort).
-	Platform string
-	GroupID  *int64
+	Platform        string
+	GroupID         *int64
+	GroupIDs        []int64
+	GroupScopeEmpty bool
 }

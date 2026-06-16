@@ -388,6 +388,11 @@ func (h *OpsHandler) DeleteAlertRule(c *gin.Context) {
 // GetAlertEvent returns a single ops alert event.
 // GET /api/v1/admin/ops/alert-events/:id
 func (h *OpsHandler) GetAlertEvent(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -405,6 +410,10 @@ func (h *OpsHandler) GetAlertEvent(c *gin.Context) {
 
 	ev, err := h.opsService.GetAlertEventByID(c.Request.Context(), id)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureOpsAlertEventVisible(ev); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -515,6 +524,11 @@ func (h *OpsHandler) CreateAlertSilence(c *gin.Context) {
 }
 
 func (h *OpsHandler) ListAlertEvents(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -603,6 +617,10 @@ func (h *OpsHandler) ListAlertEvents(c *gin.Context) {
 		}
 	} else {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := scope.applyOpsAlertEventScope(filter); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 

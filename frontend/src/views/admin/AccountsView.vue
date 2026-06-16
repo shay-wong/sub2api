@@ -63,7 +63,7 @@
               </div>
 
               <!-- More Tools Dropdown -->
-              <div class="relative" ref="accountToolsDropdownRef">
+              <div v-if="isFullAdmin" class="relative" ref="accountToolsDropdownRef">
                 <button
                   @click="
                     showAccountToolsDropdown = !showAccountToolsDropdown;
@@ -377,8 +377,8 @@
       @deleted="handleBatchTestDeleted"
     />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
+    <ScheduledTestsPanel v-if="isFullAdmin" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" :show-schedule="isFullAdmin" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -504,6 +504,7 @@ import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, Admi
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const isFullAdmin = computed(() => authStore.isAdmin)
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
@@ -1071,26 +1072,31 @@ const closeAccountToolsDropdown = () => {
 }
 
 const openSyncFromCrs = () => {
+  if (!isFullAdmin.value) return
   closeAccountToolsDropdown()
   showSync.value = true
 }
 
 const openImportData = () => {
+  if (!isFullAdmin.value) return
   closeAccountToolsDropdown()
   showImportData.value = true
 }
 
 const openExportDataDialogFromMenu = () => {
+  if (!isFullAdmin.value) return
   closeAccountToolsDropdown()
   openExportDataDialog()
 }
 
 const openErrorPassthrough = () => {
+  if (!isFullAdmin.value) return
   closeAccountToolsDropdown()
   showErrorPassthrough.value = true
 }
 
 const openTLSFingerprintProfiles = () => {
+  if (!isFullAdmin.value) return
   closeAccountToolsDropdown()
   showTLSFingerprintProfiles.value = true
 }
@@ -1692,6 +1698,7 @@ const formatExportTimestamp = () => {
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
 }
 const openExportDataDialog = () => {
+  if (!isFullAdmin.value) return
   exportDataFormat.value = 'sub2api'
   includeProxyOnExport.value = true
   showExportDataDialog.value = true
@@ -1735,6 +1742,7 @@ const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = nul
 const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }
 const handleViewStats = (a: Account) => { statsAcc.value = a; showStats.value = true }
 const handleSchedule = async (a: Account) => {
+  if (!isFullAdmin.value) return
   scheduleAcc.value = a
   scheduleModelOptions.value = []
   showSchedulePanel.value = true
@@ -1866,7 +1874,10 @@ const handleClickOutside = (event: MouseEvent) => {
 onMounted(async () => {
   load()
   try {
-    const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
+    const [p, g] = await Promise.all([
+      isFullAdmin.value ? adminAPI.proxies.getAll() : Promise.resolve<AccountProxy[]>([]),
+      adminAPI.groups.getAll()
+    ])
     proxies.value = p
     groups.value = g
   } catch (error) {

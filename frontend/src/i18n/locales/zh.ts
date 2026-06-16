@@ -391,6 +391,7 @@ export default {
     availableChannels: '可用渠道',
     subscriptions: '订阅管理',
     accounts: '账号管理',
+    permissions: '权限管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
@@ -1499,6 +1500,24 @@ export default {
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败'
+    },
+
+    permissions: {
+      title: '权限管理',
+      description: '配置运营账号和可见账号分组',
+      searchPlaceholder: '搜索邮箱、用户名或 ID',
+      empty: '暂无可配置用户',
+      user: '用户',
+      role: '角色',
+      groups: '可见分组',
+      roleUser: '普通用户',
+      roleOperator: '运营',
+      statusActive: '正常',
+      statusDisabled: '已禁用',
+      noGroupsSelected: '未选择分组，运营账号将无法看到账号',
+      loadFailed: '加载权限配置失败',
+      saved: '权限配置已保存',
+      saveFailed: '保存权限配置失败'
     },
 
     backup: {

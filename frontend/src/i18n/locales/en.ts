@@ -391,6 +391,7 @@ export default {
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
+    permissions: 'Permissions',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
@@ -1478,6 +1479,24 @@ export default {
       requestsShort: 'Req',
       tokensShort: 'Tok',
       failedToLoad: 'Failed to load dashboard statistics'
+    },
+
+    permissions: {
+      title: 'Permissions',
+      description: 'Configure operator accounts and visible account groups',
+      searchPlaceholder: 'Search email, username, or ID',
+      empty: 'No configurable users',
+      user: 'User',
+      role: 'Role',
+      groups: 'Visible Groups',
+      roleUser: 'User',
+      roleOperator: 'Operator',
+      statusActive: 'Active',
+      statusDisabled: 'Disabled',
+      noGroupsSelected: 'No groups selected. This operator will not see accounts.',
+      loadFailed: 'Failed to load permissions',
+      saved: 'Permissions saved',
+      saveFailed: 'Failed to save permissions'
     },
 
     backup: {

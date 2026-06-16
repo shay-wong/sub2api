@@ -50,6 +50,9 @@ func cloneOpsFilterWithMode(filter *OpsDashboardFilter, mode OpsQueryMode) *OpsD
 		return nil
 	}
 	cloned := *filter
+	if filter.GroupIDs != nil {
+		cloned.GroupIDs = append([]int64(nil), filter.GroupIDs...)
+	}
 	cloned.QueryMode = mode
 	return &cloned
 }

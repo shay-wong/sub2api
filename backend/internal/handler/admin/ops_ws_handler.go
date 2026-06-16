@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -92,7 +94,7 @@ func scheduleQPSWSIdleStop() {
 	qpsWSIdleStopTimer = time.AfterFunc(qpsWSIdleStopDelay, func() {
 		// Only stop if truly idle at fire time.
 		if wsConnCount.Load() == 0 {
-			qpsWSCache.Stop()
+			qpsWSCaches.stopAll()
 		}
 		qpsWSIdleStopMu.Lock()
 		qpsWSIdleStopTimer = nil
@@ -120,6 +122,8 @@ const (
 type opsWSQPSCache struct {
 	refreshInterval    time.Duration
 	requestCountWindow time.Duration
+	groupIDs           []int64
+	groupScopeEmpty    bool
 
 	lastUpdatedUnixNano atomic.Int64
 	payload             atomic.Value // []byte
@@ -132,9 +136,82 @@ type opsWSQPSCache struct {
 	running bool
 }
 
-var qpsWSCache = &opsWSQPSCache{
-	refreshInterval:    qpsWSRefreshInterval,
-	requestCountWindow: qpsWSRequestCountWindow,
+var qpsWSCaches = newOpsWSQPSCaches()
+
+type opsWSQPSCaches struct {
+	mu     sync.Mutex
+	caches map[string]*opsWSQPSCache
+}
+
+func newOpsWSQPSCaches() *opsWSQPSCaches {
+	return &opsWSQPSCaches{caches: map[string]*opsWSQPSCache{}}
+}
+
+func (c *opsWSQPSCaches) get(groupIDs []int64, groupScopeEmpty bool) *opsWSQPSCache {
+	if c == nil {
+		return nil
+	}
+	groupIDs = normalizeScopedIDsForWS(groupIDs)
+	key := qpsWSScopeKey(groupIDs, groupScopeEmpty)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cache := c.caches[key]; cache != nil {
+		return cache
+	}
+	cache := &opsWSQPSCache{
+		refreshInterval:    qpsWSRefreshInterval,
+		requestCountWindow: qpsWSRequestCountWindow,
+		groupIDs:           append([]int64(nil), groupIDs...),
+		groupScopeEmpty:    groupScopeEmpty,
+	}
+	c.caches[key] = cache
+	return cache
+}
+
+func (c *opsWSQPSCaches) stopAll() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	caches := make([]*opsWSQPSCache, 0, len(c.caches))
+	for _, cache := range c.caches {
+		caches = append(caches, cache)
+	}
+	c.mu.Unlock()
+	for _, cache := range caches {
+		cache.Stop()
+	}
+}
+
+func normalizeScopedIDsForWS(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func qpsWSScopeKey(groupIDs []int64, groupScopeEmpty bool) string {
+	if groupScopeEmpty {
+		return "empty"
+	}
+	if len(groupIDs) == 0 {
+		return "all"
+	}
+	parts := make([]string, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		parts = append(parts, strconv.FormatInt(id, 10))
+	}
+	return strings.Join(parts, ",")
 }
 
 func (c *opsWSQPSCache) start(opsService *service.OpsService) {
@@ -250,7 +327,7 @@ func (c *opsWSQPSCache) refresh(parentCtx context.Context) {
 	defer cancel()
 
 	now := time.Now().UTC()
-	stats, err := opsService.GetWindowStats(ctx, now.Add(-c.requestCountWindow), now)
+	stats, err := opsService.GetWindowStatsWithGroupScope(ctx, now.Add(-c.requestCountWindow), now, c.groupIDs, c.groupScopeEmpty)
 	if err != nil || stats == nil {
 		if err != nil {
 			logger.LegacyPrintf("handler.admin.ops_ws", "[OpsWS] refresh: get window stats failed: %v", err)
@@ -320,6 +397,18 @@ func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
 		return
 	}
 
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
+	var groupIDs []int64
+	groupScopeEmpty := false
+	if scope.isScoped() {
+		groupIDs = scope.GroupIDs
+		groupScopeEmpty = len(scope.GroupIDs) == 0
+	}
+
 	// If realtime monitoring is disabled, prefer a successful WS upgrade followed by a clean close
 	// with a deterministic close code. This prevents clients from spinning on 404/1006 reconnect loops.
 	if !h.opsService.IsRealtimeMonitoringEnabled(c.Request.Context()) {
@@ -335,7 +424,8 @@ func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
 	cancelQPSWSIdleStop()
 	// Lazily start the background refresh loop so unit tests that never hit the
 	// websocket route don't spawn goroutines that depend on DB/Redis stubs.
-	qpsWSCache.start(h.opsService)
+	qpsCache := qpsWSCaches.get(groupIDs, groupScopeEmpty)
+	qpsCache.start(h.opsService)
 
 	// Reserve a global slot before upgrading the connection to keep the limit strict.
 	if !tryAcquireOpsWSTotalSlot(opsWSLimits.MaxConns) {
@@ -368,7 +458,7 @@ func (h *OpsHandler) QPSWSHandler(c *gin.Context) {
 		_ = conn.Close()
 	}()
 
-	handleQPSWebSocket(c.Request.Context(), conn)
+	handleQPSWebSocket(c.Request.Context(), conn, qpsCache)
 }
 
 func tryAcquireOpsWSTotalSlot(limit int32) bool {
@@ -417,7 +507,7 @@ func releaseOpsWSIPSlot(clientIP string) {
 	wsConnCountByIP[clientIP] = current - 1
 }
 
-func handleQPSWebSocket(parentCtx context.Context, conn *websocket.Conn) {
+func handleQPSWebSocket(parentCtx context.Context, conn *websocket.Conn, qpsCache *opsWSQPSCache) {
 	if conn == nil {
 		return
 	}
@@ -468,7 +558,7 @@ func handleQPSWebSocket(parentCtx context.Context, conn *websocket.Conn) {
 		}
 	}()
 
-	// Push QPS data every 2 seconds (values are globally cached and refreshed at most once per qpsWSRefreshInterval).
+	// Push QPS data every 2 seconds (values are scoped and refreshed at most once per qpsWSRefreshInterval).
 	pushTicker := time.NewTicker(qpsWSPushInterval)
 	defer pushTicker.Stop()
 
@@ -493,7 +583,7 @@ func handleQPSWebSocket(parentCtx context.Context, conn *websocket.Conn) {
 	for {
 		select {
 		case <-pushTicker.C:
-			msg := qpsWSCache.getPayload()
+			msg := qpsCache.getPayload()
 			if msg == nil {
 				continue
 			}

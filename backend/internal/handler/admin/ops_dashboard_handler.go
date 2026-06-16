@@ -15,6 +15,11 @@ import (
 // GetDashboardOverview returns vNext ops dashboard overview (raw path).
 // GET /api/v1/admin/ops/dashboard/overview
 func (h *OpsHandler) GetDashboardOverview(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -43,6 +48,10 @@ func (h *OpsHandler) GetDashboardOverview(c *gin.Context) {
 			return
 		}
 		filter.GroupID = &id
+	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	data, err := h.opsService.GetDashboardOverview(c.Request.Context(), filter)
@@ -56,6 +65,11 @@ func (h *OpsHandler) GetDashboardOverview(c *gin.Context) {
 // GetDashboardThroughputTrend returns throughput time series (raw path).
 // GET /api/v1/admin/ops/dashboard/throughput-trend
 func (h *OpsHandler) GetDashboardThroughputTrend(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -84,6 +98,10 @@ func (h *OpsHandler) GetDashboardThroughputTrend(c *gin.Context) {
 			return
 		}
 		filter.GroupID = &id
+	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
@@ -98,6 +116,11 @@ func (h *OpsHandler) GetDashboardThroughputTrend(c *gin.Context) {
 // GetDashboardLatencyHistogram returns the latency distribution histogram (success requests).
 // GET /api/v1/admin/ops/dashboard/latency-histogram
 func (h *OpsHandler) GetDashboardLatencyHistogram(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -126,6 +149,10 @@ func (h *OpsHandler) GetDashboardLatencyHistogram(c *gin.Context) {
 			return
 		}
 		filter.GroupID = &id
+	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	data, err := h.opsService.GetLatencyHistogram(c.Request.Context(), filter)
@@ -139,6 +166,11 @@ func (h *OpsHandler) GetDashboardLatencyHistogram(c *gin.Context) {
 // GetDashboardErrorTrend returns error counts time series (raw path).
 // GET /api/v1/admin/ops/dashboard/error-trend
 func (h *OpsHandler) GetDashboardErrorTrend(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -167,6 +199,10 @@ func (h *OpsHandler) GetDashboardErrorTrend(c *gin.Context) {
 			return
 		}
 		filter.GroupID = &id
+	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
@@ -181,6 +217,11 @@ func (h *OpsHandler) GetDashboardErrorTrend(c *gin.Context) {
 // GetDashboardErrorDistribution returns error distribution by status code (raw path).
 // GET /api/v1/admin/ops/dashboard/error-distribution
 func (h *OpsHandler) GetDashboardErrorDistribution(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -210,6 +251,10 @@ func (h *OpsHandler) GetDashboardErrorDistribution(c *gin.Context) {
 		}
 		filter.GroupID = &id
 	}
+	if err := scope.applyOpsDashboardScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	data, err := h.opsService.GetErrorDistribution(c.Request.Context(), filter)
 	if err != nil {
@@ -222,6 +267,11 @@ func (h *OpsHandler) GetDashboardErrorDistribution(c *gin.Context) {
 // GetDashboardOpenAITokenStats returns OpenAI token efficiency stats grouped by model.
 // GET /api/v1/admin/ops/dashboard/openai-token-stats
 func (h *OpsHandler) GetDashboardOpenAITokenStats(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -234,6 +284,10 @@ func (h *OpsHandler) GetDashboardOpenAITokenStats(c *gin.Context) {
 	filter, err := parseOpsOpenAITokenStatsFilter(c)
 	if err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := scope.applyOpsOpenAITokenStatsScope(filter); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 

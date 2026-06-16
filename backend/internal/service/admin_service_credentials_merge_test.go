@@ -115,3 +115,60 @@ func TestUpdateAccount_EmptyCredentialsSkipsUpdate(t *testing.T) {
 	require.Equal(t, "rt-existing", repo.account.Credentials["refresh_token"], "空 credentials 不应触碰已有 token")
 	require.Equal(t, "renamed", repo.account.Name)
 }
+
+func TestUpdateAccount_WithGroupScopePreservesOutOfScopeGroups(t *testing.T) {
+	accountID := int64(205)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			GroupIDs: []int64{10, 30},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo: &groupRepoStubForAdmin{
+			getByID: &Group{ID: 10, Name: "visible"},
+		},
+	}
+
+	nextVisibleGroups := []int64{10}
+	_, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Name:          "renamed",
+		GroupIDs:      &nextVisibleGroups,
+		GroupScopeIDs: []int64{10},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 30}, repo.boundGroupsByID[accountID])
+}
+
+func TestUpdateAccount_WithGroupScopeCanRemoveVisibleGroupWithoutRemovingHiddenGroup(t *testing.T) {
+	accountID := int64(206)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			GroupIDs: []int64{10, 30},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo: &groupRepoStubForAdmin{
+			getByID: &Group{ID: 30, Name: "hidden"},
+		},
+	}
+
+	nextVisibleGroups := []int64{}
+	_, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		GroupIDs:      &nextVisibleGroups,
+		GroupScopeIDs: []int64{10},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{30}, repo.boundGroupsByID[accountID])
+}

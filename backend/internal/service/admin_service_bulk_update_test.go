@@ -18,6 +18,7 @@ type accountRepoStubForBulkUpdate struct {
 	bulkUpdateIDs    []int64
 	bindGroupErrByID map[int64]error
 	bindGroupsCalls  []int64
+	boundGroupsByID  map[int64][]int64
 	getByIDsAccounts []*Account
 	getByIDsErr      error
 	getByIDsCalled   bool
@@ -50,8 +51,12 @@ func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64
 	return int64(len(ids)), nil
 }
 
-func (s *accountRepoStubForBulkUpdate) BindGroups(_ context.Context, accountID int64, _ []int64) error {
+func (s *accountRepoStubForBulkUpdate) BindGroups(_ context.Context, accountID int64, groupIDs []int64) error {
 	s.bindGroupsCalls = append(s.bindGroupsCalls, accountID)
+	if s.boundGroupsByID == nil {
+		s.boundGroupsByID = map[int64][]int64{}
+	}
+	s.boundGroupsByID[accountID] = append([]int64(nil), groupIDs...)
 	if err, ok := s.bindGroupErrByID[accountID]; ok {
 		return err
 	}
@@ -245,4 +250,54 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_WithGroupScopePreservesOutOfScopeGroupsPerAccount(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{
+			{ID: 1, Platform: PlatformAnthropic, GroupIDs: []int64{10, 30}},
+			{ID: 2, Platform: PlatformAnthropic, AccountGroups: []AccountGroup{{GroupID: 20}, {GroupID: 40}}},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo:   &groupRepoStubForAdmin{getByID: &Group{ID: 10, Name: "group"}},
+	}
+
+	nextVisibleGroups := []int64{10}
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:            []int64{1, 2},
+		GroupIDs:              &nextVisibleGroups,
+		GroupScopeIDs:         []int64{10, 20},
+		SkipMixedChannelCheck: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Success)
+	require.Equal(t, []int64{10, 30}, repo.boundGroupsByID[1])
+	require.Equal(t, []int64{10, 40}, repo.boundGroupsByID[2])
+}
+
+func TestAdminServiceBulkUpdateAccounts_WithGroupScopeRequiresLoadedAccounts(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{
+			{ID: 1, Platform: PlatformAnthropic, GroupIDs: []int64{10, 30}},
+		},
+	}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo:   &groupRepoStubForAdmin{getByID: &Group{ID: 10, Name: "group"}},
+	}
+
+	nextVisibleGroups := []int64{10}
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:            []int64{1, 2},
+		GroupIDs:              &nextVisibleGroups,
+		GroupScopeIDs:         []int64{10},
+		SkipMixedChannelCheck: true,
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrAccountNotFound)
+	require.Empty(t, repo.bindGroupsCalls)
 }

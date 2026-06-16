@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 func (r *opsRepository) ListRequestDetails(ctx context.Context, filter *service.OpsRequestDetailFilter) ([]*service.OpsRequestDetail, int64, error) {
@@ -42,6 +43,10 @@ func (r *opsRepository) ListRequestDetails(ctx context.Context, filter *service.
 		}
 		if filter.GroupID != nil && *filter.GroupID > 0 {
 			addCondition(fmt.Sprintf("group_id = $%d", len(args)+1), *filter.GroupID)
+		} else if filter.GroupScopeEmpty {
+			conditions = append(conditions, "1 = 0")
+		} else if groupIDs := normalizePositiveInt64IDs(filter.GroupIDs); len(groupIDs) > 0 {
+			addCondition(fmt.Sprintf("group_id = ANY($%d)", len(args)+1), pq.Array(groupIDs))
 		}
 
 		if filter.UserID != nil && *filter.UserID > 0 {

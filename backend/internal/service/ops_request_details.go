@@ -47,8 +47,10 @@ type OpsRequestDetailFilter struct {
 	// kind: success|error|all
 	Kind string
 
-	Platform string
-	GroupID  *int64
+	Platform        string
+	GroupID         *int64
+	GroupIDs        []int64
+	GroupScopeEmpty bool
 
 	UserID    *int64
 	APIKeyID  *int64

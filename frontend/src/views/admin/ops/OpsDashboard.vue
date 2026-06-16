@@ -25,6 +25,7 @@
         :fullscreen="isFullscreen"
         :custom-start-time="customStartTime"
         :custom-end-time="customEndTime"
+        :can-manage-ops="canManageOps"
         @update:time-range="onTimeRangeChange"
         @update:platform="onPlatformChange"
         @update:group="onGroupChange"
@@ -42,7 +43,7 @@
       <!-- Row: Concurrency + Throughput -->
       <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 lg:grid-cols-4">
         <div class="lg:col-span-1 min-h-[360px]">
-          <OpsConcurrencyCard :platform-filter="platform" :group-id-filter="groupId" :refresh-token="dashboardRefreshToken" />
+          <OpsConcurrencyCard :platform-filter="platform" :group-id-filter="groupId" :refresh-token="dashboardRefreshToken" :can-view-user-concurrency="canManageOps" />
         </div>
         <div class="lg:col-span-1 min-h-[360px]">
           <OpsSwitchRateTrendChart
@@ -98,16 +99,16 @@
 
       <!-- System Logs -->
       <OpsSystemLogTable
-        v-if="opsEnabled && !(loading && !hasLoadedOnce)"
+        v-if="opsEnabled && canManageOps && !(loading && !hasLoadedOnce)"
         :platform-filter="platform"
         :refresh-token="dashboardRefreshToken"
       />
 
       <!-- Settings Dialog (hidden in fullscreen mode) -->
       <template v-if="!isFullscreen">
-        <OpsSettingsDialog :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
+        <OpsSettingsDialog v-if="canManageOps" :show="showSettingsDialog" @close="showSettingsDialog = false" @saved="onSettingsSaved" />
 
-        <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
+        <BaseDialog v-if="canManageOps" :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
         </BaseDialog>
 
@@ -152,7 +153,7 @@ import {
   type OpsThroughputTrendResponse,
   type OpsMetricThresholds
 } from '@/api/admin/ops'
-import { useAdminSettingsStore, useAppStore } from '@/stores'
+import { useAdminSettingsStore, useAppStore, useAuthStore } from '@/stores'
 import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
 import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
@@ -174,9 +175,11 @@ const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const adminSettingsStore = useAdminSettingsStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
 const opsEnabled = computed(() => adminSettingsStore.opsMonitoringEnabled)
+const canManageOps = computed(() => authStore.isAdmin)
 
 type TimeRange = '5m' | '30m' | '1h' | '6h' | '24h' | 'custom'
 const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '6h', '24h', 'custom'])
@@ -293,12 +296,12 @@ const applyRouteQueryToState = () => {
 
   // Deep links
   const openRules = readQueryString(QUERY_KEYS.openAlertRules)
-  if (openRules === '1' || openRules === 'true') {
+  if (canManageOps.value && (openRules === '1' || openRules === 'true')) {
     showAlertRulesCard.value = true
   }
 
   const ruleID = readQueryNumber(QUERY_KEYS.alertRuleId)
-  if (typeof ruleID === 'number' && ruleID > 0) {
+  if (canManageOps.value && typeof ruleID === 'number' && ruleID > 0) {
     showAlertRulesCard.value = true
   }
 
@@ -474,6 +477,7 @@ function onCustomTimeRangeChange(startTime: string, endTime: string) {
 }
 
 async function onSettingsSaved() {
+  if (!canManageOps.value) return
   await loadDashboardAdvancedSettings()
   loadThresholds()
   fetchData()
@@ -774,17 +778,25 @@ onMounted(async () => {
   // Fullscreen mode: listen for ESC key
   window.addEventListener('keydown', handleKeydown)
 
-  await adminSettingsStore.fetch()
+  if (canManageOps.value) {
+    await adminSettingsStore.fetch()
+  } else {
+    adminSettingsStore.setOpsMonitoringEnabledLocal(true)
+    adminSettingsStore.setOpsRealtimeMonitoringEnabledLocal(true)
+    adminSettingsStore.setOpsQueryModeDefaultLocal(adminSettingsStore.opsQueryModeDefault || 'auto')
+  }
   if (!adminSettingsStore.opsMonitoringEnabled) {
-    await router.replace('/admin/settings')
+    await router.replace(canManageOps.value ? '/admin/settings' : '/admin/dashboard')
     return
   }
 
-  // Load thresholds configuration
-  loadThresholds()
+  if (canManageOps.value) {
+    // Load thresholds configuration
+    loadThresholds()
 
-  // Load auto refresh settings
-  await loadDashboardAdvancedSettings()
+    // Load auto refresh settings
+    await loadDashboardAdvancedSettings()
+  }
 
   if (opsEnabled.value) {
     await fetchData()
@@ -825,7 +837,7 @@ watch(autoRefreshEnabled, (enabled) => {
 
 // Reload auto refresh settings after settings dialog is closed
 watch(showSettingsDialog, async (show) => {
-  if (!show) {
+  if (!show && canManageOps.value) {
     await loadDashboardAdvancedSettings()
   }
 })

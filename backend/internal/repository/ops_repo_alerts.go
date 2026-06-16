@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 func (r *opsRepository) ListAlertRules(ctx context.Context) ([]*service.OpsAlertRule, error) {
@@ -833,6 +834,15 @@ func buildOpsAlertEventsWhere(filter *service.OpsAlertEventFilter) (string, []an
 	if filter.GroupID != nil && *filter.GroupID > 0 {
 		args = append(args, fmt.Sprintf("%d", *filter.GroupID))
 		clauses = append(clauses, "(dimensions->>'group_id') = $"+itoa(len(args)))
+	} else if filter.GroupScopeEmpty {
+		clauses = append(clauses, "1 = 0")
+	} else if groupIDs := normalizePositiveInt64IDs(filter.GroupIDs); len(groupIDs) > 0 {
+		stringIDs := make([]string, 0, len(groupIDs))
+		for _, id := range groupIDs {
+			stringIDs = append(stringIDs, fmt.Sprintf("%d", id))
+		}
+		args = append(args, pq.Array(stringIDs))
+		clauses = append(clauses, "(dimensions->>'group_id') = ANY($"+itoa(len(args))+")")
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args

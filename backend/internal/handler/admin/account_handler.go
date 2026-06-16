@@ -58,6 +58,7 @@ type AccountHandler struct {
 	sessionLimitCache       service.SessionLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
+	permissionService       *service.PermissionService
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -75,7 +76,12 @@ func NewAccountHandler(
 	sessionLimitCache service.SessionLimitCache,
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
+	permissionService ...*service.PermissionService,
 ) *AccountHandler {
+	var perm *service.PermissionService
+	if len(permissionService) > 0 {
+		perm = permissionService[0]
+	}
 	return &AccountHandler{
 		adminService:            adminService,
 		oauthService:            oauthService,
@@ -90,6 +96,7 @@ func NewAccountHandler(
 		sessionLimitCache:       sessionLimitCache,
 		rpmCache:                rpmCache,
 		tokenCacheInvalidator:   tokenCacheInvalidator,
+		permissionService:       perm,
 	}
 }
 
@@ -178,9 +185,13 @@ type AccountWithConcurrency struct {
 
 const accountListGroupUngroupedQueryValue = "ungrouped"
 
-func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, account *service.Account) AccountWithConcurrency {
+func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, scope *adminAccessScope, account *service.Account) AccountWithConcurrency {
+	responseAccount := account
+	if scope != nil {
+		responseAccount = scope.accountForResponse(account)
+	}
 	item := AccountWithConcurrency{
-		Account:            dto.AccountFromService(account),
+		Account:            dto.AccountFromService(responseAccount),
 		CurrentConcurrency: 0,
 	}
 	if account == nil {
@@ -225,6 +236,11 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 // List handles listing all accounts with pagination
 // GET /api/v1/admin/accounts
 func (h *AccountHandler) List(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
 	accountType := c.Query("type")
@@ -258,10 +274,51 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
-	if err != nil {
-		response.ErrorFrom(c, err)
+	if scope.isScoped() {
+		if groupID == service.AccountListGroupUngrouped {
+			response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
+			return
+		}
+		if groupID > 0 {
+			if err := scope.ensureGroup(groupID); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		} else if len(scope.GroupIDs) == 1 {
+			groupID = scope.GroupIDs[0]
+		} else if len(scope.GroupIDs) == 0 {
+			response.Paginated(c, []AccountWithConcurrency{}, 0, page, pageSize)
+			return
+		}
+	}
+
+	var accounts []service.Account
+	var total int64
+	var listErr error
+	if scope.isScoped() && groupID == 0 {
+		if scopedList, ok := h.adminService.(interface {
+			ListAccountsByGroupScope(context.Context, int, int, string, string, string, string, []int64, string, string, string) ([]service.Account, int64, error)
+		}); ok {
+			accounts, total, listErr = scopedList.ListAccountsByGroupScope(c.Request.Context(), page, pageSize, platform, accountType, status, search, scope.GroupIDs, privacyMode, sortBy, sortOrder)
+		} else {
+			accounts, total, listErr = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+		}
+	} else {
+		accounts, total, listErr = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	}
+	if listErr != nil {
+		response.ErrorFrom(c, listErr)
 		return
+	}
+	if scope.isScoped() && groupID == 0 {
+		filtered := accounts[:0]
+		for i := range accounts {
+			if scope.accountVisible(&accounts[i]) {
+				filtered = append(filtered, accounts[i])
+			}
+		}
+		accounts = filtered
+		total = int64(len(accounts))
 	}
 
 	// Get current concurrency counts for all accounts
@@ -352,7 +409,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	for i := range accounts {
 		acc := &accounts[i]
 		item := AccountWithConcurrency{
-			Account:            dto.AccountFromService(acc),
+			Account:            dto.AccountFromService(scope.accountForResponse(acc)),
 			CurrentConcurrency: concurrencyCounts[acc.ID],
 		}
 
@@ -451,6 +508,11 @@ func ifNoneMatchMatched(ifNoneMatch, etag string) bool {
 // GetByID handles getting an account by ID
 // GET /api/v1/admin/accounts/:id
 func (h *AccountHandler) GetByID(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -462,13 +524,22 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		return
+	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // CheckMixedChannel handles checking mixed channel risk for account-group binding.
 // POST /api/v1/admin/accounts/check-mixed-channel
 func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	var req CheckMixedChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -479,13 +550,21 @@ func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {
 		response.Success(c, gin.H{"has_risk": false})
 		return
 	}
+	if err := scope.ensureGroups(req.GroupIDs, true); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	accountID := int64(0)
 	if req.AccountID != nil {
 		accountID = *req.AccountID
+		if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
-	err := h.adminService.CheckMixedChannelRisk(c.Request.Context(), accountID, req.Platform, req.GroupIDs)
+	err = h.adminService.CheckMixedChannelRisk(c.Request.Context(), accountID, req.Platform, req.GroupIDs)
 	if err != nil {
 		var mixedErr *service.MixedChannelError
 		if errors.As(err, &mixedErr) {
@@ -513,6 +592,11 @@ func (h *AccountHandler) CheckMixedChannel(c *gin.Context) {
 // Create handles creating a new account
 // POST /api/v1/admin/accounts
 func (h *AccountHandler) Create(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	var req CreateAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -524,6 +608,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
+	if err := scope.ensureGroups(req.GroupIDs, true); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
@@ -558,7 +646,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		h.adminService.ForceAntigravityPrivacy(ctx, account)
 		// OpenAI OAuth: 新账号直接设置隐私
 		h.adminService.ForceOpenAIPrivacy(ctx, account)
-		return h.buildAccountResponseWithRuntime(ctx, account), nil
+		return h.buildAccountResponseWithRuntime(ctx, scope, account), nil
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
@@ -591,6 +679,11 @@ func (h *AccountHandler) Create(c *gin.Context) {
 // Update handles updating an account
 // PUT /api/v1/admin/accounts/:id
 func (h *AccountHandler) Update(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -605,6 +698,16 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if req.GroupIDs != nil {
+		if err := scope.ensureGroups(*req.GroupIDs, true); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
@@ -625,6 +728,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		LoadFactor:            req.LoadFactor,
 		Status:                req.Status,
 		GroupIDs:              req.GroupIDs,
+		GroupScopeIDs:         accountMutationGroupScope(scope),
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		SkipMixedChannelCheck: skipCheck,
@@ -651,7 +755,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
@@ -681,9 +785,18 @@ func (h *AccountHandler) scheduleOpenAIResponsesProbe(account *service.Account) 
 // Delete handles deleting an account
 // DELETE /api/v1/admin/accounts/:id
 func (h *AccountHandler) Delete(c *gin.Context) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -694,6 +807,52 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Account deleted successfully"})
+}
+
+func (h *AccountHandler) ensureAccountInScope(c *gin.Context, scope *adminAccessScope, accountID int64) error {
+	if scope == nil || scope.Unrestricted {
+		return nil
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		return err
+	}
+	if !scope.accountVisible(account) {
+		return service.ErrOperatorAccountForbidden
+	}
+	return nil
+}
+
+func (h *AccountHandler) ensureAccountsInScope(c *gin.Context, scope *adminAccessScope, accountIDs []int64) error {
+	if scope == nil || scope.Unrestricted || len(accountIDs) == 0 {
+		return nil
+	}
+	if batchGetter, ok := h.adminService.(interface {
+		GetAccountsByIDs(context.Context, []int64) ([]*service.Account, error)
+	}); ok {
+		accounts, err := batchGetter.GetAccountsByIDs(c.Request.Context(), accountIDs)
+		if err != nil {
+			return err
+		}
+		visible := make(map[int64]struct{}, len(accounts))
+		for _, account := range accounts {
+			if account != nil && scope.accountVisible(account) {
+				visible[account.ID] = struct{}{}
+			}
+		}
+		for _, id := range normalizeInt64IDList(accountIDs) {
+			if _, ok := visible[id]; !ok {
+				return service.ErrOperatorAccountForbidden
+			}
+		}
+		return nil
+	}
+	for _, id := range normalizeInt64IDList(accountIDs) {
+		if err := h.ensureAccountInScope(c, scope, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // TestAccountRequest represents the request body for testing an account
@@ -720,9 +879,18 @@ type PreviewFromCRSRequest struct {
 // Test handles testing account connectivity with SSE streaming
 // POST /api/v1/admin/accounts/:id/test
 func (h *AccountHandler) Test(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -746,9 +914,18 @@ func (h *AccountHandler) Test(c *gin.Context) {
 // RecoverState handles unified recovery of recoverable account runtime state.
 // POST /api/v1/admin/accounts/:id/recover-state
 func (h *AccountHandler) RecoverState(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -770,7 +947,7 @@ func (h *AccountHandler) RecoverState(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // SyncFromCRS handles syncing accounts from claude-relay-service (CRS)
@@ -951,6 +1128,11 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 // Refresh handles refreshing account credentials
 // POST /api/v1/admin/accounts/:id/refresh
 func (h *AccountHandler) Refresh(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -961,6 +1143,10 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 
@@ -978,7 +1164,7 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updatedAccount))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, updatedAccount))
 }
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
@@ -1002,6 +1188,11 @@ type ApplyOAuthCredentialsRequest struct {
 // 与 /refresh 的区别：/refresh 用现有 refresh_token 换 access_token（无用户交互），
 // 本接口承接前端完成完整 OAuth 流程后的落库步骤。
 func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -1020,6 +1211,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	existing, err := h.adminService.GetAccount(ctx, accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(existing) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 	if !existing.IsOAuth() {
@@ -1072,15 +1267,24 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(ctx, updatedAccount))
+	response.Success(c, h.buildAccountResponseWithRuntime(ctx, scope, updatedAccount))
 }
 
 // GetStats handles getting account statistics
 // GET /api/v1/admin/accounts/:id/stats
 func (h *AccountHandler) GetStats(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1109,9 +1313,18 @@ func (h *AccountHandler) GetStats(c *gin.Context) {
 // ClearError handles clearing account error
 // POST /api/v1/admin/accounts/:id/clear-error
 func (h *AccountHandler) ClearError(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1129,15 +1342,24 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 		}
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // RevertProxyFallback handles reverting account proxy to original before fallback.
 // POST /api/v1/admin/accounts/:id/revert-proxy-fallback
 func (h *AccountHandler) RevertProxyFallback(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, id); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	if err := h.adminService.RevertAccountProxyFallback(c.Request.Context(), id); err != nil {
@@ -1150,6 +1372,11 @@ func (h *AccountHandler) RevertProxyFallback(c *gin.Context) {
 // BatchClearError handles batch clearing account errors
 // POST /api/v1/admin/accounts/batch-clear-error
 func (h *AccountHandler) BatchClearError(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		AccountIDs []int64 `json:"account_ids"`
 	}
@@ -1159,6 +1386,10 @@ func (h *AccountHandler) BatchClearError(c *gin.Context) {
 	}
 	if len(req.AccountIDs) == 0 {
 		response.BadRequest(c, "account_ids is required")
+		return
+	}
+	if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1218,6 +1449,11 @@ func (h *AccountHandler) BatchClearError(c *gin.Context) {
 // BatchRefresh handles batch refreshing account credentials
 // POST /api/v1/admin/accounts/batch-refresh
 func (h *AccountHandler) BatchRefresh(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		AccountIDs []int64 `json:"account_ids"`
 	}
@@ -1227,6 +1463,10 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 	}
 	if len(req.AccountIDs) == 0 {
 		response.BadRequest(c, "account_ids is required")
+		return
+	}
+	if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1312,12 +1552,25 @@ func (h *AccountHandler) BatchRefresh(c *gin.Context) {
 // BatchCreate handles batch creating accounts
 // POST /api/v1/admin/accounts/batch
 func (h *AccountHandler) BatchCreate(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		Accounts []CreateAccountRequest `json:"accounts" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	if scope.isScoped() {
+		for _, item := range req.Accounts {
+			if err := scope.ensureGroups(item.GroupIDs, true); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
 	}
 
 	executeAdminIdempotentJSON(c, "admin.accounts.batch_create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
@@ -1437,9 +1690,18 @@ type BatchUpdateCredentialsRequest struct {
 // BatchUpdateCredentials handles batch updating credentials fields
 // POST /api/v1/admin/accounts/batch-update-credentials
 func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req BatchUpdateCredentialsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1519,6 +1781,11 @@ func (h *AccountHandler) BatchUpdateCredentials(c *gin.Context) {
 // BulkUpdate handles bulk updating accounts with selected fields/credentials.
 // POST /api/v1/admin/accounts/bulk-update
 func (h *AccountHandler) BulkUpdate(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req BulkUpdateAccountsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -1531,6 +1798,39 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	if len(req.AccountIDs) == 0 && req.Filters == nil {
 		response.BadRequest(c, "account_ids or filters is required")
 		return
+	}
+	if scope.isScoped() {
+		if len(req.AccountIDs) > 0 {
+			if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if req.GroupIDs != nil {
+			if err := scope.ensureGroups(*req.GroupIDs, true); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if req.Filters != nil {
+			groupID, hasGroup, err := parseBulkUpdateFilterGroupID(req.Filters.Group)
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+			if hasGroup {
+				if err := scope.ensureGroup(groupID); err != nil {
+					response.ErrorFrom(c, err)
+					return
+				}
+			} else if len(req.AccountIDs) == 0 {
+				if len(scope.GroupIDs) != 1 {
+					response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
+					return
+				}
+				req.Filters.Group = strconv.FormatInt(scope.GroupIDs[0], 10)
+			}
+		}
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
@@ -1567,6 +1867,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Status:                req.Status,
 		Schedulable:           req.Schedulable,
 		GroupIDs:              req.GroupIDs,
+		GroupScopeIDs:         accountMutationGroupScope(scope),
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		SkipMixedChannelCheck: skipCheck,
@@ -1605,6 +1906,28 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		Search:      filters.Search,
 		PrivacyMode: filters.PrivacyMode,
 	}
+}
+
+func parseBulkUpdateFilterGroupID(raw string) (int64, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false, nil
+	}
+	if raw == accountListGroupUngroupedQueryValue {
+		return service.AccountListGroupUngrouped, true, nil
+	}
+	groupID, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || groupID <= 0 {
+		return 0, false, infraerrors.BadRequest("INVALID_GROUP_FILTER", "invalid group filter")
+	}
+	return groupID, true, nil
+}
+
+func accountMutationGroupScope(scope *adminAccessScope) []int64 {
+	if scope == nil || !scope.isScoped() {
+		return nil
+	}
+	return append([]int64(nil), scope.GroupIDs...)
 }
 
 // ========== OAuth Handlers ==========
@@ -1754,9 +2077,18 @@ func (h *OAuthHandler) SetupTokenCookieAuth(c *gin.Context) {
 // GetUsage handles getting account usage information
 // GET /api/v1/admin/accounts/:id/usage?source=passive|active&force=true
 func (h *AccountHandler) GetUsage(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1780,9 +2112,18 @@ func (h *AccountHandler) GetUsage(c *gin.Context) {
 // ClearRateLimit handles clearing account rate limit status
 // POST /api/v1/admin/accounts/:id/clear-rate-limit
 func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1798,15 +2139,24 @@ func (h *AccountHandler) ClearRateLimit(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // ResetQuota handles resetting account quota usage
 // POST /api/v1/admin/accounts/:id/reset-quota
 func (h *AccountHandler) ResetQuota(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1821,15 +2171,24 @@ func (h *AccountHandler) ResetQuota(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // GetTempUnschedulable handles getting temporary unschedulable status
 // GET /api/v1/admin/accounts/:id/temp-unschedulable
 func (h *AccountHandler) GetTempUnschedulable(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1853,9 +2212,18 @@ func (h *AccountHandler) GetTempUnschedulable(c *gin.Context) {
 // ClearTempUnschedulable handles clearing temporary unschedulable status
 // DELETE /api/v1/admin/accounts/:id/temp-unschedulable
 func (h *AccountHandler) ClearTempUnschedulable(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1870,9 +2238,18 @@ func (h *AccountHandler) ClearTempUnschedulable(c *gin.Context) {
 // GetTodayStats handles getting account today statistics
 // GET /api/v1/admin/accounts/:id/today-stats
 func (h *AccountHandler) GetTodayStats(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1893,6 +2270,11 @@ type BatchTodayStatsRequest struct {
 // GetBatchTodayStats 批量获取多个账号的今日统计。
 // POST /api/v1/admin/accounts/today-stats/batch
 func (h *AccountHandler) GetBatchTodayStats(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req BatchTodayStatsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -1902,6 +2284,10 @@ func (h *AccountHandler) GetBatchTodayStats(c *gin.Context) {
 	accountIDs := normalizeInt64IDList(req.AccountIDs)
 	if len(accountIDs) == 0 {
 		response.Success(c, gin.H{"stats": map[string]any{}})
+		return
+	}
+	if err := h.ensureAccountsInScope(c, scope, accountIDs); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1944,9 +2330,18 @@ type SetSchedulableRequest struct {
 // SetSchedulable handles toggling account schedulable status
 // POST /api/v1/admin/accounts/:id/schedulable
 func (h *AccountHandler) SetSchedulable(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -1962,12 +2357,17 @@ func (h *AccountHandler) SetSchedulable(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 }
 
 // GetAvailableModels handles getting available models for an account
 // GET /api/v1/admin/accounts/:id/models
 func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -1977,6 +2377,10 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 
@@ -2107,6 +2511,11 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 // SyncUpstreamModels handles syncing live supported models from an account's upstream.
 // POST /api/v1/admin/accounts/:id/models/sync-upstream
 func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -2116,6 +2525,10 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 
@@ -2149,6 +2562,15 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // SyncUpstreamModelsPreview handles syncing live supported models using provided credentials (no account ID needed).
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
+	if scope.isScoped() {
+		response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
+		return
+	}
 	var req struct {
 		Platform string `json:"platform" binding:"required"`
 		Type     string `json:"type" binding:"required"`
@@ -2199,6 +2621,11 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 // SetPrivacy handles setting privacy for a single OpenAI/Antigravity OAuth account
 // POST /api/v1/admin/accounts/:id/set-privacy
 func (h *AccountHandler) SetPrivacy(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -2207,6 +2634,10 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 	if account.Type != service.AccountTypeOAuth {
@@ -2235,15 +2666,20 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 			account.Extra = make(map[string]any)
 		}
 		account.Extra["privacy_mode"] = mode
-		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+		response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, account))
 		return
 	}
-	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), updated))
+	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), scope, updated))
 }
 
 // RefreshTier handles refreshing Google One tier for a single account
 // POST /api/v1/admin/accounts/:id/refresh-tier
 func (h *AccountHandler) RefreshTier(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -2254,6 +2690,10 @@ func (h *AccountHandler) RefreshTier(c *gin.Context) {
 	account, err := h.adminService.GetAccount(ctx, accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 
@@ -2300,6 +2740,11 @@ type BatchRefreshTierRequest struct {
 // BatchRefreshTier handles batch refreshing Google One tier
 // POST /api/v1/admin/accounts/batch-refresh-tier
 func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req BatchRefreshTierRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		req = BatchRefreshTierRequest{}
@@ -2309,6 +2754,10 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	accounts := make([]*service.Account, 0)
 
 	if len(req.AccountIDs) == 0 {
+		if scope.isScoped() {
+			response.ErrorFrom(c, service.ErrOperatorAccountScopeRequired)
+			return
+		}
 		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, "", "name", "asc")
 		if err != nil {
 			response.ErrorFrom(c, err)
@@ -2322,6 +2771,10 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 			}
 		}
 	} else {
+		if err := h.ensureAccountsInScope(c, scope, req.AccountIDs); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 		fetched, err := h.adminService.GetAccountsByIDs(ctx, req.AccountIDs)
 		if err != nil {
 			response.ErrorFrom(c, err)

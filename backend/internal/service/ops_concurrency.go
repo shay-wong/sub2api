@@ -13,18 +13,33 @@ const (
 	opsConcurrencyBatchChunkSize = 200
 )
 
-func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter string) ([]Account, error) {
+func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter string, groupIDs ...int64) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return []Account{}, nil
 	}
+	groupIDs = normalizeOperatorScopeGroupIDs(groupIDs)
 
 	out := make([]Account, 0, 128)
 	page := 1
 	for {
-		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
+		params := pagination.PaginationParams{
 			Page:     page,
 			PageSize: opsAccountsPageSize,
-		}, platformFilter, "", "", "", 0, "")
+		}
+		var accounts []Account
+		var pageInfo *pagination.PaginationResult
+		var err error
+		if len(groupIDs) > 0 {
+			if scopedRepo, ok := s.accountRepo.(interface {
+				ListWithGroupScope(context.Context, pagination.PaginationParams, string, string, string, string, []int64, string) ([]Account, *pagination.PaginationResult, error)
+			}); ok {
+				accounts, pageInfo, err = scopedRepo.ListWithGroupScope(ctx, params, platformFilter, "", "", "", groupIDs, "")
+			} else {
+				accounts, pageInfo, err = s.accountRepo.ListWithFilters(ctx, params, platformFilter, "", "", "", groupIDs[0], "")
+			}
+		} else {
+			accounts, pageInfo, err = s.accountRepo.ListWithFilters(ctx, params, platformFilter, "", "", "", 0, "")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -48,6 +63,61 @@ func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter s
 	}
 
 	return out, nil
+}
+
+func normalizeOperatorScopeGroupIDs(values []int64) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(values))
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func opsGroupScopeSet(groupIDs []int64) map[int64]struct{} {
+	groupIDs = normalizeOperatorScopeGroupIDs(groupIDs)
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	out := make(map[int64]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func opsAccountGroupsInScope(acc Account, groupIDFilter *int64, scopeSet map[int64]struct{}) []*Group {
+	if groupIDFilter != nil && *groupIDFilter > 0 {
+		for _, group := range acc.Groups {
+			if group != nil && group.ID == *groupIDFilter {
+				return []*Group{group}
+			}
+		}
+		return nil
+	}
+	if len(scopeSet) == 0 {
+		return acc.Groups
+	}
+	out := make([]*Group, 0, len(acc.Groups))
+	for _, group := range acc.Groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		if _, ok := scopeSet[group.ID]; ok {
+			out = append(out, group)
+		}
+	}
+	return out
 }
 
 func (s *OpsService) getAccountsLoadMapBestEffort(ctx context.Context, accounts []Account) map[int64]*AccountLoadInfo {
@@ -107,12 +177,18 @@ func (s *OpsService) GetConcurrencyStats(
 	ctx context.Context,
 	platformFilter string,
 	groupIDFilter *int64,
+	groupIDScope ...int64,
 ) (map[string]*PlatformConcurrencyInfo, map[int64]*GroupConcurrencyInfo, map[int64]*AccountConcurrencyInfo, *time.Time, error) {
 	if err := s.RequireMonitoringEnabled(ctx); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	accounts, err := s.listAllAccountsForOps(ctx, platformFilter)
+	if groupIDFilter != nil && *groupIDFilter > 0 {
+		groupIDScope = []int64{*groupIDFilter}
+	}
+	groupIDScope = normalizeOperatorScopeGroupIDs(groupIDScope)
+	scopeSet := opsGroupScopeSet(groupIDScope)
+	accounts, err := s.listAllAccountsForOps(ctx, platformFilter, groupIDScope...)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -129,21 +205,10 @@ func (s *OpsService) GetConcurrencyStats(
 			continue
 		}
 
-		var matchedGroup *Group
-		if groupIDFilter != nil && *groupIDFilter > 0 {
-			for _, grp := range acc.Groups {
-				if grp == nil || grp.ID <= 0 {
-					continue
-				}
-				if grp.ID == *groupIDFilter {
-					matchedGroup = grp
-					break
-				}
-			}
+		scopedGroups := opsAccountGroupsInScope(acc, groupIDFilter, scopeSet)
+		if groupIDFilter != nil && *groupIDFilter > 0 && len(scopedGroups) == 0 {
 			// Group filter provided: skip accounts not in that group.
-			if matchedGroup == nil {
-				continue
-			}
+			continue
 		}
 
 		load := loadMap[acc.ID]
@@ -157,12 +222,9 @@ func (s *OpsService) GetConcurrencyStats(
 		// Account-level view picks one display group (the first group).
 		displayGroupID := int64(0)
 		displayGroupName := ""
-		if matchedGroup != nil {
-			displayGroupID = matchedGroup.ID
-			displayGroupName = matchedGroup.Name
-		} else if len(acc.Groups) > 0 && acc.Groups[0] != nil {
-			displayGroupID = acc.Groups[0].ID
-			displayGroupName = acc.Groups[0].Name
+		if len(scopedGroups) > 0 && scopedGroups[0] != nil {
+			displayGroupID = scopedGroups[0].ID
+			displayGroupName = scopedGroups[0].Name
 		}
 
 		if _, ok := account[acc.ID]; !ok {
@@ -196,8 +258,10 @@ func (s *OpsService) GetConcurrencyStats(
 		}
 
 		// Group aggregation (one account may contribute to multiple groups).
-		if matchedGroup != nil {
-			grp := matchedGroup
+		for _, grp := range scopedGroups {
+			if grp == nil || grp.ID <= 0 {
+				continue
+			}
 			if _, ok := group[grp.ID]; !ok {
 				group[grp.ID] = &GroupConcurrencyInfo{
 					GroupID:   grp.ID,
@@ -216,30 +280,6 @@ func (s *OpsService) GetConcurrencyStats(
 			g.MaxCapacity += int64(acc.Concurrency)
 			g.CurrentInUse += currentInUse
 			g.WaitingInQueue += waiting
-		} else {
-			for _, grp := range acc.Groups {
-				if grp == nil || grp.ID <= 0 {
-					continue
-				}
-				if _, ok := group[grp.ID]; !ok {
-					group[grp.ID] = &GroupConcurrencyInfo{
-						GroupID:   grp.ID,
-						GroupName: grp.Name,
-						Platform:  grp.Platform,
-					}
-				}
-				g := group[grp.ID]
-				if g.GroupName == "" && grp.Name != "" {
-					g.GroupName = grp.Name
-				}
-				if g.Platform != "" && grp.Platform != "" && g.Platform != grp.Platform {
-					// Groups are expected to be platform-scoped. If mismatch is observed, avoid misleading labels.
-					g.Platform = ""
-				}
-				g.MaxCapacity += int64(acc.Concurrency)
-				g.CurrentInUse += currentInUse
-				g.WaitingInQueue += waiting
-			}
 		}
 	}
 

@@ -7,11 +7,13 @@ interface Props {
   platformFilter?: string
   groupIdFilter?: number | null
   refreshToken: number
+  canViewUserConcurrency?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   platformFilter: '',
-  groupIdFilter: null
+  groupIdFilter: null,
+  canViewUserConcurrency: false
 })
 
 const { t } = useI18n()
@@ -297,7 +299,20 @@ watch(
 watch(
   () => showByUser.value,
   () => {
+    if (showByUser.value && !props.canViewUserConcurrency) {
+      showByUser.value = false
+      return
+    }
     loadData()
+  }
+)
+
+watch(
+  () => props.canViewUserConcurrency,
+  (allowed) => {
+    if (!allowed && showByUser.value) {
+      showByUser.value = false
+    }
   }
 )
 
@@ -353,6 +368,7 @@ watch(
       <div class="flex items-center gap-2">
         <!-- 用户视图切换按钮 -->
         <button
+          v-if="props.canViewUserConcurrency"
           class="flex items-center justify-center rounded-lg px-2 py-1 transition-colors"
           :class="showByUser
             ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'

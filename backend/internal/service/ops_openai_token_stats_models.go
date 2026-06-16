@@ -9,6 +9,8 @@ type OpsOpenAITokenStatsFilter struct {
 
 	Platform string
 	GroupID  *int64
+	GroupIDs []int64
+	GroupScopeEmpty bool
 
 	// Pagination mode (default): page/page_size
 	Page     int

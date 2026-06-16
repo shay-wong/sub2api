@@ -14,10 +14,16 @@ declare module 'vue-router' {
     requiresAuth?: boolean
 
     /**
-     * Whether this route requires admin role
+     * Whether this route requires admin console access
      * @default false
      */
     requiresAdmin?: boolean
+
+    /**
+     * Whether this route is restricted to full administrators.
+     * @default false
+     */
+    requiresAdminOnly?: boolean
 
     /**
      * Page title for this route

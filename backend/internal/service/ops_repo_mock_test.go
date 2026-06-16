@@ -14,6 +14,7 @@ type opsRepoMock struct {
 	DeleteSystemLogsFn            func(ctx context.Context, filter *OpsSystemLogCleanupFilter) (int64, error)
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
 	LookupDeletedKeyAuditFn       func(ctx context.Context, key string) (*DeletedKeyAuditResult, error)
+	GetWindowStatsFn              func(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error)
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -75,6 +76,9 @@ func (m *opsRepoMock) UpdateErrorResolution(ctx context.Context, errorID int64, 
 }
 
 func (m *opsRepoMock) GetWindowStats(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error) {
+	if m.GetWindowStatsFn != nil {
+		return m.GetWindowStatsFn(ctx, filter)
+	}
 	return &OpsWindowStats{}, nil
 }
 

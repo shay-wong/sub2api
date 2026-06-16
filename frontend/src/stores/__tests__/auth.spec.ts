@@ -43,6 +43,14 @@ const fakeAdminUser = {
   role: 'admin' as const,
 }
 
+const fakeOperatorUser = {
+  ...fakeUser,
+  id: 3,
+  username: 'operator',
+  email: 'operator@example.com',
+  role: 'operator' as const,
+}
+
 const fakeAuthResponse = {
   access_token: 'test-token-123',
   refresh_token: 'refresh-token-456',
@@ -334,6 +342,18 @@ describe('useAuthStore', () => {
       await store.login({ email: 'test@example.com', password: '123456' })
 
       expect(store.isAdmin).toBe(false)
+    })
+
+    it('运营用户不是完整管理员，但可以进入管理后台', async () => {
+      const operatorResponse = { ...fakeAuthResponse, user: { ...fakeOperatorUser } }
+      mockLogin.mockResolvedValue(operatorResponse)
+      const store = useAuthStore()
+
+      await store.login({ email: 'operator@example.com', password: '123456' })
+
+      expect(store.isAdmin).toBe(false)
+      expect(store.isOperator).toBe(true)
+      expect(store.canAccessAdminConsole).toBe(true)
     })
 
     it('未登录时返回 false', () => {

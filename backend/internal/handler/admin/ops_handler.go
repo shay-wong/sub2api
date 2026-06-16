@@ -14,12 +14,18 @@ import (
 )
 
 type OpsHandler struct {
-	opsService *service.OpsService
+	opsService        *service.OpsService
+	permissionService *service.PermissionService
 }
 
 // GetErrorLogByID returns ops error log detail.
 // GET /api/v1/admin/ops/errors/:id
 func (h *OpsHandler) GetErrorLogByID(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -38,6 +44,10 @@ func (h *OpsHandler) GetErrorLogByID(c *gin.Context) {
 
 	detail, err := h.opsService.GetErrorLogByID(c.Request.Context(), id)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureOpsErrorLogVisible(detail); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -68,13 +78,22 @@ func parseOpsViewParam(c *gin.Context) string {
 	}
 }
 
-func NewOpsHandler(opsService *service.OpsService) *OpsHandler {
-	return &OpsHandler{opsService: opsService}
+func NewOpsHandler(opsService *service.OpsService, permissionService ...*service.PermissionService) *OpsHandler {
+	var perm *service.PermissionService
+	if len(permissionService) > 0 {
+		perm = permissionService[0]
+	}
+	return &OpsHandler{opsService: opsService, permissionService: perm}
 }
 
 // GetErrorLogs lists ops error logs.
 // GET /api/v1/admin/ops/errors
 func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -186,6 +205,10 @@ func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
 		}
 		filter.StatusCodes = out
 	}
+	if err := scope.applyOpsErrorLogScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	result, err := h.opsService.GetErrorLogs(c.Request.Context(), filter)
 	if err != nil {
@@ -198,6 +221,11 @@ func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
 // ListRequestErrors lists client-visible request errors.
 // GET /api/v1/admin/ops/request-errors
 func (h *OpsHandler) ListRequestErrors(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -290,6 +318,10 @@ func (h *OpsHandler) ListRequestErrors(c *gin.Context) {
 		}
 		filter.StatusCodes = out
 	}
+	if err := scope.applyOpsErrorLogScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	result, err := h.opsService.GetErrorLogs(c.Request.Context(), filter)
 	if err != nil {
@@ -309,6 +341,11 @@ func (h *OpsHandler) GetRequestError(c *gin.Context) {
 // ListRequestErrorUpstreamErrors lists upstream error logs correlated to a request error.
 // GET /api/v1/admin/ops/request-errors/:id/upstream-errors
 func (h *OpsHandler) ListRequestErrorUpstreamErrors(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -328,6 +365,10 @@ func (h *OpsHandler) ListRequestErrorUpstreamErrors(c *gin.Context) {
 	// Load request error to get correlation keys.
 	detail, err := h.opsService.GetErrorLogByID(c.Request.Context(), id)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureOpsErrorLogVisible(detail); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -376,6 +417,10 @@ func (h *OpsHandler) ListRequestErrorUpstreamErrors(c *gin.Context) {
 	} else {
 		filter.ClientRequestID = clientRequestID
 	}
+	if err := scope.applyOpsErrorLogScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	result, err := h.opsService.GetErrorLogs(c.Request.Context(), filter)
 	if err != nil {
@@ -413,6 +458,11 @@ func (h *OpsHandler) ResolveRequestError(c *gin.Context) {
 // ListUpstreamErrors lists independent upstream errors.
 // GET /api/v1/admin/ops/upstream-errors
 func (h *OpsHandler) ListUpstreamErrors(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -496,6 +546,10 @@ func (h *OpsHandler) ListUpstreamErrors(c *gin.Context) {
 		}
 		filter.StatusCodes = out
 	}
+	if err := scope.applyOpsErrorLogScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	result, err := h.opsService.GetErrorLogs(c.Request.Context(), filter)
 	if err != nil {
@@ -522,6 +576,11 @@ func (h *OpsHandler) ResolveUpstreamError(c *gin.Context) {
 // ListRequestDetails returns a request-level list (success + error) for drill-down.
 // GET /api/v1/admin/ops/requests
 func (h *OpsHandler) ListRequestDetails(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
 		return
@@ -604,6 +663,10 @@ func (h *OpsHandler) ListRequestDetails(c *gin.Context) {
 			return
 		}
 		filter.MaxDurationMs = &parsed
+	}
+	if err := scope.applyOpsRequestDetailScope(filter); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	out, err := h.opsService.ListRequestDetails(c.Request.Context(), filter)

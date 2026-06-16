@@ -8,6 +8,8 @@ type OpsDashboardFilter struct {
 
 	Platform string
 	GroupID  *int64
+	GroupIDs []int64
+	GroupScopeEmpty bool
 
 	// QueryMode controls whether dashboard queries should use raw logs or pre-aggregated tables.
 	// Expected values: auto/raw/preagg (see OpsQueryMode).
