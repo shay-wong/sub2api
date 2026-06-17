@@ -18,13 +18,18 @@ const (
 
 // Role constants
 const (
-	RoleAdmin    = domain.RoleAdmin
-	RoleOperator = domain.RoleOperator
-	RoleUser     = domain.RoleUser
+	RoleSuperAdmin = domain.RoleSuperAdmin
+	RoleAdmin      = domain.RoleAdmin
+	RoleOperator   = domain.RoleOperator
+	RoleUser       = domain.RoleUser
 )
 
+func RoleIsSuperAdmin(role string) bool {
+	return role == RoleSuperAdmin
+}
+
 func RoleIsAdmin(role string) bool {
-	return role == RoleAdmin
+	return role == RoleSuperAdmin || role == RoleAdmin
 }
 
 func RoleIsOperator(role string) bool {
@@ -33,7 +38,7 @@ func RoleIsOperator(role string) bool {
 
 func RoleHasUserAccess(role string) bool {
 	switch role {
-	case RoleAdmin, RoleOperator, RoleUser:
+	case RoleSuperAdmin, RoleAdmin, RoleOperator, RoleUser:
 		return true
 	default:
 		return false
@@ -41,7 +46,7 @@ func RoleHasUserAccess(role string) bool {
 }
 
 func RoleCanAccessAdminConsole(role string) bool {
-	return role == RoleAdmin || role == RoleOperator
+	return RoleIsAdmin(role)
 }
 
 // Affiliate rebate settings

@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
+	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -354,6 +355,21 @@ func (_c *UserCreate) AddAPIKeys(v ...*APIKey) *UserCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddAPIKeyIDs(ids...)
+}
+
+// AddProjectMemberIDs adds the "project_members" edge to the ProjectMember entity by IDs.
+func (_c *UserCreate) AddProjectMemberIDs(ids ...int64) *UserCreate {
+	_c.mutation.AddProjectMemberIDs(ids...)
+	return _c
+}
+
+// AddProjectMembers adds the "project_members" edges to the ProjectMember entity.
+func (_c *UserCreate) AddProjectMembers(v ...*ProjectMember) *UserCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddProjectMemberIDs(ids...)
 }
 
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by IDs.
@@ -868,6 +884,22 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.ProjectMembersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

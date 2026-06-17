@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
@@ -67,6 +68,20 @@ func (_u *AccountUpdate) SetName(v string) *AccountUpdate {
 func (_u *AccountUpdate) SetNillableName(v *string) *AccountUpdate {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *AccountUpdate) SetProjectID(v int64) *AccountUpdate {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableProjectID(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -530,6 +545,11 @@ func (_u *AccountUpdate) ClearSessionWindowStatus() *AccountUpdate {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *AccountUpdate) SetProject(v *Project) *AccountUpdate {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdate) AddGroupIDs(ids ...int64) *AccountUpdate {
 	_u.mutation.AddGroupIDs(ids...)
@@ -568,6 +588,12 @@ func (_u *AccountUpdate) AddUsageLogs(v ...*UsageLog) *AccountUpdate {
 // Mutation returns the AccountMutation object of the builder.
 func (_u *AccountUpdate) Mutation() *AccountMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *AccountUpdate) ClearProject() *AccountUpdate {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -686,6 +712,9 @@ func (_u *AccountUpdate) check() error {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
 		}
+	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Account.project"`)
 	}
 	return nil
 }
@@ -842,6 +871,35 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ProjectTable,
+			Columns: []string{account.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ProjectTable,
+			Columns: []string{account.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1030,6 +1088,20 @@ func (_u *AccountUpdateOne) SetName(v string) *AccountUpdateOne {
 func (_u *AccountUpdateOne) SetNillableName(v *string) *AccountUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *AccountUpdateOne) SetProjectID(v int64) *AccountUpdateOne {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableProjectID(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -1493,6 +1565,11 @@ func (_u *AccountUpdateOne) ClearSessionWindowStatus() *AccountUpdateOne {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *AccountUpdateOne) SetProject(v *Project) *AccountUpdateOne {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_u *AccountUpdateOne) AddGroupIDs(ids ...int64) *AccountUpdateOne {
 	_u.mutation.AddGroupIDs(ids...)
@@ -1531,6 +1608,12 @@ func (_u *AccountUpdateOne) AddUsageLogs(v ...*UsageLog) *AccountUpdateOne {
 // Mutation returns the AccountMutation object of the builder.
 func (_u *AccountUpdateOne) Mutation() *AccountMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *AccountUpdateOne) ClearProject() *AccountUpdateOne {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearGroups clears all "groups" edges to the Group entity.
@@ -1662,6 +1745,9 @@ func (_u *AccountUpdateOne) check() error {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
 		}
+	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Account.project"`)
 	}
 	return nil
 }
@@ -1835,6 +1921,35 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.SessionWindowStatusCleared() {
 		_spec.ClearField(account.FieldSessionWindowStatus, field.TypeString)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ProjectTable,
+			Columns: []string{account.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ProjectTable,
+			Columns: []string{account.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.GroupsCleared() {
 		edge := &sqlgraph.EdgeSpec{

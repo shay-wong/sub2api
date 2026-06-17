@@ -74,6 +74,7 @@ type OpsInsertErrorLogInput struct {
 	ClientRequestID string
 
 	UserID    *int64
+	ProjectID int64
 	APIKeyID  *int64
 	AccountID *int64
 	GroupID   *int64
@@ -194,6 +195,7 @@ type OpsInsertSystemMetricsInput struct {
 
 type OpsInsertSystemLogInput struct {
 	CreatedAt       time.Time
+	ProjectID       int64
 	Level           string
 	Component       string
 	Message         string

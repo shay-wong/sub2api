@@ -48,6 +48,7 @@ type dashboardSnapshotV2Filters struct {
 }
 
 type dashboardSnapshotV2CacheKey struct {
+	ProjectID         int64   `json:"project_id,omitempty"`
 	StartTime         string  `json:"start_time"`
 	EndTime           string  `json:"end_time"`
 	Granularity       string  `json:"granularity"`
@@ -109,6 +110,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 	}
 
 	keyRaw, _ := json.Marshal(dashboardSnapshotV2CacheKey{
+		ProjectID:         dashboardCacheProjectID(c.Request.Context()),
 		StartTime:         startTime.UTC().Format(time.RFC3339),
 		EndTime:           endTime.UTC().Format(time.RFC3339),
 		Granularity:       granularity,

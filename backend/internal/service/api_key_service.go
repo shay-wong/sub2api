@@ -356,6 +356,9 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		if err != nil {
 			return nil, fmt.Errorf("get group: %w", err)
 		}
+		if projectID, ok := ProjectIDFromContext(ctx); ok && group.ProjectID > 0 && group.ProjectID != projectID {
+			return nil, ErrGroupNotAllowed
+		}
 
 		// 检查用户是否可以绑定该分组
 		if !s.canUserBindGroup(ctx, user, group) {

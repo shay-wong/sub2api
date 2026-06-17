@@ -99,6 +99,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 type UsageLog struct {
 	ID        int64
 	UserID    int64
+	ProjectID int64
 	APIKeyID  int64
 	AccountID int64
 	RequestID string

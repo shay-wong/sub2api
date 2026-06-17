@@ -62,7 +62,7 @@ func newJWTTestEnv(users map[int64]*service.User) (*gin.Engine, *service.AuthSer
 	userRepo := &stubJWTUserRepo{users: users}
 	authSvc := service.NewAuthService(nil, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
-	mw := NewJWTAuthMiddleware(authSvc, userSvc)
+	mw := NewJWTAuthMiddleware(authSvc, userSvc, nil)
 
 	r := gin.New()
 	r.Use(gin.HandlerFunc(mw))
@@ -148,7 +148,7 @@ func TestJWTAuth_ValidToken_TouchesLastActive(t *testing.T) {
 	toucher := &recordingActivityToucher{}
 
 	r := gin.New()
-	r.Use(jwtAuth(authSvc, userSvc, toucher))
+	r.Use(jwtAuth(authSvc, userSvc, toucher, nil))
 	r.GET("/protected", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
@@ -163,6 +163,54 @@ func TestJWTAuth_ValidToken_TouchesLastActive(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, []int64{1}, toucher.userIDs)
+}
+
+func TestJWTAuth_SetsRequestedProjectContext(t *testing.T) {
+	user := &service.User{
+		ID:           1,
+		Email:        "test@example.com",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		Concurrency:  5,
+		TokenVersion: 1,
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.JWT.Secret = "test-jwt-secret-32bytes-long!!!"
+	cfg.JWT.AccessTokenExpireMinutes = 60
+
+	userRepo := &stubJWTUserRepo{users: map[int64]*service.User{1: user}}
+	authSvc := service.NewAuthService(nil, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	userSvc := service.NewUserService(userRepo, nil, nil, nil)
+	projectSvc := service.NewProjectService(&stubProjectRepo{
+		roles: map[int64]map[int64]string{
+			42: {1: service.ProjectRoleUser},
+		},
+	})
+
+	r := gin.New()
+	r.Use(gin.HandlerFunc(NewJWTAuthMiddleware(authSvc, userSvc, projectSvc)))
+	r.GET("/protected", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		c.JSON(http.StatusOK, gin.H{"project_id": projectID})
+	})
+
+	token, err := authSvc.GenerateToken(user)
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Project-ID", "42")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, float64(42), body["project_id"])
 }
 
 func TestJWTAuth_MissingAuthorizationHeader(t *testing.T) {

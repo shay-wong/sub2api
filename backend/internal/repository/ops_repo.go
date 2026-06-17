@@ -22,6 +22,7 @@ INSERT INTO ops_error_logs (
   request_id,
   client_request_id,
   user_id,
+  project_id,
   api_key_id,
   account_id,
   group_id,
@@ -61,7 +62,7 @@ INSERT INTO ops_error_logs (
   deleted_key_name,
   api_key_prefix
 ) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41
+  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42
 )`
 
 func NewOpsRepository(db *sql.DB) service.OpsRepository {
@@ -136,6 +137,7 @@ func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {
 		opsNullString(input.RequestID),
 		opsNullString(input.ClientRequestID),
 		opsNullInt64(input.UserID),
+		opsNullablePositiveInt64(input.ProjectID),
 		opsNullInt64(input.APIKeyID),
 		opsNullInt64(input.AccountID),
 		opsNullInt64(input.GroupID),
@@ -197,7 +199,7 @@ func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsEr
 		pageSize = 500
 	}
 
-	where, args := buildOpsErrorLogsWhere(filter)
+	where, args := buildOpsErrorLogsWhereForContext(ctx, filter)
 	countSQL := "SELECT COUNT(*) FROM ops_error_logs e " + where
 
 	var total int
@@ -444,7 +446,13 @@ LEFT JOIN accounts a ON e.account_id = a.id
 LEFT JOIN groups g ON e.group_id = g.id
 LEFT JOIN users du ON e.deleted_key_owner_user_id = du.id
 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
-WHERE e.id = $1
+WHERE e.id = $1`
+	args := []any{id}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		q += " AND e.project_id = $" + itoa(len(args))
+	}
+	q += `
 LIMIT 1`
 
 	var out service.OpsErrorLogDetail
@@ -467,7 +475,7 @@ LIMIT 1`
 	var detailAPIKeyName string
 	var detailAPIKeyDeletedAt sql.NullTime
 
-	err := r.db.QueryRowContext(ctx, q, id).Scan(
+	err := r.db.QueryRowContext(ctx, q, args...).Scan(
 		&out.ID,
 		&out.CreatedAt,
 		&out.Phase,
@@ -630,14 +638,6 @@ func (r *opsRepository) UpdateErrorResolution(ctx context.Context, errorID int64
 		return fmt.Errorf("invalid error id")
 	}
 
-	q := `
-UPDATE ops_error_logs
-SET
-  resolved = $2,
-  resolved_at = $3,
-  resolved_by_user_id = $4
-WHERE id = $1`
-
 	at := sql.NullTime{}
 	if resolvedAt != nil && !resolvedAt.IsZero() {
 		at = sql.NullTime{Time: resolvedAt.UTC(), Valid: true}
@@ -646,13 +646,23 @@ WHERE id = $1`
 		at = sql.NullTime{Time: now, Valid: true}
 	}
 
+	q := `
+UPDATE ops_error_logs
+SET
+  resolved = $2,
+  resolved_at = $3,
+  resolved_by_user_id = $4
+WHERE id = $1`
+	args := []any{errorID, resolved, at, nullInt64(resolvedByUserID)}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		q += " AND project_id = $" + itoa(len(args))
+	}
+
 	_, err := r.db.ExecContext(
 		ctx,
 		q,
-		errorID,
-		resolved,
-		at,
-		nullInt64(resolvedByUserID),
+		args...,
 	)
 	return err
 }
@@ -672,6 +682,7 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
 		"ops_system_logs",
 		"created_at",
+		"project_id",
 		"level",
 		"component",
 		"message",
@@ -688,6 +699,7 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 		return 0, err
 	}
 
+	contextProjectID, _ := service.ProjectIDFromContext(ctx)
 	var inserted int64
 	for _, input := range inputs {
 		if input == nil {
@@ -710,9 +722,23 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 		if extra == "" {
 			extra = "{}"
 		}
+		projectID := input.ProjectID
+		if projectID <= 0 {
+			projectID = contextProjectID
+		}
+		if projectID <= 0 {
+			resolvedProjectID, resolveErr := ensureDefaultProject(ctx, r.db)
+			if resolveErr != nil {
+				_ = stmt.Close()
+				_ = tx.Rollback()
+				return inserted, resolveErr
+			}
+			projectID = resolvedProjectID
+		}
 		if _, err := stmt.ExecContext(
 			ctx,
 			createdAt.UTC(),
+			projectID,
 			level,
 			component,
 			message,
@@ -766,7 +792,7 @@ func (r *opsRepository) ListSystemLogs(ctx context.Context, filter *service.OpsS
 		pageSize = 200
 	}
 
-	where, args, _ := buildOpsSystemLogsWhere(filter)
+	where, args, _ := buildOpsSystemLogsWhereForContext(ctx, filter)
 	countSQL := "SELECT COUNT(*) FROM ops_system_logs l " + where
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
@@ -778,6 +804,7 @@ func (r *opsRepository) ListSystemLogs(ctx context.Context, filter *service.OpsS
 	query := `
 SELECT
   l.id,
+  l.project_id,
   l.created_at,
   l.level,
   COALESCE(l.component, ''),
@@ -808,6 +835,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var extraRaw string
 		if err := rows.Scan(
 			&item.ID,
+			&item.ProjectID,
 			&item.CreatedAt,
 			&item.Level,
 			&item.Component,
@@ -859,7 +887,7 @@ func (r *opsRepository) DeleteSystemLogs(ctx context.Context, filter *service.Op
 		filter = &service.OpsSystemLogCleanupFilter{}
 	}
 
-	where, args, hasConstraint := buildOpsSystemLogsCleanupWhere(filter)
+	where, args, hasConstraint := buildOpsSystemLogsCleanupWhereForContext(ctx, filter)
 	if !hasConstraint {
 		return 0, fmt.Errorf("cleanup requires at least one filter condition")
 	}
@@ -1061,6 +1089,15 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
+func buildOpsErrorLogsWhereForContext(ctx context.Context, filter *service.OpsErrorLogFilter) (string, []any) {
+	where, args := buildOpsErrorLogsWhere(filter)
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		where += " AND e.project_id = $" + itoa(len(args))
+	}
+	return where, args
+}
+
 func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any, bool) {
 	clauses := make([]string, 0, 10)
 	args := make([]any, 0, 10)
@@ -1130,6 +1167,16 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 	return "WHERE " + strings.Join(clauses, " AND "), args, hasConstraint
 }
 
+func buildOpsSystemLogsWhereForContext(ctx context.Context, filter *service.OpsSystemLogFilter) (string, []any, bool) {
+	where, args, hasConstraint := buildOpsSystemLogsWhere(filter)
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		where += " AND l.project_id = $" + itoa(len(args))
+		hasConstraint = true
+	}
+	return where, args, hasConstraint
+}
+
 func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (string, []any, bool) {
 	if filter == nil {
 		filter = &service.OpsSystemLogCleanupFilter{}
@@ -1148,6 +1195,26 @@ func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (
 		Query:           filter.Query,
 	}
 	return buildOpsSystemLogsWhere(listFilter)
+}
+
+func buildOpsSystemLogsCleanupWhereForContext(ctx context.Context, filter *service.OpsSystemLogCleanupFilter) (string, []any, bool) {
+	if filter == nil {
+		filter = &service.OpsSystemLogCleanupFilter{}
+	}
+	listFilter := &service.OpsSystemLogFilter{
+		StartTime:       filter.StartTime,
+		EndTime:         filter.EndTime,
+		Level:           filter.Level,
+		Component:       filter.Component,
+		RequestID:       filter.RequestID,
+		ClientRequestID: filter.ClientRequestID,
+		UserID:          filter.UserID,
+		AccountID:       filter.AccountID,
+		Platform:        filter.Platform,
+		Model:           filter.Model,
+		Query:           filter.Query,
+	}
+	return buildOpsSystemLogsWhereForContext(ctx, listFilter)
 }
 
 // Helpers for nullable args
@@ -1175,6 +1242,13 @@ func opsNullInt64(v *int64) any {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{Int64: *v, Valid: true}
+}
+
+func opsNullablePositiveInt64(v int64) any {
+	if v <= 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: v, Valid: true}
 }
 
 func opsNullInt(v any) any {

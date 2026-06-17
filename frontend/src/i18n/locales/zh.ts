@@ -386,6 +386,7 @@ export default {
     affiliateTransferRecords: '提取记录',
     profile: '个人资料',
     users: '用户管理',
+    projects: '项目空间',
     groups: '分组管理',
     channels: '渠道管理',
     availableChannels: '可用渠道',
@@ -1504,22 +1505,8 @@ export default {
       failedToLoad: '加载仪表盘数据失败'
     },
 
-    permissions: {
-      title: '权限管理',
-      description: '配置运营账号和可见账号分组',
-      searchPlaceholder: '搜索邮箱、用户名或 ID',
-      empty: '暂无可配置用户',
-      user: '用户',
-      role: '角色',
-      groups: '可见分组',
-      roleUser: '普通用户',
-      roleOperator: '运营',
-      statusActive: '正常',
-      statusDisabled: '已禁用',
-      noGroupsSelected: '未选择分组，运营账号将无法看到账号',
-      loadFailed: '加载权限配置失败',
-      saved: '权限配置已保存',
-      saveFailed: '保存权限配置失败'
+    projectSwitcher: {
+      label: '项目空间'
     },
 
     backup: {
@@ -1855,6 +1842,48 @@ export default {
       }
     },
 
+    // Project Management
+    projects: {
+      title: '项目空间',
+      description: '创建项目空间并维护项目成员，项目管理员只能管理所属项目内的数据。',
+      createProject: '创建项目',
+      project: '项目',
+      projects: '项目',
+      name: '名称',
+      slug: '标识',
+      slugHint: '仅支持小写字母、数字和短横线，例如 default 或 team-a。',
+      descriptionField: '描述',
+      noDescription: '暂无描述',
+      members: '成员',
+      membersDescription: '设置用户在当前项目空间中的 Admin 或普通用户权限。',
+      addMember: '添加成员',
+      moveResources: '迁移资源',
+      member: '成员',
+      role: '角色',
+      owner: 'Owner',
+      status: '状态',
+      userId: '用户 ID',
+      accountIds: '账号 ID',
+      apiKeyIds: 'API Key ID',
+      groupIds: '分组 ID',
+      idListPlaceholder: '多个 ID 可用逗号、空格或换行分隔',
+      moveUsageHistory: '同时迁移历史使用记录和运维错误日志',
+      moveSelectResources: '请至少填写一个账号、API Key 或分组 ID',
+      noProjects: '暂无项目空间',
+      noProjectsDescription: '创建项目后，可以把账号、密钥和用户权限逐步迁移到新的隔离空间。',
+      noMembers: '暂无成员',
+      projectCreated: '项目创建成功',
+      memberSaved: '成员已保存',
+      memberRemoved: '成员已移除',
+      resourcesMoved: '资源迁移完成：账号 {accounts} 个，API Key {apiKeys} 个，分组 {groups} 个',
+      failedToLoad: '加载项目失败',
+      failedToCreate: '创建项目失败',
+      failedToLoadMembers: '加载项目成员失败',
+      failedToSaveMember: '保存项目成员失败',
+      failedToRemoveMember: '移除项目成员失败',
+      failedToMoveResources: '迁移项目资源失败'
+    },
+
     // Users Management
     users: {
       title: '用户管理',
@@ -1972,6 +2001,7 @@ export default {
       failedToLoadApiKeys: '加载用户 API 密钥失败',
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       roles: {
+        super_admin: '超级管理员',
         admin: '管理员',
         operator: '运营',
         user: '用户'

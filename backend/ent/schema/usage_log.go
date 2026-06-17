@@ -33,6 +33,8 @@ func (UsageLog) Fields() []ent.Field {
 	return []ent.Field{
 		// 关联字段
 		field.Int64("user_id"),
+		field.Int64("project_id").
+			Comment("Project isolation boundary captured when the request was recorded"),
 		field.Int64("api_key_id"),
 		field.Int64("account_id"),
 		field.String("request_id").
@@ -164,6 +166,11 @@ func (UsageLog) Fields() []ent.Field {
 // Edges 定义使用日志实体的关联关系。
 func (UsageLog) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("project", Project.Type).
+			Ref("usage_logs").
+			Field("project_id").
+			Required().
+			Unique(),
 		edge.From("user", User.Type).
 			Ref("usage_logs").
 			Field("user_id").
@@ -194,6 +201,7 @@ func (UsageLog) Edges() []ent.Edge {
 func (UsageLog) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("user_id"),
+		index.Fields("project_id"),
 		index.Fields("api_key_id"),
 		index.Fields("account_id"),
 		index.Fields("group_id"),
@@ -207,5 +215,6 @@ func (UsageLog) Indexes() []ent.Index {
 		index.Fields("api_key_id", "created_at"),
 		// 分组维度时间范围查询（线上由 SQL 迁移创建 group_id IS NOT NULL 的部分索引）
 		index.Fields("group_id", "created_at"),
+		index.Fields("project_id", "created_at"),
 	}
 }

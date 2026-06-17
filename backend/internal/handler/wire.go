@@ -40,7 +40,7 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
-	permissionHandler *admin.PermissionHandler,
+	projectHandler *admin.ProjectHandler,
 ) *AdminHandlers {
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
@@ -74,7 +74,7 @@ func ProvideAdminHandlers(
 		Payment:                paymentHandler,
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
-		Permission:             permissionHandler,
+		Project:                projectHandler,
 	}
 }
 
@@ -145,6 +145,10 @@ func ProvideAdminOpsHandler(opsService *service.OpsService, permissionService *s
 	return admin.NewOpsHandler(opsService, permissionService)
 }
 
+func ProvideAdminOAuthHandler(oauthService *service.OAuthService, adminService service.AdminService, permissionService *service.PermissionService) *admin.OAuthHandler {
+	return admin.NewOAuthHandler(oauthService, adminService, permissionService)
+}
+
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
 	authHandler *AuthHandler,
@@ -213,7 +217,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAnnouncementHandler,
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,
-	admin.NewOAuthHandler,
+	ProvideAdminOAuthHandler,
 	admin.NewOpenAIOAuthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
@@ -237,7 +241,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
-	admin.NewPermissionHandler,
+	admin.NewProjectHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

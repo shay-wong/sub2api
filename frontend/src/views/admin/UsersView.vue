@@ -26,11 +26,7 @@
             <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
               <Select
                 v-model="filters.role"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
+                :options="roleFilterOptions"
                 @change="applyFilter"
               />
             </div>
@@ -311,8 +307,8 @@
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
-              {{ t('admin.users.roles.' + value) }}
+            <span :class="['badge', roleBadgeClass(value)]">
+              {{ roleLabel(value) }}
             </span>
           </template>
 
@@ -595,7 +591,7 @@
 
               <!-- Toggle Status Button (not for admin) -->
               <button
-                v-if="row.role !== 'admin'"
+                v-if="!isAdminRole(row.role)"
                 @click="handleToggleStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
@@ -717,7 +713,7 @@
 
               <!-- Delete (not for admin) -->
               <button
-                v-if="user.role !== 'admin'"
+                v-if="!isAdminRole(user.role)"
                 @click="handleDelete(user); closeActionMenu()"
                 class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
               >
@@ -785,8 +781,39 @@ import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsMod
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
+import type { GlobalUserRole, UserRole } from '@/types'
 
 const appStore = useAppStore()
+
+type UserRoleFilter = '' | GlobalUserRole
+
+const assignableGlobalRoles: readonly GlobalUserRole[] = ['super_admin', 'user']
+const displayableUserRoles: readonly UserRole[] = ['super_admin', 'admin', 'operator', 'user']
+const roleFilterOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.users.allRoles') },
+  ...assignableGlobalRoles.map((role) => ({ value: role, label: roleLabel(role) }))
+])
+const isGlobalUserRole = (role: unknown): role is GlobalUserRole => {
+  return typeof role === 'string' && assignableGlobalRoles.includes(role as GlobalUserRole)
+}
+const roleBadgeClass = (role?: string) => {
+  switch (role) {
+    case 'super_admin':
+      return 'badge-danger'
+    case 'admin':
+      return 'badge-purple'
+    case 'operator':
+      return 'badge-primary'
+    case 'user':
+      return 'badge-gray'
+    default:
+      return 'badge-warning'
+  }
+}
+const roleLabel = (role?: string) => {
+  if (!role) return '-'
+  return displayableUserRoles.includes(role as UserRole) ? t(`admin.users.roles.${role}`) : role
+}
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>
@@ -995,6 +1022,7 @@ const columns = computed<Column[]>(() =>
 )
 
 const users = ref<AdminUser[]>([])
+const isAdminRole = (role?: string) => role === 'super_admin' || role === 'admin'
 const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
@@ -1082,8 +1110,8 @@ const apiKeyGroupFilterOptions = computed(() =>
 
 // Filter values (role, status, and custom attributes)
 const filters = reactive({
-  role: '',
-  status: '',
+  role: '' as UserRoleFilter,
+  status: '' as '' | 'active' | 'disabled',
   group: '',  // group name for fuzzy match, '' = all
   apiKeyGroup: null as number | null  // group id bound to the user's API keys, null = all
 })
@@ -1131,7 +1159,7 @@ const loadSavedFilters = () => {
     const savedValues = localStorage.getItem(FILTER_VALUES_KEY)
     if (savedValues) {
       const parsed = JSON.parse(savedValues)
-      if (parsed.role) filters.role = parsed.role
+      filters.role = isGlobalUserRole(parsed.role) ? parsed.role : ''
       if (parsed.status) filters.status = parsed.status
       if (parsed.group) filters.group = parsed.group
       if (typeof parsed.apiKeyGroup === 'number') filters.apiKeyGroup = parsed.apiKeyGroup
@@ -1529,8 +1557,8 @@ const loadUsers = async () => {
       pagination.page,
       pagination.page_size,
       {
-        role: filters.role as any,
-        status: filters.status as any,
+        role: filters.role || undefined,
+        status: filters.status || undefined,
         search: searchQuery.value || undefined,
         group_name: filters.group || undefined,
         api_key_group_id: filters.apiKeyGroup ?? undefined,

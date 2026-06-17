@@ -18,6 +18,7 @@ import (
 
 type Account struct {
 	ID                      int64
+	ProjectID               int64
 	Name                    string
 	Notes                   *string
 	Platform                string

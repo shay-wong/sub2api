@@ -31,13 +31,13 @@ describe('AppSidebar header styles', () => {
   })
 })
 
-describe('AppSidebar operator hierarchy', () => {
-  it('renders admin-console navigation for operator-capable roles', () => {
+describe('AppSidebar admin/user hierarchy', () => {
+  it('renders admin-console navigation only for admin-console roles', () => {
     expect(componentSource).toContain('<template v-if="canAccessAdminConsole">')
     expect(componentSource).toContain('const canAccessAdminConsole = computed(() => authStore.canAccessAdminConsole)')
   })
 
-  it('keeps user navigation available to operator-capable roles', () => {
+  it('keeps user navigation available to admin-console roles', () => {
     expect(componentSource).toContain('authStore.hasUserAccess')
     expect(componentSource).not.toContain('!authStore.isSimpleMode && authStore.isAdmin')
   })
@@ -47,9 +47,7 @@ describe('AppSidebar operator hierarchy', () => {
     expect(adminSettingsWatchMatch?.[1]).toBe('isAdmin')
   })
 
-  it('does not hide operator ops navigation behind admin-only settings cache', () => {
-    const operatorItemsMatch = componentSource.match(/const operatorItems: NavItem\[] = \[[\s\S]*?\n  \]/)
-    expect(operatorItemsMatch?.[0]).toContain("path: '/admin/ops'")
-    expect(operatorItemsMatch?.[0]).not.toContain('featureFlag: flagOpsMonitoring')
+  it('does not keep a legacy operator-only admin navigation list', () => {
+    expect(componentSource).not.toContain('operatorItems')
   })
 })

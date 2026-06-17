@@ -7,6 +7,7 @@ type APIKeyAuthSnapshot struct {
 	Version     int                      `json:"version"`
 	APIKeyID    int64                    `json:"api_key_id"`
 	UserID      int64                    `json:"user_id"`
+	ProjectID   int64                    `json:"project_id"`
 	GroupID     *int64                   `json:"group_id,omitempty"`
 	Name        string                   `json:"name"`
 	Status      string                   `json:"status"`
@@ -57,6 +58,7 @@ type APIKeyAuthUserSnapshot struct {
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
 	ID                              int64    `json:"id"`
+	ProjectID                       int64    `json:"project_id"`
 	Name                            string   `json:"name"`
 	Platform                        string   `json:"platform"`
 	IsExclusive                     bool     `json:"is_exclusive"`

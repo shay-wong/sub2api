@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
@@ -25,6 +26,8 @@ type UsageLog struct {
 	ID int64 `json:"id,omitempty"`
 	// UserID holds the value of the "user_id" field.
 	UserID int64 `json:"user_id,omitempty"`
+	// Project isolation boundary captured when the request was recorded
+	ProjectID int64 `json:"project_id,omitempty"`
 	// APIKeyID holds the value of the "api_key_id" field.
 	APIKeyID int64 `json:"api_key_id,omitempty"`
 	// AccountID holds the value of the "account_id" field.
@@ -113,6 +116,8 @@ type UsageLog struct {
 
 // UsageLogEdges holds the relations/edges for other nodes in the graph.
 type UsageLogEdges struct {
+	// Project holds the value of the project edge.
+	Project *Project `json:"project,omitempty"`
 	// User holds the value of the user edge.
 	User *User `json:"user,omitempty"`
 	// APIKey holds the value of the api_key edge.
@@ -125,7 +130,18 @@ type UsageLogEdges struct {
 	Subscription *UserSubscription `json:"subscription,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [6]bool
+}
+
+// ProjectOrErr returns the Project value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e UsageLogEdges) ProjectOrErr() (*Project, error) {
+	if e.Project != nil {
+		return e.Project, nil
+	} else if e.loadedTypes[0] {
+		return nil, &NotFoundError{label: project.Label}
+	}
+	return nil, &NotLoadedError{edge: "project"}
 }
 
 // UserOrErr returns the User value or an error if the edge
@@ -133,7 +149,7 @@ type UsageLogEdges struct {
 func (e UsageLogEdges) UserOrErr() (*User, error) {
 	if e.User != nil {
 		return e.User, nil
-	} else if e.loadedTypes[0] {
+	} else if e.loadedTypes[1] {
 		return nil, &NotFoundError{label: user.Label}
 	}
 	return nil, &NotLoadedError{edge: "user"}
@@ -144,7 +160,7 @@ func (e UsageLogEdges) UserOrErr() (*User, error) {
 func (e UsageLogEdges) APIKeyOrErr() (*APIKey, error) {
 	if e.APIKey != nil {
 		return e.APIKey, nil
-	} else if e.loadedTypes[1] {
+	} else if e.loadedTypes[2] {
 		return nil, &NotFoundError{label: apikey.Label}
 	}
 	return nil, &NotLoadedError{edge: "api_key"}
@@ -155,7 +171,7 @@ func (e UsageLogEdges) APIKeyOrErr() (*APIKey, error) {
 func (e UsageLogEdges) AccountOrErr() (*Account, error) {
 	if e.Account != nil {
 		return e.Account, nil
-	} else if e.loadedTypes[2] {
+	} else if e.loadedTypes[3] {
 		return nil, &NotFoundError{label: account.Label}
 	}
 	return nil, &NotLoadedError{edge: "account"}
@@ -166,7 +182,7 @@ func (e UsageLogEdges) AccountOrErr() (*Account, error) {
 func (e UsageLogEdges) GroupOrErr() (*Group, error) {
 	if e.Group != nil {
 		return e.Group, nil
-	} else if e.loadedTypes[3] {
+	} else if e.loadedTypes[4] {
 		return nil, &NotFoundError{label: group.Label}
 	}
 	return nil, &NotLoadedError{edge: "group"}
@@ -177,7 +193,7 @@ func (e UsageLogEdges) GroupOrErr() (*Group, error) {
 func (e UsageLogEdges) SubscriptionOrErr() (*UserSubscription, error) {
 	if e.Subscription != nil {
 		return e.Subscription, nil
-	} else if e.loadedTypes[4] {
+	} else if e.loadedTypes[5] {
 		return nil, &NotFoundError{label: usersubscription.Label}
 	}
 	return nil, &NotLoadedError{edge: "subscription"}
@@ -194,7 +210,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
-		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
+		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldProjectID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount:
 			values[i] = new(sql.NullInt64)
 		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource:
 			values[i] = new(sql.NullString)
@@ -226,6 +242,12 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field user_id", values[i])
 			} else if value.Valid {
 				_m.UserID = value.Int64
+			}
+		case usagelog.FieldProjectID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field project_id", values[i])
+			} else if value.Valid {
+				_m.ProjectID = value.Int64
 			}
 		case usagelog.FieldAPIKeyID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -499,6 +521,11 @@ func (_m *UsageLog) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
 }
 
+// QueryProject queries the "project" edge of the UsageLog entity.
+func (_m *UsageLog) QueryProject() *ProjectQuery {
+	return NewUsageLogClient(_m.config).QueryProject(_m)
+}
+
 // QueryUser queries the "user" edge of the UsageLog entity.
 func (_m *UsageLog) QueryUser() *UserQuery {
 	return NewUsageLogClient(_m.config).QueryUser(_m)
@@ -549,6 +576,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("user_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UserID))
+	builder.WriteString(", ")
+	builder.WriteString("project_id=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ProjectID))
 	builder.WriteString(", ")
 	builder.WriteString("api_key_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.APIKeyID))

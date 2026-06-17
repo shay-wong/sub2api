@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
@@ -70,6 +71,12 @@ func (_c *AccountCreate) SetNillableDeletedAt(v *time.Time) *AccountCreate {
 // SetName sets the "name" field.
 func (_c *AccountCreate) SetName(v string) *AccountCreate {
 	_c.mutation.SetName(v)
+	return _c
+}
+
+// SetProjectID sets the "project_id" field.
+func (_c *AccountCreate) SetProjectID(v int64) *AccountCreate {
+	_c.mutation.SetProjectID(v)
 	return _c
 }
 
@@ -391,6 +398,11 @@ func (_c *AccountCreate) SetNillableSessionWindowStatus(v *string) *AccountCreat
 	return _c
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_c *AccountCreate) SetProject(v *Project) *AccountCreate {
+	return _c.SetProjectID(v.ID)
+}
+
 // AddGroupIDs adds the "groups" edge to the Group entity by IDs.
 func (_c *AccountCreate) AddGroupIDs(ids ...int64) *AccountCreate {
 	_c.mutation.AddGroupIDs(ids...)
@@ -534,6 +546,9 @@ func (_c *AccountCreate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Account.name": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.ProjectID(); !ok {
+		return &ValidationError{Name: "project_id", err: errors.New(`ent: missing required field "Account.project_id"`)}
+	}
 	if _, ok := _c.mutation.Platform(); !ok {
 		return &ValidationError{Name: "platform", err: errors.New(`ent: missing required field "Account.platform"`)}
 	}
@@ -583,6 +598,9 @@ func (_c *AccountCreate) check() error {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
 			return &ValidationError{Name: "session_window_status", err: fmt.Errorf(`ent: validator failed for field "Account.session_window_status": %w`, err)}
 		}
+	}
+	if len(_c.mutation.ProjectIDs()) == 0 {
+		return &ValidationError{Name: "project", err: errors.New(`ent: missing required edge "Account.project"`)}
 	}
 	return nil
 }
@@ -722,6 +740,23 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SessionWindowStatus(); ok {
 		_spec.SetField(account.FieldSessionWindowStatus, field.TypeString, value)
 		_node.SessionWindowStatus = &value
+	}
+	if nodes := _c.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   account.ProjectTable,
+			Columns: []string{account.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ProjectID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.GroupsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -867,6 +902,18 @@ func (u *AccountUpsert) SetName(v string) *AccountUpsert {
 // UpdateName sets the "name" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateName() *AccountUpsert {
 	u.SetExcluded(account.FieldName)
+	return u
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *AccountUpsert) SetProjectID(v int64) *AccountUpsert {
+	u.Set(account.FieldProjectID, v)
+	return u
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateProjectID() *AccountUpsert {
+	u.SetExcluded(account.FieldProjectID)
 	return u
 }
 
@@ -1381,6 +1428,20 @@ func (u *AccountUpsertOne) SetName(v string) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateName() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateName()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *AccountUpsertOne) SetProjectID(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateProjectID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProjectID()
 	})
 }
 
@@ -2131,6 +2192,20 @@ func (u *AccountUpsertBulk) SetName(v string) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateName() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateName()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *AccountUpsertBulk) SetProjectID(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateProjectID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateProjectID()
 	})
 }
 

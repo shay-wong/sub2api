@@ -34,8 +34,8 @@ func (r *opsRepository) GetRealtimeTrafficSummary(ctx context.Context, filter *s
 		return nil, fmt.Errorf("window too large")
 	}
 
-	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(filter, start, end, 1)
-	errorWhere, errorArgs, _ := buildErrorWhere(filter, start, end, next)
+	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(ctx, filter, start, end, 1)
+	errorWhere, errorArgs, _ := buildErrorWhere(ctx, filter, start, end, next)
 
 	q := `
 WITH usage_buckets AS (

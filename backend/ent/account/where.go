@@ -75,6 +75,11 @@ func Name(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldName, v))
 }
 
+// ProjectID applies equality check predicate on the "project_id" field. It's identical to ProjectIDEQ.
+func ProjectID(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProjectID, v))
+}
+
 // Notes applies equality check predicate on the "notes" field. It's identical to NotesEQ.
 func Notes(v string) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldNotes, v))
@@ -383,6 +388,26 @@ func NameEqualFold(v string) predicate.Account {
 // NameContainsFold applies the ContainsFold predicate on the "name" field.
 func NameContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldName, v))
+}
+
+// ProjectIDEQ applies the EQ predicate on the "project_id" field.
+func ProjectIDEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldProjectID, v))
+}
+
+// ProjectIDNEQ applies the NEQ predicate on the "project_id" field.
+func ProjectIDNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldProjectID, v))
+}
+
+// ProjectIDIn applies the In predicate on the "project_id" field.
+func ProjectIDIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldProjectID, vs...))
+}
+
+// ProjectIDNotIn applies the NotIn predicate on the "project_id" field.
+func ProjectIDNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldProjectID, vs...))
 }
 
 // NotesEQ applies the EQ predicate on the "notes" field.
@@ -1548,6 +1573,29 @@ func SessionWindowStatusEqualFold(v string) predicate.Account {
 // SessionWindowStatusContainsFold applies the ContainsFold predicate on the "session_window_status" field.
 func SessionWindowStatusContainsFold(v string) predicate.Account {
 	return predicate.Account(sql.FieldContainsFold(FieldSessionWindowStatus, v))
+}
+
+// HasProject applies the HasEdge predicate on the "project" edge.
+func HasProject() predicate.Account {
+	return predicate.Account(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, ProjectTable, ProjectColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasProjectWith applies the HasEdge predicate on the "project" edge with a given conditions (other predicates).
+func HasProjectWith(preds ...predicate.Project) predicate.Account {
+	return predicate.Account(func(s *sql.Selector) {
+		step := newProjectStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
 }
 
 // HasGroups applies the HasEdge predicate on the "groups" edge.

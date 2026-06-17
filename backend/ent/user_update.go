@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -427,6 +428,21 @@ func (_u *UserUpdate) AddAPIKeys(v ...*APIKey) *UserUpdate {
 	return _u.AddAPIKeyIDs(ids...)
 }
 
+// AddProjectMemberIDs adds the "project_members" edge to the ProjectMember entity by IDs.
+func (_u *UserUpdate) AddProjectMemberIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddProjectMemberIDs(ids...)
+	return _u
+}
+
+// AddProjectMembers adds the "project_members" edges to the ProjectMember entity.
+func (_u *UserUpdate) AddProjectMembers(v ...*ProjectMember) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddProjectMemberIDs(ids...)
+}
+
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by IDs.
 func (_u *UserUpdate) AddRedeemCodeIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddRedeemCodeIDs(ids...)
@@ -646,6 +662,27 @@ func (_u *UserUpdate) RemoveAPIKeys(v ...*APIKey) *UserUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPIKeyIDs(ids...)
+}
+
+// ClearProjectMembers clears all "project_members" edges to the ProjectMember entity.
+func (_u *UserUpdate) ClearProjectMembers() *UserUpdate {
+	_u.mutation.ClearProjectMembers()
+	return _u
+}
+
+// RemoveProjectMemberIDs removes the "project_members" edge to ProjectMember entities by IDs.
+func (_u *UserUpdate) RemoveProjectMemberIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveProjectMemberIDs(ids...)
+	return _u
+}
+
+// RemoveProjectMembers removes "project_members" edges to ProjectMember entities.
+func (_u *UserUpdate) RemoveProjectMembers(v ...*ProjectMember) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveProjectMemberIDs(ids...)
 }
 
 // ClearRedeemCodes clears all "redeem_codes" edges to the RedeemCode entity.
@@ -1147,6 +1184,51 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ProjectMembersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedProjectMembersIDs(); len(nodes) > 0 && !_u.mutation.ProjectMembersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectMembersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -2157,6 +2239,21 @@ func (_u *UserUpdateOne) AddAPIKeys(v ...*APIKey) *UserUpdateOne {
 	return _u.AddAPIKeyIDs(ids...)
 }
 
+// AddProjectMemberIDs adds the "project_members" edge to the ProjectMember entity by IDs.
+func (_u *UserUpdateOne) AddProjectMemberIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddProjectMemberIDs(ids...)
+	return _u
+}
+
+// AddProjectMembers adds the "project_members" edges to the ProjectMember entity.
+func (_u *UserUpdateOne) AddProjectMembers(v ...*ProjectMember) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddProjectMemberIDs(ids...)
+}
+
 // AddRedeemCodeIDs adds the "redeem_codes" edge to the RedeemCode entity by IDs.
 func (_u *UserUpdateOne) AddRedeemCodeIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddRedeemCodeIDs(ids...)
@@ -2376,6 +2473,27 @@ func (_u *UserUpdateOne) RemoveAPIKeys(v ...*APIKey) *UserUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAPIKeyIDs(ids...)
+}
+
+// ClearProjectMembers clears all "project_members" edges to the ProjectMember entity.
+func (_u *UserUpdateOne) ClearProjectMembers() *UserUpdateOne {
+	_u.mutation.ClearProjectMembers()
+	return _u
+}
+
+// RemoveProjectMemberIDs removes the "project_members" edge to ProjectMember entities by IDs.
+func (_u *UserUpdateOne) RemoveProjectMemberIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveProjectMemberIDs(ids...)
+	return _u
+}
+
+// RemoveProjectMembers removes "project_members" edges to ProjectMember entities.
+func (_u *UserUpdateOne) RemoveProjectMembers(v ...*ProjectMember) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveProjectMemberIDs(ids...)
 }
 
 // ClearRedeemCodes clears all "redeem_codes" edges to the RedeemCode entity.
@@ -2907,6 +3025,51 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(apikey.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ProjectMembersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedProjectMembersIDs(); len(nodes) > 0 && !_u.mutation.ProjectMembersCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectMembersIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.ProjectMembersTable,
+			Columns: []string{user.ProjectMembersColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

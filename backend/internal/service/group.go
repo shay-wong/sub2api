@@ -12,6 +12,7 @@ type GroupModelsListConfig = domain.GroupModelsListConfig
 
 type Group struct {
 	ID             int64
+	ProjectID      int64
 	Name           string
 	Description    string
 	Platform       string

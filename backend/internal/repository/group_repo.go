@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -37,7 +38,14 @@ func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRep
 }
 
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
+	projectID, err := resolveProjectIDForCreate(ctx, r.sql, groupIn.ProjectID)
+	if err != nil {
+		return err
+	}
+	groupIn.ProjectID = projectID
+
 	builder := r.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -108,7 +116,7 @@ func (r *groupRepository) GetByID(ctx context.Context, id int64) (*service.Group
 func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
 	// AccountCount is intentionally not loaded here; use GetByID when needed.
 	m, err := r.client.Group.Query().
-		Where(group.IDEQ(id)).
+		Where(append([]dbpredicate.Group{group.IDEQ(id)}, projectScopedGroupPredicate(ctx)...)...).
 		Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)
@@ -118,6 +126,7 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
 	builder := r.client.Group.UpdateOneID(groupIn.ID).
+		Where(projectScopedGroupPredicate(ctx)...).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -146,6 +155,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit)
+	if projectID, ok := projectIDForUpdate(ctx, groupIn.ProjectID); ok {
+		builder = builder.SetProjectID(projectID)
+		groupIn.ProjectID = projectID
+	}
 
 	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
 	if groupIn.DailyLimitUSD != nil {
@@ -214,9 +227,13 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 }
 
 func (r *groupRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
+	preds := append([]dbpredicate.Group{group.IDEQ(id)}, projectScopedGroupPredicate(ctx)...)
+	affected, err := r.client.Group.Delete().Where(preds...).Exec(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
+	}
+	if affected == 0 {
+		return service.ErrGroupNotFound
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
@@ -230,6 +247,9 @@ func (r *groupRepository) List(ctx context.Context, params pagination.Pagination
 
 func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
 	q := r.client.Group.Query()
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		q = q.Where(group.ProjectIDEQ(projectID))
+	}
 
 	if platform != "" {
 		q = q.Where(group.PlatformEQ(platform))
@@ -355,7 +375,7 @@ func (r *groupRepository) listWithAccountCountSort(ctx context.Context, q *dbent
 	}
 
 	groups, err := r.client.Group.Query().
-		Where(group.IDIn(pageIDs...)).
+		Where(append([]dbpredicate.Group{group.IDIn(pageIDs...)}, projectScopedGroupPredicate(ctx)...)...).
 		All(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -431,8 +451,10 @@ func groupListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 }
 
 func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, error) {
+	preds := []dbpredicate.Group{group.StatusEQ(service.StatusActive)}
+	preds = append(preds, projectScopedGroupPredicate(ctx)...)
 	groups, err := r.client.Group.Query().
-		Where(group.StatusEQ(service.StatusActive)).
+		Where(preds...).
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -461,8 +483,10 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 }
 
 func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
+	preds := []dbpredicate.Group{group.StatusEQ(service.StatusActive), group.PlatformEQ(platform)}
+	preds = append(preds, projectScopedGroupPredicate(ctx)...)
 	groups, err := r.client.Group.Query().
-		Where(group.StatusEQ(service.StatusActive), group.PlatformEQ(platform)).
+		Where(preds...).
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -491,7 +515,9 @@ func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform str
 }
 
 func (r *groupRepository) ExistsByName(ctx context.Context, name string) (bool, error) {
-	return r.client.Group.Query().Where(group.NameEQ(name)).Exist(ctx)
+	return r.client.Group.Query().
+		Where(append([]dbpredicate.Group{group.NameEQ(name)}, projectScopedGroupPredicate(ctx)...)...).
+		Exist(ctx)
 }
 
 // ExistsByIDs 批量检查分组是否存在（仅检查未软删除记录）。
@@ -519,39 +545,39 @@ func (r *groupRepository) ExistsByIDs(ctx context.Context, ids []int64) (map[int
 		return result, nil
 	}
 
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT id
-		FROM groups
-		WHERE id = ANY($1) AND deleted_at IS NULL
-	`, pq.Array(uniqueIDs))
+	preds := append([]dbpredicate.Group{
+		group.IDIn(uniqueIDs...),
+		group.DeletedAtIsNil(),
+	}, projectScopedGroupPredicate(ctx)...)
+	groups, err := r.client.Group.Query().
+		Where(preds...).
+		All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		result[id] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	for _, g := range groups {
+		result[g.ID] = true
 	}
 	return result, nil
 }
 
 func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (total int64, active int64, err error) {
 	var rateLimited int64
+	projectClause := ""
+	args := []any{groupID}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		projectClause = " AND a.project_id = $2"
+		args = append(args, projectID)
+	}
 	err = scanSingleRow(ctx, r.sql,
 		fmt.Sprintf(`SELECT
 			COUNT(*) FILTER (WHERE a.deleted_at IS NULL),
 			COUNT(*) FILTER (WHERE %s),
 			COUNT(*) FILTER (WHERE %s)
 		FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = $1`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
-		[]any{groupID}, &total, &active, &rateLimited)
+		WHERE ag.group_id = $1%s`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL, projectClause),
+		args, &total, &active, &rateLimited)
 	return
 }
 
@@ -568,7 +594,7 @@ func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, grou
 }
 
 func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
-	g, err := r.client.Group.Query().Where(group.IDEQ(id)).Only(ctx)
+	g, err := r.client.Group.Query().Where(append([]dbpredicate.Group{group.IDEQ(id)}, projectScopedGroupPredicate(ctx)...)...).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
@@ -591,7 +617,14 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 
 	// Lock the group row to avoid concurrent writes while we cascade.
 	// 这里使用 exec.QueryContext 手动扫描，确保同一事务内加锁并能区分"未找到"与其他错误。
-	rows, err := exec.QueryContext(ctx, "SELECT id FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id)
+	lockSQL := "SELECT id FROM groups WHERE id = $1 AND deleted_at IS NULL"
+	lockArgs := []any{id}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		lockSQL += " AND project_id = $2"
+		lockArgs = append(lockArgs, projectID)
+	}
+	lockSQL += " FOR UPDATE"
+	rows, err := exec.QueryContext(ctx, lockSQL, lockArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -710,9 +743,9 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 			COUNT(*) FILTER (WHERE %s) AS rate_limited
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = ANY($1)
-		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
-		pq.Array(groupIDs),
+		WHERE ag.group_id = ANY($1)%s
+		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL, groupAccountCountsProjectClause(ctx, 2)),
+		groupAccountCountsArgs(ctx, groupIDs)...,
 	)
 	if err != nil {
 		return nil, err
@@ -747,8 +780,12 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 
 	rows, err := r.sql.QueryContext(
 		ctx,
-		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) ORDER BY account_id",
-		pq.Array(groupIDs),
+		`SELECT DISTINCT ag.account_id
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id
+		WHERE ag.group_id = ANY($1)`+groupAccountCountsProjectClause(ctx, 2)+`
+		ORDER BY ag.account_id`,
+		groupAccountCountsArgs(ctx, groupIDs)...,
 	)
 	if err != nil {
 		return nil, err
@@ -776,14 +813,24 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return nil
 	}
 
+	projectJoin := ""
+	projectWhere := ""
+	args := []any{pq.Array(accountIDs), groupID}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		projectJoin = " JOIN groups g ON g.id = $2 AND g.project_id = a.project_id"
+		projectWhere = " AND a.project_id = $3"
+		args = append(args, projectID)
+	}
+
 	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
 	_, err := r.sql.ExecContext(
 		ctx,
 		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
-		 SELECT unnest($1::bigint[]), $2, 50, NOW()
+		 SELECT a.id, $2, 50, NOW()
+		 FROM accounts a`+projectJoin+`
+		 WHERE a.id = ANY($1::bigint[]) AND a.deleted_at IS NULL`+projectWhere+`
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		pq.Array(accountIDs),
-		groupID,
+		args...,
 	)
 	if err != nil {
 		return err
@@ -824,8 +871,8 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		`SELECT COUNT(*) FROM groups WHERE deleted_at IS NULL AND id = ANY($1)`,
-		[]any{pq.Array(groupIDs)},
+		`SELECT COUNT(*) FROM groups WHERE deleted_at IS NULL AND id = ANY($1)`+groupOnlyProjectClause(ctx, 2),
+		groupOnlyProjectArgs(ctx, groupIDs),
 		&existingCount,
 	); err != nil {
 		return err
@@ -843,6 +890,9 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		placeholder += 2
 	}
 	args = append(args, pq.Array(groupIDs))
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+	}
 
 	query := fmt.Sprintf(`
 		UPDATE groups
@@ -850,8 +900,8 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 			%s
 			ELSE sort_order
 		END
-		WHERE deleted_at IS NULL AND id = ANY($%d)
-	`, strings.Join(caseClauses, "\n\t\t\t"), placeholder)
+		WHERE deleted_at IS NULL AND id = ANY($%d)%s
+	`, strings.Join(caseClauses, "\n\t\t\t"), placeholder, groupOnlyProjectClauseWithPlaceholder(ctx, placeholder+1))
 
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -871,4 +921,38 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		}
 	}
 	return nil
+}
+
+func groupAccountCountsProjectClause(ctx context.Context, placeholder int) string {
+	if _, ok := service.ProjectIDFromContext(ctx); !ok {
+		return ""
+	}
+	return fmt.Sprintf(" AND a.project_id = $%d", placeholder)
+}
+
+func groupAccountCountsArgs(ctx context.Context, groupIDs []int64) []any {
+	args := []any{pq.Array(groupIDs)}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+	}
+	return args
+}
+
+func groupOnlyProjectClause(ctx context.Context, placeholder int) string {
+	if _, ok := service.ProjectIDFromContext(ctx); !ok {
+		return ""
+	}
+	return fmt.Sprintf(" AND project_id = $%d", placeholder)
+}
+
+func groupOnlyProjectClauseWithPlaceholder(ctx context.Context, placeholder int) string {
+	return groupOnlyProjectClause(ctx, placeholder)
+}
+
+func groupOnlyProjectArgs(ctx context.Context, groupIDs []int64) []any {
+	args := []any{pq.Array(groupIDs)}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+	}
+	return args
 }

@@ -43,7 +43,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	userService := service.NewUserService(userRepo, nil, nil, nil)
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
@@ -121,6 +121,105 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+}
+
+func TestAdminAuthJWTUsesProjectIDQueryForWebSocket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	authService := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	projectMember := &service.User{
+		ID:           7,
+		Email:        "project-admin@example.com",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		TokenVersion: 1,
+		Concurrency:  1,
+	}
+
+	userRepo := &stubUserRepo{
+		getByID: func(ctx context.Context, id int64) (*service.User, error) {
+			if id != projectMember.ID {
+				return nil, service.ErrUserNotFound
+			}
+			clone := *projectMember
+			return &clone, nil
+		},
+	}
+	userService := service.NewUserService(userRepo, nil, nil, nil)
+	projectService := service.NewProjectService(&stubProjectRepo{
+		roles: map[int64]map[int64]string{
+			42: {projectMember.ID: service.ProjectRoleAdmin},
+		},
+		exists: map[int64]bool{42: true},
+	})
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.GET("/t", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, int64(42), projectID)
+		role, ok := GetUserRoleFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, service.RoleAdmin, role)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token, err := authService.GenerateToken(&service.User{
+		ID:           projectMember.ID,
+		Email:        projectMember.Email,
+		Role:         projectMember.Role,
+		TokenVersion: projectMember.TokenVersion,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t?project_id=42", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Protocol", "sub2api-admin, jwt."+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+type stubProjectRepo struct {
+	defaultID int64
+	exists    map[int64]bool
+	roles     map[int64]map[int64]string
+	projects  []service.ProjectSummary
+}
+
+func (s *stubProjectRepo) GetDefaultProjectID(context.Context) (int64, error) {
+	if s.defaultID > 0 {
+		return s.defaultID, nil
+	}
+	return 1, nil
+}
+
+func (s *stubProjectRepo) ProjectExists(_ context.Context, projectID int64) (bool, error) {
+	if s.exists == nil {
+		return true, nil
+	}
+	return s.exists[projectID], nil
+}
+
+func (s *stubProjectRepo) GetProjectRole(_ context.Context, projectID int64, userID int64) (string, bool, error) {
+	if s.roles == nil || s.roles[projectID] == nil {
+		return "", false, nil
+	}
+	role, ok := s.roles[projectID][userID]
+	return role, ok, nil
+}
+
+func (s *stubProjectRepo) ListActiveProjects(context.Context) ([]service.ProjectSummary, error) {
+	return append([]service.ProjectSummary(nil), s.projects...), nil
+}
+
+func (s *stubProjectRepo) ListUserProjects(context.Context, int64) ([]service.ProjectSummary, error) {
+	return append([]service.ProjectSummary(nil), s.projects...), nil
 }
 
 type stubUserRepo struct {

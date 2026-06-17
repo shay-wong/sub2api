@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,6 +23,30 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	require.Len(t, exec.execQueries, 1)
 	require.Contains(t, exec.execQueries[0], "UPDATE accounts")
 	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
+}
+
+func TestAccountRepository_ResetQuotaUsedScopesByContextProject(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	err := repo.ResetQuotaUsed(service.WithProjectID(context.Background(), 7), 42)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, exec.execQueries)
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "project_id = $2")
+	require.Equal(t, []any{int64(42), int64(7)}, exec.execArgs[0])
+}
+
+func TestAccountRepository_RevertProxyFallbackScopesByContextProject(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	err := repo.RevertProxyFallback(service.WithProjectID(context.Background(), 7), 42)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, exec.execQueries)
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "project_id = $2")
+	require.Equal(t, []any{int64(42), int64(7)}, exec.execArgs[0])
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidates_SQLFilter(t *testing.T) {
@@ -87,10 +112,12 @@ type recordingSQLExecutor struct {
 	result      sql.Result
 	err         error
 	execQueries []string
+	execArgs    [][]any
 }
 
 func (e *recordingSQLExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	e.execQueries = append(e.execQueries, query)
+	e.execArgs = append(e.execArgs, append([]any(nil), args...))
 	if e.err != nil {
 		return nil, e.err
 	}

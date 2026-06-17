@@ -23,6 +23,24 @@
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex items-center gap-3">
+        <label
+          v-if="showProjectSwitcher"
+          class="hidden items-center gap-2 rounded-xl border border-gray-200 bg-white/70 px-2.5 py-1.5 text-sm text-gray-600 shadow-sm dark:border-dark-700 dark:bg-dark-900/70 dark:text-dark-300 md:flex"
+        >
+          <Icon name="grid" size="sm" class="text-gray-400 dark:text-dark-400" />
+          <span class="sr-only">{{ t('admin.projectSwitcher.label') }}</span>
+          <select
+            v-model="selectedProjectID"
+            class="max-w-40 bg-transparent text-sm font-medium text-gray-800 outline-none dark:text-gray-100"
+            :title="t('admin.projectSwitcher.label')"
+            @change="handleProjectChange"
+          >
+            <option v-for="project in userProjects" :key="project.id" :value="String(project.id)">
+              {{ project.name }}
+            </option>
+          </select>
+        </label>
+
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -223,6 +241,8 @@ import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMi
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 
+const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
+
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
@@ -234,13 +254,16 @@ const onboardingStore = useOnboardingStore()
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const selectedProjectID = ref(localStorage.getItem(SELECTED_PROJECT_ID_KEY) ?? '')
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
+const userProjects = computed(() => user.value?.projects ?? [])
+const showProjectSwitcher = computed(() => authStore.canAccessAdminConsole && userProjects.value.length > 1)
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
-  return !authStore.isSimpleMode && user.value?.role === 'admin'
+  return !authStore.isSimpleMode && authStore.isAdmin
 })
 
 const userInitials = computed(() => {
@@ -264,6 +287,8 @@ const displayName = computed(() => {
 
 const roleLabel = computed(() => {
   switch (user.value?.role) {
+    case 'super_admin':
+      return t('admin.users.roles.super_admin')
     case 'admin':
       return t('admin.users.roles.admin')
     case 'operator':
@@ -327,6 +352,16 @@ function handleReplayGuide() {
   onboardingStore.replay()
 }
 
+async function handleProjectChange() {
+  const nextProjectID = selectedProjectID.value
+  if (!nextProjectID || !userProjects.value.some(project => String(project.id) === nextProjectID)) {
+    return
+  }
+  localStorage.setItem(SELECTED_PROJECT_ID_KEY, nextProjectID)
+  await router.replace({ path: route.path, query: route.query, hash: route.hash })
+  window.location.reload()
+}
+
 function handleClickOutside(event: MouseEvent) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
     closeDropdown()
@@ -334,6 +369,10 @@ function handleClickOutside(event: MouseEvent) {
 }
 
 onMounted(() => {
+  const persisted = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
+  if (persisted && userProjects.value.some(project => String(project.id) === persisted)) {
+    selectedProjectID.value = persisted
+  }
   document.addEventListener('click', handleClickOutside)
 })
 

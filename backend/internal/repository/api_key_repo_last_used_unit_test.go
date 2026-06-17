@@ -8,6 +8,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	dbproject "github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,23 @@ func newAPIKeyRepoSQLite(t *testing.T) (*apiKeyRepository, *dbent.Client) {
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
 	t.Cleanup(func() { _ = client.Close() })
 
-	return &apiKeyRepository{client: client}, client
+	_, err = client.Project.Create().
+		SetName(service.DefaultProjectName).
+		SetSlug(service.DefaultProjectSlug).
+		SetProfiles(map[string]any{}).
+		Save(context.Background())
+	require.NoError(t, err)
+
+	return newAPIKeyRepositoryWithSQL(client, db), client
+}
+
+func mustGetAPIKeyRepoDefaultProjectID(t *testing.T, ctx context.Context, client *dbent.Client) int64 {
+	t.Helper()
+	projectID, err := client.Project.Query().
+		Where(dbproject.SlugEQ(service.DefaultProjectSlug)).
+		OnlyID(ctx)
+	require.NoError(t, err)
+	return projectID
 }
 
 func mustCreateAPIKeyRepoUser(t *testing.T, ctx context.Context, client *dbent.Client, email string) *service.User {
@@ -112,6 +129,36 @@ func TestAPIKeyRepository_UpdateLastUsedDeletedKey(t *testing.T) {
 
 	err := repo.UpdateLastUsed(ctx, key.ID, time.Now().UTC())
 	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
+}
+
+func TestAPIKeyRepository_UpdateLastUsedRequiresContextProject(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "update-last-used-project@test.com")
+	defaultProjectID := mustGetAPIKeyRepoDefaultProjectID(t, ctx, client)
+	otherProject, err := client.Project.Create().
+		SetName("Other Project").
+		SetSlug("other-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	key := &service.APIKey{
+		UserID:    user.ID,
+		ProjectID: otherProject.ID,
+		Key:       "sk-update-last-used-project",
+		Name:      "UpdateLastUsedProject",
+		Status:    service.StatusActive,
+	}
+	require.NoError(t, repo.Create(ctx, key))
+
+	err = repo.UpdateLastUsed(service.WithProjectID(ctx, defaultProjectID), key.ID, time.Now().UTC())
+	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
+
+	after, err := repo.GetByID(ctx, key.ID)
+	require.NoError(t, err)
+	require.Nil(t, after.LastUsedAt)
+	require.Equal(t, otherProject.ID, after.ProjectID)
 }
 
 func TestAPIKeyRepository_UpdateLastUsedDBError(t *testing.T) {

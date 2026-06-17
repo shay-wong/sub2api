@@ -12,6 +12,12 @@ vi.mock('@/stores/app', () => ({
   })
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    isAdmin: true
+  })
+}))
+
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {

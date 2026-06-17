@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 )
@@ -27,6 +28,7 @@ type APIKeyQuery struct {
 	order         []apikey.OrderOption
 	inters        []Interceptor
 	predicates    []predicate.APIKey
+	withProject   *ProjectQuery
 	withUser      *UserQuery
 	withGroup     *GroupQuery
 	withUsageLogs *UsageLogQuery
@@ -65,6 +67,28 @@ func (_q *APIKeyQuery) Unique(unique bool) *APIKeyQuery {
 func (_q *APIKeyQuery) Order(o ...apikey.OrderOption) *APIKeyQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryProject chains the current query on the "project" edge.
+func (_q *APIKeyQuery) QueryProject() *ProjectQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(apikey.Table, apikey.FieldID, selector),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, apikey.ProjectTable, apikey.ProjectColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryUser chains the current query on the "user" edge.
@@ -325,6 +349,7 @@ func (_q *APIKeyQuery) Clone() *APIKeyQuery {
 		order:         append([]apikey.OrderOption{}, _q.order...),
 		inters:        append([]Interceptor{}, _q.inters...),
 		predicates:    append([]predicate.APIKey{}, _q.predicates...),
+		withProject:   _q.withProject.Clone(),
 		withUser:      _q.withUser.Clone(),
 		withGroup:     _q.withGroup.Clone(),
 		withUsageLogs: _q.withUsageLogs.Clone(),
@@ -332,6 +357,17 @@ func (_q *APIKeyQuery) Clone() *APIKeyQuery {
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithProject tells the query-builder to eager-load the nodes that are connected to
+// the "project" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *APIKeyQuery) WithProject(opts ...func(*ProjectQuery)) *APIKeyQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProject = query
+	return _q
 }
 
 // WithUser tells the query-builder to eager-load the nodes that are connected to
@@ -445,7 +481,8 @@ func (_q *APIKeyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*APIKe
 	var (
 		nodes       = []*APIKey{}
 		_spec       = _q.querySpec()
-		loadedTypes = [3]bool{
+		loadedTypes = [4]bool{
+			_q.withProject != nil,
 			_q.withUser != nil,
 			_q.withGroup != nil,
 			_q.withUsageLogs != nil,
@@ -472,6 +509,12 @@ func (_q *APIKeyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*APIKe
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withProject; query != nil {
+		if err := _q.loadProject(ctx, query, nodes, nil,
+			func(n *APIKey, e *Project) { n.Edges.Project = e }); err != nil {
+			return nil, err
+		}
+	}
 	if query := _q.withUser; query != nil {
 		if err := _q.loadUser(ctx, query, nodes, nil,
 			func(n *APIKey, e *User) { n.Edges.User = e }); err != nil {
@@ -494,6 +537,35 @@ func (_q *APIKeyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*APIKe
 	return nodes, nil
 }
 
+func (_q *APIKeyQuery) loadProject(ctx context.Context, query *ProjectQuery, nodes []*APIKey, init func(*APIKey), assign func(*APIKey, *Project)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*APIKey)
+	for i := range nodes {
+		fk := nodes[i].ProjectID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(project.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "project_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *APIKeyQuery) loadUser(ctx context.Context, query *UserQuery, nodes []*APIKey, init func(*APIKey), assign func(*APIKey, *User)) error {
 	ids := make([]int64, 0, len(nodes))
 	nodeids := make(map[int64][]*APIKey)
@@ -613,6 +685,9 @@ func (_q *APIKeyQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != apikey.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withProject != nil {
+			_spec.Node.AddColumnOnce(apikey.FieldProjectID)
 		}
 		if _q.withUser != nil {
 			_spec.Node.AddColumnOnce(apikey.FieldUserID)

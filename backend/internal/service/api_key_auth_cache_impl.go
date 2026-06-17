@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 13 // v13: include exclusive group auth fields and group 5h USD rate limit
+const apiKeyAuthSnapshotVersion = 14 // v14: include API key project isolation id
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -209,6 +209,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		Version:     apiKeyAuthSnapshotVersion,
 		APIKeyID:    apiKey.ID,
 		UserID:      apiKey.UserID,
+		ProjectID:   apiKey.ProjectID,
 		GroupID:     apiKey.GroupID,
 		Name:        apiKey.Name,
 		Status:      apiKey.Status,
@@ -249,6 +250,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 	if apiKey.Group != nil {
 		snapshot.Group = &APIKeyAuthGroupSnapshot{
 			ID:                              apiKey.Group.ID,
+			ProjectID:                       apiKey.Group.ProjectID,
 			Name:                            apiKey.Group.Name,
 			Platform:                        apiKey.Group.Platform,
 			IsExclusive:                     apiKey.Group.IsExclusive,
@@ -289,6 +291,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	apiKey := &APIKey{
 		ID:          snapshot.APIKeyID,
 		UserID:      snapshot.UserID,
+		ProjectID:   snapshot.ProjectID,
 		GroupID:     snapshot.GroupID,
 		Key:         key,
 		Name:        snapshot.Name,
@@ -322,6 +325,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	if snapshot.Group != nil {
 		apiKey.Group = &Group{
 			ID:                              snapshot.Group.ID,
+			ProjectID:                       snapshot.Group.ProjectID,
 			Name:                            snapshot.Group.Name,
 			Platform:                        snapshot.Group.Platform,
 			IsExclusive:                     snapshot.Group.IsExclusive,

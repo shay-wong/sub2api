@@ -63,6 +63,12 @@ type PaymentProviderInstance func(*sql.Selector)
 // PendingAuthSession is the predicate function for pendingauthsession builders.
 type PendingAuthSession func(*sql.Selector)
 
+// Project is the predicate function for project builders.
+type Project func(*sql.Selector)
+
+// ProjectMember is the predicate function for projectmember builders.
+type ProjectMember func(*sql.Selector)
+
 // PromoCode is the predicate function for promocode builders.
 type PromoCode func(*sql.Selector)
 

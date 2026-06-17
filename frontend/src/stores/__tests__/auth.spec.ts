@@ -41,6 +41,16 @@ const fakeAdminUser = {
   username: 'admin',
   email: 'admin@example.com',
   role: 'admin' as const,
+  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true }],
+}
+
+const fakeSuperAdminUser = {
+  ...fakeUser,
+  id: 4,
+  username: 'superadmin',
+  email: 'superadmin@example.com',
+  role: 'super_admin' as const,
+  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'super_admin' as const, is_owner: true }],
 }
 
 const fakeOperatorUser = {
@@ -325,14 +335,27 @@ describe('useAuthStore', () => {
   // --- isAdmin ---
 
   describe('isAdmin', () => {
-    it('管理员用户返回 true', async () => {
+    it('超级管理员用户返回 true', async () => {
+      const adminResponse = { ...fakeAuthResponse, user: { ...fakeSuperAdminUser } }
+      mockLogin.mockResolvedValue(adminResponse)
+      const store = useAuthStore()
+
+      await store.login({ email: 'superadmin@example.com', password: '123456' })
+
+      expect(store.isAdmin).toBe(true)
+      expect(store.canAccessAdminConsole).toBe(true)
+    })
+
+    it('项目管理员不是超级管理员但可以进入管理后台', async () => {
       const adminResponse = { ...fakeAuthResponse, user: { ...fakeAdminUser } }
       mockLogin.mockResolvedValue(adminResponse)
       const store = useAuthStore()
 
       await store.login({ email: 'admin@example.com', password: '123456' })
 
-      expect(store.isAdmin).toBe(true)
+      expect(store.isAdmin).toBe(false)
+      expect(store.canAccessAdminConsole).toBe(true)
+      expect(localStorage.getItem('sub2api_selected_project_id')).toBe('10')
     })
 
     it('普通用户返回 false', async () => {
@@ -344,7 +367,7 @@ describe('useAuthStore', () => {
       expect(store.isAdmin).toBe(false)
     })
 
-    it('运营用户不是完整管理员，但可以进入管理后台', async () => {
+    it('运营用户保留普通用户访问，但不能进入管理后台', async () => {
       const operatorResponse = { ...fakeAuthResponse, user: { ...fakeOperatorUser } }
       mockLogin.mockResolvedValue(operatorResponse)
       const store = useAuthStore()
@@ -354,7 +377,7 @@ describe('useAuthStore', () => {
       expect(store.isAdmin).toBe(false)
       expect(store.isOperator).toBe(true)
       expect(store.hasUserAccess).toBe(true)
-      expect(store.canAccessAdminConsole).toBe(true)
+      expect(store.canAccessAdminConsole).toBe(false)
     })
 
     it('未登录时返回 false', () => {

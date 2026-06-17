@@ -80,6 +80,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
 		// IP 限制等早退中断，也让 Ops 错误日志能回退取到 user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
+		setProjectContext(c, apiKey.ProjectID)
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
@@ -287,6 +288,17 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
 	c.Request = c.Request.WithContext(ctx)
+}
+
+func setProjectContext(c *gin.Context, projectID int64) {
+	if c == nil || c.Request == nil || projectID <= 0 {
+		return
+	}
+	if existing, ok := service.ProjectIDFromContext(c.Request.Context()); ok && existing == projectID {
+		return
+	}
+	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
+	c.Set("project_id", projectID)
 }
 
 func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool {

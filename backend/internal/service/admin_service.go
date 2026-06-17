@@ -280,6 +280,7 @@ type UpdateGroupInput struct {
 }
 
 type CreateAccountInput struct {
+	ProjectID          int64
 	Name               string
 	Notes              *string
 	Platform           string
@@ -302,6 +303,7 @@ type CreateAccountInput struct {
 }
 
 type UpdateAccountInput struct {
+	ProjectID             *int64
 	Name                  string
 	Notes                 *string
 	Type                  string // Account type: oauth, setup-token, apikey
@@ -768,7 +770,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	// Protect admin users: cannot disable admin accounts
-	if user.Role == "admin" && input.Status == "disabled" {
+	if RoleIsAdmin(user.Role) && input.Status == "disabled" {
 		return nil, errors.New("cannot disable admin user")
 	}
 
@@ -879,7 +881,7 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if user.Role == "admin" {
+	if RoleIsAdmin(user.Role) {
 		return errors.New("cannot delete admin user")
 	}
 

@@ -34,6 +34,8 @@ func (APIKey) Mixin() []ent.Mixin {
 func (APIKey) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("user_id"),
+		field.Int64("project_id").
+			Comment("Project isolation boundary for this API key"),
 		field.String("key").
 			MaxLen(128).
 			NotEmpty().
@@ -120,6 +122,11 @@ func (APIKey) Fields() []ent.Field {
 
 func (APIKey) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("project", Project.Type).
+			Ref("api_keys").
+			Field("project_id").
+			Unique().
+			Required(),
 		edge.From("user", User.Type).
 			Ref("api_keys").
 			Field("user_id").
@@ -137,6 +144,7 @@ func (APIKey) Indexes() []ent.Index {
 	return []ent.Index{
 		// key 字段已在 Fields() 中声明 Unique()，无需重复索引
 		index.Fields("user_id"),
+		index.Fields("project_id"),
 		index.Fields("group_id"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),
@@ -144,5 +152,6 @@ func (APIKey) Indexes() []ent.Index {
 		// Index for quota queries
 		index.Fields("quota", "quota_used"),
 		index.Fields("expires_at"),
+		index.Fields("project_id", "status"),
 	}
 }

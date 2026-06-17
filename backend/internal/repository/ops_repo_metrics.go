@@ -25,12 +25,17 @@ func (r *opsRepository) InsertSystemMetrics(ctx context.Context, input *service.
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	projectID, err := resolveProjectID(ctx, r.db)
+	if err != nil {
+		return err
+	}
 
 	q := `
-INSERT INTO ops_system_metrics (
-  created_at,
-  window_minutes,
-  platform,
+	INSERT INTO ops_system_metrics (
+	  project_id,
+	  created_at,
+	  window_minutes,
+	  platform,
   group_id,
 
   success_count,
@@ -72,29 +77,30 @@ INSERT INTO ops_system_metrics (
   redis_conn_total,
   redis_conn_idle,
 
-  db_conn_active,
-  db_conn_idle,
-  db_conn_waiting,
+	  db_conn_active,
+	  db_conn_idle,
+	  db_conn_waiting,
 
-  goroutine_count,
-  concurrency_queue_depth
-) VALUES (
-  $1,$2,$3,$4,
-  $5,$6,$7,$8,
-  $9,$10,$11,
-  $12,$13,$14,$15,
-  $16,$17,$18,$19,$20,$21,
-  $22,$23,$24,$25,$26,$27,
-  $28,$29,$30,$31,
-  $32,$33,
-  $34,$35,
-  $36,$37,$38,
-  $39,$40
-)`
+	  goroutine_count,
+	  concurrency_queue_depth
+	) VALUES (
+	  $1,$2,$3,$4,$5,
+	  $6,$7,$8,$9,
+	  $10,$11,$12,
+	  $13,$14,$15,$16,
+	  $17,$18,$19,$20,$21,$22,
+	  $23,$24,$25,$26,$27,$28,
+	  $29,$30,$31,$32,
+	  $33,$34,
+	  $35,$36,
+	  $37,$38,$39,
+	  $40,$41
+	)`
 
-	_, err := r.db.ExecContext(
+	_, err = r.db.ExecContext(
 		ctx,
 		q,
+		projectID,
 		createdAt,
 		window,
 		opsNullString(input.Platform),
@@ -158,9 +164,9 @@ func (r *opsRepository) GetLatestSystemMetrics(ctx context.Context, windowMinute
 	}
 
 	q := `
-SELECT
-  id,
-  created_at,
+	SELECT
+	  id,
+	  created_at,
   window_minutes,
 
   cpu_usage_percent,
@@ -181,12 +187,16 @@ SELECT
   goroutine_count,
   concurrency_queue_depth,
   account_switch_count
-FROM ops_system_metrics
-WHERE window_minutes = $1
-  AND platform IS NULL
-  AND group_id IS NULL
-ORDER BY created_at DESC
-LIMIT 1`
+	FROM ops_system_metrics
+	WHERE window_minutes = $1
+	  AND platform IS NULL
+	  AND group_id IS NULL
+`
+	args := []any{windowMinutes}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
+	q += `
+	ORDER BY created_at DESC
+	LIMIT 1`
 
 	var out service.OpsSystemMetricsSnapshot
 	var cpu sql.NullFloat64
@@ -204,7 +214,7 @@ LIMIT 1`
 	var queueDepth sql.NullInt64
 	var accountSwitchCount sql.NullInt64
 
-	if err := r.db.QueryRowContext(ctx, q, windowMinutes).Scan(
+	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
 		&out.ID,
 		&out.CreatedAt,
 		&out.WindowMinutes,

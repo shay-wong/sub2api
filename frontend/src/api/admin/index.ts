@@ -32,7 +32,7 @@ import adminPaymentAPI from './payment'
 import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
-import permissionsAPI from './permissions'
+import projectsAPI from './projects'
 
 /**
  * Unified admin API object for convenient access
@@ -67,7 +67,7 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
-  permissions: permissionsAPI
+  projects: projectsAPI
 }
 
 export {
@@ -100,7 +100,7 @@ export {
   affiliatesAPI,
   riskControlAPI,
   adminComplianceAPI,
-  permissionsAPI
+  projectsAPI
 }
 
 export default adminAPI
@@ -111,4 +111,4 @@ export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from 
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
-export type { OperatorPermissionSubject, UpdateOperatorPermissionRequest } from './permissions'
+export type { AdminProject, ProjectMember } from './projects'

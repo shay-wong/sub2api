@@ -42,6 +42,8 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.Int64("project_id").
+			Comment("Project isolation boundary for this group"),
 		field.Float("rate_multiplier").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0),
@@ -173,6 +175,11 @@ func (Group) Fields() []ent.Field {
 
 func (Group) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("project", Project.Type).
+			Ref("groups").
+			Field("project_id").
+			Unique().
+			Required(),
 		edge.To("api_keys", APIKey.Type),
 		edge.To("redeem_codes", RedeemCode.Type),
 		edge.To("subscriptions", UserSubscription.Type),
@@ -193,10 +200,12 @@ func (Group) Indexes() []ent.Index {
 	return []ent.Index{
 		// name 字段已在 Fields() 中声明 Unique()，无需重复索引
 		index.Fields("status"),
+		index.Fields("project_id"),
 		index.Fields("platform"),
 		index.Fields("subscription_type"),
 		index.Fields("is_exclusive"),
 		index.Fields("deleted_at"),
 		index.Fields("sort_order"),
+		index.Fields("project_id", "platform", "status"),
 	}
 }

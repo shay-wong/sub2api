@@ -13,13 +13,13 @@ const (
 	AdminPermissionOpsRead          = "admin.ops.read"
 	AdminPermissionAccountsRead     = "admin.accounts.read"
 	AdminPermissionAccountsWrite    = "admin.accounts.write"
-	AdminPermissionPermissionsWrite = "admin.permissions.write"
 )
 
 var (
 	ErrPermissionUserNotFound       = infraerrors.NotFound("PERMISSION_USER_NOT_FOUND", "permission subject not found")
-	ErrPermissionInvalidRole        = infraerrors.BadRequest("PERMISSION_INVALID_ROLE", "role must be user or operator")
+	ErrPermissionInvalidRole        = infraerrors.BadRequest("PERMISSION_INVALID_ROLE", "role must be user")
 	ErrPermissionCannotChangeAdmin  = infraerrors.Forbidden("PERMISSION_ADMIN_IMMUTABLE", "admin role cannot be changed here")
+	ErrLegacyOperatorRoleDisabled   = infraerrors.Forbidden("LEGACY_OPERATOR_ROLE_DISABLED", "legacy operator role is disabled; use project admin membership")
 	ErrPermissionInvalidGroupScope  = infraerrors.BadRequest("PERMISSION_INVALID_GROUP_SCOPE", "one or more scoped groups do not exist")
 	ErrOperatorScopeRequired        = infraerrors.Forbidden("OPERATOR_SCOPE_REQUIRED", "operator does not have any assigned groups")
 	ErrOperatorScopeForbidden       = infraerrors.Forbidden("OPERATOR_SCOPE_FORBIDDEN", "operator cannot access this group scope")
@@ -86,33 +86,26 @@ func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID i
 	if err != nil {
 		return nil, ErrPermissionUserNotFound
 	}
-	if user.Role == RoleAdmin {
+	if RoleIsAdmin(user.Role) {
 		return nil, ErrPermissionCannotChangeAdmin
 	}
 
 	switch role {
-	case RoleUser, RoleOperator:
+	case RoleUser:
+	case RoleOperator:
+		return nil, ErrLegacyOperatorRoleDisabled
 	default:
 		return nil, ErrPermissionInvalidRole
 	}
 
-	groupIDs = normalizeInt64Set(groupIDs)
-	if role == RoleOperator {
-		if err := s.validateGroupsExist(ctx, groupIDs); err != nil {
-			return nil, err
-		}
-	}
+	groupIDs = nil
 
 	user.Role = role
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, fmt.Errorf("update permission subject role: %w", err)
 	}
 
-	if role == RoleOperator {
-		if err := s.repo.SetOperatorGroupIDs(ctx, userID, groupIDs, createdBy); err != nil {
-			return nil, err
-		}
-	} else if err := s.repo.ClearOperatorGroupIDs(ctx, userID); err != nil {
+	if err := s.repo.ClearOperatorGroupIDs(ctx, userID); err != nil {
 		return nil, err
 	}
 

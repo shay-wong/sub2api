@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -89,6 +90,12 @@ func (_c *GroupCreate) SetNillableDescription(v *string) *GroupCreate {
 	if v != nil {
 		_c.SetDescription(*v)
 	}
+	return _c
+}
+
+// SetProjectID sets the "project_id" field.
+func (_c *GroupCreate) SetProjectID(v int64) *GroupCreate {
+	_c.mutation.SetProjectID(v)
 	return _c
 }
 
@@ -510,6 +517,11 @@ func (_c *GroupCreate) SetNillableRpmLimit(v *int) *GroupCreate {
 	return _c
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_c *GroupCreate) SetProject(v *Project) *GroupCreate {
+	return _c.SetProjectID(v.ID)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -773,6 +785,9 @@ func (_c *GroupCreate) check() error {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "Group.name": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.ProjectID(); !ok {
+		return &ValidationError{Name: "project_id", err: errors.New(`ent: missing required field "Group.project_id"`)}
+	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "Group.rate_multiplier"`)}
 	}
@@ -858,6 +873,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "Group.rpm_limit"`)}
+	}
+	if len(_c.mutation.ProjectIDs()) == 0 {
+		return &ValidationError{Name: "project", err: errors.New(`ent: missing required edge "Group.project"`)}
 	}
 	return nil
 }
@@ -1029,6 +1047,23 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if nodes := _c.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.ProjectTable,
+			Columns: []string{group.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ProjectID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1259,6 +1294,18 @@ func (u *GroupUpsert) UpdateDescription() *GroupUpsert {
 // ClearDescription clears the value of the "description" field.
 func (u *GroupUpsert) ClearDescription() *GroupUpsert {
 	u.SetNull(group.FieldDescription)
+	return u
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *GroupUpsert) SetProjectID(v int64) *GroupUpsert {
+	u.Set(group.FieldProjectID, v)
+	return u
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateProjectID() *GroupUpsert {
+	u.SetExcluded(group.FieldProjectID)
 	return u
 }
 
@@ -1884,6 +1931,20 @@ func (u *GroupUpsertOne) UpdateDescription() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearDescription() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearDescription()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *GroupUpsertOne) SetProjectID(v int64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateProjectID() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateProjectID()
 	})
 }
 
@@ -2760,6 +2821,20 @@ func (u *GroupUpsertBulk) UpdateDescription() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearDescription() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearDescription()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *GroupUpsertBulk) SetProjectID(v int64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateProjectID() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateProjectID()
 	})
 }
 

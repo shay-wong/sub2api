@@ -43,8 +43,8 @@ func RegisterAdminRoutes(
 		adminOnly := admin.Group("")
 		adminOnly.Use(middleware.RequireAdminOnly())
 
-		// 权限管理
-		registerPermissionRoutes(adminOnly, h)
+		// 项目空间管理
+		registerProjectRoutes(adminOnly, h)
 
 		// 用户管理
 		registerUserManagementRoutes(adminOnly, h)
@@ -116,11 +116,16 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	}
 }
 
-func registerPermissionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	permissions := admin.Group("/permissions")
+func registerProjectRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	projects := admin.Group("/projects")
 	{
-		permissions.GET("/operators", h.Admin.Permission.ListOperators)
-		permissions.PUT("/operators/:id", h.Admin.Permission.UpdateOperator)
+		projects.GET("", h.Admin.Project.List)
+		projects.POST("", h.Admin.Project.Create)
+		projects.PUT("/:id", h.Admin.Project.Update)
+		projects.GET("/:id/members", h.Admin.Project.ListMembers)
+		projects.PUT("/:id/members/:user_id", h.Admin.Project.SetMember)
+		projects.DELETE("/:id/members/:user_id", h.Admin.Project.RemoveMember)
+		projects.POST("/:id/resources/move", h.Admin.Project.MoveResources)
 	}
 }
 
@@ -245,12 +250,12 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.GET("/trend", dashboardRead, h.Admin.Dashboard.GetUsageTrend)
 		dashboard.GET("/models", dashboardRead, h.Admin.Dashboard.GetModelStats)
 		dashboard.GET("/groups", dashboardRead, h.Admin.Dashboard.GetGroupStats)
-		dashboard.GET("/api-keys-trend", adminOnly, h.Admin.Dashboard.GetAPIKeyUsageTrend)
-		dashboard.GET("/users-trend", adminOnly, h.Admin.Dashboard.GetUserUsageTrend)
-		dashboard.GET("/users-ranking", adminOnly, h.Admin.Dashboard.GetUserSpendingRanking)
-		dashboard.POST("/users-usage", adminOnly, h.Admin.Dashboard.GetBatchUsersUsage)
-		dashboard.POST("/api-keys-usage", adminOnly, h.Admin.Dashboard.GetBatchAPIKeysUsage)
-		dashboard.GET("/user-breakdown", adminOnly, h.Admin.Dashboard.GetUserBreakdown)
+		dashboard.GET("/api-keys-trend", dashboardRead, h.Admin.Dashboard.GetAPIKeyUsageTrend)
+		dashboard.GET("/users-trend", dashboardRead, h.Admin.Dashboard.GetUserUsageTrend)
+		dashboard.GET("/users-ranking", dashboardRead, h.Admin.Dashboard.GetUserSpendingRanking)
+		dashboard.POST("/users-usage", dashboardRead, h.Admin.Dashboard.GetBatchUsersUsage)
+		dashboard.POST("/api-keys-usage", dashboardRead, h.Admin.Dashboard.GetBatchAPIKeysUsage)
+		dashboard.GET("/user-breakdown", dashboardRead, h.Admin.Dashboard.GetUserBreakdown)
 		dashboard.POST("/aggregation/backfill", adminOnly, h.Admin.Dashboard.BackfillAggregation)
 	}
 }

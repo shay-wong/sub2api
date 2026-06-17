@@ -11,6 +11,7 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
@@ -29,6 +30,8 @@ type Group struct {
 	Name string `json:"name,omitempty"`
 	// Description holds the value of the "description" field.
 	Description *string `json:"description,omitempty"`
+	// Project isolation boundary for this group
+	ProjectID int64 `json:"project_id,omitempty"`
 	// RateMultiplier holds the value of the "rate_multiplier" field.
 	RateMultiplier float64 `json:"rate_multiplier,omitempty"`
 	// Group-level 5-hour USD rate limit per user-group window (0 = unlimited)
@@ -99,6 +102,8 @@ type Group struct {
 
 // GroupEdges holds the relations/edges for other nodes in the graph.
 type GroupEdges struct {
+	// Project holds the value of the project edge.
+	Project *Project `json:"project,omitempty"`
 	// APIKeys holds the value of the api_keys edge.
 	APIKeys []*APIKey `json:"api_keys,omitempty"`
 	// RedeemCodes holds the value of the redeem_codes edge.
@@ -119,13 +124,24 @@ type GroupEdges struct {
 	UserAllowedGroups []*UserAllowedGroup `json:"user_allowed_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [9]bool
+	loadedTypes [10]bool
+}
+
+// ProjectOrErr returns the Project value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e GroupEdges) ProjectOrErr() (*Project, error) {
+	if e.Project != nil {
+		return e.Project, nil
+	} else if e.loadedTypes[0] {
+		return nil, &NotFoundError{label: project.Label}
+	}
+	return nil, &NotLoadedError{edge: "project"}
 }
 
 // APIKeysOrErr returns the APIKeys value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) APIKeysOrErr() ([]*APIKey, error) {
-	if e.loadedTypes[0] {
+	if e.loadedTypes[1] {
 		return e.APIKeys, nil
 	}
 	return nil, &NotLoadedError{edge: "api_keys"}
@@ -134,7 +150,7 @@ func (e GroupEdges) APIKeysOrErr() ([]*APIKey, error) {
 // RedeemCodesOrErr returns the RedeemCodes value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) RedeemCodesOrErr() ([]*RedeemCode, error) {
-	if e.loadedTypes[1] {
+	if e.loadedTypes[2] {
 		return e.RedeemCodes, nil
 	}
 	return nil, &NotLoadedError{edge: "redeem_codes"}
@@ -143,7 +159,7 @@ func (e GroupEdges) RedeemCodesOrErr() ([]*RedeemCode, error) {
 // SubscriptionsOrErr returns the Subscriptions value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) SubscriptionsOrErr() ([]*UserSubscription, error) {
-	if e.loadedTypes[2] {
+	if e.loadedTypes[3] {
 		return e.Subscriptions, nil
 	}
 	return nil, &NotLoadedError{edge: "subscriptions"}
@@ -152,7 +168,7 @@ func (e GroupEdges) SubscriptionsOrErr() ([]*UserSubscription, error) {
 // UsageLogsOrErr returns the UsageLogs value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) UsageLogsOrErr() ([]*UsageLog, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[4] {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
@@ -161,7 +177,7 @@ func (e GroupEdges) UsageLogsOrErr() ([]*UsageLog, error) {
 // UserRateLimitWindowsOrErr returns the UserRateLimitWindows value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) UserRateLimitWindowsOrErr() ([]*UserGroupRateLimitWindow, error) {
-	if e.loadedTypes[4] {
+	if e.loadedTypes[5] {
 		return e.UserRateLimitWindows, nil
 	}
 	return nil, &NotLoadedError{edge: "user_rate_limit_windows"}
@@ -170,7 +186,7 @@ func (e GroupEdges) UserRateLimitWindowsOrErr() ([]*UserGroupRateLimitWindow, er
 // AccountsOrErr returns the Accounts value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) AccountsOrErr() ([]*Account, error) {
-	if e.loadedTypes[5] {
+	if e.loadedTypes[6] {
 		return e.Accounts, nil
 	}
 	return nil, &NotLoadedError{edge: "accounts"}
@@ -179,7 +195,7 @@ func (e GroupEdges) AccountsOrErr() ([]*Account, error) {
 // AllowedUsersOrErr returns the AllowedUsers value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) AllowedUsersOrErr() ([]*User, error) {
-	if e.loadedTypes[6] {
+	if e.loadedTypes[7] {
 		return e.AllowedUsers, nil
 	}
 	return nil, &NotLoadedError{edge: "allowed_users"}
@@ -188,7 +204,7 @@ func (e GroupEdges) AllowedUsersOrErr() ([]*User, error) {
 // AccountGroupsOrErr returns the AccountGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) AccountGroupsOrErr() ([]*AccountGroup, error) {
-	if e.loadedTypes[7] {
+	if e.loadedTypes[8] {
 		return e.AccountGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "account_groups"}
@@ -197,7 +213,7 @@ func (e GroupEdges) AccountGroupsOrErr() ([]*AccountGroup, error) {
 // UserAllowedGroupsOrErr returns the UserAllowedGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) UserAllowedGroupsOrErr() ([]*UserAllowedGroup, error) {
-	if e.loadedTypes[8] {
+	if e.loadedTypes[9] {
 		return e.UserAllowedGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "user_allowed_groups"}
@@ -214,7 +230,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldRateLimit5h, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldImageRateMultiplier, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k:
 			values[i] = new(sql.NullFloat64)
-		case group.FieldID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
+		case group.FieldID, group.FieldProjectID, group.FieldDefaultValidityDays, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldRpmLimit:
 			values[i] = new(sql.NullInt64)
 		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldDefaultMappedModel:
 			values[i] = new(sql.NullString)
@@ -272,6 +288,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Description = new(string)
 				*_m.Description = value.String
+			}
+		case group.FieldProjectID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field project_id", values[i])
+			} else if value.Valid {
+				_m.ProjectID = value.Int64
 			}
 		case group.FieldRateMultiplier:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -488,6 +510,11 @@ func (_m *Group) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
 }
 
+// QueryProject queries the "project" edge of the Group entity.
+func (_m *Group) QueryProject() *ProjectQuery {
+	return NewGroupClient(_m.config).QueryProject(_m)
+}
+
 // QueryAPIKeys queries the "api_keys" edge of the Group entity.
 func (_m *Group) QueryAPIKeys() *APIKeyQuery {
 	return NewGroupClient(_m.config).QueryAPIKeys(_m)
@@ -574,6 +601,9 @@ func (_m *Group) String() string {
 		builder.WriteString("description=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	builder.WriteString("project_id=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ProjectID))
 	builder.WriteString(", ")
 	builder.WriteString("rate_multiplier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RateMultiplier))

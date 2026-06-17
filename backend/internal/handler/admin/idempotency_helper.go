@@ -41,9 +41,12 @@ func executeAdminIdempotent(
 	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
 		actorScope = "admin:" + strconv.FormatInt(subject.UserID, 10)
 	}
+	projectID, _ := service.ProjectIDFromContext(c.Request.Context())
+	actorScope += ":project:" + strconv.FormatInt(projectID, 10)
+	recordScope := scope + ":project:" + strconv.FormatInt(projectID, 10)
 
 	return coordinator.Execute(c.Request.Context(), service.IdempotencyExecuteOptions{
-		Scope:          scope,
+		Scope:          recordScope,
 		ActorScope:     actorScope,
 		Method:         c.Request.Method,
 		Route:          c.FullPath(),

@@ -33,8 +33,8 @@ func (r *opsRepository) GetThroughputTrend(ctx context.Context, filter *service.
 	start := filter.StartTime.UTC()
 	end := filter.EndTime.UTC()
 
-	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(filter, start, end, 1)
-	errorWhere, errorArgs, _ := buildErrorWhere(filter, start, end, next)
+	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(ctx, filter, start, end, 1)
+	errorWhere, errorArgs, _ := buildErrorWhere(ctx, filter, start, end, next)
 
 	usageBucketExpr := opsBucketExprForUsage(bucketSeconds)
 	errorBucketExpr := opsBucketExprForError(bucketSeconds)
@@ -198,25 +198,37 @@ ORDER BY bucket ASC`
 }
 
 func (r *opsRepository) getThroughputBreakdownByPlatform(ctx context.Context, start, end time.Time) ([]*service.OpsThroughputPlatformBreakdownItem, error) {
+	args := []any{start, end}
+	usageProjectClause := ""
+	errorProjectClause := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		projectPlaceholder := "$" + itoa(len(args))
+		usageProjectClause = " AND ul.project_id = " + projectPlaceholder
+		errorProjectClause = " AND project_id = " + projectPlaceholder
+	}
+
 	q := `
-WITH usage_totals AS (
-  SELECT COALESCE(NULLIF(g.platform,''), a.platform) AS platform,
-         COUNT(*) AS success_count,
-         COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_consumed
-  FROM usage_logs ul
-  LEFT JOIN groups g ON g.id = ul.group_id
-  LEFT JOIN accounts a ON a.id = ul.account_id
-  WHERE ul.created_at >= $1 AND ul.created_at < $2
-  GROUP BY 1
-),
-error_totals AS (
-  SELECT platform,
-         COUNT(*) AS error_count
-  FROM ops_error_logs
-  WHERE created_at >= $1 AND created_at < $2
-    AND COALESCE(status_code, 0) >= 400
-    AND is_count_tokens = FALSE  -- 排除 count_tokens 请求的错误
-  GROUP BY 1
+	WITH usage_totals AS (
+	  SELECT COALESCE(NULLIF(g.platform,''), a.platform) AS platform,
+	         COUNT(*) AS success_count,
+	         COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_consumed
+	  FROM usage_logs ul
+	  LEFT JOIN groups g ON g.id = ul.group_id
+	  LEFT JOIN accounts a ON a.id = ul.account_id
+	  WHERE ul.created_at >= $1 AND ul.created_at < $2
+	    ` + usageProjectClause + `
+	  GROUP BY 1
+	),
+	error_totals AS (
+	  SELECT platform,
+	         COUNT(*) AS error_count
+	  FROM ops_error_logs
+	  WHERE created_at >= $1 AND created_at < $2
+	    ` + errorProjectClause + `
+	    AND COALESCE(status_code, 0) >= 400
+	    AND is_count_tokens = FALSE  -- 排除 count_tokens 请求的错误
+	  GROUP BY 1
 ),
 combined AS (
   SELECT COALESCE(u.platform, e.platform) AS platform,
@@ -228,10 +240,10 @@ combined AS (
 )
 SELECT platform, (success_count + error_count) AS request_count, token_consumed
 FROM combined
-WHERE platform IS NOT NULL AND platform <> ''
-ORDER BY request_count DESC`
+	WHERE platform IS NOT NULL AND platform <> ''
+	ORDER BY request_count DESC`
 
-	rows, err := r.db.QueryContext(ctx, q, start, end)
+	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -269,26 +281,39 @@ func (r *opsRepository) getThroughputTopGroupsByPlatform(ctx context.Context, st
 		limit = 10
 	}
 
+	args := []any{start, end, platform}
+	usageProjectClause := ""
+	errorProjectClause := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		projectPlaceholder := "$" + itoa(len(args))
+		usageProjectClause = " AND ul.project_id = " + projectPlaceholder
+		errorProjectClause = " AND project_id = " + projectPlaceholder
+	}
+	limitPlaceholder := "$" + itoa(len(args)+1)
+
 	q := `
-WITH usage_totals AS (
-  SELECT ul.group_id AS group_id,
-         g.name AS group_name,
+	WITH usage_totals AS (
+	  SELECT ul.group_id AS group_id,
+	         g.name AS group_name,
          COUNT(*) AS success_count,
          COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_consumed
-  FROM usage_logs ul
-  JOIN groups g ON g.id = ul.group_id
-  WHERE ul.created_at >= $1 AND ul.created_at < $2
-    AND g.platform = $3
-  GROUP BY 1, 2
-),
-error_totals AS (
+	  FROM usage_logs ul
+	  JOIN groups g ON g.id = ul.group_id
+	  WHERE ul.created_at >= $1 AND ul.created_at < $2
+	    AND g.platform = $3
+	    ` + usageProjectClause + `
+	  GROUP BY 1, 2
+	),
+	error_totals AS (
   SELECT group_id,
          COUNT(*) AS error_count
-  FROM ops_error_logs
-  WHERE created_at >= $1 AND created_at < $2
-    AND platform = $3
-    AND group_id IS NOT NULL
-    AND COALESCE(status_code, 0) >= 400
+	  FROM ops_error_logs
+	  WHERE created_at >= $1 AND created_at < $2
+	    AND platform = $3
+	    ` + errorProjectClause + `
+	    AND group_id IS NOT NULL
+	    AND COALESCE(status_code, 0) >= 400
     AND is_count_tokens = FALSE  -- 排除 count_tokens 请求的错误
   GROUP BY 1
 ),
@@ -304,11 +329,12 @@ combined AS (
 )
 SELECT group_id, group_name, (success_count + error_count) AS request_count, token_consumed
 FROM combined
-WHERE group_id IS NOT NULL
-ORDER BY request_count DESC
-LIMIT $4`
+	WHERE group_id IS NOT NULL
+	ORDER BY request_count DESC
+	LIMIT ` + limitPlaceholder
 
-	rows, err := r.db.QueryContext(ctx, q, start, end, platform, limit)
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -356,35 +382,45 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 	args := []any{start, end, pq.Array(groupIDs)}
 	platformClauseUsage := ""
 	platformClauseError := ""
-	limitIndex := 4
 	if platform = strings.TrimSpace(strings.ToLower(platform)); platform != "" {
 		args = append(args, platform)
-		platformClauseUsage = " AND g.platform = $4"
-		platformClauseError = " AND platform = $4"
-		limitIndex = 5
+		platformPlaceholder := "$" + itoa(len(args))
+		platformClauseUsage = " AND g.platform = " + platformPlaceholder
+		platformClauseError = " AND platform = " + platformPlaceholder
 	}
+	projectClauseUsage := ""
+	projectClauseError := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		projectPlaceholder := "$" + itoa(len(args))
+		projectClauseUsage = " AND ul.project_id = " + projectPlaceholder
+		projectClauseError = " AND project_id = " + projectPlaceholder
+	}
+	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `
-WITH usage_totals AS (
+	WITH usage_totals AS (
   SELECT ul.group_id AS group_id,
          g.name AS group_name,
          COUNT(*) AS success_count,
          COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_consumed
   FROM usage_logs ul
   JOIN groups g ON g.id = ul.group_id
-  WHERE ul.created_at >= $1 AND ul.created_at < $2
-    AND ul.group_id = ANY($3)
-    ` + platformClauseUsage + `
-  GROUP BY 1, 2
-),
-error_totals AS (
+	  WHERE ul.created_at >= $1 AND ul.created_at < $2
+	    AND ul.group_id = ANY($3)
+	    ` + platformClauseUsage + `
+	    ` + projectClauseUsage + `
+	  GROUP BY 1, 2
+	),
+	error_totals AS (
   SELECT group_id,
          COUNT(*) AS error_count
   FROM ops_error_logs
-  WHERE created_at >= $1 AND created_at < $2
-    AND group_id = ANY($3)
-    ` + platformClauseError + `
-    AND COALESCE(status_code, 0) >= 400
+	  WHERE created_at >= $1 AND created_at < $2
+	    AND group_id = ANY($3)
+	    ` + platformClauseError + `
+	    ` + projectClauseError + `
+	    AND COALESCE(status_code, 0) >= 400
     AND is_count_tokens = FALSE
   GROUP BY 1
 ),
@@ -400,9 +436,9 @@ combined AS (
 )
 SELECT group_id, group_name, (success_count + error_count) AS request_count, token_consumed
 FROM combined
-WHERE group_id IS NOT NULL
-ORDER BY request_count DESC
-LIMIT $` + itoa(limitIndex)
+	WHERE group_id IS NOT NULL
+	ORDER BY request_count DESC
+	LIMIT ` + limitPlaceholder
 
 	args = append(args, limit)
 	rows, err := r.db.QueryContext(ctx, q, args...)
@@ -555,7 +591,7 @@ func (r *opsRepository) GetErrorTrend(ctx context.Context, filter *service.OpsDa
 
 	start := filter.StartTime.UTC()
 	end := filter.EndTime.UTC()
-	where, args, _ := buildErrorWhere(filter, start, end, 1)
+	where, args, _ := buildErrorWhere(ctx, filter, start, end, 1)
 	bucketExpr := opsBucketExprForError(bucketSeconds)
 
 	q := `
@@ -668,7 +704,7 @@ func (r *opsRepository) GetErrorDistribution(ctx context.Context, filter *servic
 
 	start := filter.StartTime.UTC()
 	end := filter.EndTime.UTC()
-	where, args, _ := buildErrorWhere(filter, start, end, 1)
+	where, args, _ := buildErrorWhere(ctx, filter, start, end, 1)
 
 	q := `
 SELECT

@@ -708,6 +708,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				RequestID:       requestID,
 				ClientRequestID: clientRequestID,
 
+				ProjectID: resolveOpsProjectID(c, getOpsAPIKey(c)),
 				AccountID: accountID,
 				Platform:  platform,
 				Model:     modelName,
@@ -850,6 +851,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			RequestID:       requestID,
 			ClientRequestID: clientRequestID,
 
+			ProjectID: resolveOpsProjectID(c, apiKey),
 			AccountID: accountID,
 			Platform:  platform,
 			Model:     modelName,
@@ -958,6 +960,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		if apiKey != nil {
+			if entry.ProjectID <= 0 {
+				entry.ProjectID = apiKey.ProjectID
+			}
 			entry.APIKeyID = &apiKey.ID
 			// 有效(未删除)key 报错时快照前缀,key 之后被删也保留;与 INVALID_API_KEY 的 attempted_key_prefix 互斥。
 			entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
@@ -997,6 +1002,24 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		enqueueOpsErrorLog(ops, entry)
 	}
+}
+
+func resolveOpsProjectID(c *gin.Context, apiKey *service.APIKey) int64 {
+	if apiKey != nil && apiKey.ProjectID > 0 {
+		return apiKey.ProjectID
+	}
+	if c == nil || c.Request == nil {
+		return 0
+	}
+	if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
+		return projectID
+	}
+	if v, ok := c.Get("project_id"); ok {
+		if id, ok := v.(int64); ok && id > 0 {
+			return id
+		}
+	}
+	return 0
 }
 
 // isCountTokensRequest checks if the request is a count_tokens request

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -94,6 +95,20 @@ func (_u *GroupUpdate) SetNillableDescription(v *string) *GroupUpdate {
 // ClearDescription clears the value of the "description" field.
 func (_u *GroupUpdate) ClearDescription() *GroupUpdate {
 	_u.mutation.ClearDescription()
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *GroupUpdate) SetProjectID(v int64) *GroupUpdate {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableProjectID(v *int64) *GroupUpdate {
+	if v != nil {
+		_u.SetProjectID(*v)
+	}
 	return _u
 }
 
@@ -673,6 +688,11 @@ func (_u *GroupUpdate) AddRpmLimit(v int) *GroupUpdate {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *GroupUpdate) SetProject(v *Project) *GroupUpdate {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -781,6 +801,12 @@ func (_u *GroupUpdate) AddAllowedUsers(v ...*User) *GroupUpdate {
 // Mutation returns the GroupMutation object of the builder.
 func (_u *GroupUpdate) Mutation() *GroupMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *GroupUpdate) ClearProject() *GroupUpdate {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearAPIKeys clears all "api_keys" edges to the APIKey entity.
@@ -999,6 +1025,9 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
 	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Group.project"`)
+	}
 	return nil
 }
 
@@ -1198,6 +1227,35 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.ProjectTable,
+			Columns: []string{group.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.ProjectTable,
+			Columns: []string{group.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -1615,6 +1673,20 @@ func (_u *GroupUpdateOne) SetNillableDescription(v *string) *GroupUpdateOne {
 // ClearDescription clears the value of the "description" field.
 func (_u *GroupUpdateOne) ClearDescription() *GroupUpdateOne {
 	_u.mutation.ClearDescription()
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *GroupUpdateOne) SetProjectID(v int64) *GroupUpdateOne {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableProjectID(v *int64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetProjectID(*v)
+	}
 	return _u
 }
 
@@ -2194,6 +2266,11 @@ func (_u *GroupUpdateOne) AddRpmLimit(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *GroupUpdateOne) SetProject(v *Project) *GroupUpdateOne {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2302,6 +2379,12 @@ func (_u *GroupUpdateOne) AddAllowedUsers(v ...*User) *GroupUpdateOne {
 // Mutation returns the GroupMutation object of the builder.
 func (_u *GroupUpdateOne) Mutation() *GroupMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *GroupUpdateOne) ClearProject() *GroupUpdateOne {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearAPIKeys clears all "api_keys" edges to the APIKey entity.
@@ -2533,6 +2616,9 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "default_mapped_model", err: fmt.Errorf(`ent: validator failed for field "Group.default_mapped_model": %w`, err)}
 		}
 	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Group.project"`)
+	}
 	return nil
 }
 
@@ -2749,6 +2835,35 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.ProjectTable,
+			Columns: []string{group.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   group.ProjectTable,
+			Columns: []string{group.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

@@ -715,20 +715,20 @@ const customMenuItemsForAdmin = computed(() => {
 
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
-  const operatorItems: NavItem[] = [
+  const projectItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon },
+    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon }
   ]
 
-  if (authStore.isOperator) {
-    return applyFeatureFlags(operatorItems)
+  if (!authStore.isAdmin) {
+    return applyFeatureFlags(projectItems)
   }
 
   const baseItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
+    ...projectItems.slice(0, 2),
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
+    { path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     {
       path: '/admin/channels',
@@ -742,8 +742,7 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/permissions', label: t('nav.permissions'), icon: ShieldIcon, hideInSimpleMode: true },
+    projectItems[2],
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },

@@ -54,6 +54,8 @@ func (Account) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		field.Int64("project_id").
+			Comment("Project isolation boundary for this account"),
 		// notes: 管理员备注（可为空）
 		field.String("notes").
 			Optional().
@@ -202,6 +204,11 @@ func (Account) Fields() []ent.Field {
 // Edges 定义账户实体的关联关系。
 func (Account) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("project", Project.Type).
+			Ref("accounts").
+			Field("project_id").
+			Unique().
+			Required(),
 		// groups: 账户所属的分组（多对多关系）
 		// 通过 account_groups 中间表实现
 		// 一个账户可以属于多个分组，一个分组可以包含多个账户
@@ -222,6 +229,7 @@ func (Account) Edges() []ent.Edge {
 func (Account) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("platform"),            // 按平台筛选
+		index.Fields("project_id"),          // 按项目隔离
 		index.Fields("type"),                // 按认证类型筛选
 		index.Fields("status"),              // 按状态筛选
 		index.Fields("proxy_id"),            // 按代理筛选
@@ -235,5 +243,6 @@ func (Account) Indexes() []ent.Index {
 		index.Fields("platform", "priority"),
 		index.Fields("priority", "status"),
 		index.Fields("deleted_at"), // 软删除查询优化
+		index.Fields("project_id", "platform", "priority"),
 	}
 }

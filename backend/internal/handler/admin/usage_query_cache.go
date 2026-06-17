@@ -11,6 +11,7 @@ import (
 var usageStatsCache = newSnapshotCache(30 * time.Second)
 
 type usageStatsCacheKeyData struct {
+	ProjectID   int64  `json:"project_id,omitempty"`
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
 	UserID      int64  `json:"user_id"`
@@ -24,7 +25,7 @@ type usageStatsCacheKeyData struct {
 	BillingType *int8  `json:"billing_type"`
 }
 
-func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
+func usageStatsCacheKey(ctx context.Context, filters usagestats.UsageLogFilters) string {
 	start := ""
 	if filters.StartTime != nil {
 		start = filters.StartTime.UTC().Format(time.RFC3339)
@@ -34,6 +35,7 @@ func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
 		end = filters.EndTime.UTC().Format(time.RFC3339)
 	}
 	return mustMarshalDashboardCacheKey(usageStatsCacheKeyData{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   start,
 		EndTime:     end,
 		UserID:      filters.UserID,
@@ -50,7 +52,7 @@ func usageStatsCacheKey(filters usagestats.UsageLogFilters) string {
 
 // getStatsCached 命中则返回缓存,未命中则回源 usageService 并写缓存。
 func (h *UsageHandler) getStatsCached(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, bool, error) {
-	key := usageStatsCacheKey(filters)
+	key := usageStatsCacheKey(ctx, filters)
 	entry, hit, err := usageStatsCache.GetOrLoad(key, func() (any, error) {
 		return h.usageService.GetStatsWithFilters(ctx, filters)
 	})

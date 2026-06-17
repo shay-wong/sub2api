@@ -386,6 +386,7 @@ export default {
     affiliateTransferRecords: 'Transfer Records',
     profile: 'Profile',
     users: 'Users',
+    projects: 'Projects',
     groups: 'Groups',
     channels: 'Channels',
     availableChannels: 'Available Channels',
@@ -1483,22 +1484,8 @@ export default {
       failedToLoad: 'Failed to load dashboard statistics'
     },
 
-    permissions: {
-      title: 'Permissions',
-      description: 'Configure operator accounts and visible account groups',
-      searchPlaceholder: 'Search email, username, or ID',
-      empty: 'No configurable users',
-      user: 'User',
-      role: 'Role',
-      groups: 'Visible Groups',
-      roleUser: 'User',
-      roleOperator: 'Operator',
-      statusActive: 'Active',
-      statusDisabled: 'Disabled',
-      noGroupsSelected: 'No groups selected. This operator will not see accounts.',
-      loadFailed: 'Failed to load permissions',
-      saved: 'Permissions saved',
-      saveFailed: 'Failed to save permissions'
+    projectSwitcher: {
+      label: 'Project'
     },
 
     backup: {
@@ -1834,6 +1821,48 @@ export default {
       }
     },
 
+    // Project Management
+    projects: {
+      title: 'Projects',
+      description: 'Create project spaces and manage project members. Project admins can only manage data inside their projects.',
+      createProject: 'Create Project',
+      project: 'Project',
+      projects: 'Projects',
+      name: 'Name',
+      slug: 'Slug',
+      slugHint: 'Use lowercase letters, numbers, and hyphens only, such as default or team-a.',
+      descriptionField: 'Description',
+      noDescription: 'No description',
+      members: 'Members',
+      membersDescription: 'Assign Admin or User permissions inside the selected project space.',
+      addMember: 'Add Member',
+      moveResources: 'Move Resources',
+      member: 'Member',
+      role: 'Role',
+      owner: 'Owner',
+      status: 'Status',
+      userId: 'User ID',
+      accountIds: 'Account IDs',
+      apiKeyIds: 'API Key IDs',
+      groupIds: 'Group IDs',
+      idListPlaceholder: 'Separate IDs with commas, spaces, or new lines',
+      moveUsageHistory: 'Also move historical usage logs and ops error logs',
+      moveSelectResources: 'Enter at least one account, API key, or group ID',
+      noProjects: 'No projects',
+      noProjectsDescription: 'Create a project before moving accounts, keys, and member permissions into a separate space.',
+      noMembers: 'No members',
+      projectCreated: 'Project created',
+      memberSaved: 'Member saved',
+      memberRemoved: 'Member removed',
+      resourcesMoved: 'Resources moved: {accounts} accounts, {apiKeys} API keys, {groups} groups',
+      failedToLoad: 'Failed to load projects',
+      failedToCreate: 'Failed to create project',
+      failedToLoadMembers: 'Failed to load project members',
+      failedToSaveMember: 'Failed to save project member',
+      failedToRemoveMember: 'Failed to remove project member',
+      failedToMoveResources: 'Failed to move project resources'
+    },
+
     // Users
     users: {
       title: 'User Management',
@@ -2027,6 +2056,7 @@ export default {
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
       roles: {
+        super_admin: 'Super Admin',
         admin: 'Admin',
         operator: 'Operator',
         user: 'User'

@@ -334,7 +334,7 @@ func (r *opsRepository) ListAlertEvents(ctx context.Context, filter *service.Ops
 		limit = 500
 	}
 
-	where, args := buildOpsAlertEventsWhere(filter)
+	where, args := buildOpsAlertEventsWhereForContext(ctx, filter)
 	args = append(args, limit)
 	limitArg := "$" + itoa(len(args))
 
@@ -437,10 +437,12 @@ SELECT
   resolved_at,
   email_sent,
   created_at
-FROM ops_alert_events
-WHERE id = $1`
+	FROM ops_alert_events
+	WHERE id = $1`
+	args := []any{eventID}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 
-	row := r.db.QueryRowContext(ctx, q, eventID)
+	row := r.db.QueryRowContext(ctx, q, args...)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -474,12 +476,16 @@ SELECT
   resolved_at,
   email_sent,
   created_at
-FROM ops_alert_events
-WHERE rule_id = $1 AND status = $2
-ORDER BY fired_at DESC
-LIMIT 1`
+	FROM ops_alert_events
+	WHERE rule_id = $1 AND status = $2
+`
+	args := []any{ruleID, service.OpsAlertStatusFiring}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
+	q += `
+	ORDER BY fired_at DESC
+	LIMIT 1`
 
-	row := r.db.QueryRowContext(ctx, q, ruleID, service.OpsAlertStatusFiring)
+	row := r.db.QueryRowContext(ctx, q, args...)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -513,12 +519,16 @@ SELECT
   resolved_at,
   email_sent,
   created_at
-FROM ops_alert_events
-WHERE rule_id = $1
-ORDER BY fired_at DESC
-LIMIT 1`
+	FROM ops_alert_events
+	WHERE rule_id = $1
+`
+	args := []any{ruleID}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
+	q += `
+	ORDER BY fired_at DESC
+	LIMIT 1`
 
-	row := r.db.QueryRowContext(ctx, q, ruleID)
+	row := r.db.QueryRowContext(ctx, q, args...)
 	ev, err := scanOpsAlertEvent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -541,11 +551,16 @@ func (r *opsRepository) CreateAlertEvent(ctx context.Context, event *service.Ops
 	if err != nil {
 		return nil, err
 	}
+	projectID, err := resolveProjectID(ctx, r.db)
+	if err != nil {
+		return nil, err
+	}
 
 	q := `
-INSERT INTO ops_alert_events (
-  rule_id,
-  severity,
+	INSERT INTO ops_alert_events (
+	  project_id,
+	  rule_id,
+	  severity,
   status,
   title,
   description,
@@ -554,11 +569,11 @@ INSERT INTO ops_alert_events (
   dimensions,
   fired_at,
   resolved_at,
-  email_sent,
-  created_at
-) VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()
-)
+	  email_sent,
+	  created_at
+	) VALUES (
+	  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW()
+	)
 RETURNING
   id,
   COALESCE(rule_id, 0),
@@ -577,6 +592,7 @@ RETURNING
 	row := r.db.QueryRowContext(
 		ctx,
 		q,
+		projectID,
 		opsNullInt64(&event.RuleID),
 		opsNullString(event.Severity),
 		opsNullString(event.Status),
@@ -607,9 +623,11 @@ func (r *opsRepository) UpdateAlertEventStatus(ctx context.Context, eventID int6
 UPDATE ops_alert_events
 SET status = $2,
     resolved_at = $3
-WHERE id = $1`
+	WHERE id = $1`
+	args := []any{eventID, strings.TrimSpace(status), opsNullTime(resolvedAt)}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 
-	_, err := r.db.ExecContext(ctx, q, eventID, strings.TrimSpace(status), opsNullTime(resolvedAt))
+	_, err := r.db.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -621,7 +639,10 @@ func (r *opsRepository) UpdateAlertEventEmailSent(ctx context.Context, eventID i
 		return fmt.Errorf("invalid event id")
 	}
 
-	_, err := r.db.ExecContext(ctx, "UPDATE ops_alert_events SET email_sent = $2 WHERE id = $1", eventID, emailSent)
+	q := "UPDATE ops_alert_events SET email_sent = $2 WHERE id = $1"
+	args := []any{eventID, emailSent}
+	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
+	_, err := r.db.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -846,6 +867,15 @@ func buildOpsAlertEventsWhere(filter *service.OpsAlertEventFilter) (string, []an
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func buildOpsAlertEventsWhereForContext(ctx context.Context, filter *service.OpsAlertEventFilter) (string, []any) {
+	where, args := buildOpsAlertEventsWhere(filter)
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		where += " AND project_id = $" + itoa(len(args))
+	}
+	return where, args
 }
 
 func opsNullJSONMap(v map[string]any) (any, error) {

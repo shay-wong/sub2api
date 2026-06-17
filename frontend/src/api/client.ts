@@ -10,6 +10,7 @@ import { getLocale } from '@/i18n'
 // ==================== Axios Instance Configuration ====================
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -64,6 +65,11 @@ apiClient.interceptors.request.use(
     // Attach locale for backend translations
     if (config.headers) {
       config.headers['Accept-Language'] = getLocale()
+    }
+
+    const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
+    if (selectedProjectID && config.headers) {
+      config.headers['X-Project-ID'] = selectedProjectID
     }
 
     // Attach timezone for all GET requests (backend may use it for default date ranges)

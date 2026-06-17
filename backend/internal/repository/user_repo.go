@@ -106,6 +106,9 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 	if err := ensureEmailAuthIdentityWithClient(txCtx, txClient, created.ID, created.Email, "user_repo_create"); err != nil {
 		return err
 	}
+	if err := ensureDefaultProjectMember(txCtx, txAwareSQLExecutor(txCtx, r.sql, r.client), created.ID, userIn.Role); err != nil {
+		return err
+	}
 
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
@@ -900,10 +903,10 @@ func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, u
 func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, error) {
 	m, err := r.client.User.Query().
 		Where(
-			dbuser.RoleEQ(service.RoleAdmin),
+			dbuser.RoleIn(service.RoleSuperAdmin, service.RoleAdmin),
 			dbuser.StatusEQ(service.StatusActive),
 		).
-		Order(dbent.Asc(dbuser.FieldID)).
+		Order(dbent.Desc(dbuser.FieldRole), dbent.Asc(dbuser.FieldID)).
 		First(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)

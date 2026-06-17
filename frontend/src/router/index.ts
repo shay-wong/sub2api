@@ -416,6 +416,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/projects',
+    name: 'AdminProjects',
+    component: () => import('@/views/admin/ProjectsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      requiresAdminOnly: true,
+      title: 'Project Management',
+      titleKey: 'admin.projects.title',
+      descriptionKey: 'admin.projects.description'
+    }
+  },
+  {
     path: '/admin/groups',
     name: 'AdminGroups',
     component: () => import('@/views/admin/GroupsView.vue'),
@@ -492,19 +505,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Account Management',
       titleKey: 'admin.accounts.title',
       descriptionKey: 'admin.accounts.description'
-    }
-  },
-  {
-    path: '/admin/permissions',
-    name: 'AdminPermissions',
-    component: () => import('@/views/admin/PermissionsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      requiresAdminOnly: true,
-      title: 'Permission Management',
-      titleKey: 'admin.permissions.title',
-      descriptionKey: 'admin.permissions.description'
     }
   },
   {
@@ -732,11 +732,6 @@ const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/wechat/payment/callback',
 ]
 const BACKEND_MODE_PENDING_AUTH_PATHS = ['/register', '/email-verify']
-const OPERATOR_ADMIN_PATHS = ['/admin/dashboard', '/admin/accounts', '/admin/ops']
-
-function canOperatorAccessAdminPath(path: string): boolean {
-  return OPERATOR_ADMIN_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(`${allowedPath}/`))
-}
 
 function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: boolean): boolean {
   if (BACKEND_MODE_ALLOWED_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(allowedPath))) {
@@ -845,7 +840,7 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (requiresAdmin && (requiresAdminOnly || (authStore.isOperator && !canOperatorAccessAdminPath(to.path))) && !authStore.isAdmin) {
+  if (requiresAdmin && requiresAdminOnly && !authStore.isAdmin) {
     next('/admin/dashboard')
     return
   }

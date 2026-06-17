@@ -63,6 +63,8 @@ const (
 	FieldRpmLimit = "rpm_limit"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
+	// EdgeProjectMembers holds the string denoting the project_members edge name in mutations.
+	EdgeProjectMembers = "project_members"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
 	EdgeRedeemCodes = "redeem_codes"
 	// EdgeSubscriptions holds the string denoting the subscriptions edge name in mutations.
@@ -100,6 +102,13 @@ const (
 	APIKeysInverseTable = "api_keys"
 	// APIKeysColumn is the table column denoting the api_keys relation/edge.
 	APIKeysColumn = "user_id"
+	// ProjectMembersTable is the table that holds the project_members relation/edge.
+	ProjectMembersTable = "project_members"
+	// ProjectMembersInverseTable is the table name for the ProjectMember entity.
+	// It exists in this package in order to avoid circular dependency with the "projectmember" package.
+	ProjectMembersInverseTable = "project_members"
+	// ProjectMembersColumn is the table column denoting the project_members relation/edge.
+	ProjectMembersColumn = "user_id"
 	// RedeemCodesTable is the table that holds the redeem_codes relation/edge.
 	RedeemCodesTable = "redeem_codes"
 	// RedeemCodesInverseTable is the table name for the RedeemCode entity.
@@ -433,6 +442,20 @@ func ByAPIKeys(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByProjectMembersCount orders the results by project_members count.
+func ByProjectMembersCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newProjectMembersStep(), opts...)
+	}
+}
+
+// ByProjectMembers orders the results by project_members terms.
+func ByProjectMembers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newProjectMembersStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByRedeemCodesCount orders the results by redeem_codes count.
 func ByRedeemCodesCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -633,6 +656,13 @@ func newAPIKeysStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(APIKeysInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, APIKeysTable, APIKeysColumn),
+	)
+}
+func newProjectMembersStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(ProjectMembersInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, ProjectMembersTable, ProjectMembersColumn),
 	)
 }
 func newRedeemCodesStep() *sqlgraph.Step {

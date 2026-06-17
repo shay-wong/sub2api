@@ -30,7 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
+const usageLogSelectColumns = "id, user_id, project_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
 
 // usageLogInsertArgTypes must stay in the same order as:
 //  1. prepareUsageLogInsert().args
@@ -41,6 +41,7 @@ const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, 
 // When adding a usage_logs column, update all of those call sites together.
 var usageLogInsertArgTypes = [...]string{
 	"bigint",      // user_id
+	"bigint",      // project_id
 	"bigint",      // api_key_id
 	"bigint",      // account_id
 	"text",        // request_id
@@ -260,6 +261,25 @@ func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usage
 	return repo
 }
 
+func (r *usageLogRepository) ensureUsageLogProjectID(ctx context.Context, log *service.UsageLog) error {
+	if log == nil {
+		return nil
+	}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		log.ProjectID = projectID
+		return nil
+	}
+	if log.ProjectID > 0 {
+		return nil
+	}
+	projectID, err := resolveProjectID(ctx, r.sql)
+	if err != nil {
+		return err
+	}
+	log.ProjectID = projectID
+	return nil
+}
+
 // getPerformanceStats 获取 RPM 和 TPM（近5分钟平均值，可选按用户过滤）
 func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int64) (rpm, tpm int64, err error) {
 	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
@@ -271,9 +291,10 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 		WHERE created_at >= $1`
 	args := []any{fiveMinutesAgo}
 	if userID > 0 {
-		query += " AND user_id = $2"
+		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
 	}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var requestCount int64
 	var tokenCount int64
@@ -286,6 +307,9 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 func (r *usageLogRepository) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
 	if log == nil {
 		return false, nil
+	}
+	if err := r.ensureUsageLogProjectID(ctx, log); err != nil {
+		return false, err
 	}
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
@@ -302,6 +326,9 @@ func (r *usageLogRepository) Create(ctx context.Context, log *service.UsageLog) 
 func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.UsageLog) error {
 	if log == nil {
 		return nil
+	}
+	if err := r.ensureUsageLogProjectID(ctx, log); err != nil {
+		return err
 	}
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
@@ -358,6 +385,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 	query := `
 		INSERT INTO usage_logs (
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -413,7 +441,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -422,7 +450,9 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 	if err := scanSingleRow(ctx, sqlq, query, prepared.args, &log.ID, &log.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) && prepared.requestID != "" {
 			selectQuery := "SELECT id, created_at FROM usage_logs WHERE request_id = $1 AND api_key_id = $2"
-			if err := scanSingleRow(ctx, sqlq, selectQuery, []any{prepared.requestID, log.APIKeyID}, &log.ID, &log.CreatedAt); err != nil {
+			selectArgs := []any{prepared.requestID, log.APIKeyID}
+			selectQuery, selectArgs = appendProjectScopeQuery(ctx, selectQuery, selectArgs, "project_id")
+			if err := scanSingleRow(ctx, sqlq, selectQuery, selectArgs, &log.ID, &log.CreatedAt); err != nil {
 				return false, err
 			}
 			log.RateMultiplier = prepared.rateMultiplier
@@ -800,6 +830,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 		WITH input (
 			input_idx,
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -851,7 +882,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			created_at
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(keys)*50)
+	args := make([]any, 0, len(keys)*len(usageLogInsertArgTypes))
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -881,6 +912,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 		inserted AS (
 			INSERT INTO usage_logs (
 				user_id,
+			project_id,
 				api_key_id,
 				account_id,
 				request_id,
@@ -933,6 +965,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			)
 			SELECT
 				user_id,
+			project_id,
 				api_key_id,
 				account_id,
 				request_id,
@@ -1025,6 +1058,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 	_, _ = query.WriteString(`
 		WITH input (
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -1076,7 +1110,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*50)
+	args := make([]any, 0, len(preparedList)*len(usageLogInsertArgTypes))
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -1103,6 +1137,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 		)
 		INSERT INTO usage_logs (
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -1155,6 +1190,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 		)
 		SELECT
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -1215,6 +1251,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 	_, err := sqlq.ExecContext(ctx, `
 		INSERT INTO usage_logs (
 			user_id,
+			project_id,
 			api_key_id,
 			account_id,
 			request_id,
@@ -1270,7 +1307,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1327,6 +1364,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 		requestType:    requestType,
 		args: []any{
 			log.UserID,
+			log.ProjectID,
 			log.APIKeyID,
 			log.AccountID,
 			requestIDArg,
@@ -1404,7 +1442,9 @@ func (r *usageLogRepository) bestEffortRecentKey(requestID string, apiKeyID int6
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
-	rows, err := r.sql.QueryContext(ctx, query, id)
+	args := []any{id}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1462,13 +1502,15 @@ func (r *usageLogRepository) GetUserStats(ctx context.Context, userID int64, sta
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	stats := &UserStats{}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{userID, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalTokens,
 		&stats.TotalCost,
@@ -1492,8 +1534,14 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
 		return nil, err
 	}
-	if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
-		return nil, err
+	if _, ok := service.ProjectIDFromContext(ctx); ok {
+		if err := r.fillDashboardUsageStatsFromUsageLogs(ctx, stats, time.Unix(0, 0).UTC(), now.UTC(), todayStart, now); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
+			return nil, err
+		}
 	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
@@ -1542,11 +1590,16 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		FROM users
 		WHERE deleted_at IS NULL
 	`
+	userStatsArgs := []any{todayUTC}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		userStatsQuery += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.user_id = users.id AND pm.project_id = $%d)", len(userStatsArgs)+1)
+		userStatsArgs = append(userStatsArgs, projectID)
+	}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		userStatsQuery,
-		[]any{todayUTC},
+		userStatsArgs,
 		&stats.TotalUsers,
 		&stats.TodayNewUsers,
 	); err != nil {
@@ -1560,11 +1613,13 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		FROM api_keys
 		WHERE deleted_at IS NULL
 	`
+	apiKeyStatsArgs := []any{service.StatusActive}
+	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectScopeQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		apiKeyStatsQuery,
-		[]any{service.StatusActive},
+		apiKeyStatsArgs,
 		&stats.TotalAPIKeys,
 		&stats.ActiveAPIKeys,
 	); err != nil {
@@ -1581,11 +1636,13 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		FROM accounts
 		WHERE deleted_at IS NULL
 	`
+	accountStatsArgs := []any{service.StatusActive, service.StatusError, now, now}
+	accountStatsQuery, accountStatsArgs = appendProjectScopeQuery(ctx, accountStatsQuery, accountStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		accountStatsQuery,
-		[]any{service.StatusActive, service.StatusError, now, now},
+		accountStatsArgs,
 		&stats.TotalAccounts,
 		&stats.NormalAccounts,
 		&stats.ErrorAccounts,
@@ -1687,6 +1744,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 
 func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Context, stats *DashboardStats, startUTC, endUTC, todayUTC, now time.Time) error {
 	todayEnd := todayUTC.Add(24 * time.Hour)
+	args := []any{startUTC, endUTC, todayUTC, todayEnd}
+	projectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		projectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
+	}
 	combinedStatsQuery := `
 		WITH scoped AS (
 			SELECT
@@ -1702,6 +1765,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			FROM usage_logs
 			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
 				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+				` + projectCondition + `
 		)
 		SELECT
 			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz) AS total_requests,
@@ -1728,7 +1792,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		ctx,
 		r.sql,
 		combinedStatsQuery,
-		[]any{startUTC, endUTC, todayUTC, todayEnd},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -1758,19 +1822,26 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 
 	hourStart := now.UTC().Truncate(time.Hour)
 	hourEnd := hourStart.Add(time.Hour)
+	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd}
+	activeProjectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		activeArgs = append(activeArgs, projectID)
+		activeProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(activeArgs))
+	}
 	activeUsersQuery := `
 		WITH scoped AS (
 			SELECT user_id, created_at
 			FROM usage_logs
 			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
 				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+				` + activeProjectCondition + `
 		)
 		SELECT
 			COUNT(DISTINCT CASE WHEN created_at >= $1::timestamptz AND created_at < $2::timestamptz THEN user_id END) AS active_users,
 			COUNT(DISTINCT CASE WHEN created_at >= $3::timestamptz AND created_at < $4::timestamptz THEN user_id END) AS hourly_active_users
 		FROM scoped
 	`
-	if err := scanSingleRow(ctx, r.sql, activeUsersQuery, []any{todayUTC, todayEnd, hourStart, hourEnd}, &stats.ActiveUsers, &stats.HourlyActiveUsers); err != nil {
+	if err := scanSingleRow(ctx, r.sql, activeUsersQuery, activeArgs, &stats.ActiveUsers, &stats.HourlyActiveUsers); err != nil {
 		return err
 	}
 
@@ -1782,8 +1853,11 @@ func (r *usageLogRepository) ListByAccount(ctx context.Context, accountID int64,
 }
 
 func (r *usageLogRepository) ListByUserAndTimeRange(ctx context.Context, userID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE user_id = $1 AND created_at >= $2 AND created_at < $3 ORDER BY id DESC LIMIT 10000"
-	logs, err := r.queryUsageLogs(ctx, query, userID, startTime, endTime)
+	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE user_id = $1 AND created_at >= $2 AND created_at < $3"
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " ORDER BY id DESC LIMIT 10000"
+	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
 }
 
@@ -1803,13 +1877,15 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{userID, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -1842,13 +1918,15 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		FROM usage_logs
 		WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3
 	`
+	args := []any{apiKeyID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{apiKeyID, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -1891,13 +1969,15 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 	`
+	args := []any{accountID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{accountID, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -1931,13 +2011,15 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		FROM usage_logs
 		WHERE %s = $1 AND created_at >= $2 AND created_at < $3
 	`, rawUsageLogModelColumn)
+	args := []any{modelName, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{modelName, startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -1971,11 +2053,15 @@ func (r *usageLogRepository) GetDailyStatsAggregated(ctx context.Context, userID
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+	`
+	args := []any{userID, startTime, endTime, tzName}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += `
 		GROUP BY 1
 		ORDER BY 1
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime, tzName)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2044,25 +2130,37 @@ func resolveUsageStatsTimezone() string {
 }
 
 func (r *usageLogRepository) ListByAPIKeyAndTimeRange(ctx context.Context, apiKeyID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3 ORDER BY id DESC LIMIT 10000"
-	logs, err := r.queryUsageLogs(ctx, query, apiKeyID, startTime, endTime)
+	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3"
+	args := []any{apiKeyID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " ORDER BY id DESC LIMIT 10000"
+	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
 }
 
 func (r *usageLogRepository) ListByAccountAndTimeRange(ctx context.Context, accountID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 ORDER BY id DESC LIMIT 10000"
-	logs, err := r.queryUsageLogs(ctx, query, accountID, startTime, endTime)
+	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
+	args := []any{accountID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " ORDER BY id DESC LIMIT 10000"
+	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
 }
 
 func (r *usageLogRepository) ListByModelAndTimeRange(ctx context.Context, modelName string, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	query := fmt.Sprintf("SELECT %s FROM usage_logs WHERE %s = $1 AND created_at >= $2 AND created_at < $3 ORDER BY id DESC LIMIT 10000", usageLogSelectColumns, rawUsageLogModelColumn)
-	logs, err := r.queryUsageLogs(ctx, query, modelName, startTime, endTime)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs WHERE %s = $1 AND created_at >= $2 AND created_at < $3", usageLogSelectColumns, rawUsageLogModelColumn)
+	args := []any{modelName, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " ORDER BY id DESC LIMIT 10000"
+	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
 }
 
 func (r *usageLogRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.sql.ExecContext(ctx, "DELETE FROM usage_logs WHERE id = $1", id)
+	query := "DELETE FROM usage_logs WHERE id = $1"
+	args := []any{id}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -2080,13 +2178,15 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2
 	`
+	args := []any{accountID, today}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	stats := &usagestats.AccountStats{}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{accountID, today},
+		args,
 		&stats.Requests,
 		&stats.Tokens,
 		&stats.Cost,
@@ -2110,13 +2210,15 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2
 	`
+	args := []any{accountID, startTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	stats := &usagestats.AccountStats{}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{accountID, startTime},
+		args,
 		&stats.Requests,
 		&stats.Tokens,
 		&stats.Cost,
@@ -2146,9 +2248,11 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 			COALESCE(SUM(actual_cost), 0) as user_cost
 		FROM usage_logs
 		WHERE account_id = ANY($1) AND created_at >= $2
-		GROUP BY account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime)
+	args := []any{pq.Array(accountIDs), startTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY account_id"
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2200,9 +2304,11 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE actual_cost END), 0) AS pro_cost
 		FROM usage_logs
 		WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
-		GROUP BY account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime, endTime)
+	args := []any{pq.Array(accountIDs), startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY account_id"
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2255,12 +2361,21 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
+	args := []any{startTime, endTime, limit, startTime, endTime}
+	topProjectCondition := ""
+	outerProjectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		topProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
+		outerProjectCondition = fmt.Sprintf(" AND u.project_id = $%d", len(args))
+	}
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
 			SELECT api_key_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			  %s
 			GROUP BY api_key_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -2275,11 +2390,12 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		LEFT JOIN api_keys k ON u.api_key_id = k.id
 		WHERE u.api_key_id IN (SELECT api_key_id FROM top_keys)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  %s
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, dateFormat, topProjectCondition, outerProjectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2310,12 +2426,21 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 // GetUserUsageTrend returns usage trend data grouped by user and date
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
+	args := []any{startTime, endTime, limit, startTime, endTime}
+	topProjectCondition := ""
+	outerProjectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		topProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
+		outerProjectCondition = fmt.Sprintf(" AND u.project_id = $%d", len(args))
+	}
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
 			SELECT user_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			  %s
 			GROUP BY user_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -2333,11 +2458,12 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  %s
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, dateFormat, topProjectCondition, outerProjectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2379,10 +2505,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 				COUNT(*) as requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
-			FROM usage_logs u
-			LEFT JOIN users us ON u.user_id = us.id
-			WHERE u.created_at >= $1 AND u.created_at < $2
-			GROUP BY u.user_id, us.email
+		FROM usage_logs u
+		LEFT JOIN users us ON u.user_id = us.id
+		WHERE u.created_at >= $1 AND u.created_at < $2
+			%s
+		GROUP BY u.user_id, us.email
 		),
 		ranked AS (
 			SELECT
@@ -2410,8 +2537,15 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		FROM ranked
 		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
 	`
+	args := []any{startTime, endTime, limit}
+	projectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		projectCondition = fmt.Sprintf("AND u.project_id = $%d", len(args))
+	}
+	query = fmt.Sprintf(query, projectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2457,20 +2591,26 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	today := timezone.Today()
 
 	// API Key 统计
+	totalKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL"
+	totalKeysArgs := []any{userID}
+	totalKeysQuery, totalKeysArgs = appendProjectScopeQuery(ctx, totalKeysQuery, totalKeysArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL",
-		[]any{userID},
+		totalKeysQuery,
+		totalKeysArgs,
 		&stats.TotalAPIKeys,
 	); err != nil {
 		return nil, err
 	}
+	activeKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL"
+	activeKeysArgs := []any{userID, service.StatusActive}
+	activeKeysQuery, activeKeysArgs = appendProjectScopeQuery(ctx, activeKeysQuery, activeKeysArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL",
-		[]any{userID, service.StatusActive},
+		activeKeysQuery,
+		activeKeysArgs,
 		&stats.ActiveAPIKeys,
 	); err != nil {
 		return nil, err
@@ -2490,11 +2630,13 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		FROM usage_logs
 		WHERE user_id = $1
 	`
+	totalStatsArgs := []any{userID}
+	totalStatsQuery, totalStatsArgs = appendProjectScopeQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		totalStatsQuery,
-		[]any{userID},
+		totalStatsArgs,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -2521,11 +2663,13 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2
 	`
+	todayStatsArgs := []any{userID, today}
+	todayStatsQuery, todayStatsArgs = appendProjectScopeQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		todayStatsQuery,
-		[]any{userID, today},
+		todayStatsArgs,
 		&stats.TodayRequests,
 		&stats.TodayInputTokens,
 		&stats.TodayOutputTokens,
@@ -2566,11 +2710,19 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		LEFT JOIN accounts a ON a.id = ul.account_id
 		WHERE ul.user_id = $1
 		  AND ` + usageLogSuccessFilterUL + `
+		  %s
 		GROUP BY ` + usageLogEffectivePlatformExpr + `
 		HAVING ` + usageLogEffectivePlatformExpr + ` IS NOT NULL AND ` + usageLogEffectivePlatformExpr + ` <> ''
 		ORDER BY total_actual_cost DESC
 	`
-	rows, err := r.sql.QueryContext(ctx, platformQuery, userID, today)
+	platformArgs := []any{userID, today}
+	platformProjectCondition := ""
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		platformArgs = append(platformArgs, projectID)
+		platformProjectCondition = fmt.Sprintf("AND ul.project_id = $%d", len(platformArgs))
+	}
+	platformQuery = fmt.Sprintf(platformQuery, platformProjectCondition)
+	rows, err := r.sql.QueryContext(ctx, platformQuery, platformArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -2610,6 +2762,7 @@ func (r *usageLogRepository) getPerformanceStatsByAPIKey(ctx context.Context, ap
 		FROM usage_logs
 		WHERE created_at >= $1 AND api_key_id = $2`
 	args := []any{fiveMinutesAgo, apiKeyID}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	var requestCount int64
 	var tokenCount int64
@@ -2642,11 +2795,13 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		FROM usage_logs
 		WHERE api_key_id = $1
 	`
+	totalStatsArgs := []any{apiKeyID}
+	totalStatsQuery, totalStatsArgs = appendProjectScopeQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		totalStatsQuery,
-		[]any{apiKeyID},
+		totalStatsArgs,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -2673,11 +2828,13 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		FROM usage_logs
 		WHERE api_key_id = $1 AND created_at >= $2
 	`
+	todayStatsArgs := []any{apiKeyID, today}
+	todayStatsQuery, todayStatsArgs = appendProjectScopeQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id")
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		todayStatsQuery,
-		[]any{apiKeyID, today},
+		todayStatsArgs,
 		&stats.TodayRequests,
 		&stats.TodayInputTokens,
 		&stats.TodayOutputTokens,
@@ -2718,11 +2875,12 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 			COALESCE(SUM(actual_cost), 0) as actual_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY date
-		ORDER BY date ASC
 	`, dateFormat)
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY date ORDER BY date ASC"
 
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2758,11 +2916,12 @@ func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64
 			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY model
-		ORDER BY total_tokens DESC
 	`
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY model ORDER BY total_tokens DESC"
 
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2785,10 +2944,11 @@ func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters = usagestats.UsageLogFilters
 
-func buildUsageLogFilterWhere(filters UsageLogFilters) (string, []any) {
+func buildUsageLogFilterWhere(ctx context.Context, filters UsageLogFilters) (string, []any) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
+	conditions, args = appendProjectScopeWhere(ctx, conditions, args, "project_id")
 	if filters.UserID > 0 {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
 		args = append(args, filters.UserID)
@@ -2826,7 +2986,7 @@ func buildUsageLogFilterWhere(filters UsageLogFilters) (string, []any) {
 
 // ListWithFilters lists usage logs with optional filters (for admin)
 func (r *usageLogRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
-	whereClause, args := buildUsageLogFilterWhere(filters)
+	whereClause, args := buildUsageLogFilterWhere(ctx, filters)
 	var (
 		logs []service.UsageLog
 		page *pagination.PaginationResult
@@ -2849,7 +3009,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 
 // CountWithFilters counts usage logs with optional filters (for admin).
 func (r *usageLogRepository) CountWithFilters(ctx context.Context, filters UsageLogFilters) (int64, error) {
-	whereClause, args := buildUsageLogFilterWhere(filters)
+	whereClause, args := buildUsageLogFilterWhere(ctx, filters)
 	countQuery := "SELECT COUNT(*) FROM usage_logs " + whereClause
 	var total int64
 	if err := scanSingleRow(ctx, r.sql, countQuery, args, &total); err != nil {
@@ -2925,10 +3085,12 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		WHERE ul.user_id = ANY($1)
 		  AND ul.created_at >= LEAST($2, $4)
 		  AND ` + usageLogSuccessFilterUL + `
-		GROUP BY ul.user_id, ` + usageLogEffectivePlatformExpr + `
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedUserIDs), startTime, endTime, today)
+	args := []any{pq.Array(normalizedUserIDs), startTime, endTime, today}
+	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
+	query += " GROUP BY ul.user_id, " + usageLogEffectivePlatformExpr
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2997,10 +3159,12 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		FROM usage_logs
 		WHERE api_key_id = ANY($1)
 		  AND created_at >= LEAST($2, $4)
-		GROUP BY api_key_id
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedAPIKeyIDs), startTime, endTime, today)
+	args := []any{pq.Array(normalizedAPIKeyIDs), startTime, endTime, today}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY api_key_id"
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3029,7 +3193,7 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 
 // GetUsageTrendWithFilters returns usage trend data with optional filters
 func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) (results []TrendDataPoint, err error) {
-	if shouldUsePreaggregatedTrend(granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType) {
+	if _, projectScoped := service.ProjectIDFromContext(ctx); !projectScoped && shouldUsePreaggregatedTrend(granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType) {
 		aggregated, aggregatedErr := r.getUsageTrendFromAggregates(ctx, startTime, endTime, granularity)
 		if aggregatedErr == nil && len(aggregated) > 0 {
 			return aggregated, nil
@@ -3054,6 +3218,7 @@ func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, start
 	`, dateFormat)
 
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3209,6 +3374,7 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	`, modelExpr, actualCostExpr, accountCostExpr)
 
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3269,6 +3435,7 @@ func (r *usageLogRepository) GetGroupStatsWithFilters(ctx context.Context, start
 	`
 
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
 	if userID > 0 {
 		query += fmt.Sprintf(" AND ul.user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3341,6 +3508,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
 	`
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
 
 	if dim.GroupID > 0 {
 		query += fmt.Sprintf(" AND ul.group_id = $%d", len(args)+1)
@@ -3431,10 +3599,15 @@ func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayS
 			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost
 		FROM groups g
 		LEFT JOIN usage_logs ul ON ul.group_id = g.id
-		GROUP BY g.id
 	`
+	args := []any{todayStart}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		query += fmt.Sprintf(" WHERE g.project_id = $%d AND (ul.project_id = $%d OR ul.id IS NULL)", len(args), len(args))
+	}
+	query += " GROUP BY g.id"
 
-	rows, err := r.sql.QueryContext(ctx, query, todayStart)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3492,13 +3665,15 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
 	`
+	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 
 	stats := &UsageStats{}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{startTime, endTime},
+		args,
 		&stats.TotalRequests,
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
@@ -3518,6 +3693,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
+	conditions, args = appendProjectScopeWhere(ctx, conditions, args, "project_id")
 	if filters.UserID > 0 {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
 		args = append(args, filters.UserID)
@@ -3683,6 +3859,7 @@ func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Con
 	`, endpointColumn, actualCostExpr)
 
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3754,6 +3931,7 @@ func (r *usageLogRepository) getEndpointPathStatsWithFilters(ctx context.Context
 	`, actualCostExpr)
 
 	args := []any{startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3830,11 +4008,12 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 			COALESCE(SUM(actual_cost), 0) as user_cost
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY date
-		ORDER BY date ASC
 	`
+	args := []any{accountID, startTime, endTime}
+	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query += " GROUP BY date ORDER BY date ASC"
 
-	rows, err := r.sql.QueryContext(ctx, query, accountID, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3899,8 +4078,10 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 	}
 
 	avgQuery := "SELECT COALESCE(AVG(duration_ms), 0) as avg_duration_ms FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
+	avgArgs := []any{accountID, startTime, endTime}
+	avgQuery, avgArgs = appendProjectScopeQuery(ctx, avgQuery, avgArgs, "project_id")
 	var avgDuration float64
-	if err := scanSingleRow(ctx, r.sql, avgQuery, []any{accountID, startTime, endTime}, &avgDuration); err != nil {
+	if err := scanSingleRow(ctx, r.sql, avgQuery, avgArgs, &avgDuration); err != nil {
 		return nil, err
 	}
 
@@ -4262,6 +4443,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	var (
 		id                    int64
 		userID                int64
+		projectID             int64
 		apiKeyID              int64
 		accountID             int64
 		requestID             sql.NullString
@@ -4316,6 +4498,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	if err := scanner.Scan(
 		&id,
 		&userID,
+		&projectID,
 		&apiKeyID,
 		&accountID,
 		&requestID,
@@ -4372,6 +4555,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	log := &service.UsageLog{
 		ID:                    id,
 		UserID:                userID,
+		ProjectID:             projectID,
 		APIKeyID:              apiKeyID,
 		AccountID:             accountID,
 		Model:                 model,

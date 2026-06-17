@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 )
@@ -70,6 +71,12 @@ func (_c *APIKeyCreate) SetNillableDeletedAt(v *time.Time) *APIKeyCreate {
 // SetUserID sets the "user_id" field.
 func (_c *APIKeyCreate) SetUserID(v int64) *APIKeyCreate {
 	_c.mutation.SetUserID(v)
+	return _c
+}
+
+// SetProjectID sets the "project_id" field.
+func (_c *APIKeyCreate) SetProjectID(v int64) *APIKeyCreate {
+	_c.mutation.SetProjectID(v)
 	return _c
 }
 
@@ -307,6 +314,11 @@ func (_c *APIKeyCreate) SetNillableWindow7dStart(v *time.Time) *APIKeyCreate {
 	return _c
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_c *APIKeyCreate) SetProject(v *Project) *APIKeyCreate {
+	return _c.SetProjectID(v.ID)
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_c *APIKeyCreate) SetUser(v *User) *APIKeyCreate {
 	return _c.SetUserID(v.ID)
@@ -433,6 +445,9 @@ func (_c *APIKeyCreate) check() error {
 	if _, ok := _c.mutation.UserID(); !ok {
 		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "APIKey.user_id"`)}
 	}
+	if _, ok := _c.mutation.ProjectID(); !ok {
+		return &ValidationError{Name: "project_id", err: errors.New(`ent: missing required field "APIKey.project_id"`)}
+	}
 	if _, ok := _c.mutation.Key(); !ok {
 		return &ValidationError{Name: "key", err: errors.New(`ent: missing required field "APIKey.key"`)}
 	}
@@ -480,6 +495,9 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.Usage7d(); !ok {
 		return &ValidationError{Name: "usage_7d", err: errors.New(`ent: missing required field "APIKey.usage_7d"`)}
+	}
+	if len(_c.mutation.ProjectIDs()) == 0 {
+		return &ValidationError{Name: "project", err: errors.New(`ent: missing required edge "APIKey.project"`)}
 	}
 	if len(_c.mutation.UserIDs()) == 0 {
 		return &ValidationError{Name: "user", err: errors.New(`ent: missing required edge "APIKey.user"`)}
@@ -594,6 +612,23 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Window7dStart(); ok {
 		_spec.SetField(apikey.FieldWindow7dStart, field.TypeTime, value)
 		_node.Window7dStart = &value
+	}
+	if nodes := _c.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ProjectTable,
+			Columns: []string{apikey.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ProjectID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -736,6 +771,18 @@ func (u *APIKeyUpsert) SetUserID(v int64) *APIKeyUpsert {
 // UpdateUserID sets the "user_id" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdateUserID() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldUserID)
+	return u
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *APIKeyUpsert) SetProjectID(v int64) *APIKeyUpsert {
+	u.Set(apikey.FieldProjectID, v)
+	return u
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateProjectID() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldProjectID)
 	return u
 }
 
@@ -1154,6 +1201,20 @@ func (u *APIKeyUpsertOne) SetUserID(v int64) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateUserID() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *APIKeyUpsertOne) SetProjectID(v int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateProjectID() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateProjectID()
 	})
 }
 
@@ -1792,6 +1853,20 @@ func (u *APIKeyUpsertBulk) SetUserID(v int64) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateUserID() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *APIKeyUpsertBulk) SetProjectID(v int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateProjectID() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateProjectID()
 	})
 }
 

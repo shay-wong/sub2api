@@ -20,7 +20,7 @@ const {
   mockListAlertEvents,
   mockAdminSettingsState
 } = vi.hoisted(() => ({
-  mockAuthRole: { value: 'operator' as 'admin' | 'operator' },
+  mockAuthRole: { value: 'admin' as 'admin' | 'user' },
   mockRouterReplace: vi.fn(),
   mockAdminSettingsFetch: vi.fn(),
   mockGetDashboardSnapshotV2: vi.fn(),
@@ -70,7 +70,7 @@ vi.mock('@/stores', () => {
         return mockAuthRole.value === 'admin'
       },
       get isOperator() {
-        return mockAuthRole.value === 'operator'
+        return false
       }
     }),
     useAdminSettingsStore: () => ({
@@ -199,17 +199,17 @@ function setupSuccessfulOpsMocks() {
   mockAdminSettingsFetch.mockResolvedValue(undefined)
 }
 
-describe('OpsDashboard operator permissions', () => {
+describe('OpsDashboard admin permissions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockAuthRole.value = 'operator'
+    mockAuthRole.value = 'user'
     mockAdminSettingsState.opsMonitoringEnabled = true
     mockAdminSettingsState.opsRealtimeMonitoringEnabled = true
     mockAdminSettingsState.opsQueryModeDefault = 'auto'
     setupSuccessfulOpsMocks()
   })
 
-  it('operator loads monitor data without calling admin-only settings endpoints', async () => {
+  it('non-admin loads monitor data without calling admin-only settings endpoints', async () => {
     const wrapper = mount(OpsDashboard, {
       global: {
         stubs: componentStubs

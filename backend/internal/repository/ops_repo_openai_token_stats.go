@@ -33,7 +33,7 @@ func (r *opsRepository) GetOpenAITokenStats(ctx context.Context, filter *service
 		GroupScopeEmpty: filter.GroupScopeEmpty,
 	}
 
-	join, where, baseArgs, next := buildUsageWhere(dashboardFilter, dashboardFilter.StartTime, dashboardFilter.EndTime, 1)
+	join, where, baseArgs, next := buildUsageWhere(ctx, dashboardFilter, dashboardFilter.StartTime, dashboardFilter.EndTime, 1)
 	where += " AND ul.model LIKE 'gpt%'"
 
 	baseCTE := `

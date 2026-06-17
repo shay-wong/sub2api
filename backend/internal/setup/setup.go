@@ -382,7 +382,7 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 	var adminUsers int64
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE role = $1", service.RoleAdmin).Scan(&adminUsers); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users WHERE role IN ($1, $2)", service.RoleSuperAdmin, service.RoleAdmin).Scan(&adminUsers); err != nil {
 		return false, "", err
 	}
 	decision := decideAdminBootstrap(totalUsers, adminUsers)
@@ -402,7 +402,7 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 
 	admin := &service.User{
 		Email:       cfg.Admin.Email,
-		Role:        service.RoleAdmin,
+		Role:        service.RoleSuperAdmin,
 		Status:      service.StatusActive,
 		Balance:     0,
 		Concurrency: setupDefaultAdminConcurrency(),
@@ -414,10 +414,12 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 
-	_, err = db.ExecContext(
+	var adminID int64
+	err = db.QueryRowContext(
 		ctx,
 		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id`,
 		admin.Email,
 		admin.PasswordHash,
 		admin.Role,
@@ -426,8 +428,20 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		admin.Status,
 		admin.CreatedAt,
 		admin.UpdatedAt,
-	)
+	).Scan(&adminID)
 	if err != nil {
+		return false, "", err
+	}
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, created_at, updated_at)
+		SELECT id, $1, $2, '[]'::jsonb, true, NOW(), NOW()
+		FROM projects
+		WHERE slug = $3
+		ON CONFLICT (project_id, user_id) DO UPDATE
+		SET role = EXCLUDED.role,
+			is_owner = EXCLUDED.is_owner,
+			updated_at = NOW()
+	`, adminID, service.ProjectRoleAdmin, service.DefaultProjectSlug); err != nil {
 		return false, "", err
 	}
 	return true, decision.reason, nil

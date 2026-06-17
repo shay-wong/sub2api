@@ -63,6 +63,20 @@ export interface UserProfileSourceContext {
   provider_label?: string | null
 }
 
+export interface UserProject {
+  id: number
+  name: string
+  slug: string
+  description?: string | null
+  role: ProjectRole
+  is_owner: boolean
+}
+
+export type GlobalUserRole = 'super_admin' | 'user'
+export type LegacyUserRole = 'admin' | 'operator'
+export type UserRole = GlobalUserRole | LegacyUserRole
+export type ProjectRole = 'super_admin' | 'admin' | 'user'
+
 export interface User {
   id: number
   username: string
@@ -84,7 +98,8 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'operator' | 'user' // User role for authorization
+  projects?: UserProject[]
+  role: UserRole // User role for authorization
   balance: number // User balance for API usage
   concurrency: number // Allowed concurrent requests
   rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
@@ -1565,7 +1580,6 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'operator' | 'user'
   balance?: number
   concurrency?: number
   status?: 'active' | 'disabled'

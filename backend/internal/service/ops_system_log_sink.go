@@ -207,6 +207,7 @@ func (s *OpsSystemLogSink) flushBatch(baseCtx context.Context, batch []*logger.L
 
 		userID := asInt64Ptr(fields["user_id"])
 		accountID := asInt64Ptr(fields["account_id"])
+		projectID := asInt64(fields["project_id"])
 
 		// 统一脱敏后写入索引。
 		message := logredact.RedactText(strings.TrimSpace(event.Message))
@@ -219,6 +220,7 @@ func (s *OpsSystemLogSink) flushBatch(baseCtx context.Context, batch []*logger.L
 
 		inputs = append(inputs, &OpsInsertSystemLogInput{
 			CreatedAt:       createdAt,
+			ProjectID:       projectID,
 			Level:           strings.ToLower(strings.TrimSpace(event.Level)),
 			Component:       component,
 			Message:         message,
@@ -290,6 +292,13 @@ func asString(v any) string {
 	default:
 		return ""
 	}
+}
+
+func asInt64(v any) int64 {
+	if p := asInt64Ptr(v); p != nil {
+		return *p
+	}
+	return 0
 }
 
 func asInt64Ptr(v any) *int64 {

@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
@@ -30,6 +31,12 @@ type UsageLogCreate struct {
 // SetUserID sets the "user_id" field.
 func (_c *UsageLogCreate) SetUserID(v int64) *UsageLogCreate {
 	_c.mutation.SetUserID(v)
+	return _c
+}
+
+// SetProjectID sets the "project_id" field.
+func (_c *UsageLogCreate) SetProjectID(v int64) *UsageLogCreate {
+	_c.mutation.SetProjectID(v)
 	return _c
 }
 
@@ -553,6 +560,11 @@ func (_c *UsageLogCreate) SetNillableCreatedAt(v *time.Time) *UsageLogCreate {
 	return _c
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_c *UsageLogCreate) SetProject(v *Project) *UsageLogCreate {
+	return _c.SetProjectID(v.ID)
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_c *UsageLogCreate) SetUser(v *User) *UsageLogCreate {
 	return _c.SetUserID(v.ID)
@@ -692,6 +704,9 @@ func (_c *UsageLogCreate) check() error {
 	if _, ok := _c.mutation.UserID(); !ok {
 		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "UsageLog.user_id"`)}
 	}
+	if _, ok := _c.mutation.ProjectID(); !ok {
+		return &ValidationError{Name: "project_id", err: errors.New(`ent: missing required field "UsageLog.project_id"`)}
+	}
 	if _, ok := _c.mutation.APIKeyID(); !ok {
 		return &ValidationError{Name: "api_key_id", err: errors.New(`ent: missing required field "UsageLog.api_key_id"`)}
 	}
@@ -822,6 +837,9 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "UsageLog.created_at"`)}
+	}
+	if len(_c.mutation.ProjectIDs()) == 0 {
+		return &ValidationError{Name: "project", err: errors.New(`ent: missing required edge "UsageLog.project"`)}
 	}
 	if len(_c.mutation.UserIDs()) == 0 {
 		return &ValidationError{Name: "user", err: errors.New(`ent: missing required edge "UsageLog.user"`)}
@@ -1003,6 +1021,23 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
 	}
+	if nodes := _c.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   usagelog.ProjectTable,
+			Columns: []string{usagelog.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ProjectID = nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2O,
@@ -1149,6 +1184,18 @@ func (u *UsageLogUpsert) SetUserID(v int64) *UsageLogUpsert {
 // UpdateUserID sets the "user_id" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateUserID() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldUserID)
+	return u
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *UsageLogUpsert) SetProjectID(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldProjectID, v)
+	return u
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateProjectID() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldProjectID)
 	return u
 }
 
@@ -1898,6 +1945,20 @@ func (u *UsageLogUpsertOne) SetUserID(v int64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateUserID() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *UsageLogUpsertOne) SetProjectID(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateProjectID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProjectID()
 	})
 }
 
@@ -2928,6 +2989,20 @@ func (u *UsageLogUpsertBulk) SetUserID(v int64) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateUserID() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *UsageLogUpsertBulk) SetProjectID(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateProjectID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateProjectID()
 	})
 }
 

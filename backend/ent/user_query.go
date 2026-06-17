@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -39,6 +40,7 @@ type UserQuery struct {
 	inters                    []Interceptor
 	predicates                []predicate.User
 	withAPIKeys               *APIKeyQuery
+	withProjectMembers        *ProjectMemberQuery
 	withRedeemCodes           *RedeemCodeQuery
 	withSubscriptions         *UserSubscriptionQuery
 	withAssignedSubscriptions *UserSubscriptionQuery
@@ -105,6 +107,28 @@ func (_q *UserQuery) QueryAPIKeys() *APIKeyQuery {
 			sqlgraph.From(user.Table, user.FieldID, selector),
 			sqlgraph.To(apikey.Table, apikey.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, user.APIKeysTable, user.APIKeysColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryProjectMembers chains the current query on the "project_members" edge.
+func (_q *UserQuery) QueryProjectMembers() *ProjectMemberQuery {
+	query := (&ProjectMemberClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(projectmember.Table, projectmember.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.ProjectMembersTable, user.ProjectMembersColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -613,6 +637,7 @@ func (_q *UserQuery) Clone() *UserQuery {
 		inters:                    append([]Interceptor{}, _q.inters...),
 		predicates:                append([]predicate.User{}, _q.predicates...),
 		withAPIKeys:               _q.withAPIKeys.Clone(),
+		withProjectMembers:        _q.withProjectMembers.Clone(),
 		withRedeemCodes:           _q.withRedeemCodes.Clone(),
 		withSubscriptions:         _q.withSubscriptions.Clone(),
 		withAssignedSubscriptions: _q.withAssignedSubscriptions.Clone(),
@@ -641,6 +666,17 @@ func (_q *UserQuery) WithAPIKeys(opts ...func(*APIKeyQuery)) *UserQuery {
 		opt(query)
 	}
 	_q.withAPIKeys = query
+	return _q
+}
+
+// WithProjectMembers tells the query-builder to eager-load the nodes that are connected to
+// the "project_members" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithProjectMembers(opts ...func(*ProjectMemberQuery)) *UserQuery {
+	query := (&ProjectMemberClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProjectMembers = query
 	return _q
 }
 
@@ -876,8 +912,9 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [15]bool{
+		loadedTypes = [16]bool{
 			_q.withAPIKeys != nil,
+			_q.withProjectMembers != nil,
 			_q.withRedeemCodes != nil,
 			_q.withSubscriptions != nil,
 			_q.withAssignedSubscriptions != nil,
@@ -919,6 +956,13 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadAPIKeys(ctx, query, nodes,
 			func(n *User) { n.Edges.APIKeys = []*APIKey{} },
 			func(n *User, e *APIKey) { n.Edges.APIKeys = append(n.Edges.APIKeys, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withProjectMembers; query != nil {
+		if err := _q.loadProjectMembers(ctx, query, nodes,
+			func(n *User) { n.Edges.ProjectMembers = []*ProjectMember{} },
+			func(n *User, e *ProjectMember) { n.Edges.ProjectMembers = append(n.Edges.ProjectMembers, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -1044,6 +1088,36 @@ func (_q *UserQuery) loadAPIKeys(ctx context.Context, query *APIKeyQuery, nodes 
 	}
 	query.Where(predicate.APIKey(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(user.APIKeysColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.UserID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "user_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadProjectMembers(ctx context.Context, query *ProjectMemberQuery, nodes []*User, init func(*User), assign func(*User, *ProjectMember)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(projectmember.FieldUserID)
+	}
+	query.Where(predicate.ProjectMember(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.ProjectMembersColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

@@ -34,6 +34,7 @@ var (
 		{Name: "window_1d_start", Type: field.TypeTime, Nullable: true},
 		{Name: "window_7d_start", Type: field.TypeTime, Nullable: true},
 		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "project_id", Type: field.TypeInt64},
 		{Name: "user_id", Type: field.TypeInt64},
 	}
 	// APIKeysTable holds the schema information for the "api_keys" table.
@@ -49,8 +50,14 @@ var (
 				OnDelete:   schema.SetNull,
 			},
 			{
-				Symbol:     "api_keys_users_api_keys",
+				Symbol:     "api_keys_projects_api_keys",
 				Columns:    []*schema.Column{APIKeysColumns[23]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "api_keys_users_api_keys",
+				Columns:    []*schema.Column{APIKeysColumns[24]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -58,6 +65,11 @@ var (
 		Indexes: []*schema.Index{
 			{
 				Name:    "apikey_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{APIKeysColumns[24]},
+			},
+			{
+				Name:    "apikey_project_id",
 				Unique:  false,
 				Columns: []*schema.Column{APIKeysColumns[23]},
 			},
@@ -90,6 +102,11 @@ var (
 				Name:    "apikey_expires_at",
 				Unique:  false,
 				Columns: []*schema.Column{APIKeysColumns[12]},
+			},
+			{
+				Name:    "apikey_project_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{APIKeysColumns[23], APIKeysColumns[6]},
 			},
 		},
 	}
@@ -125,6 +142,7 @@ var (
 		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
 		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "project_id", Type: field.TypeInt64},
 	}
 	// AccountsTable holds the schema information for the "accounts" table.
 	AccountsTable = &schema.Table{
@@ -138,12 +156,23 @@ var (
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
+			{
+				Symbol:     "accounts_projects_accounts",
+				Columns:    []*schema.Column{AccountsColumns[30]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
 		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "account_platform",
 				Unique:  false,
 				Columns: []*schema.Column{AccountsColumns[6]},
+			},
+			{
+				Name:    "account_project_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[30]},
 			},
 			{
 				Name:    "account_type",
@@ -204,6 +233,11 @@ var (
 				Name:    "account_deleted_at",
 				Unique:  false,
 				Columns: []*schema.Column{AccountsColumns[3]},
+			},
+			{
+				Name:    "account_project_id_platform_priority",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[30], AccountsColumns[6], AccountsColumns[13]},
 			},
 		},
 	}
@@ -674,17 +708,31 @@ var (
 		{Name: "messages_dispatch_model_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
+		{Name: "project_id", Type: field.TypeInt64},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
 	GroupsTable = &schema.Table{
 		Name:       "groups",
 		Columns:    GroupsColumns,
 		PrimaryKey: []*schema.Column{GroupsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "groups_projects_groups",
+				Columns:    []*schema.Column{GroupsColumns[37]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
 		Indexes: []*schema.Index{
 			{
 				Name:    "group_status",
 				Unique:  false,
 				Columns: []*schema.Column{GroupsColumns[9]},
+			},
+			{
+				Name:    "group_project_id",
+				Unique:  false,
+				Columns: []*schema.Column{GroupsColumns[37]},
 			},
 			{
 				Name:    "group_platform",
@@ -710,6 +758,11 @@ var (
 				Name:    "group_sort_order",
 				Unique:  false,
 				Columns: []*schema.Column{GroupsColumns[29]},
+			},
+			{
+				Name:    "group_project_id_platform_status",
+				Unique:  false,
+				Columns: []*schema.Column{GroupsColumns[37], GroupsColumns[10], GroupsColumns[9]},
 			},
 		},
 	}
@@ -1015,6 +1068,89 @@ var (
 				Name:    "pendingauthsession_completion_code_hash",
 				Unique:  false,
 				Columns: []*schema.Column{PendingAuthSessionsColumns[14]},
+			},
+		},
+	}
+	// ProjectsColumns holds the columns for the "projects" table.
+	ProjectsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "slug", Type: field.TypeString, Unique: true, Size: 80},
+		{Name: "description", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+		{Name: "profiles", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+	}
+	// ProjectsTable holds the schema information for the "projects" table.
+	ProjectsTable = &schema.Table{
+		Name:       "projects",
+		Columns:    ProjectsColumns,
+		PrimaryKey: []*schema.Column{ProjectsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "project_slug",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectsColumns[5]},
+			},
+			{
+				Name:    "project_status",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectsColumns[7]},
+			},
+			{
+				Name:    "project_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectsColumns[3]},
+			},
+		},
+	}
+	// ProjectMembersColumns holds the columns for the "project_members" table.
+	ProjectMembersColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "role", Type: field.TypeString, Size: 20, Default: "user"},
+		{Name: "scopes", Type: field.TypeJSON},
+		{Name: "is_owner", Type: field.TypeBool, Default: false},
+		{Name: "project_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// ProjectMembersTable holds the schema information for the "project_members" table.
+	ProjectMembersTable = &schema.Table{
+		Name:       "project_members",
+		Columns:    ProjectMembersColumns,
+		PrimaryKey: []*schema.Column{ProjectMembersColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "project_members_projects_members",
+				Columns:    []*schema.Column{ProjectMembersColumns[6]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "project_members_users_project_members",
+				Columns:    []*schema.Column{ProjectMembersColumns[7]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "projectmember_project_id_user_id",
+				Unique:  true,
+				Columns: []*schema.Column{ProjectMembersColumns[6], ProjectMembersColumns[7]},
+			},
+			{
+				Name:    "projectmember_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectMembersColumns[7]},
+			},
+			{
+				Name:    "projectmember_project_id_role",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectMembersColumns[6], ProjectMembersColumns[3]},
 			},
 		},
 	}
@@ -1371,6 +1507,7 @@ var (
 		{Name: "api_key_id", Type: field.TypeInt64},
 		{Name: "account_id", Type: field.TypeInt64},
 		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "project_id", Type: field.TypeInt64},
 		{Name: "user_id", Type: field.TypeInt64},
 		{Name: "subscription_id", Type: field.TypeInt64, Nullable: true},
 	}
@@ -1399,14 +1536,20 @@ var (
 				OnDelete:   schema.SetNull,
 			},
 			{
-				Symbol:     "usage_logs_users_usage_logs",
+				Symbol:     "usage_logs_projects_usage_logs",
 				Columns:    []*schema.Column{UsageLogsColumns[40]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "usage_logs_users_usage_logs",
+				Columns:    []*schema.Column{UsageLogsColumns[41]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "usage_logs_user_subscriptions_usage_logs",
-				Columns:    []*schema.Column{UsageLogsColumns[41]},
+				Columns:    []*schema.Column{UsageLogsColumns[42]},
 				RefColumns: []*schema.Column{UserSubscriptionsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -1414,6 +1557,11 @@ var (
 		Indexes: []*schema.Index{
 			{
 				Name:    "usagelog_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogsColumns[41]},
+			},
+			{
+				Name:    "usagelog_project_id",
 				Unique:  false,
 				Columns: []*schema.Column{UsageLogsColumns[40]},
 			},
@@ -1435,7 +1583,7 @@ var (
 			{
 				Name:    "usagelog_subscription_id",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogsColumns[41]},
+				Columns: []*schema.Column{UsageLogsColumns[42]},
 			},
 			{
 				Name:    "usagelog_created_at",
@@ -1460,7 +1608,7 @@ var (
 			{
 				Name:    "usagelog_user_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogsColumns[40], UsageLogsColumns[36]},
+				Columns: []*schema.Column{UsageLogsColumns[41], UsageLogsColumns[36]},
 			},
 			{
 				Name:    "usagelog_api_key_id_created_at",
@@ -1471,6 +1619,11 @@ var (
 				Name:    "usagelog_group_id_created_at",
 				Unique:  false,
 				Columns: []*schema.Column{UsageLogsColumns[39], UsageLogsColumns[36]},
+			},
+			{
+				Name:    "usagelog_project_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogsColumns[40], UsageLogsColumns[36]},
 			},
 		},
 	}
@@ -1851,6 +2004,8 @@ var (
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
 		PendingAuthSessionsTable,
+		ProjectsTable,
+		ProjectMembersTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
@@ -1873,11 +2028,13 @@ var (
 
 func init() {
 	APIKeysTable.ForeignKeys[0].RefTable = GroupsTable
-	APIKeysTable.ForeignKeys[1].RefTable = UsersTable
+	APIKeysTable.ForeignKeys[1].RefTable = ProjectsTable
+	APIKeysTable.ForeignKeys[2].RefTable = UsersTable
 	APIKeysTable.Annotation = &entsql.Annotation{
 		Table: "api_keys",
 	}
 	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
+	AccountsTable.ForeignKeys[1].RefTable = ProjectsTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
 	}
@@ -1920,6 +2077,7 @@ func init() {
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",
 	}
+	GroupsTable.ForeignKeys[0].RefTable = ProjectsTable
 	GroupsTable.Annotation = &entsql.Annotation{
 		Table: "groups",
 	}
@@ -1944,6 +2102,14 @@ func init() {
 	PendingAuthSessionsTable.ForeignKeys[0].RefTable = UsersTable
 	PendingAuthSessionsTable.Annotation = &entsql.Annotation{
 		Table: "pending_auth_sessions",
+	}
+	ProjectsTable.Annotation = &entsql.Annotation{
+		Table: "projects",
+	}
+	ProjectMembersTable.ForeignKeys[0].RefTable = ProjectsTable
+	ProjectMembersTable.ForeignKeys[1].RefTable = UsersTable
+	ProjectMembersTable.Annotation = &entsql.Annotation{
+		Table: "project_members",
 	}
 	PromoCodesTable.Annotation = &entsql.Annotation{
 		Table: "promo_codes",
@@ -1980,8 +2146,9 @@ func init() {
 	UsageLogsTable.ForeignKeys[0].RefTable = APIKeysTable
 	UsageLogsTable.ForeignKeys[1].RefTable = AccountsTable
 	UsageLogsTable.ForeignKeys[2].RefTable = GroupsTable
-	UsageLogsTable.ForeignKeys[3].RefTable = UsersTable
-	UsageLogsTable.ForeignKeys[4].RefTable = UserSubscriptionsTable
+	UsageLogsTable.ForeignKeys[3].RefTable = ProjectsTable
+	UsageLogsTable.ForeignKeys[4].RefTable = UsersTable
+	UsageLogsTable.ForeignKeys[5].RefTable = UserSubscriptionsTable
 	UsageLogsTable.Annotation = &entsql.Annotation{
 		Table: "usage_logs",
 	}

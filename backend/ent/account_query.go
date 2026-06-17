@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
@@ -28,6 +29,7 @@ type AccountQuery struct {
 	order             []account.OrderOption
 	inters            []Interceptor
 	predicates        []predicate.Account
+	withProject       *ProjectQuery
 	withGroups        *GroupQuery
 	withProxy         *ProxyQuery
 	withUsageLogs     *UsageLogQuery
@@ -67,6 +69,28 @@ func (_q *AccountQuery) Unique(unique bool) *AccountQuery {
 func (_q *AccountQuery) Order(o ...account.OrderOption) *AccountQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryProject chains the current query on the "project" edge.
+func (_q *AccountQuery) QueryProject() *ProjectQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, selector),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, account.ProjectTable, account.ProjectColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryGroups chains the current query on the "groups" edge.
@@ -349,6 +373,7 @@ func (_q *AccountQuery) Clone() *AccountQuery {
 		order:             append([]account.OrderOption{}, _q.order...),
 		inters:            append([]Interceptor{}, _q.inters...),
 		predicates:        append([]predicate.Account{}, _q.predicates...),
+		withProject:       _q.withProject.Clone(),
 		withGroups:        _q.withGroups.Clone(),
 		withProxy:         _q.withProxy.Clone(),
 		withUsageLogs:     _q.withUsageLogs.Clone(),
@@ -357,6 +382,17 @@ func (_q *AccountQuery) Clone() *AccountQuery {
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithProject tells the query-builder to eager-load the nodes that are connected to
+// the "project" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *AccountQuery) WithProject(opts ...func(*ProjectQuery)) *AccountQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProject = query
+	return _q
 }
 
 // WithGroups tells the query-builder to eager-load the nodes that are connected to
@@ -481,7 +517,8 @@ func (_q *AccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Acco
 	var (
 		nodes       = []*Account{}
 		_spec       = _q.querySpec()
-		loadedTypes = [4]bool{
+		loadedTypes = [5]bool{
+			_q.withProject != nil,
 			_q.withGroups != nil,
 			_q.withProxy != nil,
 			_q.withUsageLogs != nil,
@@ -508,6 +545,12 @@ func (_q *AccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Acco
 	}
 	if len(nodes) == 0 {
 		return nodes, nil
+	}
+	if query := _q.withProject; query != nil {
+		if err := _q.loadProject(ctx, query, nodes, nil,
+			func(n *Account, e *Project) { n.Edges.Project = e }); err != nil {
+			return nil, err
+		}
 	}
 	if query := _q.withGroups; query != nil {
 		if err := _q.loadGroups(ctx, query, nodes,
@@ -539,6 +582,35 @@ func (_q *AccountQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Acco
 	return nodes, nil
 }
 
+func (_q *AccountQuery) loadProject(ctx context.Context, query *ProjectQuery, nodes []*Account, init func(*Account), assign func(*Account, *Project)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*Account)
+	for i := range nodes {
+		fk := nodes[i].ProjectID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(project.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "project_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *AccountQuery) loadGroups(ctx context.Context, query *GroupQuery, nodes []*Account, init func(*Account), assign func(*Account, *Group)) error {
 	edgeIDs := make([]driver.Value, len(nodes))
 	byID := make(map[int64]*Account)
@@ -720,6 +792,9 @@ func (_q *AccountQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != account.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withProject != nil {
+			_spec.Node.AddColumnOnce(account.FieldProjectID)
 		}
 		if _q.withProxy != nil {
 			_spec.Node.AddColumnOnce(account.FieldProxyID)

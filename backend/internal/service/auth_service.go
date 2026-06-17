@@ -1435,9 +1435,10 @@ type TokenPair struct {
 	ExpiresIn    int    `json:"expires_in"` // Access Token有效期（秒）
 }
 
-// TokenPairWithUser extends TokenPair with user role for backend mode checks
+// TokenPairWithUser extends TokenPair with the refreshed user for caller-side access checks.
 type TokenPairWithUser struct {
 	TokenPair
+	User     *User
 	UserRole string
 }
 
@@ -1593,6 +1594,7 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 	}
 	return &TokenPairWithUser{
 		TokenPair: *pair,
+		User:      user,
 		UserRole:  user.Role,
 	}, nil
 }

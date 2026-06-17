@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -282,4 +284,50 @@ func TestExecuteAdminIdempotentJSONConcurrentRetryOnlyOneSideEffect(t *testing.T
 	require.Equal(t, http.StatusOK, status3)
 	require.Equal(t, "true", headers3.Get("X-Idempotency-Replayed"))
 	require.Equal(t, int32(1), executed.Load())
+}
+
+func TestExecuteAdminIdempotentJSONScopesReplayByProject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := newMemoryIdempotencyRepoStub()
+	cfg := service.DefaultIdempotencyConfig()
+	cfg.ObserveOnly = false
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(repo, cfg))
+	t.Cleanup(func() {
+		service.SetDefaultIdempotencyCoordinator(nil)
+	})
+
+	var executed atomic.Int32
+	router := gin.New()
+	router.POST("/idempotent", func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42})
+		projectID, err := strconv.ParseInt(c.GetHeader("X-Test-Project-ID"), 10, 64)
+		require.NoError(t, err)
+		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
+
+		executeAdminIdempotentJSON(c, "admin.test.project_scope", map[string]any{"a": 1}, time.Minute, func(ctx context.Context) (any, error) {
+			return gin.H{"executed": executed.Add(1)}, nil
+		})
+	})
+
+	call := func(projectID string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/idempotent", bytes.NewBufferString(`{"a":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "same-key")
+		req.Header.Set("X-Test-Project-ID", projectID)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code, rec.Header().Get("X-Idempotency-Replayed")
+	}
+
+	status1, replayed1 := call("101")
+	status2, replayed2 := call("202")
+	status3, replayed3 := call("101")
+
+	require.Equal(t, http.StatusOK, status1)
+	require.Empty(t, replayed1)
+	require.Equal(t, http.StatusOK, status2)
+	require.Empty(t, replayed2, "same key and payload in a different project must not replay another project's result")
+	require.Equal(t, http.StatusOK, status3)
+	require.Equal(t, "true", replayed3)
+	require.Equal(t, int32(2), executed.Load())
 }

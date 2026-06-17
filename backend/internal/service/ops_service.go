@@ -211,6 +211,11 @@ func (s *OpsService) prepareErrorLogInput(ctx context.Context, entry *OpsInsertE
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
+	if entry.ProjectID <= 0 {
+		if projectID, ok := ProjectIDFromContext(ctx); ok {
+			entry.ProjectID = projectID
+		}
+	}
 
 	// Ensure required fields exist (DB has NOT NULL constraints).
 	entry.ErrorPhase = strings.TrimSpace(entry.ErrorPhase)

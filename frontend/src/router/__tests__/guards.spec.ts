@@ -51,17 +51,12 @@ vi.mock('@/api/auth', () => ({
 interface MockAuthState {
   isAuthenticated: boolean
   isAdmin: boolean
+  canAccessAdminConsole?: boolean
   isOperator?: boolean
   isSimpleMode: boolean
   backendModeEnabled: boolean
   hasPendingAuthSession: boolean
   setupNeedsSetup?: boolean
-}
-
-const OPERATOR_ADMIN_PATHS = ['/admin/dashboard', '/admin/accounts', '/admin/ops']
-
-function canOperatorAccessAdminPath(path: string): boolean {
-  return OPERATOR_ADMIN_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(`${allowedPath}/`))
 }
 
 /**
@@ -75,7 +70,7 @@ function simulateGuard(
   const requiresAuth = toMeta.requiresAuth !== false
   const requiresAdmin = toMeta.requiresAdmin === true
   const requiresAdminOnly = toMeta.requiresAdminOnly === true
-  const canAccessAdminConsole = authState.isAdmin || authState.isOperator === true
+  const canAccessAdminConsole = authState.canAccessAdminConsole ?? authState.isAdmin
 
   if (toPath === '/setup' && authState.setupNeedsSetup === false) {
     return resolveCompletedSetupRedirectPath(authState.isAuthenticated, canAccessAdminConsole)
@@ -123,7 +118,7 @@ function simulateGuard(
     return '/dashboard'
   }
 
-  if (requiresAdmin && (requiresAdminOnly || (authState.isOperator && !canOperatorAccessAdminPath(toPath))) && !authState.isAdmin) {
+  if (requiresAdmin && requiresAdminOnly && !authState.isAdmin) {
     return '/admin/dashboard'
   }
 
@@ -268,7 +263,39 @@ describe('路由守卫逻辑', () => {
     })
   })
 
-  // --- 已认证运营 ---
+  // --- 已认证项目管理员 ---
+
+  describe('已认证项目管理员', () => {
+    const authState: MockAuthState = {
+      isAuthenticated: true,
+      isAdmin: false,
+      canAccessAdminConsole: true,
+      isSimpleMode: false,
+      backendModeEnabled: false,
+      hasPendingAuthSession: false,
+    }
+
+    it('访问项目级后台页面允许通过', () => {
+      expect(simulateGuard('/admin/dashboard', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/accounts', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/ops', { requiresAdmin: true }, authState)).toBeNull()
+    })
+
+    it('访问超级管理员页面重定向到后台仪表盘', () => {
+      const redirect = simulateGuard('/admin/users', { requiresAdmin: true, requiresAdminOnly: true }, authState)
+      expect(redirect).toBe('/admin/dashboard')
+    })
+
+    it('Backend mode 下项目管理员可以继续访问后台', () => {
+      const redirect = simulateGuard('/admin/dashboard', { requiresAdmin: true }, {
+        ...authState,
+        backendModeEnabled: true,
+      })
+      expect(redirect).toBeNull()
+    })
+  })
+
+  // --- 已认证运营（遗留 role，按普通用户处理） ---
 
   describe('已认证运营', () => {
     const authState: MockAuthState = {
@@ -280,25 +307,25 @@ describe('路由守卫逻辑', () => {
       hasPendingAuthSession: false,
     }
 
-    it('访问允许的后台页面', () => {
-      expect(simulateGuard('/admin/dashboard', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/accounts', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/ops', { requiresAdmin: true }, authState)).toBeNull()
+    it('访问后台页面被当作普通用户拒绝', () => {
+      expect(simulateGuard('/admin/dashboard', { requiresAdmin: true }, authState)).toBe('/dashboard')
+      expect(simulateGuard('/admin/accounts', { requiresAdmin: true }, authState)).toBe('/dashboard')
+      expect(simulateGuard('/admin/ops', { requiresAdmin: true }, authState)).toBe('/dashboard')
     })
 
-    it('访问完整管理员页面重定向到后台仪表盘', () => {
-      const redirect = simulateGuard('/admin/permissions', { requiresAdmin: true, requiresAdminOnly: true }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+    it('访问完整管理员页面重定向到用户仪表盘', () => {
+      const redirect = simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)
+      expect(redirect).toBe('/dashboard')
     })
 
-    it('访问支付后台页面重定向到后台仪表盘', () => {
+    it('访问支付后台页面重定向到用户仪表盘', () => {
       const redirect = simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+      expect(redirect).toBe('/dashboard')
     })
 
-    it('访问未在运营白名单内的后台页面重定向到后台仪表盘', () => {
+    it('访问其他后台页面也重定向到用户仪表盘', () => {
       const redirect = simulateGuard('/admin/users', { requiresAdmin: true }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+      expect(redirect).toBe('/dashboard')
     })
   })
 

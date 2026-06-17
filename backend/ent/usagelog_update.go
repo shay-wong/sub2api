@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
@@ -42,6 +43,20 @@ func (_u *UsageLogUpdate) SetUserID(v int64) *UsageLogUpdate {
 func (_u *UsageLogUpdate) SetNillableUserID(v *int64) *UsageLogUpdate {
 	if v != nil {
 		_u.SetUserID(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *UsageLogUpdate) SetProjectID(v int64) *UsageLogUpdate {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableProjectID(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -825,6 +840,11 @@ func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *UsageLogUpdate) SetProject(v *Project) *UsageLogUpdate {
+	return _u.SetProjectID(v.ID)
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -853,6 +873,12 @@ func (_u *UsageLogUpdate) SetSubscription(v *UserSubscription) *UsageLogUpdate {
 // Mutation returns the UsageLogMutation object of the builder.
 func (_u *UsageLogUpdate) Mutation() *UsageLogMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *UsageLogUpdate) ClearProject() *UsageLogUpdate {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearUser clears the "user" edge to the User entity.
@@ -978,6 +1004,9 @@ func (_u *UsageLogUpdate) check() error {
 		if err := usagelog.ImageSizeSourceValidator(v); err != nil {
 			return &ValidationError{Name: "image_size_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size_source": %w`, err)}
 		}
+	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "UsageLog.project"`)
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
@@ -1213,6 +1242,35 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   usagelog.ProjectTable,
+			Columns: []string{usagelog.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   usagelog.ProjectTable,
+			Columns: []string{usagelog.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.M2O,
@@ -1388,6 +1446,20 @@ func (_u *UsageLogUpdateOne) SetUserID(v int64) *UsageLogUpdateOne {
 func (_u *UsageLogUpdateOne) SetNillableUserID(v *int64) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetUserID(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *UsageLogUpdateOne) SetProjectID(v int64) *UsageLogUpdateOne {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableProjectID(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -2171,6 +2243,11 @@ func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpd
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *UsageLogUpdateOne) SetProject(v *Project) *UsageLogUpdateOne {
+	return _u.SetProjectID(v.ID)
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdateOne) SetUser(v *User) *UsageLogUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -2199,6 +2276,12 @@ func (_u *UsageLogUpdateOne) SetSubscription(v *UserSubscription) *UsageLogUpdat
 // Mutation returns the UsageLogMutation object of the builder.
 func (_u *UsageLogUpdateOne) Mutation() *UsageLogMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *UsageLogUpdateOne) ClearProject() *UsageLogUpdateOne {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearUser clears the "user" edge to the User entity.
@@ -2337,6 +2420,9 @@ func (_u *UsageLogUpdateOne) check() error {
 		if err := usagelog.ImageSizeSourceValidator(v); err != nil {
 			return &ValidationError{Name: "image_size_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size_source": %w`, err)}
 		}
+	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "UsageLog.project"`)
 	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
@@ -2588,6 +2674,35 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   usagelog.ProjectTable,
+			Columns: []string{usagelog.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   usagelog.ProjectTable,
+			Columns: []string{usagelog.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

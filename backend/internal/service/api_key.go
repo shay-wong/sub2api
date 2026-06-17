@@ -30,6 +30,7 @@ func IsWindowExpired(windowStart *time.Time, duration time.Duration) bool {
 type APIKey struct {
 	ID          int64
 	UserID      int64
+	ProjectID   int64
 	Key         string
 	Name        string
 	GroupID     *int64

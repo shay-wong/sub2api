@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 var (
@@ -18,6 +19,7 @@ var (
 )
 
 type dashboardTrendCacheKey struct {
+	ProjectID   int64  `json:"project_id,omitempty"`
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
 	Granularity string `json:"granularity"`
@@ -32,6 +34,7 @@ type dashboardTrendCacheKey struct {
 }
 
 type dashboardModelGroupCacheKey struct {
+	ProjectID   int64  `json:"project_id,omitempty"`
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
 	UserID      int64  `json:"user_id"`
@@ -45,6 +48,7 @@ type dashboardModelGroupCacheKey struct {
 }
 
 type dashboardEntityTrendCacheKey struct {
+	ProjectID   int64  `json:"project_id,omitempty"`
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
 	Granularity string `json:"granularity"`
@@ -75,6 +79,13 @@ func snapshotPayloadAs[T any](payload any) (T, error) {
 	return typed, nil
 }
 
+func dashboardCacheProjectID(ctx context.Context) int64 {
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		return projectID
+	}
+	return 0
+}
+
 func (h *DashboardHandler) getUsageTrendCached(
 	ctx context.Context,
 	startTime, endTime time.Time,
@@ -86,6 +97,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 	billingType *int8,
 ) ([]usagestats.TrendDataPoint, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardTrendCacheKey{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   startTime.UTC().Format(time.RFC3339),
 		EndTime:     endTime.UTC().Format(time.RFC3339),
 		Granularity: granularity,
@@ -118,6 +130,7 @@ func (h *DashboardHandler) getModelStatsCached(
 	billingType *int8,
 ) ([]usagestats.ModelStat, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   startTime.UTC().Format(time.RFC3339),
 		EndTime:     endTime.UTC().Format(time.RFC3339),
 		UserID:      userID,
@@ -148,6 +161,7 @@ func (h *DashboardHandler) getGroupStatsCached(
 	billingType *int8,
 ) ([]usagestats.GroupStat, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardModelGroupCacheKey{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   startTime.UTC().Format(time.RFC3339),
 		EndTime:     endTime.UTC().Format(time.RFC3339),
 		UserID:      userID,
@@ -170,6 +184,7 @@ func (h *DashboardHandler) getGroupStatsCached(
 
 func (h *DashboardHandler) getAPIKeyUsageTrendCached(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) ([]usagestats.APIKeyUsageTrendPoint, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardEntityTrendCacheKey{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   startTime.UTC().Format(time.RFC3339),
 		EndTime:     endTime.UTC().Format(time.RFC3339),
 		Granularity: granularity,
@@ -187,6 +202,7 @@ func (h *DashboardHandler) getAPIKeyUsageTrendCached(ctx context.Context, startT
 
 func (h *DashboardHandler) getUserUsageTrendCached(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) ([]usagestats.UserUsageTrendPoint, bool, error) {
 	key := mustMarshalDashboardCacheKey(dashboardEntityTrendCacheKey{
+		ProjectID:   dashboardCacheProjectID(ctx),
 		StartTime:   startTime.UTC().Format(time.RFC3339),
 		EndTime:     endTime.UTC().Format(time.RFC3339),
 		Granularity: granularity,

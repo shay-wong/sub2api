@@ -38,8 +38,10 @@ func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_S
 	repo, client := newAPIKeyRepoSQLite(t)
 	ctx := context.Background()
 	user := mustCreateAPIKeyRepoUser(t, ctx, client, "getbykey-auth-dispatch-unit@test.com")
+	projectID := mustGetAPIKeyRepoDefaultProjectID(t, ctx, client)
 
 	group, err := client.Group.Create().
+		SetProjectID(projectID).
 		SetName("g-auth-dispatch-unit").
 		SetPlatform(service.PlatformOpenAI).
 		SetStatus(service.StatusActive).

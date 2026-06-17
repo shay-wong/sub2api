@@ -11,8 +11,8 @@ import (
 )
 
 // NewJWTAuthMiddleware 创建 JWT 认证中间件
-func NewJWTAuthMiddleware(authService *service.AuthService, userService *service.UserService) JWTAuthMiddleware {
-	return JWTAuthMiddleware(jwtAuth(authService, userService, userService))
+func NewJWTAuthMiddleware(authService *service.AuthService, userService *service.UserService, projectService *service.ProjectService) JWTAuthMiddleware {
+	return JWTAuthMiddleware(jwtAuth(authService, userService, userService, projectService))
 }
 
 type jwtUserReader interface {
@@ -24,7 +24,7 @@ type userActivityToucher interface {
 }
 
 // jwtAuth JWT认证中间件实现
-func jwtAuth(authService *service.AuthService, userService jwtUserReader, activityToucher userActivityToucher) gin.HandlerFunc {
+func jwtAuth(authService *service.AuthService, userService jwtUserReader, activityToucher userActivityToucher, projectService *service.ProjectService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 从Authorization header中提取token
 		authHeader := c.GetHeader("Authorization")
@@ -84,6 +84,24 @@ func jwtAuth(authService *service.AuthService, userService jwtUserReader, activi
 		c.Set(string(ContextKeyUserRole), user.Role)
 		if activityToucher != nil {
 			activityToucher.TouchLastActiveForUser(c.Request.Context(), user)
+		}
+		if projectService != nil {
+			requestedProjectID, ok := parseRequestedProjectID(c)
+			if !ok {
+				return
+			}
+			projectID, err := projectService.ResolveUserProject(c.Request.Context(), user, requestedProjectID)
+			if err != nil {
+				if service.IsProjectNotFound(err) {
+					AbortWithError(c, 404, "PROJECT_NOT_FOUND", "project not found")
+				} else {
+					AbortWithError(c, 403, "PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
+				}
+				return
+			}
+			if projectID > 0 {
+				setProjectContext(c, projectID)
+			}
 		}
 
 		c.Next()

@@ -386,6 +386,11 @@ func (r *opsRepository) listHourlyMetricsRows(ctx context.Context, filter *servi
 	where := "bucket_start >= $1 AND bucket_start < $2"
 	args := []any{start.UTC(), end.UTC()}
 	idx := 3
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		where += fmt.Sprintf(" AND project_id = $%d", idx)
+		args = append(args, projectID)
+		idx++
+	}
 
 	platform := ""
 	groupID := (*int64)(nil)
@@ -694,7 +699,7 @@ func (r *opsRepository) queryRawPartial(ctx context.Context, filter *service.Ops
 
 func (r *opsRepository) rawOpsDataExists(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (bool, error) {
 	{
-		join, where, args, _ := buildUsageWhere(filter, start, end, 1)
+		join, where, args, _ := buildUsageWhere(ctx, filter, start, end, 1)
 		q := `SELECT EXISTS(SELECT 1 FROM usage_logs ul ` + join + ` ` + where + ` LIMIT 1)`
 		var exists bool
 		if err := r.db.QueryRowContext(ctx, q, args...).Scan(&exists); err != nil {
@@ -706,7 +711,7 @@ func (r *opsRepository) rawOpsDataExists(ctx context.Context, filter *service.Op
 	}
 
 	{
-		where, args, _ := buildErrorWhere(filter, start, end, 1)
+		where, args, _ := buildErrorWhere(ctx, filter, start, end, 1)
 		q := `SELECT EXISTS(SELECT 1 FROM ops_error_logs ` + where + ` LIMIT 1)`
 		var exists bool
 		if err := r.db.QueryRowContext(ctx, q, args...).Scan(&exists); err != nil {
@@ -805,7 +810,7 @@ func maxTime(a, b time.Time) time.Time {
 }
 
 func (r *opsRepository) queryUsageCounts(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (successCount int64, tokenConsumed int64, err error) {
-	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
+	join, where, args, _ := buildUsageWhere(ctx, filter, start, end, 1)
 
 	q := `
 SELECT
@@ -826,7 +831,7 @@ FROM usage_logs ul
 }
 
 func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, ttftSampleCount int64, err error) {
-	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
+	join, where, args, _ := buildUsageWhere(ctx, filter, start, end, 1)
 	q := `
 SELECT
   percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p50,
@@ -892,7 +897,7 @@ func (r *opsRepository) queryErrorCounts(ctx context.Context, filter *service.Op
 	upstream529 int64,
 	err error,
 ) {
-	where, args, _ := buildErrorWhere(filter, start, end, 1)
+	where, args, _ := buildErrorWhere(ctx, filter, start, end, 1)
 
 	q := `
 SELECT
@@ -936,8 +941,8 @@ func (r *opsRepository) queryCurrentRates(ctx context.Context, filter *service.O
 }
 
 func (r *opsRepository) queryPeakRates(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (qpsPeak float64, tpsPeak float64, err error) {
-	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(filter, start, end, 1)
-	errorWhere, errorArgs, _ := buildErrorWhere(filter, start, end, next)
+	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(ctx, filter, start, end, 1)
+	errorWhere, errorArgs, _ := buildErrorWhere(ctx, filter, start, end, next)
 
 	q := `
 WITH usage_buckets AS (
@@ -988,7 +993,7 @@ func isQueryTimeoutErr(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded)
 }
 
-func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (join string, where string, args []any, nextIndex int) {
+func buildUsageWhere(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (join string, where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
 	groupIDs := []int64(nil)
@@ -1010,6 +1015,11 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 	args = append(args, end)
 	clauses = append(clauses, fmt.Sprintf("ul.created_at < $%d", idx))
 	idx++
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		clauses = append(clauses, fmt.Sprintf("ul.project_id = $%d", idx))
+		idx++
+	}
 
 	if groupScopeEmpty {
 		clauses = append(clauses, "1 = 0")
@@ -1035,7 +1045,7 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 	return join, where, args, idx
 }
 
-func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (where string, args []any, nextIndex int) {
+func buildErrorWhere(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
 	groupIDs := []int64(nil)
@@ -1057,6 +1067,11 @@ func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 	args = append(args, end)
 	clauses = append(clauses, fmt.Sprintf("created_at < $%d", idx))
 	idx++
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		args = append(args, projectID)
+		clauses = append(clauses, fmt.Sprintf("project_id = $%d", idx))
+		idx++
+	}
 
 	clauses = append(clauses, "is_count_tokens = FALSE")
 
