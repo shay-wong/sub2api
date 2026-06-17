@@ -502,7 +502,7 @@ func (r *usageLogRepository) createBatched(ctx context.Context, log *service.Usa
 		case res := <-req.resultCh:
 			return res.inserted, res.err
 		case <-timer.C:
-			return false, ctx.Err()
+			return false, service.MarkUsageLogCreateNotPersisted(ctx.Err())
 		}
 	}
 }
@@ -2393,7 +2393,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		  %s
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat, topProjectCondition, outerProjectCondition)
+	`, topProjectCondition, dateFormat, outerProjectCondition)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -2461,7 +2461,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		  %s
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat, topProjectCondition, outerProjectCondition)
+	`, topProjectCondition, dateFormat, outerProjectCondition)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {

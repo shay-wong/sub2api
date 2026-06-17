@@ -42,7 +42,9 @@ func (s *RedeemCodeRepoSuite) createUser(email string) *dbent.User {
 }
 
 func (s *RedeemCodeRepoSuite) createGroup(name string) *dbent.Group {
+	projectID := mustDefaultProjectID(s.T(), s.client)
 	g, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		Save(s.ctx)
 	s.Require().NoError(err, "create group")

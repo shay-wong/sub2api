@@ -317,9 +317,11 @@ func (s *ProxyRepoSuite) mustInsertAccount(name string, proxyID *int64) {
 	if proxyID != nil {
 		pid = *proxyID
 	}
+	projectID := mustDefaultProjectID(s.T(), s.tx.Client())
 	_, err := s.tx.ExecContext(
 		s.ctx,
-		"INSERT INTO accounts (name, platform, type, proxy_id) VALUES ($1, $2, $3, $4)",
+		"INSERT INTO accounts (project_id, name, platform, type, proxy_id) VALUES ($1, $2, $3, $4, $5)",
+		projectID,
 		name,
 		service.PlatformAnthropic,
 		service.AccountTypeOAuth,

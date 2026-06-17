@@ -51,8 +51,10 @@ func (s *UserSubscriptionRepoSuite) mustCreateUser(email string, role string) *s
 
 func (s *UserSubscriptionRepoSuite) mustCreateGroup(name string) *service.Group {
 	s.T().Helper()
+	projectID := mustDefaultProjectID(s.T(), s.client)
 
 	g, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)
@@ -722,7 +724,9 @@ func (s *UserSubscriptionRepoSuite) TestTxContext_RollbackIsolation() {
 		Save(txCtx)
 	s.Require().NoError(err, "create user in tx")
 
+	projectID := mustDefaultProjectID(s.T(), tx.Client())
 	groupEnt, err := tx.Client().Group.Create().
+		SetProjectID(projectID).
 		SetName("tx-group-" + suffix).
 		Save(txCtx)
 	s.Require().NoError(err, "create group in tx")

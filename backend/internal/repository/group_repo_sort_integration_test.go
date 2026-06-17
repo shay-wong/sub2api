@@ -19,12 +19,7 @@ func (s *GroupRepoSuite) TestListWithAccountCountSort_AttachesActiveCount() {
 	s.Require().NoError(s.repo.Create(s.ctx, gB))
 
 	insertAccount := func(name, status string) int64 {
-		var id int64
-		s.Require().NoError(scanSingleRow(s.ctx, s.tx,
-			"INSERT INTO accounts (name, platform, type, status) VALUES ($1, $2, $3, $4) RETURNING id",
-			[]any{name, service.PlatformAnthropic, service.AccountTypeOAuth, status},
-			&id))
-		return id
+		return s.insertAccount(name, ", status", ", $5", status)
 	}
 	link := func(accountID, groupID int64, priority int) {
 		_, err := s.tx.ExecContext(s.ctx,

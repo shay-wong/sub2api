@@ -88,7 +88,9 @@ func (s *APIKeyRepoSuite) TestGetByKey_NotFound() {
 
 func (s *APIKeyRepoSuite) TestGetByKeyForAuth_PreservesMessagesDispatchModelConfig() {
 	user := s.mustCreateUser("getbykey-auth-dispatch@test.com")
+	projectID := mustDefaultProjectID(s.T(), s.client)
 	group, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName("g-auth-dispatch").
 		SetPlatform(service.PlatformOpenAI).
 		SetStatus(service.StatusActive).
@@ -428,8 +430,10 @@ func (s *APIKeyRepoSuite) mustCreateUser(email string) *service.User {
 
 func (s *APIKeyRepoSuite) mustCreateGroup(name string) *service.Group {
 	s.T().Helper()
+	projectID := mustDefaultProjectID(s.T(), s.client)
 
 	g, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)

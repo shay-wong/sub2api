@@ -50,7 +50,9 @@ func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateUser(email string) *service.U
 
 func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateGroup(name string) *dbent.Group {
 	s.T().Helper()
+	projectID := mustDefaultProjectID(s.T(), s.client)
 	g, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)
@@ -60,7 +62,9 @@ func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateGroup(name string) *dbent.Gro
 
 func (s *UserRepoAPIKeyGroupFilterSuite) mustCreateAPIKey(userID int64, key, name string, groupID *int64) *dbent.APIKey {
 	s.T().Helper()
+	projectID := mustDefaultProjectID(s.T(), s.client)
 	create := s.client.APIKey.Create().
+		SetProjectID(projectID).
 		SetUserID(userID).
 		SetKey(key).
 		SetName(name)

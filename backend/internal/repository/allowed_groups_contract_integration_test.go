@@ -22,13 +22,16 @@ func TestUserRepository_RemoveGroupFromAllowedGroups_RemovesAllOccurrences(t *te
 	ctx := context.Background()
 	tx := testEntTx(t)
 	entClient := tx.Client()
+	projectID := mustDefaultProjectID(t, entClient)
 
 	targetGroup, err := entClient.Group.Create().
+		SetProjectID(projectID).
 		SetName(uniqueTestValue(t, "target-group")).
 		SetStatus(service.StatusActive).
 		Save(ctx)
 	require.NoError(t, err)
 	otherGroup, err := entClient.Group.Create().
+		SetProjectID(projectID).
 		SetName(uniqueTestValue(t, "other-group")).
 		SetStatus(service.StatusActive).
 		Save(ctx)
@@ -84,13 +87,16 @@ func TestGroupRepository_DeleteCascade_PreservesApiKeyGroupID(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	entClient := tx.Client()
+	projectID := mustDefaultProjectID(t, entClient)
 
 	targetGroup, err := entClient.Group.Create().
+		SetProjectID(projectID).
 		SetName(uniqueTestValue(t, "delete-cascade-target")).
 		SetStatus(service.StatusActive).
 		Save(ctx)
 	require.NoError(t, err)
 	otherGroup, err := entClient.Group.Create().
+		SetProjectID(projectID).
 		SetName(uniqueTestValue(t, "delete-cascade-other")).
 		SetStatus(service.StatusActive).
 		Save(ctx)

@@ -8,9 +8,31 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	dbproject "github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func mustDefaultProjectID(t *testing.T, client *dbent.Client) int64 {
+	t.Helper()
+	ctx := context.Background()
+
+	existingID, err := client.Project.Query().
+		Where(dbproject.SlugEQ(service.DefaultProjectSlug)).
+		OnlyID(ctx)
+	if err == nil {
+		return existingID
+	}
+	require.True(t, dbent.IsNotFound(err), "load default project: %v", err)
+
+	project, err := client.Project.Create().
+		SetName(service.DefaultProjectName).
+		SetSlug(service.DefaultProjectSlug).
+		SetDescription("Integration test default project.").
+		Save(ctx)
+	require.NoError(t, err, "create default project")
+	return project.ID
+}
 
 func mustCreateUser(t *testing.T, client *dbent.Client, u *service.User) *service.User {
 	t.Helper()
@@ -81,8 +103,12 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 	if g.SubscriptionType == "" {
 		g.SubscriptionType = service.SubscriptionTypeStandard
 	}
+	if g.ProjectID <= 0 {
+		g.ProjectID = mustDefaultProjectID(t, client)
+	}
 
 	create := client.Group.Create().
+		SetProjectID(g.ProjectID).
 		SetName(g.Name).
 		SetPlatform(g.Platform).
 		SetStatus(g.Status).
@@ -112,6 +138,7 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 	require.NoError(t, err, "create group")
 
 	g.ID = created.ID
+	g.ProjectID = created.ProjectID
 	g.CreatedAt = created.CreatedAt
 	g.UpdatedAt = created.UpdatedAt
 	return g
@@ -190,8 +217,12 @@ func mustCreateAccount(t *testing.T, client *dbent.Client, a *service.Account) *
 	if a.Extra == nil {
 		a.Extra = map[string]any{}
 	}
+	if a.ProjectID <= 0 {
+		a.ProjectID = mustDefaultProjectID(t, client)
+	}
 
 	create := client.Account.Create().
+		SetProjectID(a.ProjectID).
 		SetName(a.Name).
 		SetPlatform(a.Platform).
 		SetType(a.Type).
@@ -238,6 +269,7 @@ func mustCreateAccount(t *testing.T, client *dbent.Client, a *service.Account) *
 	require.NoError(t, err, "create account")
 
 	a.ID = created.ID
+	a.ProjectID = created.ProjectID
 	a.CreatedAt = created.CreatedAt
 	a.UpdatedAt = created.UpdatedAt
 	return a
@@ -256,9 +288,13 @@ func mustCreateApiKey(t *testing.T, client *dbent.Client, k *service.APIKey) *se
 	if k.Name == "" {
 		k.Name = "default"
 	}
+	if k.ProjectID <= 0 {
+		k.ProjectID = mustDefaultProjectID(t, client)
+	}
 
 	create := client.APIKey.Create().
 		SetUserID(k.UserID).
+		SetProjectID(k.ProjectID).
 		SetKey(k.Key).
 		SetName(k.Name).
 		SetStatus(k.Status)
@@ -312,6 +348,7 @@ func mustCreateApiKey(t *testing.T, client *dbent.Client, k *service.APIKey) *se
 	require.NoError(t, err, "create api key")
 
 	k.ID = created.ID
+	k.ProjectID = created.ProjectID
 	k.CreatedAt = created.CreatedAt
 	k.UpdatedAt = created.UpdatedAt
 	return k

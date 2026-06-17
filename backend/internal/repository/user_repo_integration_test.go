@@ -64,8 +64,10 @@ func (s *UserRepoSuite) mustCreateUser(u *service.User) *service.User {
 
 func (s *UserRepoSuite) mustCreateGroup(name string) *service.Group {
 	s.T().Helper()
+	projectID := mustDefaultProjectID(s.T(), s.client)
 
 	g, err := s.client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)

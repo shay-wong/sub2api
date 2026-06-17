@@ -200,6 +200,7 @@ func TestUsageLogRepositoryFlushCreateBatch_DeduplicatesSameKeyInMemory(t *testi
 	for i := 0; i < total; i++ {
 		log := &service.UsageLog{
 			UserID:       user.ID,
+			ProjectID:    account.ProjectID,
 			APIKeyID:     apiKey.ID,
 			AccountID:    account.ID,
 			RequestID:    requestID,
@@ -329,6 +330,7 @@ func TestUsageLogRepositoryCreate_BatchPathCanceledContextMarksNotPersisted(t *t
 
 	inserted, err := repo.Create(ctx, &service.UsageLog{
 		UserID:       user.ID,
+		ProjectID:    account.ProjectID,
 		APIKeyID:     apiKey.ID,
 		AccountID:    account.ID,
 		RequestID:    uuid.NewString(),
@@ -349,8 +351,7 @@ func TestUsageLogRepositoryCreate_BatchPathQueueFullMarksNotPersisted(t *testing
 	ctx := context.Background()
 	client := testEntClient(t)
 	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
-	repo.createBatchCh = make(chan usageLogCreateRequest, 1)
-	repo.createBatchCh <- usageLogCreateRequest{}
+	repo.createBatchCh = make(chan usageLogCreateRequest)
 
 	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-create-full-%d@example.com", time.Now().UnixNano())})
 	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-create-full-" + uuid.NewString(), Name: "k"})

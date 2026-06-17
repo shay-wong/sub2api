@@ -162,3 +162,27 @@ func (r *authRefreshProjectRepoStub) ListActiveProjects(context.Context) ([]serv
 func (r *authRefreshProjectRepoStub) ListUserProjects(context.Context, int64) ([]service.ProjectSummary, error) {
 	return append([]service.ProjectSummary(nil), r.projects...), nil
 }
+
+func (r *authRefreshProjectRepoStub) CreateProject(context.Context, service.ProjectCreateInput) (*service.ProjectSummary, error) {
+	panic("unexpected CreateProject call")
+}
+
+func (r *authRefreshProjectRepoStub) UpdateProject(context.Context, int64, service.ProjectUpdateInput) (*service.ProjectSummary, error) {
+	panic("unexpected UpdateProject call")
+}
+
+func (r *authRefreshProjectRepoStub) ListProjectMembers(context.Context, int64) ([]service.ProjectMember, error) {
+	panic("unexpected ListProjectMembers call")
+}
+
+func (r *authRefreshProjectRepoStub) SetProjectMember(context.Context, int64, service.ProjectMemberInput) (*service.ProjectMember, error) {
+	panic("unexpected SetProjectMember call")
+}
+
+func (r *authRefreshProjectRepoStub) RemoveProjectMember(context.Context, int64, int64) error {
+	panic("unexpected RemoveProjectMember call")
+}
+
+func (r *authRefreshProjectRepoStub) MoveProjectResources(context.Context, int64, service.ProjectResourceMoveInput) (*service.ProjectResourceMoveResult, error) {
+	panic("unexpected MoveProjectResources call")
+}

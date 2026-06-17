@@ -42,9 +42,11 @@ func TestEnsureSimpleModeDefaultGroups_IgnoresSoftDeletedGroups(t *testing.T) {
 
 	seedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	projectID := mustDefaultProjectID(t, client)
 
 	// Create and then soft-delete an anthropic default group.
 	g, err := client.Group.Create().
+		SetProjectID(projectID).
 		SetName(service.PlatformAnthropic + "-default").
 		SetPlatform(service.PlatformAnthropic).
 		SetStatus(service.StatusActive).

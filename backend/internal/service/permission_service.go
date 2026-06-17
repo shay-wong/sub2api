@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	AdminPermissionDashboardRead    = "admin.dashboard.read"
-	AdminPermissionOpsRead          = "admin.ops.read"
-	AdminPermissionAccountsRead     = "admin.accounts.read"
-	AdminPermissionAccountsWrite    = "admin.accounts.write"
+	AdminPermissionDashboardRead = "admin.dashboard.read"
+	AdminPermissionOpsRead       = "admin.ops.read"
+	AdminPermissionAccountsRead  = "admin.accounts.read"
+	AdminPermissionAccountsWrite = "admin.accounts.write"
 )
 
 var (
@@ -47,13 +47,12 @@ type OperatorPermissionSubject struct {
 }
 
 type PermissionService struct {
-	repo      OperatorPermissionRepository
-	userRepo  UserRepository
-	groupRepo GroupRepository
+	repo     OperatorPermissionRepository
+	userRepo UserRepository
 }
 
 func NewPermissionService(repo OperatorPermissionRepository, userRepo UserRepository, groupRepo GroupRepository) *PermissionService {
-	return &PermissionService{repo: repo, userRepo: userRepo, groupRepo: groupRepo}
+	return &PermissionService{repo: repo, userRepo: userRepo}
 }
 
 func (s *PermissionService) ListOperatorPermissions(ctx context.Context) ([]OperatorPermissionSubject, error) {
@@ -78,7 +77,7 @@ func (s *PermissionService) GetOperatorGroupIDs(ctx context.Context, userID int6
 	return normalizeInt64Set(groupIDs), nil
 }
 
-func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID int64, role string, groupIDs []int64, createdBy *int64) (*OperatorPermissionSubject, error) {
+func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID int64, role string, _ []int64, createdBy *int64) (*OperatorPermissionSubject, error) {
 	if s.userRepo == nil || s.repo == nil {
 		return nil, infraerrors.InternalServer("PERMISSION_SERVICE_UNAVAILABLE", "permission service unavailable")
 	}
@@ -98,8 +97,6 @@ func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID i
 		return nil, ErrPermissionInvalidRole
 	}
 
-	groupIDs = nil
-
 	user.Role = role
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, fmt.Errorf("update permission subject role: %w", err)
@@ -115,38 +112,8 @@ func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID i
 		Username: user.Username,
 		Role:     user.Role,
 		Status:   user.Status,
-		GroupIDs: groupIDs,
+		GroupIDs: []int64{},
 	}, nil
-}
-
-func (s *PermissionService) validateGroupsExist(ctx context.Context, groupIDs []int64) error {
-	if len(groupIDs) == 0 {
-		return nil
-	}
-	if s.groupRepo == nil {
-		return ErrPermissionInvalidGroupScope
-	}
-	batch, ok := s.groupRepo.(interface {
-		ExistsByIDs(context.Context, []int64) (map[int64]bool, error)
-	})
-	if !ok {
-		for _, id := range groupIDs {
-			if _, err := s.groupRepo.GetByID(ctx, id); err != nil {
-				return ErrPermissionInvalidGroupScope
-			}
-		}
-		return nil
-	}
-	exists, err := batch.ExistsByIDs(ctx, groupIDs)
-	if err != nil {
-		return err
-	}
-	for _, id := range groupIDs {
-		if !exists[id] {
-			return ErrPermissionInvalidGroupScope
-		}
-	}
-	return nil
 }
 
 func normalizeInt64Set(values []int64) []int64 {

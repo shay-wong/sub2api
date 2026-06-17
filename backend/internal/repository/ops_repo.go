@@ -76,6 +76,9 @@ func (r *opsRepository) InsertErrorLog(ctx context.Context, input *service.OpsIn
 	if input == nil {
 		return 0, fmt.Errorf("nil input")
 	}
+	if err := r.ensureErrorLogProject(ctx, input); err != nil {
+		return 0, err
+	}
 
 	var id int64
 	err := r.db.QueryRowContext(
@@ -120,6 +123,9 @@ func (r *opsRepository) BatchInsertErrorLogs(ctx context.Context, inputs []*serv
 		if input == nil {
 			continue
 		}
+		if err = r.ensureErrorLogProject(ctx, input); err != nil {
+			return inserted, err
+		}
 		if _, err = stmt.ExecContext(ctx, opsInsertErrorLogArgs(input)...); err != nil {
 			return inserted, err
 		}
@@ -130,6 +136,22 @@ func (r *opsRepository) BatchInsertErrorLogs(ctx context.Context, inputs []*serv
 		return inserted, err
 	}
 	return inserted, nil
+}
+
+func (r *opsRepository) ensureErrorLogProject(ctx context.Context, input *service.OpsInsertErrorLogInput) error {
+	if input == nil || input.ProjectID > 0 {
+		return nil
+	}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		input.ProjectID = projectID
+		return nil
+	}
+	projectID, err := ensureDefaultProject(ctx, r.db)
+	if err != nil {
+		return err
+	}
+	input.ProjectID = projectID
+	return nil
 }
 
 func opsInsertErrorLogArgs(input *service.OpsInsertErrorLogInput) []any {

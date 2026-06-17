@@ -22,7 +22,43 @@ func TestPermissionServiceSetOperatorPermissionsRejectsSuperAdmin(t *testing.T) 
 	require.False(t, userRepo.updated, "legacy permissions endpoint must not downgrade super admins")
 }
 
-type permissionOperatorRepoStub struct{}
+func TestPermissionServiceSetOperatorPermissionsRejectsLegacyOperatorRole(t *testing.T) {
+	userRepo := &permissionUserRepoStub{
+		user: &User{ID: 8, Email: "user@example.com", Role: RoleUser, Status: StatusActive},
+	}
+	operatorRepo := &permissionOperatorRepoStub{}
+	svc := NewPermissionService(operatorRepo, userRepo, nil)
+
+	updated, err := svc.SetOperatorPermissions(context.Background(), 8, RoleOperator, []int64{1, 2}, nil)
+
+	require.ErrorIs(t, err, ErrLegacyOperatorRoleDisabled)
+	require.Nil(t, updated)
+	require.False(t, userRepo.updated)
+	require.False(t, operatorRepo.clearCalled)
+}
+
+func TestPermissionServiceSetOperatorPermissionsClearsLegacyScopeWhenDowngradingToUser(t *testing.T) {
+	userRepo := &permissionUserRepoStub{
+		user: &User{ID: 9, Email: "operator@example.com", Role: RoleOperator, Status: StatusActive},
+	}
+	operatorRepo := &permissionOperatorRepoStub{}
+	svc := NewPermissionService(operatorRepo, userRepo, nil)
+
+	updated, err := svc.SetOperatorPermissions(context.Background(), 9, RoleUser, []int64{10, 20}, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, RoleUser, updated.Role)
+	require.Empty(t, updated.GroupIDs)
+	require.True(t, userRepo.updated)
+	require.True(t, operatorRepo.clearCalled)
+	require.Equal(t, int64(9), operatorRepo.clearUserID)
+}
+
+type permissionOperatorRepoStub struct {
+	clearCalled bool
+	clearUserID int64
+}
 
 func (permissionOperatorRepoStub) ListOperatorPermissionSubjects(context.Context) ([]OperatorPermissionSubject, error) {
 	return nil, nil
@@ -40,7 +76,9 @@ func (permissionOperatorRepoStub) SetOperatorGroupIDs(context.Context, int64, []
 	return nil
 }
 
-func (permissionOperatorRepoStub) ClearOperatorGroupIDs(context.Context, int64) error {
+func (r *permissionOperatorRepoStub) ClearOperatorGroupIDs(_ context.Context, userID int64) error {
+	r.clearCalled = true
+	r.clearUserID = userID
 	return nil
 }
 

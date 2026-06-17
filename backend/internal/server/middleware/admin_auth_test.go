@@ -222,6 +222,30 @@ func (s *stubProjectRepo) ListUserProjects(context.Context, int64) ([]service.Pr
 	return append([]service.ProjectSummary(nil), s.projects...), nil
 }
 
+func (s *stubProjectRepo) CreateProject(context.Context, service.ProjectCreateInput) (*service.ProjectSummary, error) {
+	panic("unexpected CreateProject call")
+}
+
+func (s *stubProjectRepo) UpdateProject(context.Context, int64, service.ProjectUpdateInput) (*service.ProjectSummary, error) {
+	panic("unexpected UpdateProject call")
+}
+
+func (s *stubProjectRepo) ListProjectMembers(context.Context, int64) ([]service.ProjectMember, error) {
+	panic("unexpected ListProjectMembers call")
+}
+
+func (s *stubProjectRepo) SetProjectMember(context.Context, int64, service.ProjectMemberInput) (*service.ProjectMember, error) {
+	panic("unexpected SetProjectMember call")
+}
+
+func (s *stubProjectRepo) RemoveProjectMember(context.Context, int64, int64) error {
+	panic("unexpected RemoveProjectMember call")
+}
+
+func (s *stubProjectRepo) MoveProjectResources(context.Context, int64, service.ProjectResourceMoveInput) (*service.ProjectResourceMoveResult, error) {
+	panic("unexpected MoveProjectResources call")
+}
+
 type stubUserRepo struct {
 	getByID func(ctx context.Context, id int64) (*service.User, error)
 }

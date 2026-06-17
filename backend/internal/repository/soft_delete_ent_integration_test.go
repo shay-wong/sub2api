@@ -118,8 +118,10 @@ func TestEntSoftDelete_ApiKey_HardDeleteViaSkipSoftDelete(t *testing.T) {
 
 func createEntGroup(t *testing.T, ctx context.Context, client *dbent.Client, name string) *dbent.Group {
 	t.Helper()
+	projectID := mustDefaultProjectID(t, client)
 
 	g, err := client.Group.Create().
+		SetProjectID(projectID).
 		SetName(name).
 		SetStatus(service.StatusActive).
 		Save(ctx)

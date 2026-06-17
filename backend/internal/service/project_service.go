@@ -399,19 +399,19 @@ func IsProjectNotFound(err error) bool {
 
 func normalizeProjectSlug(slug string) string {
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	var b strings.Builder
+	out := make([]rune, 0, len(slug))
 	lastDash := false
 	for _, r := range slug {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
+			out = append(out, r)
 			lastDash = false
 		case r == '-' || r == '_' || r == ' ':
 			if !lastDash {
-				b.WriteByte('-')
+				out = append(out, '-')
 				lastDash = true
 			}
 		}
 	}
-	return strings.Trim(b.String(), "-")
+	return strings.Trim(string(out), "-")
 }
