@@ -3,7 +3,6 @@ package admin
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -169,280 +168,37 @@ func newOperatorAccountScopeRouter(adminSvc *stubAdminService, groupIDs []int64)
 	return router
 }
 
-func TestOperatorAccountListUsesAssignedGroupScope(t *testing.T) {
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{
-		{ID: 1, Name: "visible-a", Status: service.StatusActive, GroupIDs: []int64{10}},
-		{ID: 2, Name: "hidden", Status: service.StatusActive, GroupIDs: []int64{30}},
-		{ID: 3, Name: "visible-b", Status: service.StatusActive, GroupIDs: []int64{20}},
-	}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10, 20})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data struct {
-			Total int `json:"total"`
-			Items []struct {
-				ID int64 `json:"id"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 2, resp.Data.Total)
-	require.Equal(t, []int64{1, 3}, []int64{resp.Data.Items[0].ID, resp.Data.Items[1].ID})
-}
-
-func TestOperatorAccountListPreservesScopedTotalAcrossPages(t *testing.T) {
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{
-		{ID: 1, Name: "visible-a", Status: service.StatusActive, GroupIDs: []int64{10}},
-		{ID: 2, Name: "hidden", Status: service.StatusActive, GroupIDs: []int64{30}},
-		{ID: 3, Name: "visible-b", Status: service.StatusActive, GroupIDs: []int64{20}},
-	}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10, 20})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=1", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data struct {
-			Total int `json:"total"`
-			Items []struct {
-				ID int64 `json:"id"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 2, resp.Data.Total)
-	require.Len(t, resp.Data.Items, 1)
-	require.Equal(t, int64(1), resp.Data.Items[0].ID)
-}
-
-func TestOperatorAccountListTrimsOutOfScopeGroups(t *testing.T) {
-	adminSvc := newStubAdminService()
-	now := time.Now().UTC()
-	adminSvc.accounts = []service.Account{
-		{
-			ID:        1,
-			Name:      "shared",
-			Status:    service.StatusActive,
-			GroupIDs:  []int64{10, 30},
-			CreatedAt: now,
-			UpdatedAt: now,
-			Groups: []*service.Group{
-				{ID: 10, Name: "visible", Status: service.StatusActive},
-				{ID: 30, Name: "hidden", Status: service.StatusActive},
-			},
-			AccountGroups: []service.AccountGroup{
-				{AccountID: 1, GroupID: 10, Group: &service.Group{ID: 10, Name: "visible", Status: service.StatusActive}},
-				{AccountID: 1, GroupID: 30, Group: &service.Group{ID: 30, Name: "hidden", Status: service.StatusActive}},
-			},
-		},
-	}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data struct {
-			Items []struct {
-				GroupIDs []int64 `json:"group_ids"`
-				Groups   []struct {
-					ID   int64  `json:"id"`
-					Name string `json:"name"`
-				} `json:"groups"`
-				AccountGroups []struct {
-					GroupID int64 `json:"group_id"`
-					Group   *struct {
-						ID   int64  `json:"id"`
-						Name string `json:"name"`
-					} `json:"group"`
-				} `json:"account_groups"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Len(t, resp.Data.Items, 1)
-	item := resp.Data.Items[0]
-	require.Equal(t, []int64{10}, item.GroupIDs)
-	require.Len(t, item.Groups, 1)
-	require.Equal(t, int64(10), item.Groups[0].ID)
-	require.Equal(t, "visible", item.Groups[0].Name)
-	require.Len(t, item.AccountGroups, 1)
-	require.Equal(t, int64(10), item.AccountGroups[0].GroupID)
-	require.NotNil(t, item.AccountGroups[0].Group)
-	require.Equal(t, "visible", item.AccountGroups[0].Group.Name)
-	require.NotContains(t, rec.Body.String(), "hidden")
-}
-
-func TestOperatorAccountDetailTrimsOutOfScopeGroups(t *testing.T) {
-	adminSvc := newStubAdminService()
-	now := time.Now().UTC()
-	adminSvc.accounts = []service.Account{
-		{
-			ID:        1,
-			Name:      "shared",
-			Status:    service.StatusActive,
-			GroupIDs:  []int64{10, 30},
-			CreatedAt: now,
-			UpdatedAt: now,
-			Groups: []*service.Group{
-				{ID: 10, Name: "visible", Status: service.StatusActive},
-				{ID: 30, Name: "hidden", Status: service.StatusActive},
-			},
-			AccountGroups: []service.AccountGroup{
-				{AccountID: 1, GroupID: 10, Group: &service.Group{ID: 10, Name: "visible", Status: service.StatusActive}},
-				{AccountID: 1, GroupID: 30, Group: &service.Group{ID: 30, Name: "hidden", Status: service.StatusActive}},
-			},
-		},
-	}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/1", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data struct {
-			GroupIDs []int64 `json:"group_ids"`
-			Groups   []struct {
-				ID   int64  `json:"id"`
-				Name string `json:"name"`
-			} `json:"groups"`
-			AccountGroups []struct {
-				GroupID int64 `json:"group_id"`
-				Group   *struct {
-					ID   int64  `json:"id"`
-					Name string `json:"name"`
-				} `json:"group"`
-			} `json:"account_groups"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, []int64{10}, resp.Data.GroupIDs)
-	require.Len(t, resp.Data.Groups, 1)
-	require.Equal(t, "visible", resp.Data.Groups[0].Name)
-	require.Len(t, resp.Data.AccountGroups, 1)
-	require.Equal(t, int64(10), resp.Data.AccountGroups[0].GroupID)
-	require.NotContains(t, rec.Body.String(), "hidden")
-}
-
-func TestOperatorAccountDetailRejectsOutOfScopeAccount(t *testing.T) {
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{{ID: 99, Name: "hidden", Status: service.StatusActive, GroupIDs: []int64{30}}}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/99", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
-}
-
-func TestOperatorAccountCreateRejectsProxyAssignment(t *testing.T) {
+func TestOperatorAccountRoutesRejectLegacyRole(t *testing.T) {
 	adminSvc := newStubAdminService()
 	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"name":        "operator-created",
-		"platform":    service.PlatformAnthropic,
-		"type":        service.AccountTypeAPIKey,
-		"credentials": map[string]any{"api_key": "sk-test"},
-		"group_ids":   []int64{10},
-		"proxy_id":    4,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
-	require.Empty(t, adminSvc.createdAccounts)
-}
-
-func TestOperatorAccountUpdateRejectsProxyAssignment(t *testing.T) {
-	adminSvc := newStubAdminService()
 	adminSvc.accounts = []service.Account{{ID: 1, Name: "visible", Status: service.StatusActive, GroupIDs: []int64{10}}}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"name":     "operator-updated",
-		"proxy_id": 4,
-	})
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "list", method: http.MethodGet, path: "/api/v1/admin/accounts?page=1&page_size=20"},
+		{name: "detail", method: http.MethodGet, path: "/api/v1/admin/accounts/1"},
+		{name: "create", method: http.MethodPost, path: "/api/v1/admin/accounts", body: `{"name":"operator-created","platform":"anthropic","type":"apikey","credentials":{"api_key":"sk-test"},"group_ids":[10]}`},
+		{name: "update", method: http.MethodPut, path: "/api/v1/admin/accounts/1", body: `{"name":"operator-updated"}`},
+		{name: "bulk_update", method: http.MethodPost, path: "/api/v1/admin/accounts/bulk-update", body: `{"filters":{"platform":"openai"},"schedulable":true}`},
+	}
 
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			router.ServeHTTP(rec, req)
 
-func TestOperatorAccountUpdateRejectsProxyClear(t *testing.T) {
-	adminSvc := newStubAdminService()
-	proxyID := int64(4)
-	adminSvc.accounts = []service.Account{{ID: 1, Name: "visible", Status: service.StatusActive, GroupIDs: []int64{10}, ProxyID: &proxyID}}
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"name":     "operator-updated",
-		"proxy_id": 0,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
-}
-
-func TestOperatorBulkUpdateRejectsFilterOutsideScope(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"filters":     map[string]any{"group": "30"},
-		"schedulable": true,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_SCOPE_FORBIDDEN")
-}
-
-func TestOperatorBulkUpdateFilterUsesAllAssignedGroups(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorAccountScopeRouter(adminSvc, []int64{10, 20})
-	body, _ := json.Marshal(map[string]any{
-		"filters":     map[string]any{"platform": service.PlatformOpenAI},
-		"schedulable": true,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotNil(t, adminSvc.lastBulkUpdateInput)
-	require.Empty(t, adminSvc.lastBulkUpdateInput.AccountIDs)
-	require.NotNil(t, adminSvc.lastBulkUpdateInput.Filters)
-	require.Equal(t, service.PlatformOpenAI, adminSvc.lastBulkUpdateInput.Filters.Platform)
-	require.Equal(t, []int64{10, 20}, adminSvc.lastBulkUpdateInput.GroupScopeIDs)
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Contains(t, rec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
+		})
+	}
+	require.Empty(t, adminSvc.createdAccounts)
+	require.Nil(t, adminSvc.lastBulkUpdateInput)
 }

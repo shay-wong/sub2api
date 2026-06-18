@@ -304,6 +304,9 @@ func (i *contentModerationTestAuthCacheInvalidator) InvalidateAuthCacheByUserID(
 func (i *contentModerationTestAuthCacheInvalidator) InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64) {
 }
 
+func (i *contentModerationTestAuthCacheInvalidator) InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKeyID int64) {
+}
+
 func (c *contentModerationTestHashCache) RecordFlaggedInputHash(ctx context.Context, inputHash string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

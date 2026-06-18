@@ -33,6 +33,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofilebinding"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -131,6 +133,8 @@ func checkColumn(t, c string) error {
 			pendingauthsession.Table:            pendingauthsession.ValidColumn,
 			project.Table:                       project.ValidColumn,
 			projectmember.Table:                 projectmember.ValidColumn,
+			projectprofile.Table:                projectprofile.ValidColumn,
+			projectprofilebinding.Table:         projectprofilebinding.ValidColumn,
 			promocode.Table:                     promocode.ValidColumn,
 			promocodeusage.Table:                promocodeusage.ValidColumn,
 			proxy.Table:                         proxy.ValidColumn,

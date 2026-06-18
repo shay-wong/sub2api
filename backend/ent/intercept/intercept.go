@@ -30,6 +30,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofilebinding"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -672,6 +674,60 @@ func (f TraverseProjectMember) Traverse(ctx context.Context, q ent.Query) error 
 	return fmt.Errorf("unexpected query type %T. expect *ent.ProjectMemberQuery", q)
 }
 
+// The ProjectProfileFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ProjectProfileFunc func(context.Context, *ent.ProjectProfileQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f ProjectProfileFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.ProjectProfileQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.ProjectProfileQuery", q)
+}
+
+// The TraverseProjectProfile type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseProjectProfile func(context.Context, *ent.ProjectProfileQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseProjectProfile) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseProjectProfile) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.ProjectProfileQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.ProjectProfileQuery", q)
+}
+
+// The ProjectProfileBindingFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ProjectProfileBindingFunc func(context.Context, *ent.ProjectProfileBindingQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f ProjectProfileBindingFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.ProjectProfileBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.ProjectProfileBindingQuery", q)
+}
+
+// The TraverseProjectProfileBinding type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseProjectProfileBinding func(context.Context, *ent.ProjectProfileBindingQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseProjectProfileBinding) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseProjectProfileBinding) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.ProjectProfileBindingQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.ProjectProfileBindingQuery", q)
+}
+
 // The PromoCodeFunc type is an adapter to allow the use of ordinary function as a Querier.
 type PromoCodeFunc func(context.Context, *ent.PromoCodeQuery) (ent.Value, error)
 
@@ -1176,6 +1232,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.ProjectQuery, predicate.Project, project.OrderOption]{typ: ent.TypeProject, tq: q}, nil
 	case *ent.ProjectMemberQuery:
 		return &query[*ent.ProjectMemberQuery, predicate.ProjectMember, projectmember.OrderOption]{typ: ent.TypeProjectMember, tq: q}, nil
+	case *ent.ProjectProfileQuery:
+		return &query[*ent.ProjectProfileQuery, predicate.ProjectProfile, projectprofile.OrderOption]{typ: ent.TypeProjectProfile, tq: q}, nil
+	case *ent.ProjectProfileBindingQuery:
+		return &query[*ent.ProjectProfileBindingQuery, predicate.ProjectProfileBinding, projectprofilebinding.OrderOption]{typ: ent.TypeProjectProfileBinding, tq: q}, nil
 	case *ent.PromoCodeQuery:
 		return &query[*ent.PromoCodeQuery, predicate.PromoCode, promocode.OrderOption]{typ: ent.TypePromoCode, tq: q}, nil
 	case *ent.PromoCodeUsageQuery:

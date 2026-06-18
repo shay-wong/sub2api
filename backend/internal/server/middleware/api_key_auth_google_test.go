@@ -20,6 +20,7 @@ import (
 
 type fakeAPIKeyRepo struct {
 	getByKey       func(ctx context.Context, key string) (*service.APIKey, error)
+	getByID        func(ctx context.Context, id int64) (*service.APIKey, error)
 	updateLastUsed func(ctx context.Context, id int64, usedAt time.Time) error
 }
 
@@ -36,6 +37,9 @@ func (f fakeAPIKeyRepo) Create(ctx context.Context, key *service.APIKey) error {
 	return errors.New("not implemented")
 }
 func (f fakeAPIKeyRepo) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
+	if f.getByID != nil {
+		return f.getByID(ctx, id)
+	}
 	return nil, errors.New("not implemented")
 }
 func (f fakeAPIKeyRepo) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
@@ -321,6 +325,137 @@ func TestApiKeyAuthWithSubscriptionGoogleSetsGroupContext(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "google-profile-visible-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	var checkedProjectID int64
+	apiKeyService := service.NewAPIKeyService(
+		fakeAPIKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != apiKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *apiKey
+				return &clone, nil
+			},
+			getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+				require.Equal(t, apiKey.ID, id)
+				projectID, ok := service.ProjectIDFromContext(ctx)
+				require.True(t, ok)
+				checkedProjectID = projectID
+				clone := *apiKey
+				clone.ProjectID = projectID
+				return &clone, nil
+			},
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		&config.Config{RunMode: config.RunModeSimple},
+	)
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	r := gin.New()
+	r.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, nil, cfg))
+	r.GET("/v1beta/test", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		c.JSON(http.StatusOK, gin.H{"project_id": projectID})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("x-goog-api-key", apiKey.Key)
+	req.Header.Set("X-Project-ID", "2")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(2), checkedProjectID)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, float64(2), body["project_id"])
+}
+
+func TestApiKeyAuthWithSubscriptionGoogleValidatesHomeProjectProfileVisibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "google-home-profile-visible-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	var checkedProjectID int64
+	apiKeyService := service.NewAPIKeyService(
+		fakeAPIKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != apiKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *apiKey
+				return &clone, nil
+			},
+			getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+				require.Equal(t, apiKey.ID, id)
+				projectID, ok := service.ProjectIDFromContext(ctx)
+				require.True(t, ok)
+				checkedProjectID = projectID
+				clone := *apiKey
+				return &clone, nil
+			},
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		&config.Config{RunMode: config.RunModeSimple},
+	)
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	r := gin.New()
+	r.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, nil, cfg))
+	r.GET("/v1beta/test", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		c.JSON(http.StatusOK, gin.H{"project_id": projectID})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("x-goog-api-key", apiKey.Key)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(1), checkedProjectID)
 }
 
 func TestApiKeyAuthWithSubscriptionGoogle_QueryKeyAllowedOnV1Beta(t *testing.T) {

@@ -27,28 +27,10 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 	if service.RoleIsAdmin(role) {
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
-	if !service.RoleIsOperator(role) {
-		return nil, errors.Forbidden("FORBIDDEN", "admin console access required")
+	if service.RoleIsOperator(role) {
+		return nil, service.ErrLegacyOperatorRoleDisabled
 	}
-	subject, ok := middleware.GetAuthSubjectFromContext(c)
-	if !ok || subject.UserID <= 0 {
-		return nil, errors.Unauthorized("UNAUTHORIZED", "authorization required")
-	}
-	if permissionService == nil {
-		return nil, errors.Forbidden("OPERATOR_SCOPE_UNAVAILABLE", "operator scope unavailable")
-	}
-	groupIDs, err := permissionService.GetOperatorGroupIDs(c.Request.Context(), subject.UserID)
-	if err != nil {
-		return nil, err
-	}
-	scope := &adminAccessScope{
-		GroupIDs: groupIDs,
-		groupSet: make(map[int64]struct{}, len(groupIDs)),
-	}
-	for _, id := range groupIDs {
-		scope.groupSet[id] = struct{}{}
-	}
-	return scope, nil
+	return nil, errors.Forbidden("FORBIDDEN", "admin console access required")
 }
 
 func (s *adminAccessScope) isScoped() bool {

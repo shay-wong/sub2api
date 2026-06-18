@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -128,6 +129,21 @@ func (_c *ProjectCreate) AddMembers(v ...*ProjectMember) *ProjectCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddMemberIDs(ids...)
+}
+
+// AddAppProfileIDs adds the "app_profiles" edge to the ProjectProfile entity by IDs.
+func (_c *ProjectCreate) AddAppProfileIDs(ids ...int64) *ProjectCreate {
+	_c.mutation.AddAppProfileIDs(ids...)
+	return _c
+}
+
+// AddAppProfiles adds the "app_profiles" edges to the ProjectProfile entity.
+func (_c *ProjectCreate) AddAppProfiles(v ...*ProjectProfile) *ProjectCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddAppProfileIDs(ids...)
 }
 
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
@@ -358,6 +374,22 @@ func (_c *ProjectCreate) createSpec() (*Project, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.AppProfilesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

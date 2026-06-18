@@ -26,6 +26,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofilebinding"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -1328,6 +1330,101 @@ func init() {
 	projectmemberDescIsOwner := projectmemberFields[4].Descriptor()
 	// projectmember.DefaultIsOwner holds the default value on creation for the is_owner field.
 	projectmember.DefaultIsOwner = projectmemberDescIsOwner.Default.(bool)
+	// projectmemberDescStatus is the schema descriptor for status field.
+	projectmemberDescStatus := projectmemberFields[5].Descriptor()
+	// projectmember.DefaultStatus holds the default value on creation for the status field.
+	projectmember.DefaultStatus = projectmemberDescStatus.Default.(string)
+	// projectmember.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	projectmember.StatusValidator = projectmemberDescStatus.Validators[0].(func(string) error)
+	projectprofileMixin := schema.ProjectProfile{}.Mixin()
+	projectprofileMixinHooks1 := projectprofileMixin[1].Hooks()
+	projectprofile.Hooks[0] = projectprofileMixinHooks1[0]
+	projectprofileMixinInters1 := projectprofileMixin[1].Interceptors()
+	projectprofile.Interceptors[0] = projectprofileMixinInters1[0]
+	projectprofileMixinFields0 := projectprofileMixin[0].Fields()
+	_ = projectprofileMixinFields0
+	projectprofileFields := schema.ProjectProfile{}.Fields()
+	_ = projectprofileFields
+	// projectprofileDescCreatedAt is the schema descriptor for created_at field.
+	projectprofileDescCreatedAt := projectprofileMixinFields0[0].Descriptor()
+	// projectprofile.DefaultCreatedAt holds the default value on creation for the created_at field.
+	projectprofile.DefaultCreatedAt = projectprofileDescCreatedAt.Default.(func() time.Time)
+	// projectprofileDescUpdatedAt is the schema descriptor for updated_at field.
+	projectprofileDescUpdatedAt := projectprofileMixinFields0[1].Descriptor()
+	// projectprofile.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	projectprofile.DefaultUpdatedAt = projectprofileDescUpdatedAt.Default.(func() time.Time)
+	// projectprofile.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	projectprofile.UpdateDefaultUpdatedAt = projectprofileDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// projectprofileDescName is the schema descriptor for name field.
+	projectprofileDescName := projectprofileFields[1].Descriptor()
+	// projectprofile.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	projectprofile.NameValidator = func() func(string) error {
+		validators := projectprofileDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// projectprofileDescMode is the schema descriptor for mode field.
+	projectprofileDescMode := projectprofileFields[3].Descriptor()
+	// projectprofile.DefaultMode holds the default value on creation for the mode field.
+	projectprofile.DefaultMode = projectprofileDescMode.Default.(string)
+	// projectprofile.ModeValidator is a validator for the "mode" field. It is called by the builders before save.
+	projectprofile.ModeValidator = func() func(string) error {
+		validators := projectprofileDescMode.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(mode string) error {
+			for _, fn := range fns {
+				if err := fn(mode); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// projectprofileDescIsActive is the schema descriptor for is_active field.
+	projectprofileDescIsActive := projectprofileFields[4].Descriptor()
+	// projectprofile.DefaultIsActive holds the default value on creation for the is_active field.
+	projectprofile.DefaultIsActive = projectprofileDescIsActive.Default.(bool)
+	projectprofilebindingFields := schema.ProjectProfileBinding{}.Fields()
+	_ = projectprofilebindingFields
+	// projectprofilebindingDescResourceType is the schema descriptor for resource_type field.
+	projectprofilebindingDescResourceType := projectprofilebindingFields[1].Descriptor()
+	// projectprofilebinding.ResourceTypeValidator is a validator for the "resource_type" field. It is called by the builders before save.
+	projectprofilebinding.ResourceTypeValidator = func() func(string) error {
+		validators := projectprofilebindingDescResourceType.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(resource_type string) error {
+			for _, fn := range fns {
+				if err := fn(resource_type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// projectprofilebindingDescCreatedAt is the schema descriptor for created_at field.
+	projectprofilebindingDescCreatedAt := projectprofilebindingFields[3].Descriptor()
+	// projectprofilebinding.DefaultCreatedAt holds the default value on creation for the created_at field.
+	projectprofilebinding.DefaultCreatedAt = projectprofilebindingDescCreatedAt.Default.(func() time.Time)
+	// projectprofilebindingDescMetadata is the schema descriptor for metadata field.
+	projectprofilebindingDescMetadata := projectprofilebindingFields[4].Descriptor()
+	// projectprofilebinding.DefaultMetadata holds the default value on creation for the metadata field.
+	projectprofilebinding.DefaultMetadata = projectprofilebindingDescMetadata.Default.(func() map[string]interface{})
 	promocodeFields := schema.PromoCode{}.Fields()
 	_ = promocodeFields
 	// promocodeDescCode is the schema descriptor for code field.

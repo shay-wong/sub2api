@@ -28,6 +28,8 @@ const (
 	FieldScopes = "scopes"
 	// FieldIsOwner holds the string denoting the is_owner field in the database.
 	FieldIsOwner = "is_owner"
+	// FieldStatus holds the string denoting the status field in the database.
+	FieldStatus = "status"
 	// EdgeProject holds the string denoting the project edge name in mutations.
 	EdgeProject = "project"
 	// EdgeUser holds the string denoting the user edge name in mutations.
@@ -60,6 +62,7 @@ var Columns = []string{
 	FieldRole,
 	FieldScopes,
 	FieldIsOwner,
+	FieldStatus,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -87,6 +90,10 @@ var (
 	DefaultScopes []string
 	// DefaultIsOwner holds the default value on creation for the "is_owner" field.
 	DefaultIsOwner bool
+	// DefaultStatus holds the default value on creation for the "status" field.
+	DefaultStatus string
+	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	StatusValidator func(string) error
 )
 
 // OrderOption defines the ordering options for the ProjectMember queries.
@@ -125,6 +132,11 @@ func ByRole(opts ...sql.OrderTermOption) OrderOption {
 // ByIsOwner orders the results by the is_owner field.
 func ByIsOwner(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIsOwner, opts...).ToFunc()
+}
+
+// ByStatus orders the results by the status field.
+func ByStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldStatus, opts...).ToFunc()
 }
 
 // ByProjectField orders the results by project field.

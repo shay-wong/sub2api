@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -125,7 +124,7 @@ func TestDashboardHandler_GetUserUsageTrend_UsesCache(t *testing.T) {
 	require.Equal(t, int32(1), repo.usersTrendCalls.Load())
 }
 
-func TestDashboardSnapshotV2OperatorCannotIncludeUsersTrend(t *testing.T) {
+func TestDashboardSnapshotV2RejectsLegacyOperatorRole(t *testing.T) {
 	t.Cleanup(resetDashboardReadCachesForTest)
 	resetDashboardReadCachesForTest()
 
@@ -150,13 +149,13 @@ func TestDashboardSnapshotV2OperatorCannotIncludeUsersTrend(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
 	require.Equal(t, int32(0), repo.usersTrendCalls.Load())
-	require.NotContains(t, rec.Body.String(), "users_trend")
 	require.NotContains(t, rec.Body.String(), "cache@test.dev")
 }
 
-func TestDashboardSnapshotV2OperatorEmptyScopeDoesNotReuseAdminCache(t *testing.T) {
+func TestDashboardSnapshotV2LegacyOperatorDoesNotReuseAdminCache(t *testing.T) {
 	t.Cleanup(resetDashboardReadCachesForTest)
 	resetDashboardReadCachesForTest()
 
@@ -197,36 +196,19 @@ func TestDashboardSnapshotV2OperatorEmptyScopeDoesNotReuseAdminCache(t *testing.
 	operatorReq.Header.Set("X-Test-Role", service.RoleOperator)
 	operatorRec := httptest.NewRecorder()
 	router.ServeHTTP(operatorRec, operatorReq)
-	require.Equal(t, http.StatusOK, operatorRec.Code)
-	require.Equal(t, "miss", operatorRec.Header().Get("X-Snapshot-Cache"))
-
-	var resp struct {
-		Data struct {
-			Stats struct {
-				TotalAccounts int64 `json:"total_accounts"`
-			} `json:"stats"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(operatorRec.Body.Bytes(), &resp))
-	require.Equal(t, int64(0), resp.Data.Stats.TotalAccounts)
+	require.Equal(t, http.StatusForbidden, operatorRec.Code)
+	require.Empty(t, operatorRec.Header().Get("X-Snapshot-Cache"))
+	require.Contains(t, operatorRec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
 }
 
-func TestDashboardSnapshotV2OperatorStatsUsesScopedAccounts(t *testing.T) {
+func TestDashboardSnapshotV2LegacyOperatorStatsRejectedBeforeAccountScope(t *testing.T) {
 	t.Cleanup(resetDashboardReadCachesForTest)
 	resetDashboardReadCachesForTest()
 
 	gin.SetMode(gin.TestMode)
-	now := time.Now().UTC()
-	rateLimitedAt := now.Add(-time.Minute)
-	rateLimitResetAt := now.Add(time.Hour)
-	overloadUntil := now.Add(time.Hour)
 	adminSvc := newStubAdminService()
 	adminSvc.accounts = []service.Account{
 		{ID: 1, Name: "normal", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{10}},
-		{ID: 2, Name: "error", Status: service.StatusError, GroupIDs: []int64{10}},
-		{ID: 3, Name: "rate-limited", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{20}, RateLimitedAt: &rateLimitedAt, RateLimitResetAt: &rateLimitResetAt},
-		{ID: 4, Name: "overload", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{20}, OverloadUntil: &overloadUntil},
-		{ID: 5, Name: "hidden", Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{30}},
 	}
 	repo := &dashboardUsageRepoCacheProbe{}
 	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
@@ -249,22 +231,6 @@ func TestDashboardSnapshotV2OperatorStatsUsesScopedAccounts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data struct {
-			Stats struct {
-				TotalAccounts     int64 `json:"total_accounts"`
-				NormalAccounts    int64 `json:"normal_accounts"`
-				ErrorAccounts     int64 `json:"error_accounts"`
-				RateLimitAccounts int64 `json:"ratelimit_accounts"`
-				OverloadAccounts  int64 `json:"overload_accounts"`
-			} `json:"stats"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, int64(4), resp.Data.Stats.TotalAccounts)
-	require.Equal(t, int64(3), resp.Data.Stats.NormalAccounts)
-	require.Equal(t, int64(1), resp.Data.Stats.ErrorAccounts)
-	require.Equal(t, int64(1), resp.Data.Stats.RateLimitAccounts)
-	require.Equal(t, int64(1), resp.Data.Stats.OverloadAccounts)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
 }

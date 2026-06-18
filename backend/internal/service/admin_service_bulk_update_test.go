@@ -204,6 +204,49 @@ func TestAdminService_BulkUpdateAccounts_NilGroupRepoReturnsError(t *testing.T) 
 	require.Contains(t, err.Error(), "group repository not configured")
 }
 
+func TestAdminServiceCreateAccount_ProjectContextRejectsOutOfScopeGroupsBeforeCreate(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{}
+	groupRepo := &groupRepoStubForAdmin{getErr: ErrGroupNotFound}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		groupRepo:   groupRepo,
+	}
+
+	_, err := svc.CreateAccount(WithProjectID(context.Background(), 7), &CreateAccountInput{
+		Name:                  "blocked",
+		Platform:              PlatformAnthropic,
+		Type:                  AccountTypeOAuth,
+		GroupIDs:              []int64{99},
+		SkipMixedChannelCheck: true,
+	})
+
+	require.ErrorIs(t, err, ErrGroupNotFound)
+	require.Empty(t, repo.bulkUpdateIDs)
+	require.Empty(t, repo.bindGroupsCalls)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ProjectContextRequiresVisibleExplicitAccounts(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		getByIDsAccounts: []*Account{
+			{ID: 1, Platform: PlatformAnthropic},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	schedulable := true
+	result, err := svc.BulkUpdateAccounts(WithProjectID(context.Background(), 7), &BulkUpdateAccountsInput{
+		AccountIDs:  []int64{1, 2},
+		Schedulable: &schedulable,
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrAccountNotFound)
+	require.True(t, repo.getByIDsCalled)
+	require.Equal(t, []int64{1, 2}, repo.getByIDsIDs)
+	require.Empty(t, repo.bulkUpdateIDs)
+	require.Empty(t, repo.bindGroupsCalls)
+}
+
 // TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingConflict verifies
 // that the global pre-check detects a conflict with existing group members and returns an
 // error before any DB write is performed.

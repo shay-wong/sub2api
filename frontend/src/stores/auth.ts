@@ -91,12 +91,8 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value?.role === 'super_admin'
   })
 
-  const isOperator = computed(() => {
-    return user.value?.role === 'operator'
-  })
-
   const hasUserAccess = computed(() => {
-    return user.value?.role === 'super_admin' || user.value?.role === 'admin' || user.value?.role === 'operator' || user.value?.role === 'user'
+    return user.value?.role === 'super_admin' || user.value?.role === 'admin' || user.value?.role === 'user'
   })
 
   const canAccessAdminConsole = computed(() => {
@@ -514,7 +510,6 @@ export const useAuthStore = defineStore('auth', () => {
     // Computed
     isAuthenticated,
     isAdmin,
-    isOperator,
     hasUserAccess,
     canAccessAdminConsole,
     isSimpleMode,

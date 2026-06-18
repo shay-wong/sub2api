@@ -14,11 +14,12 @@ import (
 // UserAttributeHandler handles user attribute management
 type UserAttributeHandler struct {
 	attrService *service.UserAttributeService
+	adminSvc    service.AdminService
 }
 
 // NewUserAttributeHandler creates a new handler
-func NewUserAttributeHandler(attrService *service.UserAttributeService) *UserAttributeHandler {
-	return &UserAttributeHandler{attrService: attrService}
+func NewUserAttributeHandler(attrService *service.UserAttributeService, adminSvc service.AdminService) *UserAttributeHandler {
+	return &UserAttributeHandler{attrService: attrService, adminSvc: adminSvc}
 }
 
 // --- Request/Response DTOs ---
@@ -127,6 +128,27 @@ func valueToResponse(val *service.UserAttributeValue) *AttributeValueResponse {
 		CreatedAt:   val.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:   val.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
+}
+
+func (h *UserAttributeHandler) ensureUserVisible(c *gin.Context, userID int64) bool {
+	if h.adminSvc == nil {
+		response.InternalError(c, "Admin service unavailable")
+		return false
+	}
+	if _, err := h.adminSvc.GetUser(c.Request.Context(), userID); err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	return true
+}
+
+func (h *UserAttributeHandler) ensureUsersVisible(c *gin.Context, userIDs []int64) bool {
+	for _, userID := range userIDs {
+		if !h.ensureUserVisible(c, userID) {
+			return false
+		}
+	}
+	return true
 }
 
 // --- Handlers ---
@@ -264,6 +286,9 @@ func (h *UserAttributeHandler) GetUserAttributes(c *gin.Context) {
 		response.BadRequest(c, "Invalid user ID")
 		return
 	}
+	if !h.ensureUserVisible(c, userID) {
+		return
+	}
 
 	values, err := h.attrService.GetUserAttributes(c.Request.Context(), userID)
 	if err != nil {
@@ -285,6 +310,9 @@ func (h *UserAttributeHandler) UpdateUserAttributes(c *gin.Context) {
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	if !h.ensureUserVisible(c, userID) {
 		return
 	}
 
@@ -334,6 +362,9 @@ func (h *UserAttributeHandler) GetBatchUserAttributes(c *gin.Context) {
 	userIDs := normalizeInt64IDList(req.UserIDs)
 	if len(userIDs) == 0 {
 		response.Success(c, BatchUserAttributesResponse{Attributes: map[int64]map[int64]string{}})
+		return
+	}
+	if !h.ensureUsersVisible(c, userIDs) {
 		return
 	}
 

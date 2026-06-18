@@ -107,6 +107,29 @@ describe('API Client', () => {
       const config = adapter.mock.calls[0][0]
       expect(config.withCredentials).toBe(true)
     })
+
+    it('项目上下文只附加到业务请求，不污染认证和公共配置请求', async () => {
+      localStorage.setItem('sub2api_selected_project_id', '10')
+
+      const adapter = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: {} },
+        headers: {},
+        config: {},
+        statusText: 'OK',
+      })
+      apiClient.defaults.adapter = adapter
+
+      await apiClient.get('/auth/me')
+      await apiClient.post('/auth/logout', { refresh_token: 'rt' })
+      await apiClient.get('/settings/public')
+      await apiClient.get('/admin/users')
+
+      expect(adapter.mock.calls[0][0].headers.get('X-Project-ID')).toBeFalsy()
+      expect(adapter.mock.calls[1][0].headers.get('X-Project-ID')).toBeFalsy()
+      expect(adapter.mock.calls[2][0].headers.get('X-Project-ID')).toBeFalsy()
+      expect(adapter.mock.calls[3][0].headers.get('X-Project-ID')).toBe('10')
+    })
   })
 
   // --- 响应拦截器 ---

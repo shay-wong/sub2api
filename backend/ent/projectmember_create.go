@@ -98,6 +98,20 @@ func (_c *ProjectMemberCreate) SetNillableIsOwner(v *bool) *ProjectMemberCreate 
 	return _c
 }
 
+// SetStatus sets the "status" field.
+func (_c *ProjectMemberCreate) SetStatus(v string) *ProjectMemberCreate {
+	_c.mutation.SetStatus(v)
+	return _c
+}
+
+// SetNillableStatus sets the "status" field if the given value is not nil.
+func (_c *ProjectMemberCreate) SetNillableStatus(v *string) *ProjectMemberCreate {
+	if v != nil {
+		_c.SetStatus(*v)
+	}
+	return _c
+}
+
 // SetProject sets the "project" edge to the Project entity.
 func (_c *ProjectMemberCreate) SetProject(v *Project) *ProjectMemberCreate {
 	return _c.SetProjectID(v.ID)
@@ -163,6 +177,10 @@ func (_c *ProjectMemberCreate) defaults() {
 		v := projectmember.DefaultIsOwner
 		_c.mutation.SetIsOwner(v)
 	}
+	if _, ok := _c.mutation.Status(); !ok {
+		v := projectmember.DefaultStatus
+		_c.mutation.SetStatus(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -192,6 +210,14 @@ func (_c *ProjectMemberCreate) check() error {
 	}
 	if _, ok := _c.mutation.IsOwner(); !ok {
 		return &ValidationError{Name: "is_owner", err: errors.New(`ent: missing required field "ProjectMember.is_owner"`)}
+	}
+	if _, ok := _c.mutation.Status(); !ok {
+		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "ProjectMember.status"`)}
+	}
+	if v, ok := _c.mutation.Status(); ok {
+		if err := projectmember.StatusValidator(v); err != nil {
+			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "ProjectMember.status": %w`, err)}
+		}
 	}
 	if len(_c.mutation.ProjectIDs()) == 0 {
 		return &ValidationError{Name: "project", err: errors.New(`ent: missing required edge "ProjectMember.project"`)}
@@ -245,6 +271,10 @@ func (_c *ProjectMemberCreate) createSpec() (*ProjectMember, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.IsOwner(); ok {
 		_spec.SetField(projectmember.FieldIsOwner, field.TypeBool, value)
 		_node.IsOwner = value
+	}
+	if value, ok := _c.mutation.Status(); ok {
+		_spec.SetField(projectmember.FieldStatus, field.TypeString, value)
+		_node.Status = value
 	}
 	if nodes := _c.mutation.ProjectIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -404,6 +434,18 @@ func (u *ProjectMemberUpsert) UpdateIsOwner() *ProjectMemberUpsert {
 	return u
 }
 
+// SetStatus sets the "status" field.
+func (u *ProjectMemberUpsert) SetStatus(v string) *ProjectMemberUpsert {
+	u.Set(projectmember.FieldStatus, v)
+	return u
+}
+
+// UpdateStatus sets the "status" field to the value that was provided on create.
+func (u *ProjectMemberUpsert) UpdateStatus() *ProjectMemberUpsert {
+	u.SetExcluded(projectmember.FieldStatus)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -530,6 +572,20 @@ func (u *ProjectMemberUpsertOne) SetIsOwner(v bool) *ProjectMemberUpsertOne {
 func (u *ProjectMemberUpsertOne) UpdateIsOwner() *ProjectMemberUpsertOne {
 	return u.Update(func(s *ProjectMemberUpsert) {
 		s.UpdateIsOwner()
+	})
+}
+
+// SetStatus sets the "status" field.
+func (u *ProjectMemberUpsertOne) SetStatus(v string) *ProjectMemberUpsertOne {
+	return u.Update(func(s *ProjectMemberUpsert) {
+		s.SetStatus(v)
+	})
+}
+
+// UpdateStatus sets the "status" field to the value that was provided on create.
+func (u *ProjectMemberUpsertOne) UpdateStatus() *ProjectMemberUpsertOne {
+	return u.Update(func(s *ProjectMemberUpsert) {
+		s.UpdateStatus()
 	})
 }
 
@@ -825,6 +881,20 @@ func (u *ProjectMemberUpsertBulk) SetIsOwner(v bool) *ProjectMemberUpsertBulk {
 func (u *ProjectMemberUpsertBulk) UpdateIsOwner() *ProjectMemberUpsertBulk {
 	return u.Update(func(s *ProjectMemberUpsert) {
 		s.UpdateIsOwner()
+	})
+}
+
+// SetStatus sets the "status" field.
+func (u *ProjectMemberUpsertBulk) SetStatus(v string) *ProjectMemberUpsertBulk {
+	return u.Update(func(s *ProjectMemberUpsert) {
+		s.SetStatus(v)
+	})
+}
+
+// UpdateStatus sets the "status" field to the value that was provided on create.
+func (u *ProjectMemberUpsertBulk) UpdateStatus() *ProjectMemberUpsertBulk {
+	return u.Update(func(s *ProjectMemberUpsert) {
+		s.UpdateStatus()
 	})
 }
 

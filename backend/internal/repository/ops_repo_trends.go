@@ -199,14 +199,8 @@ ORDER BY bucket ASC`
 
 func (r *opsRepository) getThroughputBreakdownByPlatform(ctx context.Context, start, end time.Time) ([]*service.OpsThroughputPlatformBreakdownItem, error) {
 	args := []any{start, end}
-	usageProjectClause := ""
-	errorProjectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectPlaceholder := "$" + itoa(len(args))
-		usageProjectClause = " AND ul.project_id = " + projectPlaceholder
-		errorProjectClause = " AND project_id = " + projectPlaceholder
-	}
+	usageProjectClause := buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
+	errorProjectClause := buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
 
 	q := `
 	WITH usage_totals AS (
@@ -282,14 +276,8 @@ func (r *opsRepository) getThroughputTopGroupsByPlatform(ctx context.Context, st
 	}
 
 	args := []any{start, end, platform}
-	usageProjectClause := ""
-	errorProjectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectPlaceholder := "$" + itoa(len(args))
-		usageProjectClause = " AND ul.project_id = " + projectPlaceholder
-		errorProjectClause = " AND project_id = " + projectPlaceholder
-	}
+	usageProjectClause := buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
+	errorProjectClause := buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
 	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `
@@ -390,12 +378,8 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 	}
 	projectClauseUsage := ""
 	projectClauseError := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectPlaceholder := "$" + itoa(len(args))
-		projectClauseUsage = " AND ul.project_id = " + projectPlaceholder
-		projectClauseError = " AND project_id = " + projectPlaceholder
-	}
+	projectClauseUsage = buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
+	projectClauseError = buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
 	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `

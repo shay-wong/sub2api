@@ -42,10 +42,15 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			return
 		}
 
+		projectID, ok := resolveAPIKeyRequestProjectGoogle(c, apiKeyService, apiKey)
+		if !ok {
+			return
+		}
+
 		// 同 api_key_auth.go：早退中断前也写入 Ops 回退 key，便于错误日志展示
 		// user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
-		setProjectContext(c, apiKey.ProjectID)
+		setProjectContext(c, projectID)
 
 		if !apiKey.IsActive() {
 			abortWithGoogleError(c, 401, "API key is disabled")
@@ -165,6 +170,42 @@ func extractAPIKeyForGoogle(c *gin.Context) string {
 
 func allowGoogleQueryKey(path string) bool {
 	return strings.HasPrefix(path, "/v1beta") || strings.HasPrefix(path, "/antigravity/v1beta")
+}
+
+func resolveAPIKeyRequestProjectGoogle(c *gin.Context, apiKeyService *service.APIKeyService, apiKey *service.APIKey) (int64, bool) {
+	if apiKey == nil {
+		return 0, true
+	}
+	requestedProjectID, ok := parseRequestedProjectID(c)
+	if !ok {
+		return 0, false
+	}
+	effectiveProjectID := requestedProjectID
+	if effectiveProjectID <= 0 {
+		effectiveProjectID = apiKey.ProjectID
+	}
+	if effectiveProjectID <= 0 {
+		return apiKey.ProjectID, true
+	}
+	if apiKeyService == nil {
+		abortWithGoogleError(c, 500, "Failed to validate API key")
+		return 0, false
+	}
+	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
+	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
+	if err != nil {
+		if errors.Is(err, service.ErrAPIKeyNotFound) {
+			abortWithGoogleError(c, 401, "Invalid API key")
+			return 0, false
+		}
+		abortWithGoogleError(c, 500, "Failed to validate API key")
+		return 0, false
+	}
+	if visible == nil || visible.ID != apiKey.ID {
+		abortWithGoogleError(c, 401, "Invalid API key")
+		return 0, false
+	}
+	return effectiveProjectID, true
 }
 
 func abortWithGoogleError(c *gin.Context, status int, message string) {

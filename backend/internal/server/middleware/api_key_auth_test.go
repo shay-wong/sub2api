@@ -603,6 +603,208 @@ func TestAPIKeyAuthGoogleSetsOpsFallbackKeyOnEarlyAbort(t *testing.T) {
 	require.Equal(t, user.ID, fallback.User.ID)
 }
 
+func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "profile-visible-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	var checkedProjectID int64
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+			require.Equal(t, apiKey.ID, id)
+			projectID, ok := service.ProjectIDFromContext(ctx)
+			require.True(t, ok)
+			checkedProjectID = projectID
+			clone := *apiKey
+			clone.ProjectID = projectID
+			return &clone, nil
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		c.JSON(http.StatusOK, gin.H{"project_id": projectID})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	req.Header.Set("X-Project-ID", "2")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(2), checkedProjectID)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, float64(2), body["project_id"])
+}
+
+func TestAPIKeyAuthValidatesHomeProjectProfileVisibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "home-profile-visible-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	var checkedProjectID int64
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+			require.Equal(t, apiKey.ID, id)
+			projectID, ok := service.ProjectIDFromContext(ctx)
+			require.True(t, ok)
+			checkedProjectID = projectID
+			clone := *apiKey
+			return &clone, nil
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := newAuthTestRouter(apiKeyService, nil, cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(1), checkedProjectID)
+}
+
+func TestAPIKeyAuthRejectsHomeProjectWhenAPIKeyIsNotProfileVisible(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "home-profile-hidden-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+			require.Equal(t, apiKey.ID, id)
+			return nil, service.ErrAPIKeyNotFound
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := newAuthTestRouter(apiKeyService, nil, cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	requireAPIKeyAuthError(t, w, "INVALID_API_KEY", "Invalid API key")
+}
+
+func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		Key:       "profile-hidden-key",
+		Status:    service.StatusActive,
+		User:      user,
+	}
+	apiKeyRepo := &stubApiKeyRepo{
+		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			if key != apiKey.Key {
+				return nil, service.ErrAPIKeyNotFound
+			}
+			clone := *apiKey
+			return &clone, nil
+		},
+		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+			require.Equal(t, apiKey.ID, id)
+			return nil, service.ErrAPIKeyNotFound
+		},
+	}
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	router := newAuthTestRouter(apiKeyService, nil, cfg)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	req.Header.Set("X-Project-ID", "2")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	requireAPIKeyAuthError(t, w, "INVALID_API_KEY", "Invalid API key")
+}
+
 func TestRequireGroupAssignmentMarksUngroupedKeyBusinessLimited(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1020,6 +1222,7 @@ func requireAPIKeyAuthError(t *testing.T, w *httptest.ResponseRecorder, code, me
 
 type stubApiKeyRepo struct {
 	getByKey       func(ctx context.Context, key string) (*service.APIKey, error)
+	getByID        func(ctx context.Context, id int64) (*service.APIKey, error)
 	updateLastUsed func(ctx context.Context, id int64, usedAt time.Time) error
 }
 
@@ -1028,6 +1231,9 @@ func (r *stubApiKeyRepo) Create(ctx context.Context, key *service.APIKey) error 
 }
 
 func (r *stubApiKeyRepo) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
+	if r.getByID != nil {
+		return r.getByID(ctx, id)
+	}
 	return nil, errors.New("not implemented")
 }
 

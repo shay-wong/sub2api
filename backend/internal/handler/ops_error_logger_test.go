@@ -973,3 +973,15 @@ func TestGetOpsAPIKeyPrefersPrimaryContextKey(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, int64(1), got.ID, "已鉴权请求应优先使用正式 api key")
 }
+
+func TestResolveOpsProjectIDPrefersRequestProjectContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
+	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 2))
+
+	apiKey := &service.APIKey{ID: 100, ProjectID: 1}
+
+	require.Equal(t, int64(2), resolveOpsProjectID(c, apiKey))
+}

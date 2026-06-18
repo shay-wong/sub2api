@@ -788,7 +788,7 @@ const appStore = useAppStore()
 type UserRoleFilter = '' | GlobalUserRole
 
 const assignableGlobalRoles: readonly GlobalUserRole[] = ['super_admin', 'user']
-const displayableUserRoles: readonly UserRole[] = ['super_admin', 'admin', 'operator', 'user']
+const displayableUserRoles: readonly UserRole[] = ['super_admin', 'admin', 'user']
 const roleFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.users.allRoles') },
   ...assignableGlobalRoles.map((role) => ({ value: role, label: roleLabel(role) }))
@@ -802,8 +802,6 @@ const roleBadgeClass = (role?: string) => {
       return 'badge-danger'
     case 'admin':
       return 'badge-purple'
-    case 'operator':
-      return 'badge-primary'
     case 'user':
       return 'badge-gray'
     default:

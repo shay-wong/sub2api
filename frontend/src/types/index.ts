@@ -73,7 +73,7 @@ export interface UserProject {
 }
 
 export type GlobalUserRole = 'super_admin' | 'user'
-export type LegacyUserRole = 'admin' | 'operator'
+export type LegacyUserRole = 'admin'
 export type UserRole = GlobalUserRole | LegacyUserRole
 export type ProjectRole = 'super_admin' | 'admin' | 'user'
 

@@ -193,3 +193,34 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
     expect(opts.map((o) => o.value)).toEqual([null, 'claude-3', 'gpt-4o'])
   })
 })
+
+describe('UsageFilters — cleanup action visibility', () => {
+  it('shows cleanup by default and hides it when disabled', () => {
+    const visible = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        modelOptions: [],
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+
+    expect(visible.text()).toContain('Cleanup')
+
+    const hidden = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showCleanup: false,
+        modelOptions: [],
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+
+    expect(hidden.text()).not.toContain('Cleanup')
+  })
+})

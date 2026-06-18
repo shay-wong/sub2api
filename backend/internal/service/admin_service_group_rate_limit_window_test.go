@@ -152,4 +152,23 @@ func TestAdminService_ResetUserGroupRateLimitWindow(t *testing.T) {
 		_, err = svc.ResetUserGroupRateLimitWindow(context.Background(), 7, 2)
 		require.ErrorIs(t, err, repoErr)
 	})
+
+	t.Run("project context rejects out-of-scope group before reset", func(t *testing.T) {
+		repo := &userGroupRateLimitWindowRepoStubForAdmin{}
+		userRepo := &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 7, Email: "visible@example.com"}}}
+		groupRepo := &scopedAdminGroupRepoStub{groups: map[int64]*Group{}}
+		svc := &adminServiceImpl{
+			userRepo:               userRepo,
+			groupRepo:              groupRepo,
+			userGroupRateLimitRepo: repo,
+		}
+
+		_, err := svc.ResetUserGroupRateLimitWindow(WithProjectID(context.Background(), 7), 7, 2)
+
+		require.ErrorIs(t, err, ErrGroupNotFound)
+		require.Equal(t, []int64{2}, groupRepo.calls)
+		require.Zero(t, repo.resetUserID)
+		require.Len(t, userRepo.listCalls, 1)
+		require.Equal(t, int64(7), userRepo.listCalls[0].ID)
+	})
 }

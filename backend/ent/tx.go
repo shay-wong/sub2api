@@ -56,6 +56,10 @@ type Tx struct {
 	Project *ProjectClient
 	// ProjectMember is the client for interacting with the ProjectMember builders.
 	ProjectMember *ProjectMemberClient
+	// ProjectProfile is the client for interacting with the ProjectProfile builders.
+	ProjectProfile *ProjectProfileClient
+	// ProjectProfileBinding is the client for interacting with the ProjectProfileBinding builders.
+	ProjectProfileBinding *ProjectProfileBindingClient
 	// PromoCode is the client for interacting with the PromoCode builders.
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
@@ -242,6 +246,8 @@ func (tx *Tx) init() {
 	tx.PendingAuthSession = NewPendingAuthSessionClient(tx.config)
 	tx.Project = NewProjectClient(tx.config)
 	tx.ProjectMember = NewProjectMemberClient(tx.config)
+	tx.ProjectProfile = NewProjectProfileClient(tx.config)
+	tx.ProjectProfileBinding = NewProjectProfileBindingClient(tx.config)
 	tx.PromoCode = NewPromoCodeClient(tx.config)
 	tx.PromoCodeUsage = NewPromoCodeUsageClient(tx.config)
 	tx.Proxy = NewProxyClient(tx.config)

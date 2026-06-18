@@ -44,6 +44,8 @@ type Project struct {
 type ProjectEdges struct {
 	// Members holds the value of the members edge.
 	Members []*ProjectMember `json:"members,omitempty"`
+	// AppProfiles holds the value of the app_profiles edge.
+	AppProfiles []*ProjectProfile `json:"app_profiles,omitempty"`
 	// Accounts holds the value of the accounts edge.
 	Accounts []*Account `json:"accounts,omitempty"`
 	// APIKeys holds the value of the api_keys edge.
@@ -54,7 +56,7 @@ type ProjectEdges struct {
 	UsageLogs []*UsageLog `json:"usage_logs,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [6]bool
 }
 
 // MembersOrErr returns the Members value or an error if the edge
@@ -66,10 +68,19 @@ func (e ProjectEdges) MembersOrErr() ([]*ProjectMember, error) {
 	return nil, &NotLoadedError{edge: "members"}
 }
 
+// AppProfilesOrErr returns the AppProfiles value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProjectEdges) AppProfilesOrErr() ([]*ProjectProfile, error) {
+	if e.loadedTypes[1] {
+		return e.AppProfiles, nil
+	}
+	return nil, &NotLoadedError{edge: "app_profiles"}
+}
+
 // AccountsOrErr returns the Accounts value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProjectEdges) AccountsOrErr() ([]*Account, error) {
-	if e.loadedTypes[1] {
+	if e.loadedTypes[2] {
 		return e.Accounts, nil
 	}
 	return nil, &NotLoadedError{edge: "accounts"}
@@ -78,7 +89,7 @@ func (e ProjectEdges) AccountsOrErr() ([]*Account, error) {
 // APIKeysOrErr returns the APIKeys value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProjectEdges) APIKeysOrErr() ([]*APIKey, error) {
-	if e.loadedTypes[2] {
+	if e.loadedTypes[3] {
 		return e.APIKeys, nil
 	}
 	return nil, &NotLoadedError{edge: "api_keys"}
@@ -87,7 +98,7 @@ func (e ProjectEdges) APIKeysOrErr() ([]*APIKey, error) {
 // GroupsOrErr returns the Groups value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProjectEdges) GroupsOrErr() ([]*Group, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[4] {
 		return e.Groups, nil
 	}
 	return nil, &NotLoadedError{edge: "groups"}
@@ -96,7 +107,7 @@ func (e ProjectEdges) GroupsOrErr() ([]*Group, error) {
 // UsageLogsOrErr returns the UsageLogs value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProjectEdges) UsageLogsOrErr() ([]*UsageLog, error) {
-	if e.loadedTypes[4] {
+	if e.loadedTypes[5] {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
@@ -204,6 +215,11 @@ func (_m *Project) Value(name string) (ent.Value, error) {
 // QueryMembers queries the "members" edge of the Project entity.
 func (_m *Project) QueryMembers() *ProjectMemberQuery {
 	return NewProjectClient(_m.config).QueryMembers(_m)
+}
+
+// QueryAppProfiles queries the "app_profiles" edge of the Project entity.
+func (_m *Project) QueryAppProfiles() *ProjectProfileQuery {
+	return NewProjectClient(_m.config).QueryAppProfiles(_m)
 }
 
 // QueryAccounts queries the "accounts" edge of the Project entity.

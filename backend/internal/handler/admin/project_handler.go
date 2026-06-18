@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -18,9 +19,15 @@ func NewProjectHandler(projectService *service.ProjectService) *ProjectHandler {
 }
 
 type createProjectRequest struct {
-	Name        string  `json:"name" binding:"required"`
-	Slug        string  `json:"slug" binding:"required"`
-	Description *string `json:"description"`
+	Name            string  `json:"name" binding:"required"`
+	Slug            string  `json:"slug" binding:"required"`
+	Description     *string `json:"description"`
+	ProfileMode     string  `json:"profile_mode"`
+	UserIDs         []int64 `json:"user_ids"`
+	GroupIDs        []int64 `json:"group_ids"`
+	AccountIDs      []int64 `json:"account_ids"`
+	SubscriptionIDs []int64 `json:"subscription_ids"`
+	APIKeyIDs       []int64 `json:"api_key_ids"`
 }
 
 type updateProjectRequest struct {
@@ -30,15 +37,23 @@ type updateProjectRequest struct {
 }
 
 type setProjectMemberRequest struct {
-	Role    string `json:"role" binding:"required"`
-	IsOwner bool   `json:"is_owner"`
+	Role    string  `json:"role" binding:"required"`
+	IsOwner bool    `json:"is_owner"`
+	Status  *string `json:"status"`
 }
 
-type moveProjectResourcesRequest struct {
-	AccountIDs       []int64 `json:"account_ids"`
-	APIKeyIDs        []int64 `json:"api_key_ids"`
-	GroupIDs         []int64 `json:"group_ids"`
-	MoveUsageHistory *bool   `json:"move_usage_history"`
+type projectProfileRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Mode        *string `json:"mode"`
+}
+
+type setProjectProfileBindingsRequest struct {
+	UserIDs         []int64 `json:"user_ids"`
+	GroupIDs        []int64 `json:"group_ids"`
+	AccountIDs      []int64 `json:"account_ids"`
+	SubscriptionIDs []int64 `json:"subscription_ids"`
+	APIKeyIDs       []int64 `json:"api_key_ids"`
 }
 
 func (h *ProjectHandler) List(c *gin.Context) {
@@ -46,7 +61,14 @@ func (h *ProjectHandler) List(c *gin.Context) {
 		response.InternalError(c, "Project service unavailable")
 		return
 	}
-	projects, err := h.projectService.ListProjects(c.Request.Context())
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "Authorization required")
+		return
+	}
+	role, _ := middleware.GetUserRoleFromContext(c)
+	user := &service.User{ID: subject.UserID, Role: role}
+	projects, err := h.projectService.ListUserProjects(c.Request.Context(), user)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -74,6 +96,14 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		Slug:        req.Slug,
 		Description: req.Description,
 		OwnerUserID: subject.UserID,
+		ProfileMode: req.ProfileMode,
+		Bindings: service.ProjectProfileBindingInput{
+			UserIDs:         req.UserIDs,
+			GroupIDs:        req.GroupIDs,
+			AccountIDs:      req.AccountIDs,
+			SubscriptionIDs: req.SubscriptionIDs,
+			APIKeyIDs:       req.APIKeyIDs,
+		},
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -117,6 +147,9 @@ func (h *ProjectHandler) ListMembers(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
 	members, err := h.projectService.ListProjectMembers(c.Request.Context(), projectID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -134,6 +167,9 @@ func (h *ProjectHandler) SetMember(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
 	userID, ok := parseUserIDParam(c)
 	if !ok {
 		return
@@ -143,16 +179,287 @@ func (h *ProjectHandler) SetMember(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if !service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		allowed, err := h.canProjectAdminSetMember(c.Request.Context(), projectID, userID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if !allowed {
+			response.Forbidden(c, "Project access forbidden")
+			return
+		}
+	}
 	member, err := h.projectService.SetProjectMember(c.Request.Context(), projectID, service.ProjectMemberInput{
 		UserID:  userID,
 		Role:    req.Role,
 		IsOwner: req.IsOwner,
+		Status:  req.Status,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, member)
+}
+
+func (h *ProjectHandler) ListProfiles(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profiles, err := h.projectService.ListProjectProfiles(c.Request.Context(), projectID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, profiles)
+}
+
+func (h *ProjectHandler) CreateProfile(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	var req projectProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	profile, err := h.projectService.CreateProjectProfile(c.Request.Context(), projectID, service.ProjectProfileInput{
+		Name:        req.Name,
+		Description: req.Description,
+		Mode:        req.Mode,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, profile)
+}
+
+func (h *ProjectHandler) UpdateProfile(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profileID, ok := parseProfileIDParam(c)
+	if !ok {
+		return
+	}
+	var req projectProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	profile, err := h.projectService.UpdateProjectProfile(c.Request.Context(), projectID, profileID, service.ProjectProfileInput{
+		Name:        req.Name,
+		Description: req.Description,
+		Mode:        req.Mode,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, profile)
+}
+
+func (h *ProjectHandler) DeleteProfile(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profileID, ok := parseProfileIDParam(c)
+	if !ok {
+		return
+	}
+	if err := h.projectService.DeleteProjectProfile(c.Request.Context(), projectID, profileID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": "success"})
+}
+
+func (h *ProjectHandler) ActivateProfile(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profileID, ok := parseProfileIDParam(c)
+	if !ok {
+		return
+	}
+	profile, err := h.projectService.ActivateProjectProfile(c.Request.Context(), projectID, profileID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, profile)
+}
+
+func (h *ProjectHandler) GetProfileBindings(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profileID, ok := parseProfileIDParam(c)
+	if !ok {
+		return
+	}
+	bindings, err := h.projectService.GetProjectProfileBindings(c.Request.Context(), projectID, profileID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, bindings)
+}
+
+func (h *ProjectHandler) SetProfileBindings(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profileID, ok := parseProfileIDParam(c)
+	if !ok {
+		return
+	}
+	var req setProjectProfileBindingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		mode, err := h.projectProfileMode(c, projectID, profileID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		if mode == service.ProjectProfileModeUnrestricted {
+			response.Forbidden(c, "Project access forbidden")
+			return
+		}
+		if err := h.projectService.ValidateProjectProfileBindingScope(c.Request.Context(), projectID, service.ProjectProfileBindingInput{
+			UserIDs:         req.UserIDs,
+			GroupIDs:        req.GroupIDs,
+			AccountIDs:      req.AccountIDs,
+			SubscriptionIDs: req.SubscriptionIDs,
+			APIKeyIDs:       req.APIKeyIDs,
+		}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	bindings, err := h.projectService.SetProjectProfileBindings(c.Request.Context(), projectID, profileID, service.ProjectProfileBindingInput{
+		UserIDs:         req.UserIDs,
+		GroupIDs:        req.GroupIDs,
+		AccountIDs:      req.AccountIDs,
+		SubscriptionIDs: req.SubscriptionIDs,
+		APIKeyIDs:       req.APIKeyIDs,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, bindings)
+}
+
+func (h *ProjectHandler) SearchBindableResources(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	limit := 20
+	if raw := c.Query("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	result, err := h.projectService.SearchProjectBindableResources(c.Request.Context(), projectID, c.Query("q"), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProjectHandler) SearchGlobalBindableResources(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if !service.RoleIsSuperAdmin(role) {
+		response.Forbidden(c, "Project access forbidden")
+		return
+	}
+	limit := 20
+	if raw := c.Query("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	result, err := h.projectService.SearchProjectBindableResources(c.Request.Context(), 0, c.Query("q"), limit)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ProjectHandler) RemoveMember(c *gin.Context) {
@@ -164,6 +471,9 @@ func (h *ProjectHandler) RemoveMember(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
 	userID, ok := parseUserIDParam(c)
 	if !ok {
 		return
@@ -173,37 +483,6 @@ func (h *ProjectHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"message": "success"})
-}
-
-func (h *ProjectHandler) MoveResources(c *gin.Context) {
-	if h.projectService == nil {
-		response.InternalError(c, "Project service unavailable")
-		return
-	}
-	projectID, ok := parseProjectIDParam(c)
-	if !ok {
-		return
-	}
-	var req moveProjectResourcesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-	moveUsageHistory := true
-	if req.MoveUsageHistory != nil {
-		moveUsageHistory = *req.MoveUsageHistory
-	}
-	result, err := h.projectService.MoveProjectResources(c.Request.Context(), projectID, service.ProjectResourceMoveInput{
-		AccountIDs:       req.AccountIDs,
-		APIKeyIDs:        req.APIKeyIDs,
-		GroupIDs:         req.GroupIDs,
-		MoveUsageHistory: moveUsageHistory,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, result)
 }
 
 func parseProjectIDParam(c *gin.Context) (int64, bool) {
@@ -222,4 +501,61 @@ func parseUserIDParam(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func (h *ProjectHandler) canProjectAdminSetMember(ctx context.Context, projectID int64, userID int64) (bool, error) {
+	members, err := h.projectService.ListProjectMembers(ctx, projectID)
+	if err != nil {
+		return false, err
+	}
+	for _, member := range members {
+		if member.UserID == userID {
+			return true, nil
+		}
+	}
+	if err := h.projectService.ValidateProjectProfileBindingScope(ctx, projectID, service.ProjectProfileBindingInput{
+		UserIDs: []int64{userID},
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func parseProfileIDParam(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("profile_id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid profile ID")
+		return 0, false
+	}
+	return id, true
+}
+
+func authorizeProjectPath(c *gin.Context, projectID int64) bool {
+	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		return true
+	}
+	currentProjectID, ok := service.ProjectIDFromContext(c.Request.Context())
+	if ok && currentProjectID == projectID {
+		return true
+	}
+	response.Forbidden(c, "Project access forbidden")
+	return false
+}
+
+func currentAdminRole(c *gin.Context) string {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	return role
+}
+
+func (h *ProjectHandler) projectProfileMode(c *gin.Context, projectID int64, profileID int64) (string, error) {
+	profiles, err := h.projectService.ListProjectProfiles(c.Request.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, profile := range profiles {
+		if profile.ID == profileID {
+			return profile.Mode, nil
+		}
+	}
+	return "", service.ErrProjectProfileNotFound
 }

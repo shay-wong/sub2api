@@ -183,6 +183,42 @@ func (r *authRefreshProjectRepoStub) RemoveProjectMember(context.Context, int64,
 	panic("unexpected RemoveProjectMember call")
 }
 
-func (r *authRefreshProjectRepoStub) MoveProjectResources(context.Context, int64, service.ProjectResourceMoveInput) (*service.ProjectResourceMoveResult, error) {
-	panic("unexpected MoveProjectResources call")
+func (r *authRefreshProjectRepoStub) ListProjectProfiles(context.Context, int64) ([]service.ProjectProfile, error) {
+	panic("unexpected ListProjectProfiles call")
+}
+
+func (r *authRefreshProjectRepoStub) CreateProjectProfile(context.Context, int64, service.ProjectProfileInput) (*service.ProjectProfile, error) {
+	panic("unexpected CreateProjectProfile call")
+}
+
+func (r *authRefreshProjectRepoStub) UpdateProjectProfile(context.Context, int64, int64, service.ProjectProfileInput) (*service.ProjectProfile, error) {
+	panic("unexpected UpdateProjectProfile call")
+}
+
+func (r *authRefreshProjectRepoStub) DeleteProjectProfile(context.Context, int64, int64) error {
+	panic("unexpected DeleteProjectProfile call")
+}
+
+func (r *authRefreshProjectRepoStub) ActivateProjectProfile(context.Context, int64, int64) (*service.ProjectProfile, error) {
+	panic("unexpected ActivateProjectProfile call")
+}
+
+func (r *authRefreshProjectRepoStub) GetProjectProfileBindings(context.Context, int64, int64) (*service.ProjectProfileBindings, error) {
+	panic("unexpected GetProjectProfileBindings call")
+}
+
+func (r *authRefreshProjectRepoStub) SetProjectProfileBindings(context.Context, int64, int64, service.ProjectProfileBindingInput) (*service.ProjectProfileBindings, error) {
+	panic("unexpected SetProjectProfileBindings call")
+}
+
+func (r *authRefreshProjectRepoStub) ValidateProjectProfileBindingScope(context.Context, int64, service.ProjectProfileBindingInput) error {
+	panic("unexpected ValidateProjectProfileBindingScope call")
+}
+
+func (r *authRefreshProjectRepoStub) ValidateProjectProfileBindingResources(context.Context, service.ProjectProfileBindingInput) error {
+	panic("unexpected ValidateProjectProfileBindingResources call")
+}
+
+func (r *authRefreshProjectRepoStub) SearchProjectBindableResources(context.Context, int64, string, int) (*service.ProjectResourceSearchResult, error) {
+	panic("unexpected SearchProjectBindableResources call")
 }

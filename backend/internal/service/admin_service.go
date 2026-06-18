@@ -681,8 +681,72 @@ func (s *adminServiceImpl) loadUserGroupRatesOneByOne(ctx context.Context, users
 	}
 }
 
+func (s *adminServiceImpl) getAdminScopedUser(ctx context.Context, id int64, includeDeleted bool) (*User, error) {
+	if id <= 0 {
+		return nil, ErrUserNotFound
+	}
+	if _, ok := ProjectIDFromContext(ctx); !ok {
+		if includeDeleted {
+			return s.userRepo.GetByIDIncludeDeleted(ctx, id)
+		}
+		return s.userRepo.GetByID(ctx, id)
+	}
+
+	includeSubscriptions := false
+	users, _, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, UserListFilters{
+		ID:                   id,
+		IncludeDeleted:       includeDeleted,
+		IncludeSubscriptions: &includeSubscriptions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, ErrUserNotFound
+	}
+	return &users[0], nil
+}
+
+func (s *adminServiceImpl) ensureAdminScopedUsers(ctx context.Context, userIDs []int64) error {
+	if _, ok := ProjectIDFromContext(ctx); !ok {
+		return nil
+	}
+	for _, userID := range userIDs {
+		if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) ensureAdminScopedGroups(ctx context.Context, groupIDs []int64) error {
+	if _, ok := ProjectIDFromContext(ctx); !ok {
+		return nil
+	}
+	cleaned := normalizePositiveInt64IDsForService(groupIDs)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	if s.groupRepo == nil {
+		return infraerrors.ServiceUnavailable("GROUP_REPOSITORY_UNAVAILABLE", "group repository is not configured")
+	}
+	for _, groupID := range cleaned {
+		if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) ensureAdminScopedGroupRateEntries(ctx context.Context, groupID int64, userIDs []int64) error {
+	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
+		return err
+	}
+	return s.ensureAdminScopedUsers(ctx, normalizePositiveInt64IDsForService(userIDs))
+}
+
 func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error) {
-	user, err := s.userRepo.GetByID(ctx, id)
+	user, err := s.getAdminScopedUser(ctx, id, false)
 	if err != nil {
 		return nil, err
 	}
@@ -705,10 +769,14 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 }
 
 func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) (*User, error) {
-	return s.userRepo.GetByIDIncludeDeleted(ctx, id)
+	return s.getAdminScopedUser(ctx, id, true)
 }
 
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
+	if err := s.ensureAdminScopedGroups(ctx, input.AllowedGroups); err != nil {
+		return nil, err
+	}
+
 	balance := 0.0
 	if input.Balance != nil {
 		balance = *input.Balance
@@ -764,9 +832,23 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
-	user, err := s.userRepo.GetByID(ctx, id)
+	user, err := s.getAdminScopedUser(ctx, id, false)
 	if err != nil {
 		return nil, err
+	}
+	if input.AllowedGroups != nil {
+		if err := s.ensureAdminScopedGroups(ctx, *input.AllowedGroups); err != nil {
+			return nil, err
+		}
+	}
+	if input.GroupRates != nil {
+		groupIDs := make([]int64, 0, len(input.GroupRates))
+		for groupID := range input.GroupRates {
+			groupIDs = append(groupIDs, groupID)
+		}
+		if err := s.ensureAdminScopedGroups(ctx, groupIDs); err != nil {
+			return nil, err
+		}
 	}
 
 	// Protect admin users: cannot disable admin accounts
@@ -877,7 +959,7 @@ func sameInt64Set(a, b []int64) bool {
 
 func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	// Protect admin users: cannot delete admin accounts
-	user, err := s.userRepo.GetByID(ctx, id)
+	user, err := s.getAdminScopedUser(ctx, id, false)
 	if err != nil {
 		return err
 	}
@@ -976,6 +1058,9 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	if len(cleaned) == 0 {
 		return 0, nil
 	}
+	if err := s.ensureAdminScopedUsers(ctx, cleaned); err != nil {
+		return 0, err
+	}
 
 	var affected int
 	var err error
@@ -1000,7 +1085,7 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 }
 
 func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.getAdminScopedUser(ctx, userID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1065,6 +1150,9 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 }
 
 func (s *adminServiceImpl) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error) {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+		return nil, 0, err
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	keys, result, err := s.apiKeyRepo.ListByUserID(ctx, userID, params, APIKeyListFilters{})
 	if err != nil {
@@ -1078,7 +1166,7 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 		return nil, ErrRPMStatusUnavailable
 	}
 
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.getAdminScopedUser(ctx, userID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1152,7 +1240,7 @@ func (s *adminServiceImpl) ListUserGroupRateLimitWindows(ctx context.Context, us
 	if userID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_USER_ID", "invalid user id")
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
 		return nil, err
 	}
 	if s.userGroupRateLimitRepo == nil {
@@ -1168,7 +1256,10 @@ func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, us
 	if groupID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+		return nil, err
+	}
+	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
 		return nil, err
 	}
 	if s.userGroupRateLimitRepo == nil {
@@ -1178,6 +1269,9 @@ func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, us
 }
 
 func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+		return nil, err
+	}
 	// Return mock data for now
 	return map[string]any{
 		"period":          period,
@@ -1190,6 +1284,9 @@ func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, 
 
 // GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
 func (s *adminServiceImpl) GetUserBalanceHistory(ctx context.Context, userID int64, page, pageSize int, codeType string) ([]RedeemCode, int64, float64, error) {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+		return nil, 0, 0, err
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
 	if codeType == RedeemTypeAffiliateBalance {
 		codes, total, err := s.listAffiliateBalanceHistory(ctx, userID, params)
@@ -1407,7 +1504,7 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 	if s == nil || s.entClient == nil || s.userRepo == nil {
 		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_UNAVAILABLE", "auth identity binding service is unavailable")
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
 		return nil, err
 	}
 
@@ -2352,12 +2449,18 @@ func (s *adminServiceImpl) GetGroupRateMultipliers(ctx context.Context, groupID 
 	if s.userGroupRateRepo == nil {
 		return nil, nil
 	}
+	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
+		return nil, err
+	}
 	return s.userGroupRateRepo.GetByGroupID(ctx, groupID)
 }
 
 func (s *adminServiceImpl) ClearGroupRateMultipliers(ctx context.Context, groupID int64) error {
 	if s.userGroupRateRepo == nil {
 		return nil
+	}
+	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
+		return err
 	}
 	return s.userGroupRateRepo.DeleteByGroupID(ctx, groupID)
 }
@@ -2366,10 +2469,15 @@ func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, gro
 	if s.userGroupRateRepo == nil {
 		return nil
 	}
+	userIDs := make([]int64, 0, len(entries))
 	for _, e := range entries {
 		if e.RateMultiplier <= 0 {
 			return fmt.Errorf("rate_multiplier must be > 0 (user_id=%d)", e.UserID)
 		}
+		userIDs = append(userIDs, e.UserID)
+	}
+	if err := s.ensureAdminScopedGroupRateEntries(ctx, groupID, userIDs); err != nil {
+		return err
 	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
 }
@@ -2377,6 +2485,9 @@ func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, gro
 func (s *adminServiceImpl) ClearGroupRPMOverrides(ctx context.Context, groupID int64) error {
 	if s.userGroupRateRepo == nil {
 		return nil
+	}
+	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
+		return err
 	}
 	if err := s.userGroupRateRepo.ClearGroupRPMOverrides(ctx, groupID); err != nil {
 		return err
@@ -2392,10 +2503,15 @@ func (s *adminServiceImpl) BatchSetGroupRPMOverrides(ctx context.Context, groupI
 	if s.userGroupRateRepo == nil {
 		return nil
 	}
+	userIDs := make([]int64, 0, len(entries))
 	for _, e := range entries {
 		if e.RPMOverride != nil && *e.RPMOverride < 0 {
 			return infraerrors.BadRequest("INVALID_RPM_OVERRIDE", fmt.Sprintf("rpm_override must be >= 0 (user_id=%d)", e.UserID))
 		}
+		userIDs = append(userIDs, e.UserID)
+	}
+	if err := s.ensureAdminScopedGroupRateEntries(ctx, groupID, userIDs); err != nil {
+		return err
 	}
 	if err := s.userGroupRateRepo.SyncGroupRPMOverrides(ctx, groupID, entries); err != nil {
 		return err
@@ -2462,6 +2578,9 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 
 		// 专属标准分组：使用事务保证「添加分组权限」与「更新 API Key」的原子性
 		if group.IsExclusive && !group.IsSubscriptionType() {
+			if _, err := s.getAdminScopedUser(ctx, apiKey.UserID, false); err != nil {
+				return nil, err
+			}
 			opCtx := ctx
 			var tx *dbent.Tx
 			if s.entClient == nil {
@@ -2544,6 +2663,9 @@ func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, k
 func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (*ReplaceUserGroupResult, error) {
 	if oldGroupID == newGroupID {
 		return nil, infraerrors.BadRequest("SAME_GROUP", "old and new group must be different")
+	}
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+		return nil, err
 	}
 
 	// 验证新分组存在且为活跃的专属标准分组
@@ -2667,6 +2789,11 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 					break
 				}
 			}
+		}
+	}
+	if len(groupIDs) > 0 {
+		if err := s.validateGroupIDsExist(ctx, groupIDs); err != nil {
+			return nil, err
 		}
 	}
 
@@ -2929,7 +3056,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 预加载账号平台信息（混合渠道检查需要）。
 	platformByID := map[int64]string{}
 	accountByID := map[int64]*Account{}
-	if needMixedChannelCheck || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
+	_, projectScopedBulkUpdate := ProjectIDFromContext(ctx)
+	requiresAccountPreload := needMixedChannelCheck || projectScopedBulkUpdate || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0)
+	if requiresAccountPreload {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -2940,7 +3069,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				platformByID[account.ID] = account.Platform
 			}
 		}
-		if input.GroupIDs != nil && len(input.GroupScopeIDs) > 0 {
+		if projectScopedBulkUpdate || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
 			for _, accountID := range input.AccountIDs {
 				if accountByID[accountID] == nil {
 					return nil, ErrAccountNotFound

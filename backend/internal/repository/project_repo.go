@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -64,6 +63,7 @@ func (r *projectRepository) GetProjectRole(ctx context.Context, projectID int64,
 		JOIN projects p ON p.id = pm.project_id
 		WHERE pm.project_id = $1
 		  AND pm.user_id = $2
+		  AND pm.status = 'active'
 		  AND p.deleted_at IS NULL
 		  AND p.status = 'active'
 		LIMIT 1
@@ -123,6 +123,7 @@ func (r *projectRepository) ListUserProjects(ctx context.Context, userID int64) 
 		FROM project_members pm
 		JOIN projects p ON p.id = pm.project_id
 		WHERE pm.user_id = $1
+		  AND pm.status = 'active'
 		  AND p.deleted_at IS NULL
 		  AND p.status = 'active'
 		ORDER BY pm.is_owner DESC, p.id ASC
@@ -173,6 +174,32 @@ func (r *projectRepository) CreateProject(ctx context.Context, input service.Pro
 			updated_at = CURRENT_TIMESTAMP
 	`, project.ID, input.OwnerUserID, service.ProjectRoleAdmin); err != nil {
 		return nil, err
+	}
+	var profileID int64
+	if err := scanSingleRow(ctx, tx, `
+		INSERT INTO project_profiles (project_id, name, description, mode, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT DO NOTHING
+		RETURNING id
+	`, []any{project.ID, "默认配置", "Default active project application profile.", input.ProfileMode}, &profileID); err != nil {
+		return nil, err
+	}
+	if input.ProfileMode == service.ProjectProfileModeRestricted {
+		if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeUser, input.Bindings.UserIDs); err != nil {
+			return nil, err
+		}
+		if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeGroup, input.Bindings.GroupIDs); err != nil {
+			return nil, err
+		}
+		if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAccount, input.Bindings.AccountIDs); err != nil {
+			return nil, err
+		}
+		if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeSubscription, input.Bindings.SubscriptionIDs); err != nil {
+			return nil, err
+		}
+		if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAPIKey, input.Bindings.APIKeyIDs); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -245,6 +272,7 @@ func (r *projectRepository) ListProjectMembers(ctx context.Context, projectID in
 			COALESCE(u.username, ''),
 			pm.role,
 			pm.is_owner,
+			pm.status,
 			u.status,
 			pm.created_at,
 			pm.updated_at
@@ -263,7 +291,7 @@ func (r *projectRepository) ListProjectMembers(ctx context.Context, projectID in
 	for rows.Next() {
 		var item service.ProjectMember
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&item.ProjectID, &item.UserID, &item.Email, &item.Username, &item.Role, &item.IsOwner, &item.Status, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&item.ProjectID, &item.UserID, &item.Email, &item.Username, &item.Role, &item.IsOwner, &item.Status, &item.UserStatus, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
@@ -280,8 +308,14 @@ func (r *projectRepository) SetProjectMember(ctx context.Context, projectID int6
 	if r == nil || r.sql == nil {
 		return nil, fmt.Errorf("nil project repository")
 	}
+	tx, err := beginSQLTx(ctx, r.sql)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var exists int64
-	if err := scanSingleRow(ctx, r.sql, `
+	if err := scanSingleRow(ctx, tx, `
 		SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL LIMIT 1
 	`, []any{input.UserID}, &exists); errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrPermissionUserNotFound
@@ -289,17 +323,35 @@ func (r *projectRepository) SetProjectMember(ctx context.Context, projectID int6
 		return nil, err
 	}
 
+	status := service.StatusActive
+	if input.Status != nil {
+		status = *input.Status
+	}
+	if input.IsOwner {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE project_members
+			SET is_owner = FALSE,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE project_id = $1
+			  AND user_id <> $2
+			  AND is_owner = TRUE
+		`, projectID, input.UserID); err != nil {
+			return nil, err
+		}
+	}
+
 	var item service.ProjectMember
 	var createdAt, updatedAt time.Time
-	err := scanSingleRow(ctx, r.sql, `
+	err = scanSingleRow(ctx, tx, `
 		WITH upserted AS (
-			INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, created_at, updated_at)
-			VALUES ($1, $2, $3, '[]', $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+			INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, status, created_at, updated_at)
+			VALUES ($1, $2, $3, '[]', $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 			ON CONFLICT (project_id, user_id) DO UPDATE
 			SET role = EXCLUDED.role,
 				is_owner = EXCLUDED.is_owner,
+				status = EXCLUDED.status,
 				updated_at = CURRENT_TIMESTAMP
-			RETURNING project_id, user_id, role, is_owner, created_at, updated_at
+			RETURNING project_id, user_id, role, is_owner, status, created_at, updated_at
 		)
 		SELECT
 			up.project_id,
@@ -308,13 +360,26 @@ func (r *projectRepository) SetProjectMember(ctx context.Context, projectID int6
 			COALESCE(u.username, ''),
 			up.role,
 			up.is_owner,
+			up.status,
 			u.status,
 			up.created_at,
 			up.updated_at
 		FROM upserted up
 		JOIN users u ON u.id = up.user_id
-	`, []any{projectID, input.UserID, input.Role, input.IsOwner}, &item.ProjectID, &item.UserID, &item.Email, &item.Username, &item.Role, &item.IsOwner, &item.Status, &createdAt, &updatedAt)
+	`, []any{projectID, input.UserID, input.Role, input.IsOwner, status}, &item.ProjectID, &item.UserID, &item.Email, &item.Username, &item.Role, &item.IsOwner, &item.Status, &item.UserStatus, &createdAt, &updatedAt)
 	if err != nil {
+		return nil, err
+	}
+	if status == service.StatusActive {
+		if err := bindResourceToActiveProjectProfile(ctx, tx, projectID, service.ProjectResourceTypeUser, input.UserID); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := removeProjectProfileResourceBindings(ctx, tx, projectID, service.ProjectResourceTypeUser, input.UserID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
@@ -326,15 +391,105 @@ func (r *projectRepository) RemoveProjectMember(ctx context.Context, projectID i
 	if r == nil || r.sql == nil {
 		return fmt.Errorf("nil project repository")
 	}
-	_, err := r.sql.ExecContext(ctx, `
+	var isOwner bool
+	if err := scanSingleRow(ctx, r.sql, `
+		SELECT is_owner
+		FROM project_members
+		WHERE project_id = $1
+		  AND user_id = $2
+	`, []any{projectID, userID}, &isOwner); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if isOwner {
+		return service.ErrProjectOwnerTransferRequired
+	}
+	tx, err := beginSQLTx(ctx, r.sql)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `
 		DELETE FROM project_members
 		WHERE project_id = $1
 		  AND user_id = $2
 	`, projectID, userID)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := removeProjectProfileResourceBindings(ctx, tx, projectID, service.ProjectResourceTypeUser, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (r *projectRepository) MoveProjectResources(ctx context.Context, projectID int64, input service.ProjectResourceMoveInput) (*service.ProjectResourceMoveResult, error) {
+func (r *projectRepository) ListProjectProfiles(ctx context.Context, projectID int64) ([]service.ProjectProfile, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
+	}
+	if err := ensureProjectActiveProfile(ctx, r.sql, projectID); err != nil {
+		return nil, err
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id, project_id, name, description, mode, is_active, created_at, updated_at
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND deleted_at IS NULL
+		ORDER BY is_active DESC, id ASC
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]service.ProjectProfile, 0)
+	for rows.Next() {
+		var item service.ProjectProfile
+		var description sql.NullString
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Name, &description, &item.Mode, &item.IsActive, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		if description.Valid {
+			item.Description = &description.String
+		}
+		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *projectRepository) CreateProjectProfile(ctx context.Context, projectID int64, input service.ProjectProfileInput) (*service.ProjectProfile, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
+	}
+	name := derefString(input.Name)
+	mode := derefString(input.Mode)
+	var item service.ProjectProfile
+	var description sql.NullString
+	var createdAt, updatedAt time.Time
+	err := scanSingleRow(ctx, r.sql, `
+		INSERT INTO project_profiles (project_id, name, description, mode, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id, project_id, name, description, mode, is_active, created_at, updated_at
+	`, []any{projectID, name, nullableString(input.Description), mode}, &item.ID, &item.ProjectID, &item.Name, &description, &item.Mode, &item.IsActive, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if description.Valid {
+		item.Description = &description.String
+	}
+	item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return &item, nil
+}
+
+func (r *projectRepository) UpdateProjectProfile(ctx context.Context, projectID int64, profileID int64, input service.ProjectProfileInput) (*service.ProjectProfile, error) {
 	if r == nil || r.sql == nil {
 		return nil, fmt.Errorf("nil project repository")
 	}
@@ -344,322 +499,179 @@ func (r *projectRepository) MoveProjectResources(ctx context.Context, projectID 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result := &service.ProjectResourceMoveResult{}
-	accountIDs := input.AccountIDs
-	apiKeyIDs := input.APIKeyIDs
-	groupIDs := input.GroupIDs
-
-	if err := loadProjectMoveInvalidationScope(ctx, tx, accountIDs, apiKeyIDs, groupIDs, result); err != nil {
+	var item service.ProjectProfile
+	var description sql.NullString
+	var createdAt, updatedAt time.Time
+	err = scanSingleRow(ctx, tx, `
+		UPDATE project_profiles
+		SET name = COALESCE($3, name),
+			description = COALESCE($4, description),
+			mode = COALESCE($5, mode),
+			updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		RETURNING id, project_id, name, description, mode, is_active, created_at, updated_at
+	`, []any{projectID, profileID, nullableString(input.Name), nullableString(input.Description), nullableString(input.Mode)}, &item.ID, &item.ProjectID, &item.Name, &description, &item.Mode, &item.IsActive, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrProjectProfileNotFound
+	}
+	if err != nil {
 		return nil, err
 	}
-
-	if len(groupIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE groups
-			SET project_id = $2,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ANY($1)
-			  AND deleted_at IS NULL
-			  AND project_id <> $2
-		`, pq.Array(groupIDs), projectID)
-		if err != nil {
+	if item.Mode == service.ProjectProfileModeUnrestricted {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM project_profile_bindings
+			WHERE project_profile_id = $1
+		`, profileID); err != nil {
 			return nil, err
 		}
-		result.GroupsMoved = n
 	}
-
-	if len(accountIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE accounts
-			SET project_id = $2,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ANY($1)
-			  AND deleted_at IS NULL
-			  AND project_id <> $2
-		`, pq.Array(accountIDs), projectID)
-		if err != nil {
-			return nil, err
-		}
-		result.AccountsMoved = n
-	}
-
-	if len(apiKeyIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE api_keys
-			SET project_id = $2,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ANY($1)
-			  AND deleted_at IS NULL
-			  AND project_id <> $2
-		`, pq.Array(apiKeyIDs), projectID)
-		if err != nil {
-			return nil, err
-		}
-		result.APIKeysMoved = n
-	}
-
-	if len(groupIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE groups g
-			SET fallback_group_id = NULL,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE g.id = ANY($1)
-			  AND g.fallback_group_id IS NOT NULL
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM groups fg
-				WHERE fg.id = g.fallback_group_id
-				  AND fg.project_id = g.project_id
-				  AND fg.deleted_at IS NULL
-			  )
-		`, pq.Array(groupIDs))
-		if err != nil {
-			return nil, err
-		}
-		result.GroupFallbacksCleared += n
-
-		n, err = execRowsAffected(ctx, tx, `
-			UPDATE groups g
-			SET fallback_group_id_on_invalid_request = NULL,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE g.id = ANY($1)
-			  AND g.fallback_group_id_on_invalid_request IS NOT NULL
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM groups fg
-				WHERE fg.id = g.fallback_group_id_on_invalid_request
-				  AND fg.project_id = g.project_id
-				  AND fg.deleted_at IS NULL
-			  )
-		`, pq.Array(groupIDs))
-		if err != nil {
-			return nil, err
-		}
-		result.GroupFallbacksCleared += n
-
-		n, err = execRowsAffected(ctx, tx, `
-			WITH filtered AS (
-				SELECT
-					g.id,
-					COALESCE(
-						jsonb_object_agg(route.key, route.valid_ids) FILTER (WHERE jsonb_array_length(route.valid_ids) > 0),
-						'{}'::jsonb
-					) AS routing
-				FROM groups g
-				CROSS JOIN LATERAL (
-					SELECT
-						entry.key,
-						COALESCE(jsonb_agg(elem.value ORDER BY elem.ord), '[]'::jsonb) AS valid_ids
-					FROM jsonb_each(g.model_routing) AS entry(key, value)
-					LEFT JOIN LATERAL jsonb_array_elements(
-						CASE
-							WHEN jsonb_typeof(entry.value) = 'array' THEN entry.value
-							ELSE '[]'::jsonb
-						END
-					) WITH ORDINALITY AS elem(value, ord)
-						ON jsonb_typeof(elem.value) = 'number'
-					LEFT JOIN accounts a
-						ON a.id = (elem.value #>> '{}')::bigint
-						AND a.project_id = g.project_id
-						AND a.deleted_at IS NULL
-					WHERE a.id IS NOT NULL
-					GROUP BY entry.key
-				) route
-				WHERE g.id = ANY($1)
-				  AND g.model_routing <> '{}'::jsonb
-				GROUP BY g.id
-			)
-			UPDATE groups g
-			SET model_routing = filtered.routing,
-				model_routing_enabled = CASE WHEN filtered.routing = '{}'::jsonb THEN FALSE ELSE g.model_routing_enabled END,
-				updated_at = CURRENT_TIMESTAMP
-			FROM filtered
-			WHERE g.id = filtered.id
-			  AND (
-				g.model_routing <> filtered.routing
-				OR (filtered.routing = '{}'::jsonb AND g.model_routing_enabled = TRUE)
-			  )
-		`, pq.Array(groupIDs))
-		if err != nil {
-			return nil, err
-		}
-		result.GroupModelRoutingCleared = n
-	}
-
-	if len(accountIDs) > 0 || len(groupIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			DELETE FROM account_groups ag
-			USING accounts a, groups g
-			WHERE ag.account_id = a.id
-			  AND ag.group_id = g.id
-			  AND a.project_id <> g.project_id
-			  AND (
-				ag.account_id = ANY($1)
-				OR ag.group_id = ANY($2)
-			  )
-		`, pq.Array(accountIDs), pq.Array(groupIDs))
-		if err != nil {
-			return nil, err
-		}
-		result.AccountGroupBindingsRemoved = n
-	}
-
-	if len(apiKeyIDs) > 0 || len(groupIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE api_keys ak
-			SET group_id = NULL,
-				updated_at = CURRENT_TIMESTAMP
-			FROM groups g
-			WHERE ak.group_id = g.id
-			  AND ak.deleted_at IS NULL
-			  AND ak.project_id <> g.project_id
-			  AND (
-				ak.id = ANY($1)
-				OR ak.group_id = ANY($2)
-			  )
-		`, pq.Array(apiKeyIDs), pq.Array(groupIDs))
-		if err != nil {
-			return nil, err
-		}
-		result.APIKeyGroupBindingsCleared = n
-	}
-
-	if len(result.InvalidatedUserIDs) > 0 {
-		n, err := execRowsAffected(ctx, tx, `
-			INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, created_at, updated_at)
-			SELECT $1, u.id, $3, '[]'::jsonb, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-			FROM users u
-			WHERE u.id = ANY($2)
-			  AND u.deleted_at IS NULL
-			ON CONFLICT (project_id, user_id) DO NOTHING
-		`, projectID, pq.Array(result.InvalidatedUserIDs), service.ProjectRoleUser)
-		if err != nil {
-			return nil, err
-		}
-		result.ProjectMembersAdded = n
-	}
-
-	if input.MoveUsageHistory {
-		n, err := execRowsAffected(ctx, tx, `
-			UPDATE usage_logs
-			SET project_id = $4
-			WHERE project_id <> $4
-			  AND (
-				account_id = ANY($1)
-				OR api_key_id = ANY($2)
-				OR group_id = ANY($3)
-			  )
-		`, pq.Array(accountIDs), pq.Array(apiKeyIDs), pq.Array(groupIDs), projectID)
-		if err != nil {
-			return nil, err
-		}
-		result.UsageLogsMoved = n
-
-		n, err = execRowsAffected(ctx, tx, `
-			UPDATE ops_error_logs
-			SET project_id = $4
-			WHERE project_id <> $4
-			  AND (
-				account_id = ANY($1)
-				OR api_key_id = ANY($2)
-				OR group_id = ANY($3)
-			  )
-		`, pq.Array(accountIDs), pq.Array(apiKeyIDs), pq.Array(groupIDs), projectID)
-		if err != nil {
-			return nil, err
-		}
-		result.OpsErrorLogsMoved = n
-	}
-
-	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventFullRebuild, nil, nil, map[string]any{
-		"reason":     "project_resource_move",
-		"project_id": projectID,
-	}); err != nil {
-		return nil, err
-	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return result, nil
+	if description.Valid {
+		item.Description = &description.String
+	}
+	item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return &item, nil
 }
 
-func loadProjectMoveInvalidationScope(ctx context.Context, tx *sql.Tx, accountIDs, apiKeyIDs, groupIDs []int64, result *service.ProjectResourceMoveResult) error {
-	if result == nil {
-		return nil
+func (r *projectRepository) DeleteProjectProfile(ctx context.Context, projectID int64, profileID int64) error {
+	if r == nil || r.sql == nil {
+		return fmt.Errorf("nil project repository")
 	}
-	if len(apiKeyIDs) > 0 || len(groupIDs) > 0 {
-		keys, err := queryStringColumn(ctx, tx, `
-			SELECT DISTINCT key
-			FROM api_keys
-			WHERE deleted_at IS NULL
-			  AND (
-				id = ANY($1)
-				OR group_id = ANY($2)
-			  )
-			ORDER BY key ASC
-		`, pq.Array(apiKeyIDs), pq.Array(groupIDs))
-		if err != nil {
-			return err
-		}
-		result.InvalidatedAPIKeys = keys
+	var active bool
+	if err := scanSingleRow(ctx, r.sql, `
+		SELECT is_active
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`, []any{projectID, profileID}, &active); errors.Is(err, sql.ErrNoRows) {
+		return service.ErrProjectProfileNotFound
+	} else if err != nil {
+		return err
 	}
-	if len(groupIDs) > 0 {
-		result.InvalidatedGroupIDs = append([]int64(nil), groupIDs...)
-		userIDs, err := queryInt64Column(ctx, tx, `
-			SELECT DISTINCT user_id
-			FROM (
-				SELECT user_id FROM user_allowed_groups WHERE group_id = ANY($1)
-				UNION
-				SELECT user_id FROM user_subscriptions WHERE group_id = ANY($1) AND deleted_at IS NULL
-				UNION
-				SELECT user_id FROM api_keys WHERE group_id = ANY($1) AND deleted_at IS NULL
-			) scoped_users
-			ORDER BY user_id ASC
-		`, pq.Array(groupIDs))
-		if err != nil {
-			return err
-		}
-		result.InvalidatedUserIDs = userIDs
+	if active {
+		return service.ErrProjectInvalidInput
 	}
-	if len(apiKeyIDs) > 0 {
-		userIDs, err := queryInt64Column(ctx, tx, `
-			SELECT DISTINCT user_id
-			FROM api_keys
-			WHERE id = ANY($1)
-			  AND deleted_at IS NULL
-			ORDER BY user_id ASC
-		`, pq.Array(apiKeyIDs))
-		if err != nil {
-			return err
-		}
-		result.InvalidatedUserIDs = mergeSortedInt64(result.InvalidatedUserIDs, userIDs)
+	res, err := r.sql.ExecContext(ctx, `
+		UPDATE project_profiles
+		SET deleted_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP,
+			is_active = FALSE
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`, projectID, profileID)
+	if err != nil {
+		return err
 	}
-	_ = accountIDs
+	if n, _ := res.RowsAffected(); n == 0 {
+		return service.ErrProjectProfileNotFound
+	}
 	return nil
 }
 
-func execRowsAffected(ctx context.Context, exec sqlExecutor, query string, args ...any) (int64, error) {
-	res, err := exec.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, err
+func (r *projectRepository) ActivateProjectProfile(ctx context.Context, projectID int64, profileID int64) (*service.ProjectProfile, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
 	}
-	return res.RowsAffected()
+	tx, err := beginSQLTx(ctx, r.sql)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var exists int64
+	if err := scanSingleRow(ctx, tx, `
+		SELECT id
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`, []any{projectID, profileID}, &exists); errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrProjectProfileNotFound
+	} else if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_profiles
+		SET is_active = FALSE,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = $1
+		  AND is_active = TRUE
+		  AND deleted_at IS NULL
+	`, projectID); err != nil {
+		return nil, err
+	}
+
+	var item service.ProjectProfile
+	var description sql.NullString
+	var createdAt, updatedAt time.Time
+	err = scanSingleRow(ctx, tx, `
+		UPDATE project_profiles
+		SET is_active = TRUE,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		RETURNING id, project_id, name, description, mode, is_active, created_at, updated_at
+	`, []any{projectID, profileID}, &item.ID, &item.ProjectID, &item.Name, &description, &item.Mode, &item.IsActive, &createdAt, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	if description.Valid {
+		item.Description = &description.String
+	}
+	item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return &item, nil
 }
 
-func queryStringColumn(ctx context.Context, q sqlQueryer, query string, args ...any) ([]string, error) {
-	rows, err := q.QueryContext(ctx, query, args...)
+func (r *projectRepository) GetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64) (*service.ProjectProfileBindings, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
+	}
+	if err := ensureProjectProfileExists(ctx, r.sql, projectID, profileID); err != nil {
+		return nil, err
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT resource_type, resource_id
+		FROM project_profile_bindings
+		WHERE project_profile_id = $1
+		ORDER BY resource_type ASC, resource_id ASC
+	`, profileID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	out := make([]string, 0)
+
+	out := &service.ProjectProfileBindings{ProfileID: profileID}
 	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
+		var typ string
+		var id int64
+		if err := rows.Scan(&typ, &id); err != nil {
 			return nil, err
 		}
-		out = append(out, value)
+		switch typ {
+		case service.ProjectResourceTypeUser:
+			out.UserIDs = append(out.UserIDs, id)
+		case service.ProjectResourceTypeGroup:
+			out.GroupIDs = append(out.GroupIDs, id)
+		case service.ProjectResourceTypeAccount:
+			out.AccountIDs = append(out.AccountIDs, id)
+		case service.ProjectResourceTypeSubscription:
+			out.SubscriptionIDs = append(out.SubscriptionIDs, id)
+		case service.ProjectResourceTypeAPIKey:
+			out.APIKeyIDs = append(out.APIKeyIDs, id)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -667,47 +679,452 @@ func queryStringColumn(ctx context.Context, q sqlQueryer, query string, args ...
 	return out, nil
 }
 
-func queryInt64Column(ctx context.Context, q sqlQueryer, query string, args ...any) ([]int64, error) {
-	rows, err := q.QueryContext(ctx, query, args...)
+func (r *projectRepository) SetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64, input service.ProjectProfileBindingInput) (*service.ProjectProfileBindings, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
+	}
+	tx, err := beginSQLTx(ctx, r.sql)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := make([]int64, 0)
-	for rows.Next() {
-		var value int64
-		if err := rows.Scan(&value); err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	if err := rows.Err(); err != nil {
+	defer func() { _ = tx.Rollback() }()
+
+	mode, err := getProjectProfileMode(ctx, tx, projectID, profileID)
+	if err != nil {
 		return nil, err
 	}
+	if mode == service.ProjectProfileModeUnrestricted {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM project_profile_bindings
+			WHERE project_profile_id = $1
+		`, profileID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE project_profiles
+			SET updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1
+		`, profileID); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &service.ProjectProfileBindings{ProfileID: profileID}, nil
+	}
+	if err := validateProjectBindingIDs(ctx, tx, input); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM project_profile_bindings
+		WHERE project_profile_id = $1
+	`, profileID); err != nil {
+		return nil, err
+	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeUser, input.UserIDs); err != nil {
+		return nil, err
+	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeGroup, input.GroupIDs); err != nil {
+		return nil, err
+	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAccount, input.AccountIDs); err != nil {
+		return nil, err
+	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeSubscription, input.SubscriptionIDs); err != nil {
+		return nil, err
+	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAPIKey, input.APIKeyIDs); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE project_profiles
+		SET updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`, profileID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetProjectProfileBindings(ctx, projectID, profileID)
+}
+
+func (r *projectRepository) ValidateProjectProfileBindingScope(ctx context.Context, projectID int64, input service.ProjectProfileBindingInput) error {
+	if r == nil || r.sql == nil {
+		return fmt.Errorf("nil project repository")
+	}
+	checks := []struct {
+		table     string
+		ids       []int64
+		extra     string
+		resources projectSQLScopeResources
+	}{
+		{
+			table:     "users",
+			ids:       input.UserIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{UserID: "users.id"},
+		},
+		{
+			table:     "groups",
+			ids:       input.GroupIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{GroupID: "groups.id"},
+		},
+		{
+			table:     "accounts",
+			ids:       input.AccountIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{AccountID: "accounts.id"},
+		},
+		{
+			table:     "user_subscriptions",
+			ids:       input.SubscriptionIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{SubscriptionID: "user_subscriptions.id", UserID: "user_subscriptions.user_id", GroupID: "user_subscriptions.group_id"},
+		},
+		{
+			table:     "api_keys",
+			ids:       input.APIKeyIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{APIKeyID: "api_keys.id", UserID: "api_keys.user_id", GroupID: "api_keys.group_id"},
+		},
+	}
+	for _, check := range checks {
+		if len(check.ids) == 0 {
+			continue
+		}
+		scopeSQL := projectProfileScopeSQL(projectID, check.resources)
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = ANY($1) AND %s AND %s", check.table, check.extra, scopeSQL)
+		var count int
+		if err := scanSingleRow(ctx, r.sql, query, []any{pq.Array(check.ids)}, &count); err != nil {
+			return err
+		}
+		if count != len(check.ids) {
+			return service.ErrProjectAccessForbidden
+		}
+	}
+	return nil
+}
+
+func (r *projectRepository) ValidateProjectProfileBindingResources(ctx context.Context, input service.ProjectProfileBindingInput) error {
+	if r == nil || r.sql == nil {
+		return fmt.Errorf("nil project repository")
+	}
+	return validateProjectBindingIDs(ctx, r.sql, input)
+}
+
+func (r *projectRepository) SearchProjectBindableResources(ctx context.Context, projectID int64, query string, limit int) (*service.ProjectResourceSearchResult, error) {
+	if r == nil || r.sql == nil {
+		return nil, fmt.Errorf("nil project repository")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	out := &service.ProjectResourceSearchResult{
+		Users:         []service.ProjectResourceUserCandidate{},
+		Groups:        []service.ProjectResourceGroupCandidate{},
+		Accounts:      []service.ProjectResourceAccountCandidate{},
+		Subscriptions: []service.ProjectResourceSubscriptionCandidate{},
+		APIKeys:       []service.ProjectResourceAPIKeyCandidate{},
+	}
+
+	userRows, err := r.sql.QueryContext(ctx, `
+		SELECT id, email, COALESCE(username, ''), COALESCE(notes, ''), status
+		FROM users
+		WHERE deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(email) LIKE $1
+			OR LOWER(COALESCE(username, '')) LIKE $1
+			OR LOWER(COALESCE(notes, '')) LIKE $1
+			OR EXISTS (
+				SELECT 1
+				FROM api_keys ak
+				WHERE ak.user_id = users.id
+				  AND ak.deleted_at IS NULL
+				  AND (LOWER(ak.key) LIKE $1 OR LOWER(ak.name) LIKE $1)
+			)
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{UserID: "users.id"})+`
+		ORDER BY id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for userRows.Next() {
+		var item service.ProjectResourceUserCandidate
+		if err := userRows.Scan(&item.ID, &item.Email, &item.Username, &item.Notes, &item.Status); err != nil {
+			_ = userRows.Close()
+			return nil, err
+		}
+		out.Users = append(out.Users, item)
+	}
+	if err := userRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := userRows.Err(); err != nil {
+		return nil, err
+	}
+
+	groupRows, err := r.sql.QueryContext(ctx, `
+		SELECT id, project_id, name, COALESCE(description, ''), platform, status
+		FROM groups
+		WHERE deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(name) LIKE $1
+			OR LOWER(COALESCE(description, '')) LIKE $1
+			OR LOWER(platform) LIKE $1
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{GroupID: "groups.id"})+`
+		ORDER BY id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for groupRows.Next() {
+		var item service.ProjectResourceGroupCandidate
+		if err := groupRows.Scan(&item.ID, &item.ProjectID, &item.Name, &item.Description, &item.Platform, &item.Status); err != nil {
+			_ = groupRows.Close()
+			return nil, err
+		}
+		out.Groups = append(out.Groups, item)
+	}
+	if err := groupRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := groupRows.Err(); err != nil {
+		return nil, err
+	}
+
+	accountRows, err := r.sql.QueryContext(ctx, `
+		SELECT
+			id,
+			project_id,
+			name,
+			COALESCE(notes, ''),
+			platform,
+			type,
+			status,
+			COALESCE(credentials->>'email', credentials->>'account_email', credentials->>'user_email', extra->>'email', '')
+		FROM accounts
+		WHERE deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(name) LIKE $1
+			OR LOWER(COALESCE(notes, '')) LIKE $1
+			OR LOWER(platform) LIKE $1
+			OR LOWER(type) LIKE $1
+			OR LOWER(COALESCE(credentials->>'email', credentials->>'account_email', credentials->>'user_email', extra->>'email', '')) LIKE $1
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{AccountID: "accounts.id"})+`
+		ORDER BY id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for accountRows.Next() {
+		var item service.ProjectResourceAccountCandidate
+		if err := accountRows.Scan(&item.ID, &item.ProjectID, &item.Name, &item.Notes, &item.Platform, &item.Type, &item.Status, &item.Email); err != nil {
+			_ = accountRows.Close()
+			return nil, err
+		}
+		out.Accounts = append(out.Accounts, item)
+	}
+	if err := accountRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := accountRows.Err(); err != nil {
+		return nil, err
+	}
+
+	subRows, err := r.sql.QueryContext(ctx, `
+		SELECT us.id, us.user_id, us.group_id, u.email, g.name, us.status, COALESCE(us.notes, '')
+		FROM user_subscriptions us
+		JOIN users u ON u.id = us.user_id
+		JOIN groups g ON g.id = us.group_id
+		WHERE us.deleted_at IS NULL
+		  AND u.deleted_at IS NULL
+		  AND g.deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(u.email) LIKE $1
+			OR LOWER(COALESCE(u.username, '')) LIKE $1
+			OR LOWER(g.name) LIKE $1
+			OR LOWER(COALESCE(us.notes, '')) LIKE $1
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{SubscriptionID: "us.id", UserID: "us.user_id", GroupID: "us.group_id"})+`
+		ORDER BY us.id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for subRows.Next() {
+		var item service.ProjectResourceSubscriptionCandidate
+		if err := subRows.Scan(&item.ID, &item.UserID, &item.GroupID, &item.UserEmail, &item.GroupName, &item.Status, &item.Notes); err != nil {
+			_ = subRows.Close()
+			return nil, err
+		}
+		out.Subscriptions = append(out.Subscriptions, item)
+	}
+	if err := subRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := subRows.Err(); err != nil {
+		return nil, err
+	}
+
+	keyRows, err := r.sql.QueryContext(ctx, `
+		SELECT ak.id, ak.user_id, ak.project_id, ak.name, LEFT(ak.key, 12), u.email, ak.status
+		FROM api_keys ak
+		JOIN users u ON u.id = ak.user_id
+		WHERE ak.deleted_at IS NULL
+		  AND u.deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(ak.name) LIKE $1
+			OR LOWER(ak.key) LIKE $1
+			OR LOWER(u.email) LIKE $1
+			OR LOWER(COALESCE(u.username, '')) LIKE $1
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{APIKeyID: "ak.id", UserID: "ak.user_id", GroupID: "ak.group_id"})+`
+		ORDER BY ak.id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for keyRows.Next() {
+		var item service.ProjectResourceAPIKeyCandidate
+		if err := keyRows.Scan(&item.ID, &item.UserID, &item.ProjectID, &item.Name, &item.KeyPrefix, &item.UserEmail, &item.Status); err != nil {
+			_ = keyRows.Close()
+			return nil, err
+		}
+		out.APIKeys = append(out.APIKeys, item)
+	}
+	if err := keyRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := keyRows.Err(); err != nil {
+		return nil, err
+	}
+
 	return out, nil
 }
 
-func mergeSortedInt64(a, b []int64) []int64 {
-	if len(a) == 0 {
-		return append([]int64(nil), b...)
+func ensureProjectActiveProfile(ctx context.Context, q sqlExecutor, projectID int64) error {
+	if projectID <= 0 {
+		return nil
 	}
-	if len(b) == 0 {
-		return a
+	var id int64
+	err := scanSingleRow(ctx, q, `
+		SELECT id
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND is_active = TRUE
+		  AND deleted_at IS NULL
+		LIMIT 1
+	`, []any{projectID}, &id)
+	if err == nil {
+		return nil
 	}
-	seen := make(map[int64]struct{}, len(a)+len(b))
-	out := make([]int64, 0, len(a)+len(b))
-	for _, id := range append(a, b...) {
-		if id <= 0 {
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `
+		INSERT INTO project_profiles (project_id, name, description, mode, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT DO NOTHING
+	`, projectID, "默认配置", "Default active project application profile.", service.ProjectProfileModeRestricted)
+	return err
+}
+
+func ensureProjectProfileExists(ctx context.Context, q sqlQueryer, projectID int64, profileID int64) error {
+	_, err := getProjectProfileMode(ctx, q, projectID, profileID)
+	return err
+}
+
+func getProjectProfileMode(ctx context.Context, q sqlQueryer, projectID int64, profileID int64) (string, error) {
+	var mode string
+	err := scanSingleRow(ctx, q, `
+		SELECT mode
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`, []any{projectID, profileID}, &mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", service.ErrProjectProfileNotFound
+	}
+	return mode, err
+}
+
+func validateProjectBindingIDs(ctx context.Context, q sqlQueryer, input service.ProjectProfileBindingInput) error {
+	checks := []struct {
+		table string
+		ids   []int64
+		extra string
+	}{
+		{table: "users", ids: input.UserIDs, extra: "deleted_at IS NULL"},
+		{table: "groups", ids: input.GroupIDs, extra: "deleted_at IS NULL"},
+		{table: "accounts", ids: input.AccountIDs, extra: "deleted_at IS NULL"},
+		{table: "user_subscriptions", ids: input.SubscriptionIDs, extra: "deleted_at IS NULL"},
+		{table: "api_keys", ids: input.APIKeyIDs, extra: "deleted_at IS NULL"},
+	}
+	for _, check := range checks {
+		if len(check.ids) == 0 {
 			continue
 		}
-		if _, ok := seen[id]; ok {
-			continue
+		query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = ANY($1) AND %s", check.table, check.extra)
+		var count int
+		if err := scanSingleRow(ctx, q, query, []any{pq.Array(check.ids)}, &count); err != nil {
+			return err
 		}
-		seen[id] = struct{}{}
-		out = append(out, id)
+		if count != len(check.ids) {
+			return service.ErrProjectInvalidInput
+		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
+	return nil
+}
+
+func insertProjectProfileBindings(ctx context.Context, exec sqlExecutor, profileID int64, resourceType string, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO project_profile_bindings (project_profile_id, resource_type, resource_id, created_at)
+		SELECT $1, $2, unnest($3::bigint[]), CURRENT_TIMESTAMP
+		ON CONFLICT (project_profile_id, resource_type, resource_id) DO NOTHING
+	`, profileID, resourceType, pq.Array(ids))
+	return err
+}
+
+func removeProjectProfileResourceBindings(ctx context.Context, exec sqlExecutor, projectID int64, resourceType string, resourceID int64) error {
+	if exec == nil || projectID <= 0 || resourceID <= 0 || strings.TrimSpace(resourceType) == "" {
+		return nil
+	}
+	_, err := exec.ExecContext(ctx, `
+		DELETE FROM project_profile_bindings ppb
+		USING project_profiles pp
+		WHERE ppb.project_profile_id = pp.id
+		  AND pp.project_id = $1
+		  AND ppb.resource_type = $2
+		  AND ppb.resource_id = $3
+	`, projectID, resourceType, resourceID)
+	return err
+}
+
+func projectSearchScopeCondition(projectID int64, resources projectSQLScopeResources) string {
+	if projectID <= 0 {
+		return ""
+	}
+	return "AND " + projectProfileScopeSQL(projectID, resources)
 }
 
 func nullableString(value *string) any {

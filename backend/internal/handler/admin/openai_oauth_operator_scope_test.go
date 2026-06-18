@@ -2,7 +2,6 @@ package admin
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,193 +34,44 @@ func newOperatorOpenAIOAuthScopeRouter(adminSvc *stubAdminService, groupIDs []in
 	return router
 }
 
-func TestOperatorOpenAIOAuthRefreshRejectsOutOfScopeAccount(t *testing.T) {
+func TestOperatorOpenAIOAuthRoutesRejectLegacyRole(t *testing.T) {
 	adminSvc := newStubAdminService()
 	adminSvc.accounts = []service.Account{{
 		ID:          1,
-		Name:        "hidden-openai",
+		Name:        "visible-openai",
 		Platform:    service.PlatformOpenAI,
 		Type:        service.AccountTypeOAuth,
 		Status:      service.StatusActive,
-		GroupIDs:    []int64{30},
+		GroupIDs:    []int64{10},
 		Credentials: map[string]any{"refresh_token": "rt"},
 	}}
 	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/accounts/1/refresh", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
-}
-
-func TestOperatorOpenAIOAuthQueryQuotaRejectsOutOfScopeAccount(t *testing.T) {
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{{
-		ID:       1,
-		Name:     "hidden-openai",
-		Platform: service.PlatformOpenAI,
-		Type:     service.AccountTypeOAuth,
-		Status:   service.StatusActive,
-		GroupIDs: []int64{30},
-	}}
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/openai/accounts/1/quota", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
-}
-
-func TestOperatorOpenAIOAuthResetQuotaRejectsOutOfScopeAccount(t *testing.T) {
-	adminSvc := newStubAdminService()
-	adminSvc.accounts = []service.Account{{
-		ID:       1,
-		Name:     "hidden-openai",
-		Platform: service.PlatformOpenAI,
-		Type:     service.AccountTypeOAuth,
-		Status:   service.StatusActive,
-		GroupIDs: []int64{30},
-	}}
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/accounts/1/reset-quota", nil)
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
-}
-
-func TestOperatorOpenAIOAuthCreateRequiresAssignedGroups(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"session_id": "session",
-		"code":       "code",
-		"state":      "state",
-		"group_ids":  []int64{},
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/create-from-oauth", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_SCOPE_REQUIRED")
-	require.Empty(t, adminSvc.createdAccounts)
-}
-
-func TestOperatorOpenAIOAuthCreateRejectsOutOfScopeGroups(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"session_id": "session",
-		"code":       "code",
-		"state":      "state",
-		"group_ids":  []int64{30},
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/create-from-oauth", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_SCOPE_FORBIDDEN")
-	require.Empty(t, adminSvc.createdAccounts)
-}
-
-func TestOperatorOpenAIOAuthGenerateAuthURLRejectsProxyAssignment(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"proxy_id": 4,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/generate-auth-url", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
-}
-
-func TestOperatorOAuthProxyUseAllowsVisibleAccountCurrentProxy(t *testing.T) {
-	adminSvc := newStubAdminService()
-	proxyID := int64(4)
-	accountID := int64(1)
-	adminSvc.accounts = []service.Account{{
-		ID:       1,
-		Name:     "visible-openai",
-		Platform: service.PlatformOpenAI,
-		Type:     service.AccountTypeOAuth,
-		Status:   service.StatusActive,
-		GroupIDs: []int64{10},
-		ProxyID:  &proxyID,
-	}}
-	scope := &adminAccessScope{
-		GroupIDs: []int64{10},
-		groupSet: map[int64]struct{}{10: {}},
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "refresh", method: http.MethodPost, path: "/api/v1/admin/openai/accounts/1/refresh"},
+		{name: "quota", method: http.MethodGet, path: "/api/v1/admin/openai/accounts/1/quota"},
+		{name: "reset_quota", method: http.MethodPost, path: "/api/v1/admin/openai/accounts/1/reset-quota"},
+		{name: "generate_auth_url", method: http.MethodPost, path: "/api/v1/admin/openai/generate-auth-url", body: `{"account_id":1,"proxy_id":4}`},
+		{name: "create_from_oauth", method: http.MethodPost, path: "/api/v1/admin/openai/create-from-oauth", body: `{"session_id":"session","code":"code","state":"state","group_ids":[10],"proxy_id":4}`},
 	}
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/generate-auth-url", nil)
 
-	err := scope.ensureOAuthProxyUse(c, adminSvc, &accountID, &proxyID)
-	require.NoError(t, err)
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			router.ServeHTTP(rec, req)
 
-func TestOperatorOpenAIOAuthGenerateAuthURLRejectsOutOfScopeAccountProxyReuse(t *testing.T) {
-	adminSvc := newStubAdminService()
-	proxyID := int64(4)
-	adminSvc.accounts = []service.Account{{
-		ID:       1,
-		Name:     "hidden-openai",
-		Platform: service.PlatformOpenAI,
-		Type:     service.AccountTypeOAuth,
-		Status:   service.StatusActive,
-		GroupIDs: []int64{30},
-		ProxyID:  &proxyID,
-	}}
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"account_id": 1,
-		"proxy_id":   4,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/generate-auth-url", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_ACCOUNT_FORBIDDEN")
-}
-
-func TestOperatorOpenAIOAuthCreateRejectsProxyAssignment(t *testing.T) {
-	adminSvc := newStubAdminService()
-	router := newOperatorOpenAIOAuthScopeRouter(adminSvc, []int64{10})
-	body, _ := json.Marshal(map[string]any{
-		"session_id": "session",
-		"code":       "code",
-		"state":      "state",
-		"group_ids":  []int64{10},
-		"proxy_id":   4,
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/openai/create-from-oauth", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "OPERATOR_PROXY_FORBIDDEN")
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Contains(t, rec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
+		})
+	}
 	require.Empty(t, adminSvc.createdAccounts)
 }

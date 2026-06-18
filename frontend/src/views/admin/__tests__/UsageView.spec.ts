@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
+const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, authState } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -18,6 +18,7 @@ const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorL
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    authState: { isAdmin: true },
   }
 })
 
@@ -72,6 +73,10 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState,
+}))
+
 vi.mock('@/utils/format', () => ({
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
 }))
@@ -93,7 +98,10 @@ vi.mock('vue-router', () => ({
 }))
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
-const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const UsageFiltersStub = {
+  props: ['showCleanup'],
+  template: '<div data-test="usage-filters" :data-show-cleanup="String(showCleanup)"><slot name="after-reset" /></div>',
+}
 const UsageTableStub = {
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
@@ -128,6 +136,7 @@ describe('admin UsageView distribution metric toggles', () => {
     getSnapshotV2.mockReset()
     getById.mockReset()
     getModelStats.mockReset()
+    authState.isAdmin = true
 
     list.mockResolvedValue({
       items: [],
@@ -369,6 +378,57 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('admin UsageView cleanup visibility', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    list.mockReset()
+    count.mockReset()
+    getStats.mockReset()
+    getSnapshotV2.mockReset()
+    getModelStats.mockReset()
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    count.mockResolvedValue({ total: 0 })
+    getStats.mockResolvedValue({
+      total_requests: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      total_actual_cost: 0,
+      average_duration_ms: 0,
+    })
+    getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockResolvedValue({ models: [] })
+  })
+
+  afterEach(() => {
+    authState.isAdmin = true
+    vi.useRealTimers()
+  })
+
+  it('hides cleanup action for project admins', async () => {
+    authState.isAdmin = false
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="usage-filters"]').attributes('data-show-cleanup')).toBe('false')
+    wrapper.unmount()
   })
 })
 

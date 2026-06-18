@@ -961,7 +961,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		if apiKey != nil {
 			if entry.ProjectID <= 0 {
-				entry.ProjectID = apiKey.ProjectID
+				entry.ProjectID = resolveOpsProjectID(c, apiKey)
 			}
 			entry.APIKeyID = &apiKey.ID
 			// 有效(未删除)key 报错时快照前缀,key 之后被删也保留;与 INVALID_API_KEY 的 attempted_key_prefix 互斥。
@@ -1005,10 +1005,10 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 }
 
 func resolveOpsProjectID(c *gin.Context, apiKey *service.APIKey) int64 {
-	if apiKey != nil && apiKey.ProjectID > 0 {
-		return apiKey.ProjectID
-	}
 	if c == nil || c.Request == nil {
+		if apiKey != nil {
+			return apiKey.ProjectID
+		}
 		return 0
 	}
 	if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
@@ -1018,6 +1018,9 @@ func resolveOpsProjectID(c *gin.Context, apiKey *service.APIKey) int64 {
 		if id, ok := v.(int64); ok && id > 0 {
 			return id
 		}
+	}
+	if apiKey != nil && apiKey.ProjectID > 0 {
+		return apiKey.ProjectID
 	}
 	return 0
 }

@@ -23,6 +23,9 @@ type userRepoStubForGroupUpdate struct {
 	addGroupCalled bool
 	addedUserID    int64
 	addedGroupID   int64
+	user           *User
+	scopedUsers    []User
+	listCalls      []UserListFilters
 }
 
 func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, userID int64, groupID int64) error {
@@ -33,8 +36,12 @@ func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, 
 }
 
 func (s *userRepoStubForGroupUpdate) Create(context.Context, *User) error { panic("unexpected") }
-func (s *userRepoStubForGroupUpdate) GetByID(context.Context, int64) (*User, error) {
-	panic("unexpected")
+func (s *userRepoStubForGroupUpdate) GetByID(_ context.Context, id int64) (*User, error) {
+	if s.user != nil {
+		clone := *s.user
+		return &clone, nil
+	}
+	return &User{ID: id, Status: StatusActive}, nil
 }
 func (s *userRepoStubForGroupUpdate) GetByEmail(context.Context, string) (*User, error) {
 	panic("unexpected")
@@ -56,8 +63,16 @@ func (s *userRepoStubForGroupUpdate) DeleteUserAvatar(context.Context, int64) er
 func (s *userRepoStubForGroupUpdate) List(context.Context, pagination.PaginationParams) ([]User, *pagination.PaginationResult, error) {
 	panic("unexpected")
 }
-func (s *userRepoStubForGroupUpdate) ListWithFilters(context.Context, pagination.PaginationParams, UserListFilters) ([]User, *pagination.PaginationResult, error) {
-	panic("unexpected")
+func (s *userRepoStubForGroupUpdate) ListWithFilters(_ context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error) {
+	s.listCalls = append(s.listCalls, filters)
+	out := make([]User, 0, len(s.scopedUsers))
+	for _, user := range s.scopedUsers {
+		if filters.ID > 0 && user.ID != filters.ID {
+			continue
+		}
+		out = append(out, user)
+	}
+	return out, &pagination.PaginationResult{Total: int64(len(out)), Page: params.Page, PageSize: params.PageSize}, nil
 }
 func (s *userRepoStubForGroupUpdate) UpdateBalance(context.Context, int64, float64) error {
 	panic("unexpected")
@@ -530,6 +545,21 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_ExclusiveGroup_AllowedGroupAddFai
 	require.True(t, userRepo.addGroupCalled)
 	// apiKey 不应被更新
 	require.Nil(t, apiKeyRepo.updated)
+}
+
+func TestAdminService_AdminUpdateAPIKeyGroupID_ProjectContextRejectsExclusiveGroupWhenOwnerOutOfScope(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test", GroupID: nil}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	groupRepo := &groupRepoStubForGroupUpdate{group: &Group{ID: 10, Name: "Exclusive", Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeStandard}}
+	userRepo := &userRepoStubForGroupUpdate{}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, groupRepo: groupRepo, userRepo: userRepo}
+
+	_, err := svc.AdminUpdateAPIKeyGroupID(WithProjectID(context.Background(), 7), 1, int64Ptr(10))
+	require.ErrorIs(t, err, ErrUserNotFound)
+	require.False(t, userRepo.addGroupCalled)
+	require.Nil(t, apiKeyRepo.updated)
+	require.Len(t, userRepo.listCalls, 1)
+	require.Equal(t, int64(42), userRepo.listCalls[0].ID)
 }
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_Unbind_NoAllowedGroupUpdate(t *testing.T) {

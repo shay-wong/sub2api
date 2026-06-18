@@ -11,6 +11,10 @@ import { getLocale } from '@/i18n'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
+const PROJECT_HEADER_EXCLUDED_PREFIXES = [
+  '/auth/',
+  '/settings/public',
+]
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -68,7 +72,7 @@ apiClient.interceptors.request.use(
     }
 
     const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
-    if (selectedProjectID && config.headers) {
+    if (selectedProjectID && config.headers && shouldAttachProjectHeader(config.url)) {
       config.headers['X-Project-ID'] = selectedProjectID
     }
 
@@ -86,6 +90,25 @@ apiClient.interceptors.request.use(
     return Promise.reject(error)
   }
 )
+
+function shouldAttachProjectHeader(url?: string): boolean {
+  const path = normalizeRequestPath(url)
+  if (!path) {
+    return false
+  }
+  return !PROJECT_HEADER_EXCLUDED_PREFIXES.some(prefix => path === prefix.slice(0, -1) || path.startsWith(prefix))
+}
+
+function normalizeRequestPath(url?: string): string {
+  if (!url) {
+    return ''
+  }
+  try {
+    return new URL(url, window.location.origin).pathname
+  } catch {
+    return url.split('?')[0] ?? ''
+  }
+}
 
 // ==================== Response Interceptor ====================
 

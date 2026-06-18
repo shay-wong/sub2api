@@ -13,14 +13,25 @@ import (
 const (
 	ProjectRoleAdmin = "admin"
 	ProjectRoleUser  = "user"
+
+	ProjectProfileModeRestricted   = "restricted"
+	ProjectProfileModeUnrestricted = "unrestricted"
+
+	ProjectResourceTypeUser         = "user"
+	ProjectResourceTypeGroup        = "group"
+	ProjectResourceTypeAccount      = "account"
+	ProjectResourceTypeSubscription = "subscription"
+	ProjectResourceTypeAPIKey       = "api_key"
 )
 
 var (
-	ErrProjectNotFound        = infraerrors.NotFound("PROJECT_NOT_FOUND", "project not found")
-	ErrProjectAccessForbidden = infraerrors.Forbidden("PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
-	ErrProjectInvalidInput    = infraerrors.BadRequest("PROJECT_INVALID_INPUT", "project input is invalid")
-	ErrProjectInvalidRole     = infraerrors.BadRequest("PROJECT_INVALID_ROLE", "project member role must be admin or user")
-	ErrProjectSlugConflict    = infraerrors.Conflict("PROJECT_SLUG_CONFLICT", "project slug already exists")
+	ErrProjectNotFound              = infraerrors.NotFound("PROJECT_NOT_FOUND", "project not found")
+	ErrProjectAccessForbidden       = infraerrors.Forbidden("PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
+	ErrProjectInvalidInput          = infraerrors.BadRequest("PROJECT_INVALID_INPUT", "project input is invalid")
+	ErrProjectInvalidRole           = infraerrors.BadRequest("PROJECT_INVALID_ROLE", "project member role must be admin or user")
+	ErrProjectSlugConflict          = infraerrors.Conflict("PROJECT_SLUG_CONFLICT", "project slug already exists")
+	ErrProjectOwnerTransferRequired = infraerrors.BadRequest("PROJECT_OWNER_TRANSFER_REQUIRED", "project owner must be transferred before removal")
+	ErrProjectProfileNotFound       = infraerrors.NotFound("PROJECT_PROFILE_NOT_FOUND", "project profile not found")
 )
 
 type ProjectRepository interface {
@@ -34,7 +45,16 @@ type ProjectRepository interface {
 	ListProjectMembers(ctx context.Context, projectID int64) ([]ProjectMember, error)
 	SetProjectMember(ctx context.Context, projectID int64, input ProjectMemberInput) (*ProjectMember, error)
 	RemoveProjectMember(ctx context.Context, projectID int64, userID int64) error
-	MoveProjectResources(ctx context.Context, projectID int64, input ProjectResourceMoveInput) (*ProjectResourceMoveResult, error)
+	ListProjectProfiles(ctx context.Context, projectID int64) ([]ProjectProfile, error)
+	CreateProjectProfile(ctx context.Context, projectID int64, input ProjectProfileInput) (*ProjectProfile, error)
+	UpdateProjectProfile(ctx context.Context, projectID int64, profileID int64, input ProjectProfileInput) (*ProjectProfile, error)
+	DeleteProjectProfile(ctx context.Context, projectID int64, profileID int64) error
+	ActivateProjectProfile(ctx context.Context, projectID int64, profileID int64) (*ProjectProfile, error)
+	GetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64) (*ProjectProfileBindings, error)
+	SetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64, input ProjectProfileBindingInput) (*ProjectProfileBindings, error)
+	ValidateProjectProfileBindingScope(ctx context.Context, projectID int64, input ProjectProfileBindingInput) error
+	ValidateProjectProfileBindingResources(ctx context.Context, input ProjectProfileBindingInput) error
+	SearchProjectBindableResources(ctx context.Context, projectID int64, query string, limit int) (*ProjectResourceSearchResult, error)
 }
 
 type ProjectService struct {
@@ -56,6 +76,8 @@ type ProjectCreateInput struct {
 	Slug        string
 	Description *string
 	OwnerUserID int64
+	ProfileMode string
+	Bindings    ProjectProfileBindingInput
 }
 
 type ProjectUpdateInput struct {
@@ -68,41 +90,110 @@ type ProjectMemberInput struct {
 	UserID  int64
 	Role    string
 	IsOwner bool
+	Status  *string
 }
 
-type ProjectResourceMoveInput struct {
-	AccountIDs       []int64 `json:"account_ids,omitempty"`
-	APIKeyIDs        []int64 `json:"api_key_ids,omitempty"`
-	GroupIDs         []int64 `json:"group_ids,omitempty"`
-	MoveUsageHistory bool    `json:"move_usage_history"`
+type ProjectProfile struct {
+	ID          int64   `json:"id"`
+	ProjectID   int64   `json:"project_id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	Mode        string  `json:"mode"`
+	IsActive    bool    `json:"is_active"`
+	CreatedAt   string  `json:"created_at,omitempty"`
+	UpdatedAt   string  `json:"updated_at,omitempty"`
 }
 
-type ProjectResourceMoveResult struct {
-	AccountsMoved               int64    `json:"accounts_moved"`
-	APIKeysMoved                int64    `json:"api_keys_moved"`
-	GroupsMoved                 int64    `json:"groups_moved"`
-	AccountGroupBindingsRemoved int64    `json:"account_group_bindings_removed"`
-	APIKeyGroupBindingsCleared  int64    `json:"api_key_group_bindings_cleared"`
-	GroupFallbacksCleared       int64    `json:"group_fallbacks_cleared"`
-	GroupModelRoutingCleared    int64    `json:"group_model_routing_cleared"`
-	ProjectMembersAdded         int64    `json:"project_members_added"`
-	UsageLogsMoved              int64    `json:"usage_logs_moved"`
-	OpsErrorLogsMoved           int64    `json:"ops_error_logs_moved"`
-	InvalidatedUserIDs          []int64  `json:"-"`
-	InvalidatedGroupIDs         []int64  `json:"-"`
-	InvalidatedAPIKeys          []string `json:"-"`
+type ProjectProfileInput struct {
+	Name        *string
+	Description *string
+	Mode        *string
+}
+
+type ProjectProfileBindings struct {
+	ProfileID       int64   `json:"profile_id"`
+	UserIDs         []int64 `json:"user_ids"`
+	GroupIDs        []int64 `json:"group_ids"`
+	AccountIDs      []int64 `json:"account_ids"`
+	SubscriptionIDs []int64 `json:"subscription_ids"`
+	APIKeyIDs       []int64 `json:"api_key_ids"`
+}
+
+type ProjectProfileBindingInput struct {
+	UserIDs         []int64 `json:"user_ids,omitempty"`
+	GroupIDs        []int64 `json:"group_ids,omitempty"`
+	AccountIDs      []int64 `json:"account_ids,omitempty"`
+	SubscriptionIDs []int64 `json:"subscription_ids,omitempty"`
+	APIKeyIDs       []int64 `json:"api_key_ids,omitempty"`
+}
+
+type ProjectResourceSearchResult struct {
+	Users         []ProjectResourceUserCandidate         `json:"users"`
+	Groups        []ProjectResourceGroupCandidate        `json:"groups"`
+	Accounts      []ProjectResourceAccountCandidate      `json:"accounts"`
+	Subscriptions []ProjectResourceSubscriptionCandidate `json:"subscriptions"`
+	APIKeys       []ProjectResourceAPIKeyCandidate       `json:"api_keys"`
+}
+
+type ProjectResourceUserCandidate struct {
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+	Notes    string `json:"notes"`
+	Status   string `json:"status"`
+}
+
+type ProjectResourceAPIKeyCandidate struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	ProjectID int64  `json:"project_id"`
+	Name      string `json:"name"`
+	KeyPrefix string `json:"key_prefix"`
+	UserEmail string `json:"user_email"`
+	Status    string `json:"status"`
+}
+
+type ProjectResourceGroupCandidate struct {
+	ID          int64  `json:"id"`
+	ProjectID   int64  `json:"project_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Platform    string `json:"platform"`
+	Status      string `json:"status"`
+}
+
+type ProjectResourceAccountCandidate struct {
+	ID        int64  `json:"id"`
+	ProjectID int64  `json:"project_id"`
+	Name      string `json:"name"`
+	Notes     string `json:"notes"`
+	Platform  string `json:"platform"`
+	Type      string `json:"type"`
+	Status    string `json:"status"`
+	Email     string `json:"email"`
+}
+
+type ProjectResourceSubscriptionCandidate struct {
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	GroupID   int64  `json:"group_id"`
+	UserEmail string `json:"user_email"`
+	GroupName string `json:"group_name"`
+	Status    string `json:"status"`
+	Notes     string `json:"notes"`
 }
 
 type ProjectMember struct {
-	ProjectID int64  `json:"project_id"`
-	UserID    int64  `json:"user_id"`
-	Email     string `json:"email"`
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	IsOwner   bool   `json:"is_owner"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ProjectID  int64  `json:"project_id"`
+	UserID     int64  `json:"user_id"`
+	Email      string `json:"email"`
+	Username   string `json:"username"`
+	Role       string `json:"role"`
+	IsOwner    bool   `json:"is_owner"`
+	Status     string `json:"status"`
+	UserStatus string `json:"user_status,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
 var projectSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$|^[a-z0-9]$`)
@@ -123,16 +214,15 @@ func (s *ProjectService) ResolveAdminProject(ctx context.Context, user *User, re
 		return 0, "", infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
 	}
 
-	projectID := requestedProjectID
-	if projectID <= 0 {
-		defaultProjectID, err := s.repo.GetDefaultProjectID(ctx)
-		if err != nil {
-			return 0, "", err
-		}
-		projectID = defaultProjectID
-	}
-
 	if RoleIsSuperAdmin(user.Role) {
+		projectID := requestedProjectID
+		if projectID <= 0 {
+			defaultProjectID, err := s.repo.GetDefaultProjectID(ctx)
+			if err != nil {
+				return 0, "", err
+			}
+			projectID = defaultProjectID
+		}
 		exists, err := s.repo.ProjectExists(ctx, projectID)
 		if err != nil {
 			return 0, "", err
@@ -141,6 +231,26 @@ func (s *ProjectService) ResolveAdminProject(ctx context.Context, user *User, re
 			return 0, "", ErrProjectNotFound
 		}
 		return projectID, RoleSuperAdmin, nil
+	}
+	if RoleIsOperator(user.Role) {
+		return 0, "", ErrLegacyOperatorRoleDisabled
+	}
+
+	projectID := requestedProjectID
+	if projectID <= 0 {
+		projects, err := s.repo.ListUserProjects(ctx, user.ID)
+		if err != nil {
+			return 0, "", err
+		}
+		for _, project := range projects {
+			if project.Role == ProjectRoleAdmin {
+				projectID = project.ID
+				break
+			}
+		}
+		if projectID <= 0 {
+			return 0, "", ErrProjectAccessForbidden
+		}
 	}
 
 	role, ok, err := s.repo.GetProjectRole(ctx, projectID, user.ID)
@@ -236,6 +346,26 @@ func (s *ProjectService) CreateProject(ctx context.Context, input ProjectCreateI
 		desc := strings.TrimSpace(*input.Description)
 		input.Description = &desc
 	}
+	input.ProfileMode = strings.TrimSpace(input.ProfileMode)
+	if input.ProfileMode == "" {
+		input.ProfileMode = ProjectProfileModeRestricted
+	}
+	if input.ProfileMode != ProjectProfileModeRestricted && input.ProfileMode != ProjectProfileModeUnrestricted {
+		return nil, ErrProjectInvalidInput
+	}
+	if input.ProfileMode == ProjectProfileModeUnrestricted {
+		input.Bindings = ProjectProfileBindingInput{}
+	}
+	input.Bindings.UserIDs = normalizeProjectResourceIDs(input.Bindings.UserIDs)
+	input.Bindings.GroupIDs = normalizeProjectResourceIDs(input.Bindings.GroupIDs)
+	input.Bindings.AccountIDs = normalizeProjectResourceIDs(input.Bindings.AccountIDs)
+	input.Bindings.SubscriptionIDs = normalizeProjectResourceIDs(input.Bindings.SubscriptionIDs)
+	input.Bindings.APIKeyIDs = normalizeProjectResourceIDs(input.Bindings.APIKeyIDs)
+	if input.ProfileMode == ProjectProfileModeRestricted && !projectProfileBindingsEmpty(input.Bindings) {
+		if err := s.repo.ValidateProjectProfileBindingResources(ctx, input.Bindings); err != nil {
+			return nil, err
+		}
+	}
 	project, err := s.repo.CreateProject(ctx, input)
 	if err != nil {
 		return nil, err
@@ -303,6 +433,17 @@ func (s *ProjectService) SetProjectMember(ctx context.Context, projectID int64, 
 	if input.Role != ProjectRoleAdmin && input.Role != ProjectRoleUser {
 		return nil, ErrProjectInvalidRole
 	}
+	if input.Status != nil {
+		status := strings.TrimSpace(*input.Status)
+		if status != StatusActive && status != StatusDisabled {
+			return nil, ErrProjectInvalidInput
+		}
+		input.Status = &status
+	}
+	if input.IsOwner {
+		status := StatusActive
+		input.Status = &status
+	}
 	exists, err := s.repo.ProjectExists(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -330,47 +471,221 @@ func (s *ProjectService) RemoveProjectMember(ctx context.Context, projectID int6
 	return s.repo.RemoveProjectMember(ctx, projectID, userID)
 }
 
-func (s *ProjectService) MoveProjectResources(ctx context.Context, projectID int64, input ProjectResourceMoveInput) (*ProjectResourceMoveResult, error) {
+func (s *ProjectService) ListProjectProfiles(ctx context.Context, projectID int64) ([]ProjectProfile, error) {
 	if s == nil || s.repo == nil {
 		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
 	}
 	if projectID <= 0 {
 		return nil, ErrProjectInvalidInput
 	}
-	input.AccountIDs = normalizeProjectResourceIDs(input.AccountIDs)
-	input.APIKeyIDs = normalizeProjectResourceIDs(input.APIKeyIDs)
-	input.GroupIDs = normalizeProjectResourceIDs(input.GroupIDs)
-	if len(input.AccountIDs) == 0 && len(input.APIKeyIDs) == 0 && len(input.GroupIDs) == 0 {
-		return nil, ErrProjectInvalidInput
-	}
-	exists, err := s.repo.ProjectExists(ctx, projectID)
-	if err != nil {
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
 		return nil, err
 	}
-	if !exists {
-		return nil, ErrProjectNotFound
-	}
-	result, err := s.repo.MoveProjectResources(ctx, projectID, input)
-	if err != nil {
-		return nil, err
-	}
-	s.invalidateMovedProjectResourceAuthCache(ctx, result)
-	return result, nil
+	return s.repo.ListProjectProfiles(ctx, projectID)
 }
 
-func (s *ProjectService) invalidateMovedProjectResourceAuthCache(ctx context.Context, result *ProjectResourceMoveResult) {
-	if s == nil || s.authCacheInvalidator == nil || result == nil {
-		return
+func (s *ProjectService) CreateProjectProfile(ctx context.Context, projectID int64, input ProjectProfileInput) (*ProjectProfile, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
 	}
-	for _, key := range result.InvalidatedAPIKeys {
-		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, key)
+	if projectID <= 0 {
+		return nil, ErrProjectInvalidInput
 	}
-	for _, userID := range result.InvalidatedUserIDs {
-		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	if err := s.normalizeProjectProfileInput(&input, true); err != nil {
+		return nil, err
 	}
-	for _, groupID := range result.InvalidatedGroupIDs {
-		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, groupID)
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return nil, err
 	}
+	return s.repo.CreateProjectProfile(ctx, projectID, input)
+}
+
+func (s *ProjectService) UpdateProjectProfile(ctx context.Context, projectID int64, profileID int64, input ProjectProfileInput) (*ProjectProfile, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 || profileID <= 0 {
+		return nil, ErrProjectInvalidInput
+	}
+	if err := s.normalizeProjectProfileInput(&input, false); err != nil {
+		return nil, err
+	}
+	if input.Name == nil && input.Description == nil && input.Mode == nil {
+		return nil, ErrProjectInvalidInput
+	}
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return nil, err
+	}
+	var affectedBindings []*ProjectProfileBindings
+	if input.Mode != nil {
+		currentBindings, err := s.repo.GetProjectProfileBindings(ctx, projectID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		affectedBindings = append(affectedBindings, currentBindings)
+	}
+	profile, err := s.repo.UpdateProjectProfile(ctx, projectID, profileID, input)
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateProjectProfileAuthCache(ctx, affectedBindings...)
+	return profile, nil
+}
+
+func (s *ProjectService) DeleteProjectProfile(ctx context.Context, projectID int64, profileID int64) error {
+	if s == nil || s.repo == nil {
+		return infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 || profileID <= 0 {
+		return ErrProjectInvalidInput
+	}
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return err
+	}
+	return s.repo.DeleteProjectProfile(ctx, projectID, profileID)
+}
+
+func (s *ProjectService) ActivateProjectProfile(ctx context.Context, projectID int64, profileID int64) (*ProjectProfile, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 || profileID <= 0 {
+		return nil, ErrProjectInvalidInput
+	}
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return nil, err
+	}
+	affectedBindings, err := s.projectProfileActivationAuthCacheBindings(ctx, projectID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.repo.ActivateProjectProfile(ctx, projectID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateProjectProfileAuthCache(ctx, affectedBindings...)
+	return profile, nil
+}
+
+func (s *ProjectService) GetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64) (*ProjectProfileBindings, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 || profileID <= 0 {
+		return nil, ErrProjectInvalidInput
+	}
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return nil, err
+	}
+	return s.repo.GetProjectProfileBindings(ctx, projectID, profileID)
+}
+
+func (s *ProjectService) SetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64, input ProjectProfileBindingInput) (*ProjectProfileBindings, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 || profileID <= 0 {
+		return nil, ErrProjectInvalidInput
+	}
+	input.UserIDs = normalizeProjectResourceIDs(input.UserIDs)
+	input.GroupIDs = normalizeProjectResourceIDs(input.GroupIDs)
+	input.AccountIDs = normalizeProjectResourceIDs(input.AccountIDs)
+	input.SubscriptionIDs = normalizeProjectResourceIDs(input.SubscriptionIDs)
+	input.APIKeyIDs = normalizeProjectResourceIDs(input.APIKeyIDs)
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return nil, err
+	}
+	currentBindings, err := s.repo.GetProjectProfileBindings(ctx, projectID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	updatedBindings, err := s.repo.SetProjectProfileBindings(ctx, projectID, profileID, input)
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateProjectProfileAuthCache(ctx, currentBindings, updatedBindings)
+	return updatedBindings, nil
+}
+
+func (s *ProjectService) ValidateProjectProfileBindingScope(ctx context.Context, projectID int64, input ProjectProfileBindingInput) error {
+	if s == nil || s.repo == nil {
+		return infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 {
+		return ErrProjectInvalidInput
+	}
+	input.UserIDs = normalizeProjectResourceIDs(input.UserIDs)
+	input.GroupIDs = normalizeProjectResourceIDs(input.GroupIDs)
+	input.AccountIDs = normalizeProjectResourceIDs(input.AccountIDs)
+	input.SubscriptionIDs = normalizeProjectResourceIDs(input.SubscriptionIDs)
+	input.APIKeyIDs = normalizeProjectResourceIDs(input.APIKeyIDs)
+	if err := s.ensureProjectExists(ctx, projectID); err != nil {
+		return err
+	}
+	return s.repo.ValidateProjectProfileBindingScope(ctx, projectID, input)
+}
+
+func (s *ProjectService) SearchProjectBindableResources(ctx context.Context, projectID int64, query string, limit int) (*ProjectResourceSearchResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	if projectID <= 0 {
+		projectID = 0
+	}
+	query = strings.TrimSpace(query)
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if projectID > 0 {
+		if err := s.ensureProjectExists(ctx, projectID); err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.SearchProjectBindableResources(ctx, projectID, query, limit)
+}
+
+func (s *ProjectService) ensureProjectExists(ctx context.Context, projectID int64) error {
+	exists, err := s.repo.ProjectExists(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrProjectNotFound
+	}
+	return nil
+}
+
+func (s *ProjectService) normalizeProjectProfileInput(input *ProjectProfileInput, requireName bool) error {
+	if input == nil {
+		return ErrProjectInvalidInput
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return ErrProjectInvalidInput
+		}
+		input.Name = &name
+	} else if requireName {
+		return ErrProjectInvalidInput
+	}
+	if input.Description != nil {
+		desc := strings.TrimSpace(*input.Description)
+		input.Description = &desc
+	}
+	if input.Mode != nil {
+		mode := strings.TrimSpace(*input.Mode)
+		if mode == "" {
+			mode = ProjectProfileModeRestricted
+		}
+		if mode != ProjectProfileModeRestricted && mode != ProjectProfileModeUnrestricted {
+			return ErrProjectInvalidInput
+		}
+		input.Mode = &mode
+	} else if requireName {
+		mode := ProjectProfileModeRestricted
+		input.Mode = &mode
+	}
+	return nil
 }
 
 func normalizeProjectResourceIDs(ids []int64) []int64 {
@@ -387,6 +702,85 @@ func normalizeProjectResourceIDs(ids []int64) []int64 {
 			continue
 		}
 		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func projectProfileBindingsEmpty(input ProjectProfileBindingInput) bool {
+	return len(input.UserIDs) == 0 &&
+		len(input.GroupIDs) == 0 &&
+		len(input.AccountIDs) == 0 &&
+		len(input.SubscriptionIDs) == 0 &&
+		len(input.APIKeyIDs) == 0
+}
+
+func (s *ProjectService) projectProfileActivationAuthCacheBindings(ctx context.Context, projectID int64, profileID int64) ([]*ProjectProfileBindings, error) {
+	profiles, err := s.repo.ListProjectProfiles(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	affected := make([]*ProjectProfileBindings, 0, 2)
+	seen := make(map[int64]struct{}, 2)
+	for _, profile := range profiles {
+		if !profile.IsActive && profile.ID != profileID {
+			continue
+		}
+		if _, ok := seen[profile.ID]; ok {
+			continue
+		}
+		seen[profile.ID] = struct{}{}
+		bindings, err := s.repo.GetProjectProfileBindings(ctx, projectID, profile.ID)
+		if err != nil {
+			return nil, err
+		}
+		affected = append(affected, bindings)
+	}
+	return affected, nil
+}
+
+func (s *ProjectService) invalidateProjectProfileAuthCache(ctx context.Context, bindings ...*ProjectProfileBindings) {
+	if s == nil || s.authCacheInvalidator == nil {
+		return
+	}
+	userIDs := map[int64]struct{}{}
+	groupIDs := map[int64]struct{}{}
+	apiKeyIDs := map[int64]struct{}{}
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		addIDs(userIDs, binding.UserIDs)
+		addIDs(groupIDs, binding.GroupIDs)
+		addIDs(apiKeyIDs, binding.APIKeyIDs)
+	}
+	for _, id := range sortedIDKeys(userIDs) {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
+	}
+	for _, id := range sortedIDKeys(groupIDs) {
+		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+	}
+	for _, id := range sortedIDKeys(apiKeyIDs) {
+		s.authCacheInvalidator.InvalidateAuthCacheByAPIKeyID(ctx, id)
+	}
+}
+
+func addIDs(dst map[int64]struct{}, ids []int64) {
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		dst[id] = struct{}{}
+	}
+}
+
+func sortedIDKeys(values map[int64]struct{}) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]int64, 0, len(values))
+	for id := range values {
 		out = append(out, id)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })

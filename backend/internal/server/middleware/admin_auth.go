@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -160,6 +161,8 @@ func applyAdminProjectContext(c *gin.Context, user *service.User, projectService
 		if err != nil {
 			if service.IsProjectNotFound(err) {
 				AbortWithError(c, 404, "PROJECT_NOT_FOUND", "project not found")
+			} else if appErr := infraerrors.FromError(err); appErr != nil && appErr.Reason != "" && appErr.Code >= 400 && appErr.Code < 500 {
+				AbortWithError(c, int(appErr.Code), appErr.Reason, appErr.Message)
 			} else {
 				AbortWithError(c, 403, "PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
 			}

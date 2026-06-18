@@ -105,6 +105,20 @@ func (_u *ProjectMemberUpdate) SetNillableIsOwner(v *bool) *ProjectMemberUpdate 
 	return _u
 }
 
+// SetStatus sets the "status" field.
+func (_u *ProjectMemberUpdate) SetStatus(v string) *ProjectMemberUpdate {
+	_u.mutation.SetStatus(v)
+	return _u
+}
+
+// SetNillableStatus sets the "status" field if the given value is not nil.
+func (_u *ProjectMemberUpdate) SetNillableStatus(v *string) *ProjectMemberUpdate {
+	if v != nil {
+		_u.SetStatus(*v)
+	}
+	return _u
+}
+
 // SetProject sets the "project" edge to the Project entity.
 func (_u *ProjectMemberUpdate) SetProject(v *Project) *ProjectMemberUpdate {
 	return _u.SetProjectID(v.ID)
@@ -175,6 +189,11 @@ func (_u *ProjectMemberUpdate) check() error {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "ProjectMember.role": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Status(); ok {
+		if err := projectmember.StatusValidator(v); err != nil {
+			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "ProjectMember.status": %w`, err)}
+		}
+	}
 	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "ProjectMember.project"`)
 	}
@@ -212,6 +231,9 @@ func (_u *ProjectMemberUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	}
 	if value, ok := _u.mutation.IsOwner(); ok {
 		_spec.SetField(projectmember.FieldIsOwner, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Status(); ok {
+		_spec.SetField(projectmember.FieldStatus, field.TypeString, value)
 	}
 	if _u.mutation.ProjectCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -365,6 +387,20 @@ func (_u *ProjectMemberUpdateOne) SetNillableIsOwner(v *bool) *ProjectMemberUpda
 	return _u
 }
 
+// SetStatus sets the "status" field.
+func (_u *ProjectMemberUpdateOne) SetStatus(v string) *ProjectMemberUpdateOne {
+	_u.mutation.SetStatus(v)
+	return _u
+}
+
+// SetNillableStatus sets the "status" field if the given value is not nil.
+func (_u *ProjectMemberUpdateOne) SetNillableStatus(v *string) *ProjectMemberUpdateOne {
+	if v != nil {
+		_u.SetStatus(*v)
+	}
+	return _u
+}
+
 // SetProject sets the "project" edge to the Project entity.
 func (_u *ProjectMemberUpdateOne) SetProject(v *Project) *ProjectMemberUpdateOne {
 	return _u.SetProjectID(v.ID)
@@ -448,6 +484,11 @@ func (_u *ProjectMemberUpdateOne) check() error {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "ProjectMember.role": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.Status(); ok {
+		if err := projectmember.StatusValidator(v); err != nil {
+			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "ProjectMember.status": %w`, err)}
+		}
+	}
 	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "ProjectMember.project"`)
 	}
@@ -502,6 +543,9 @@ func (_u *ProjectMemberUpdateOne) sqlSave(ctx context.Context) (_node *ProjectMe
 	}
 	if value, ok := _u.mutation.IsOwner(); ok {
 		_spec.SetField(projectmember.FieldIsOwner, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.Status(); ok {
+		_spec.SetField(projectmember.FieldStatus, field.TypeString, value)
 	}
 	if _u.mutation.ProjectCleared() {
 		edge := &sqlgraph.EdgeSpec{

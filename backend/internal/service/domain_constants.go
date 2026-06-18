@@ -38,7 +38,7 @@ func RoleIsOperator(role string) bool {
 
 func RoleHasUserAccess(role string) bool {
 	switch role {
-	case RoleSuperAdmin, RoleAdmin, RoleOperator, RoleUser:
+	case RoleSuperAdmin, RoleAdmin, RoleUser:
 		return true
 	default:
 		return false

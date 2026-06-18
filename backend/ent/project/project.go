@@ -33,6 +33,8 @@ const (
 	FieldProfiles = "profiles"
 	// EdgeMembers holds the string denoting the members edge name in mutations.
 	EdgeMembers = "members"
+	// EdgeAppProfiles holds the string denoting the app_profiles edge name in mutations.
+	EdgeAppProfiles = "app_profiles"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
@@ -50,6 +52,13 @@ const (
 	MembersInverseTable = "project_members"
 	// MembersColumn is the table column denoting the members relation/edge.
 	MembersColumn = "project_id"
+	// AppProfilesTable is the table that holds the app_profiles relation/edge.
+	AppProfilesTable = "project_profiles"
+	// AppProfilesInverseTable is the table name for the ProjectProfile entity.
+	// It exists in this package in order to avoid circular dependency with the "projectprofile" package.
+	AppProfilesInverseTable = "project_profiles"
+	// AppProfilesColumn is the table column denoting the app_profiles relation/edge.
+	AppProfilesColumn = "project_id"
 	// AccountsTable is the table that holds the accounts relation/edge.
 	AccountsTable = "accounts"
 	// AccountsInverseTable is the table name for the Account entity.
@@ -186,6 +195,20 @@ func ByMembers(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByAppProfilesCount orders the results by app_profiles count.
+func ByAppProfilesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newAppProfilesStep(), opts...)
+	}
+}
+
+// ByAppProfiles orders the results by app_profiles terms.
+func ByAppProfiles(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newAppProfilesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByAccountsCount orders the results by accounts count.
 func ByAccountsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -246,6 +269,13 @@ func newMembersStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(MembersInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, MembersTable, MembersColumn),
+	)
+}
+func newAppProfilesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(AppProfilesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, AppProfilesTable, AppProfilesColumn),
 	)
 }
 func newAccountsStep() *sqlgraph.Step {

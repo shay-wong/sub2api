@@ -261,6 +261,30 @@ func (f ProjectMemberFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Valu
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProjectMemberMutation", m)
 }
 
+// The ProjectProfileFunc type is an adapter to allow the use of ordinary
+// function as ProjectProfile mutator.
+type ProjectProfileFunc func(context.Context, *ent.ProjectProfileMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProjectProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProjectProfileMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProjectProfileMutation", m)
+}
+
+// The ProjectProfileBindingFunc type is an adapter to allow the use of ordinary
+// function as ProjectProfileBinding mutator.
+type ProjectProfileBindingFunc func(context.Context, *ent.ProjectProfileBindingMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ProjectProfileBindingFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.ProjectProfileBindingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProjectProfileBindingMutation", m)
+}
+
 // The PromoCodeFunc type is an adapter to allow the use of ordinary
 // function as PromoCode mutator.
 type PromoCodeFunc func(context.Context, *ent.PromoCodeMutation) (ent.Value, error)

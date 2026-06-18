@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -142,6 +143,21 @@ func (_u *ProjectUpdate) AddMembers(v ...*ProjectMember) *ProjectUpdate {
 	return _u.AddMemberIDs(ids...)
 }
 
+// AddAppProfileIDs adds the "app_profiles" edge to the ProjectProfile entity by IDs.
+func (_u *ProjectUpdate) AddAppProfileIDs(ids ...int64) *ProjectUpdate {
+	_u.mutation.AddAppProfileIDs(ids...)
+	return _u
+}
+
+// AddAppProfiles adds the "app_profiles" edges to the ProjectProfile entity.
+func (_u *ProjectUpdate) AddAppProfiles(v ...*ProjectProfile) *ProjectUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAppProfileIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProjectUpdate) AddAccountIDs(ids ...int64) *ProjectUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -226,6 +242,27 @@ func (_u *ProjectUpdate) RemoveMembers(v ...*ProjectMember) *ProjectUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveMemberIDs(ids...)
+}
+
+// ClearAppProfiles clears all "app_profiles" edges to the ProjectProfile entity.
+func (_u *ProjectUpdate) ClearAppProfiles() *ProjectUpdate {
+	_u.mutation.ClearAppProfiles()
+	return _u
+}
+
+// RemoveAppProfileIDs removes the "app_profiles" edge to ProjectProfile entities by IDs.
+func (_u *ProjectUpdate) RemoveAppProfileIDs(ids ...int64) *ProjectUpdate {
+	_u.mutation.RemoveAppProfileIDs(ids...)
+	return _u
+}
+
+// RemoveAppProfiles removes "app_profiles" edges to ProjectProfile entities.
+func (_u *ProjectUpdate) RemoveAppProfiles(v ...*ProjectProfile) *ProjectUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAppProfileIDs(ids...)
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -451,6 +488,51 @@ func (_u *ProjectUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AppProfilesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAppProfilesIDs(); len(nodes) > 0 && !_u.mutation.AppProfilesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AppProfilesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -767,6 +849,21 @@ func (_u *ProjectUpdateOne) AddMembers(v ...*ProjectMember) *ProjectUpdateOne {
 	return _u.AddMemberIDs(ids...)
 }
 
+// AddAppProfileIDs adds the "app_profiles" edge to the ProjectProfile entity by IDs.
+func (_u *ProjectUpdateOne) AddAppProfileIDs(ids ...int64) *ProjectUpdateOne {
+	_u.mutation.AddAppProfileIDs(ids...)
+	return _u
+}
+
+// AddAppProfiles adds the "app_profiles" edges to the ProjectProfile entity.
+func (_u *ProjectUpdateOne) AddAppProfiles(v ...*ProjectProfile) *ProjectUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddAppProfileIDs(ids...)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProjectUpdateOne) AddAccountIDs(ids ...int64) *ProjectUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -851,6 +948,27 @@ func (_u *ProjectUpdateOne) RemoveMembers(v ...*ProjectMember) *ProjectUpdateOne
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveMemberIDs(ids...)
+}
+
+// ClearAppProfiles clears all "app_profiles" edges to the ProjectProfile entity.
+func (_u *ProjectUpdateOne) ClearAppProfiles() *ProjectUpdateOne {
+	_u.mutation.ClearAppProfiles()
+	return _u
+}
+
+// RemoveAppProfileIDs removes the "app_profiles" edge to ProjectProfile entities by IDs.
+func (_u *ProjectUpdateOne) RemoveAppProfileIDs(ids ...int64) *ProjectUpdateOne {
+	_u.mutation.RemoveAppProfileIDs(ids...)
+	return _u
+}
+
+// RemoveAppProfiles removes "app_profiles" edges to ProjectProfile entities.
+func (_u *ProjectUpdateOne) RemoveAppProfiles(v ...*ProjectProfile) *ProjectUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveAppProfileIDs(ids...)
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -1106,6 +1224,51 @@ func (_u *ProjectUpdateOne) sqlSave(ctx context.Context) (_node *Project, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(projectmember.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.AppProfilesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedAppProfilesIDs(); len(nodes) > 0 && !_u.mutation.AppProfilesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.AppProfilesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.AppProfilesTable,
+			Columns: []string{project.AppProfilesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(projectprofile.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

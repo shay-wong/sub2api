@@ -34,6 +34,8 @@ type ProjectMember struct {
 	Scopes []string `json:"scopes,omitempty"`
 	// IsOwner holds the value of the "is_owner" field.
 	IsOwner bool `json:"is_owner,omitempty"`
+	// Status holds the value of the "status" field.
+	Status string `json:"status,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ProjectMemberQuery when eager-loading is set.
 	Edges        ProjectMemberEdges `json:"edges"`
@@ -84,7 +86,7 @@ func (*ProjectMember) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case projectmember.FieldID, projectmember.FieldProjectID, projectmember.FieldUserID:
 			values[i] = new(sql.NullInt64)
-		case projectmember.FieldRole:
+		case projectmember.FieldRole, projectmember.FieldStatus:
 			values[i] = new(sql.NullString)
 		case projectmember.FieldCreatedAt, projectmember.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -153,6 +155,12 @@ func (_m *ProjectMember) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.IsOwner = value.Bool
 			}
+		case projectmember.FieldStatus:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field status", values[i])
+			} else if value.Valid {
+				_m.Status = value.String
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -219,6 +227,9 @@ func (_m *ProjectMember) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("is_owner=")
 	builder.WriteString(fmt.Sprintf("%v", _m.IsOwner))
+	builder.WriteString(", ")
+	builder.WriteString("status=")
+	builder.WriteString(_m.Status)
 	builder.WriteByte(')')
 	return builder.String()
 }

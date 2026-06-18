@@ -68,9 +68,6 @@ vi.mock('@/stores', () => {
     useAuthStore: () => ({
       get isAdmin() {
         return mockAuthRole.value === 'admin'
-      },
-      get isOperator() {
-        return false
       }
     }),
     useAdminSettingsStore: () => ({

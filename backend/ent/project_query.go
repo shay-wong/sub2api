@@ -19,22 +19,24 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
 // ProjectQuery is the builder for querying Project entities.
 type ProjectQuery struct {
 	config
-	ctx           *QueryContext
-	order         []project.OrderOption
-	inters        []Interceptor
-	predicates    []predicate.Project
-	withMembers   *ProjectMemberQuery
-	withAccounts  *AccountQuery
-	withAPIKeys   *APIKeyQuery
-	withGroups    *GroupQuery
-	withUsageLogs *UsageLogQuery
-	modifiers     []func(*sql.Selector)
+	ctx             *QueryContext
+	order           []project.OrderOption
+	inters          []Interceptor
+	predicates      []predicate.Project
+	withMembers     *ProjectMemberQuery
+	withAppProfiles *ProjectProfileQuery
+	withAccounts    *AccountQuery
+	withAPIKeys     *APIKeyQuery
+	withGroups      *GroupQuery
+	withUsageLogs   *UsageLogQuery
+	modifiers       []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -86,6 +88,28 @@ func (_q *ProjectQuery) QueryMembers() *ProjectMemberQuery {
 			sqlgraph.From(project.Table, project.FieldID, selector),
 			sqlgraph.To(projectmember.Table, projectmember.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, project.MembersTable, project.MembersColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryAppProfiles chains the current query on the "app_profiles" edge.
+func (_q *ProjectQuery) QueryAppProfiles() *ProjectProfileQuery {
+	query := (&ProjectProfileClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(project.Table, project.FieldID, selector),
+			sqlgraph.To(projectprofile.Table, projectprofile.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, project.AppProfilesTable, project.AppProfilesColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -368,16 +392,17 @@ func (_q *ProjectQuery) Clone() *ProjectQuery {
 		return nil
 	}
 	return &ProjectQuery{
-		config:        _q.config,
-		ctx:           _q.ctx.Clone(),
-		order:         append([]project.OrderOption{}, _q.order...),
-		inters:        append([]Interceptor{}, _q.inters...),
-		predicates:    append([]predicate.Project{}, _q.predicates...),
-		withMembers:   _q.withMembers.Clone(),
-		withAccounts:  _q.withAccounts.Clone(),
-		withAPIKeys:   _q.withAPIKeys.Clone(),
-		withGroups:    _q.withGroups.Clone(),
-		withUsageLogs: _q.withUsageLogs.Clone(),
+		config:          _q.config,
+		ctx:             _q.ctx.Clone(),
+		order:           append([]project.OrderOption{}, _q.order...),
+		inters:          append([]Interceptor{}, _q.inters...),
+		predicates:      append([]predicate.Project{}, _q.predicates...),
+		withMembers:     _q.withMembers.Clone(),
+		withAppProfiles: _q.withAppProfiles.Clone(),
+		withAccounts:    _q.withAccounts.Clone(),
+		withAPIKeys:     _q.withAPIKeys.Clone(),
+		withGroups:      _q.withGroups.Clone(),
+		withUsageLogs:   _q.withUsageLogs.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -392,6 +417,17 @@ func (_q *ProjectQuery) WithMembers(opts ...func(*ProjectMemberQuery)) *ProjectQ
 		opt(query)
 	}
 	_q.withMembers = query
+	return _q
+}
+
+// WithAppProfiles tells the query-builder to eager-load the nodes that are connected to
+// the "app_profiles" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProjectQuery) WithAppProfiles(opts ...func(*ProjectProfileQuery)) *ProjectQuery {
+	query := (&ProjectProfileClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withAppProfiles = query
 	return _q
 }
 
@@ -517,8 +553,9 @@ func (_q *ProjectQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proj
 	var (
 		nodes       = []*Project{}
 		_spec       = _q.querySpec()
-		loadedTypes = [5]bool{
+		loadedTypes = [6]bool{
 			_q.withMembers != nil,
+			_q.withAppProfiles != nil,
 			_q.withAccounts != nil,
 			_q.withAPIKeys != nil,
 			_q.withGroups != nil,
@@ -550,6 +587,13 @@ func (_q *ProjectQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proj
 		if err := _q.loadMembers(ctx, query, nodes,
 			func(n *Project) { n.Edges.Members = []*ProjectMember{} },
 			func(n *Project, e *ProjectMember) { n.Edges.Members = append(n.Edges.Members, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withAppProfiles; query != nil {
+		if err := _q.loadAppProfiles(ctx, query, nodes,
+			func(n *Project) { n.Edges.AppProfiles = []*ProjectProfile{} },
+			func(n *Project, e *ProjectProfile) { n.Edges.AppProfiles = append(n.Edges.AppProfiles, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -599,6 +643,36 @@ func (_q *ProjectQuery) loadMembers(ctx context.Context, query *ProjectMemberQue
 	}
 	query.Where(predicate.ProjectMember(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(project.MembersColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.ProjectID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "project_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *ProjectQuery) loadAppProfiles(ctx context.Context, query *ProjectProfileQuery, nodes []*Project, init func(*Project), assign func(*Project, *ProjectProfile)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*Project)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(projectprofile.FieldProjectID)
+	}
+	query.Where(predicate.ProjectProfile(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(project.AppProfilesColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

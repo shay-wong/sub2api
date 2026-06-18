@@ -39,6 +39,9 @@ func (ProjectMember) Fields() []ent.Field {
 			Default([]string{}),
 		field.Bool("is_owner").
 			Default(false),
+		field.String("status").
+			MaxLen(20).
+			Default("active"),
 	}
 }
 
@@ -62,5 +65,8 @@ func (ProjectMember) Indexes() []ent.Index {
 		index.Fields("project_id", "user_id").Unique(),
 		index.Fields("user_id"),
 		index.Fields("project_id", "role"),
+		index.Fields("project_id", "is_owner").
+			Unique().
+			Annotations(entsql.IndexWhere("is_owner = true")),
 	}
 }

@@ -69,6 +69,12 @@ type Project func(*sql.Selector)
 // ProjectMember is the predicate function for projectmember builders.
 type ProjectMember func(*sql.Selector)
 
+// ProjectProfile is the predicate function for projectprofile builders.
+type ProjectProfile func(*sql.Selector)
+
+// ProjectProfileBinding is the predicate function for projectprofilebinding builders.
+type ProjectProfileBinding func(*sql.Selector)
+
 // PromoCode is the predicate function for promocode builders.
 type PromoCode func(*sql.Selector)
 

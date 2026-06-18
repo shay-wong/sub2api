@@ -24,7 +24,7 @@
                 <h2 class="truncate text-2xl font-semibold text-gray-900 dark:text-white">
                   {{ displayName }}
                 </h2>
-                <span :class="['badge', user?.role === 'super_admin' || user?.role === 'admin' ? 'badge-primary' : user?.role === 'operator' ? 'badge-warning' : 'badge-gray']">
+                <span :class="['badge', user?.role === 'super_admin' || user?.role === 'admin' ? 'badge-primary' : 'badge-gray']">
                   {{ roleLabel }}
                 </span>
                 <span
@@ -238,8 +238,6 @@ const roleLabel = computed(() => {
   switch (props.user?.role) {
     case 'admin':
       return t('profile.administrator')
-    case 'operator':
-      return t('profile.operator')
     case 'user':
       return t('profile.user')
     default:

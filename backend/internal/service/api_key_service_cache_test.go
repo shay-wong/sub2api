@@ -18,6 +18,7 @@ import (
 
 type authRepoStub struct {
 	getByKeyForAuth   func(ctx context.Context, key string) (*APIKey, error)
+	getKeyAndOwnerID  func(ctx context.Context, id int64) (string, int64, error)
 	listKeysByUserID  func(ctx context.Context, userID int64) ([]string, error)
 	listKeysByGroupID func(ctx context.Context, groupID int64) ([]string, error)
 }
@@ -31,7 +32,10 @@ func (s *authRepoStub) GetByID(ctx context.Context, id int64) (*APIKey, error) {
 }
 
 func (s *authRepoStub) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
-	panic("unexpected GetKeyAndOwnerID call")
+	if s.getKeyAndOwnerID == nil {
+		panic("unexpected GetKeyAndOwnerID call")
+	}
+	return s.getKeyAndOwnerID(ctx, id)
 }
 
 func (s *authRepoStub) GetByKey(ctx context.Context, key string) (*APIKey, error) {
@@ -505,6 +509,28 @@ func TestAPIKeyService_InvalidateAuthCacheByKey(t *testing.T) {
 	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
 
 	svc.InvalidateAuthCacheByKey(context.Background(), "k1")
+	require.Len(t, cache.deleteAuthKeys, 1)
+}
+
+func TestAPIKeyService_InvalidateAuthCacheByAPIKeyID(t *testing.T) {
+	cache := &authCacheStub{}
+	repo := &authRepoStub{
+		getKeyAndOwnerID: func(ctx context.Context, id int64) (string, int64, error) {
+			require.Equal(t, int64(11), id)
+			_, ok := ProjectIDFromContext(ctx)
+			require.False(t, ok)
+			return "k-direct", 7, nil
+		},
+	}
+	cfg := &config.Config{
+		APIKeyAuth: config.APIKeyAuthCacheConfig{
+			L2TTLSeconds: 60,
+		},
+	}
+	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
+
+	svc.InvalidateAuthCacheByAPIKeyID(WithProjectID(context.Background(), 99), 11)
+
 	require.Len(t, cache.deleteAuthKeys, 1)
 }
 

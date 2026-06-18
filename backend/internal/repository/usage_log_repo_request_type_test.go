@@ -288,8 +288,8 @@ func TestUsageLogRepositoryCreateConflictLookupUsesContextProject(t *testing.T) 
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2 AND project_id = \\$3").
-		WithArgs(log.RequestID, log.APIKeyID, int64(7)).
+	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2 AND \\(project_id = 7 AND").
+		WithArgs(log.RequestID, log.APIKeyID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(202), createdAt))
 
 	inserted, err := repo.Create(service.WithProjectID(context.Background(), 7), log)
@@ -731,7 +731,7 @@ func (s usageLogScannerStub) Scan(dest ...any) error {
 	}
 	for i := range dest {
 		dv := reflect.ValueOf(dest[i])
-		if dv.Kind() != reflect.Ptr {
+		if dv.Kind() != reflect.Pointer {
 			return fmt.Errorf("dest[%d] is not pointer", i)
 		}
 		dv.Elem().Set(reflect.ValueOf(s.values[i]))

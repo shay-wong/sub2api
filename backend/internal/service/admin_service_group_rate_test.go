@@ -195,6 +195,42 @@ func TestAdminService_BatchSetGroupRateMultipliers(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "sync failed")
 	})
+
+	t.Run("project context rejects out-of-scope group", func(t *testing.T) {
+		repo := &userGroupRateRepoStubForGroupRate{}
+		groupRepo := &scopedAdminGroupRepoStub{groups: map[int64]*Group{}}
+		userRepo := &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 1, Email: "visible@example.com"}}}
+		svc := &adminServiceImpl{userRepo: userRepo, groupRepo: groupRepo, userGroupRateRepo: repo}
+
+		err := svc.BatchSetGroupRateMultipliers(WithProjectID(context.Background(), 7), 10, []GroupRateMultiplierInput{
+			{UserID: 1, RateMultiplier: 1.0},
+		})
+
+		require.ErrorIs(t, err, ErrGroupNotFound)
+		require.Equal(t, []int64{10}, groupRepo.calls)
+		require.Zero(t, repo.syncedGroupID)
+		require.Empty(t, userRepo.listCalls)
+	})
+
+	t.Run("project context rejects out-of-scope users", func(t *testing.T) {
+		repo := &userGroupRateRepoStubForGroupRate{}
+		groupRepo := &scopedAdminGroupRepoStub{groups: map[int64]*Group{
+			10: {ID: 10, Name: "visible", Status: StatusActive},
+		}}
+		userRepo := &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 1, Email: "visible@example.com"}}}
+		svc := &adminServiceImpl{userRepo: userRepo, groupRepo: groupRepo, userGroupRateRepo: repo}
+
+		err := svc.BatchSetGroupRateMultipliers(WithProjectID(context.Background(), 7), 10, []GroupRateMultiplierInput{
+			{UserID: 1, RateMultiplier: 1.0},
+			{UserID: 99, RateMultiplier: 1.1},
+		})
+
+		require.ErrorIs(t, err, ErrUserNotFound)
+		require.Equal(t, []int64{10}, groupRepo.calls)
+		require.Zero(t, repo.syncedGroupID)
+		require.Len(t, userRepo.listCalls, 2)
+		require.Equal(t, int64(99), userRepo.listCalls[1].ID)
+	})
 }
 
 func TestAdminService_BatchSetGroupRPMOverrides(t *testing.T) {
@@ -221,5 +257,26 @@ func TestAdminService_BatchSetGroupRPMOverrides(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
 		require.Zero(t, repo.rpmSyncedGroupID)
+	})
+
+	t.Run("project context rejects out-of-scope users", func(t *testing.T) {
+		repo := &userGroupRateRepoStubForGroupRate{}
+		groupRepo := &scopedAdminGroupRepoStub{groups: map[int64]*Group{
+			10: {ID: 10, Name: "visible", Status: StatusActive},
+		}}
+		userRepo := &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 1, Email: "visible@example.com"}}}
+		override := 20
+		svc := &adminServiceImpl{userRepo: userRepo, groupRepo: groupRepo, userGroupRateRepo: repo}
+
+		err := svc.BatchSetGroupRPMOverrides(WithProjectID(context.Background(), 7), 10, []GroupRPMOverrideInput{
+			{UserID: 1, RPMOverride: &override},
+			{UserID: 99, RPMOverride: &override},
+		})
+
+		require.ErrorIs(t, err, ErrUserNotFound)
+		require.Equal(t, []int64{10}, groupRepo.calls)
+		require.Zero(t, repo.rpmSyncedGroupID)
+		require.Len(t, userRepo.listCalls, 2)
+		require.Equal(t, int64(99), userRepo.listCalls[1].ID)
 	})
 }

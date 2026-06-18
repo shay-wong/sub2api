@@ -33,6 +33,9 @@ func (r *opsRepository) GetDashboardOverview(ctx context.Context, filter *servic
 	if !mode.IsValid() {
 		mode = service.OpsQueryModeRaw
 	}
+	if _, ok := service.ProjectIDFromContext(ctx); ok {
+		mode = service.OpsQueryModeRaw
+	}
 
 	switch mode {
 	case service.OpsQueryModePreagg:
@@ -1015,11 +1018,7 @@ func buildUsageWhere(ctx context.Context, filter *service.OpsDashboardFilter, st
 	args = append(args, end)
 	clauses = append(clauses, fmt.Sprintf("ul.created_at < $%d", idx))
 	idx++
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		clauses = append(clauses, fmt.Sprintf("ul.project_id = $%d", idx))
-		idx++
-	}
+	clauses, args, idx = appendProjectProfileScopedWhereAt(ctx, clauses, args, idx, "ul.project_id", usageLogSQLScopeResources("ul"))
 
 	if groupScopeEmpty {
 		clauses = append(clauses, "1 = 0")
@@ -1067,11 +1066,7 @@ func buildErrorWhere(ctx context.Context, filter *service.OpsDashboardFilter, st
 	args = append(args, end)
 	clauses = append(clauses, fmt.Sprintf("created_at < $%d", idx))
 	idx++
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		clauses = append(clauses, fmt.Sprintf("project_id = $%d", idx))
-		idx++
-	}
+	clauses, args, idx = appendProjectProfileScopedWhereAt(ctx, clauses, args, idx, "project_id", opsErrorSQLScopeResources(""))
 
 	clauses = append(clauses, "is_count_tokens = FALSE")
 

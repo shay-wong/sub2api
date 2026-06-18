@@ -148,6 +148,7 @@ type APIKeyAuthCacheInvalidator interface {
 	InvalidateAuthCacheByKey(ctx context.Context, key string)
 	InvalidateAuthCacheByUserID(ctx context.Context, userID int64)
 	InvalidateAuthCacheByGroupID(ctx context.Context, groupID int64)
+	InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKeyID int64)
 }
 
 // CreateAPIKeyRequest 创建API Key请求
@@ -356,9 +357,6 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		if err != nil {
 			return nil, fmt.Errorf("get group: %w", err)
 		}
-		if projectID, ok := ProjectIDFromContext(ctx); ok && group.ProjectID > 0 && group.ProjectID != projectID {
-			return nil, ErrGroupNotAllowed
-		}
 
 		// 检查用户是否可以绑定该分组
 		if !s.canUserBindGroup(ctx, user, group) {
@@ -456,6 +454,15 @@ func (s *APIKeyService) VerifyOwnership(ctx context.Context, userID int64, apiKe
 
 // GetByID 根据ID获取API Key
 func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) {
+	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get api key: %w", err)
+	}
+	s.compileAPIKeyIPRules(apiKey)
+	return apiKey, nil
+}
+
+func (s *APIKeyService) GetByIDForProjectAuth(ctx context.Context, id int64) (*APIKey, error) {
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get api key: %w", err)

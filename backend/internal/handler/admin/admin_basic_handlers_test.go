@@ -228,7 +228,7 @@ func TestGroupHandlerEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestOperatorGroupGetAllFiltersAssignedGroups(t *testing.T) {
+func TestOperatorGroupGetAllRejectsLegacyRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
@@ -253,18 +253,8 @@ func TestOperatorGroupGetAllFiltersAssignedGroups(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/groups/all", nil)
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data []struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Len(t, resp.Data, 1)
-	require.Equal(t, int64(10), resp.Data[0].ID)
-	require.Equal(t, "visible", resp.Data[0].Name)
-	require.NotContains(t, rec.Body.String(), "hidden")
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
 }
 
 func TestProxyHandlerEndpoints(t *testing.T) {

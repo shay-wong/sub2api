@@ -106,8 +106,18 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 	if err := ensureEmailAuthIdentityWithClient(txCtx, txClient, created.ID, created.Email, "user_repo_create"); err != nil {
 		return err
 	}
-	if err := ensureDefaultProjectMember(txCtx, txAwareSQLExecutor(txCtx, r.sql, r.client), created.ID, userIn.Role); err != nil {
-		return err
+	sqlExec := txAwareSQLExecutor(txCtx, r.sql, r.client)
+	if projectID, ok := service.ProjectIDFromContext(txCtx); ok {
+		if err := ensureProjectMember(txCtx, sqlExec, projectID, created.ID, userIn.Role, false); err != nil {
+			return err
+		}
+		if err := bindResourceToActiveProjectProfile(txCtx, sqlExec, projectID, service.ProjectResourceTypeUser, created.ID); err != nil {
+			return err
+		}
+	} else {
+		if err := ensureDefaultProjectMember(txCtx, sqlExec, created.ID, userIn.Role); err != nil {
+			return err
+		}
 	}
 
 	if tx != nil {
@@ -440,8 +450,12 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		userCtx = mixins.SkipSoftDelete(ctx)
 	}
 
-	q := r.client.User.Query()
+	q := r.client.User.Query().
+		Where(projectScopedUserPredicate(ctx)...)
 
+	if filters.ID > 0 {
+		q = q.Where(dbuser.IDEQ(filters.ID))
+	}
 	if filters.Status != "" {
 		q = q.Where(dbuser.StatusEQ(filters.Status))
 	}
@@ -526,10 +540,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if shouldLoadSubscriptions {
 		// Batch load active subscriptions with groups to avoid N+1.
 		subs, err := r.client.UserSubscription.Query().
-			Where(
+			Where(append([]predicate.UserSubscription{
 				usersubscription.UserIDIn(userIDs...),
 				usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			).
+			}, projectScopedUserSubscriptionPredicate(ctx)...)...).
 			WithGroup().
 			All(ctx)
 		if err != nil {
@@ -791,9 +805,10 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	if value < 0 {
 		value = 0
 	}
-	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		value, pq.Array(userIDs))
+	query := "UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL"
+	args := []any{value, pq.Array(userIDs)}
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "users.project_id", projectSQLScopeResources{UserID: "users.id"})
+	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch set concurrency: %w", err)
 	}
@@ -805,9 +820,10 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 	if len(userIDs) == 0 {
 		return 0, nil
 	}
-	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		delta, pq.Array(userIDs))
+	query := "UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL"
+	args := []any{delta, pq.Array(userIDs)}
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "users.project_id", projectSQLScopeResources{UserID: "users.id"})
+	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch add concurrency: %w", err)
 	}

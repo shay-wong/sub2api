@@ -513,6 +513,29 @@ func HasMembersWith(preds ...predicate.ProjectMember) predicate.Project {
 	})
 }
 
+// HasAppProfiles applies the HasEdge predicate on the "app_profiles" edge.
+func HasAppProfiles() predicate.Project {
+	return predicate.Project(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, AppProfilesTable, AppProfilesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasAppProfilesWith applies the HasEdge predicate on the "app_profiles" edge with a given conditions (other predicates).
+func HasAppProfilesWith(preds ...predicate.ProjectProfile) predicate.Project {
+	return predicate.Project(func(s *sql.Selector) {
+		step := newAppProfilesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.
 func HasAccounts() predicate.Project {
 	return predicate.Project(func(s *sql.Selector) {

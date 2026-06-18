@@ -35,6 +35,18 @@ func (s *APIKeyService) InvalidateAuthCacheByGroupID(ctx context.Context, groupI
 	s.deleteAuthCacheByKeys(ctx, keys)
 }
 
+// InvalidateAuthCacheByAPIKeyID 清除指定 API Key ID 的认证缓存。
+func (s *APIKeyService) InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKeyID int64) {
+	if apiKeyID <= 0 {
+		return
+	}
+	key, _, err := s.apiKeyRepo.GetKeyAndOwnerID(WithoutProjectID(ctx), apiKeyID)
+	if err != nil {
+		return
+	}
+	s.InvalidateAuthCacheByKey(ctx, key)
+}
+
 func (s *APIKeyService) deleteAuthCacheByKeys(ctx context.Context, keys []string) {
 	if len(keys) == 0 {
 		return

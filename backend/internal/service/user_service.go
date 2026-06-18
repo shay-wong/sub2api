@@ -65,6 +65,7 @@ var (
 
 // UserListFilters contains all filter options for listing users
 type UserListFilters struct {
+	ID        int64  // Exact user ID filter. 0 = no filter.
 	Status    string // User status filter
 	Role      string // User role filter
 	Search    string // Search in email, username

@@ -479,6 +479,7 @@ func (s *PricingService) useFallbackPricing() error {
 	}
 
 	pricingFile := s.getPricingFilePath()
+	// #nosec G703 -- pricing file path is operator configuration for the local cache copy.
 	if err := os.WriteFile(pricingFile, data, 0644); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to copy fallback: %v", err)
 	}

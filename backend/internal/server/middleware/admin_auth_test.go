@@ -185,6 +185,241 @@ func TestAdminAuthJWTUsesProjectIDQueryForWebSocket(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestAdminAuthJWTDefaultsToFirstProjectAdminMembership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	authService := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	projectMember := &service.User{
+		ID:           7,
+		Email:        "project-admin@example.com",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		TokenVersion: 1,
+		Concurrency:  1,
+	}
+
+	userRepo := &stubUserRepo{
+		getByID: func(ctx context.Context, id int64) (*service.User, error) {
+			if id != projectMember.ID {
+				return nil, service.ErrUserNotFound
+			}
+			clone := *projectMember
+			return &clone, nil
+		},
+	}
+	userService := service.NewUserService(userRepo, nil, nil, nil)
+	projectService := service.NewProjectService(&stubProjectRepo{
+		projects: []service.ProjectSummary{
+			{ID: 10, Name: "Member Only", Slug: "member-only", Role: service.ProjectRoleUser},
+			{ID: 42, Name: "Admin Project", Slug: "admin-project", Role: service.ProjectRoleAdmin},
+		},
+		roles: map[int64]map[int64]string{
+			10: {projectMember.ID: service.ProjectRoleUser},
+			42: {projectMember.ID: service.ProjectRoleAdmin},
+		},
+		exists: map[int64]bool{10: true, 42: true},
+	})
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.GET("/t", func(c *gin.Context) {
+		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, int64(42), projectID)
+		role, ok := GetUserRoleFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, service.RoleAdmin, role)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token, err := authService.GenerateToken(&service.User{
+		ID:           projectMember.ID,
+		Email:        projectMember.Email,
+		Role:         projectMember.Role,
+		TokenVersion: projectMember.TokenVersion,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAdminAuthJWTRejectsLegacyOperatorWithoutProjectAdminMembership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	authService := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	operator := &service.User{
+		ID:           7,
+		Email:        "operator@example.com",
+		Role:         service.RoleOperator,
+		Status:       service.StatusActive,
+		TokenVersion: 1,
+		Concurrency:  1,
+	}
+
+	userRepo := &stubUserRepo{
+		getByID: func(ctx context.Context, id int64) (*service.User, error) {
+			if id != operator.ID {
+				return nil, service.ErrUserNotFound
+			}
+			clone := *operator
+			return &clone, nil
+		},
+	}
+	userService := service.NewUserService(userRepo, nil, nil, nil)
+	projectService := service.NewProjectService(&stubProjectRepo{
+		projects: []service.ProjectSummary{
+			{ID: 42, Name: "Member Project", Slug: "member-project", Role: service.ProjectRoleUser},
+		},
+		roles: map[int64]map[int64]string{
+			42: {operator.ID: service.ProjectRoleUser},
+		},
+		exists: map[int64]bool{42: true},
+	})
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.GET("/t", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token, err := authService.GenerateToken(&service.User{
+		ID:           operator.ID,
+		Email:        operator.Email,
+		Role:         operator.Role,
+		TokenVersion: operator.TokenVersion,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
+}
+
+func TestAdminAuthJWTRejectsLegacyOperatorWithProjectAdminMembership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	authService := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	operator := &service.User{
+		ID:           7,
+		Email:        "operator@example.com",
+		Role:         service.RoleOperator,
+		Status:       service.StatusActive,
+		TokenVersion: 1,
+		Concurrency:  1,
+	}
+
+	userRepo := &stubUserRepo{
+		getByID: func(ctx context.Context, id int64) (*service.User, error) {
+			if id != operator.ID {
+				return nil, service.ErrUserNotFound
+			}
+			clone := *operator
+			return &clone, nil
+		},
+	}
+	userService := service.NewUserService(userRepo, nil, nil, nil)
+	projectService := service.NewProjectService(&stubProjectRepo{
+		projects: []service.ProjectSummary{
+			{ID: 42, Name: "Admin Project", Slug: "admin-project", Role: service.ProjectRoleAdmin},
+		},
+		roles: map[int64]map[int64]string{
+			42: {operator.ID: service.ProjectRoleAdmin},
+		},
+		exists: map[int64]bool{42: true},
+	})
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.GET("/t", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token, err := authService.GenerateToken(&service.User{
+		ID:           operator.ID,
+		Email:        operator.Email,
+		Role:         operator.Role,
+		TokenVersion: operator.TokenVersion,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Project-ID", "42")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "LEGACY_OPERATOR_ROLE_DISABLED")
+}
+
+func TestAdminAuthJWTRejectsDisabledProjectMember(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", ExpireHour: 1}}
+	authService := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	projectMember := &service.User{
+		ID:           8,
+		Email:        "disabled-project-admin@example.com",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		TokenVersion: 1,
+		Concurrency:  1,
+	}
+
+	userRepo := &stubUserRepo{
+		getByID: func(ctx context.Context, id int64) (*service.User, error) {
+			if id != projectMember.ID {
+				return nil, service.ErrUserNotFound
+			}
+			clone := *projectMember
+			return &clone, nil
+		},
+	}
+	userService := service.NewUserService(userRepo, nil, nil, nil)
+	projectService := service.NewProjectService(&stubProjectRepo{
+		exists: map[int64]bool{42: true},
+	})
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.GET("/t", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	token, err := authService.GenerateToken(&service.User{
+		ID:           projectMember.ID,
+		Email:        projectMember.Email,
+		Role:         projectMember.Role,
+		TokenVersion: projectMember.TokenVersion,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Project-ID", "42")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "PROJECT_ACCESS_FORBIDDEN")
+}
+
 type stubProjectRepo struct {
 	defaultID int64
 	exists    map[int64]bool
@@ -242,8 +477,44 @@ func (s *stubProjectRepo) RemoveProjectMember(context.Context, int64, int64) err
 	panic("unexpected RemoveProjectMember call")
 }
 
-func (s *stubProjectRepo) MoveProjectResources(context.Context, int64, service.ProjectResourceMoveInput) (*service.ProjectResourceMoveResult, error) {
-	panic("unexpected MoveProjectResources call")
+func (s *stubProjectRepo) ListProjectProfiles(context.Context, int64) ([]service.ProjectProfile, error) {
+	panic("unexpected ListProjectProfiles call")
+}
+
+func (s *stubProjectRepo) CreateProjectProfile(context.Context, int64, service.ProjectProfileInput) (*service.ProjectProfile, error) {
+	panic("unexpected CreateProjectProfile call")
+}
+
+func (s *stubProjectRepo) UpdateProjectProfile(context.Context, int64, int64, service.ProjectProfileInput) (*service.ProjectProfile, error) {
+	panic("unexpected UpdateProjectProfile call")
+}
+
+func (s *stubProjectRepo) DeleteProjectProfile(context.Context, int64, int64) error {
+	panic("unexpected DeleteProjectProfile call")
+}
+
+func (s *stubProjectRepo) ActivateProjectProfile(context.Context, int64, int64) (*service.ProjectProfile, error) {
+	panic("unexpected ActivateProjectProfile call")
+}
+
+func (s *stubProjectRepo) GetProjectProfileBindings(context.Context, int64, int64) (*service.ProjectProfileBindings, error) {
+	panic("unexpected GetProjectProfileBindings call")
+}
+
+func (s *stubProjectRepo) SetProjectProfileBindings(context.Context, int64, int64, service.ProjectProfileBindingInput) (*service.ProjectProfileBindings, error) {
+	panic("unexpected SetProjectProfileBindings call")
+}
+
+func (s *stubProjectRepo) ValidateProjectProfileBindingScope(context.Context, int64, service.ProjectProfileBindingInput) error {
+	panic("unexpected ValidateProjectProfileBindingScope call")
+}
+
+func (s *stubProjectRepo) ValidateProjectProfileBindingResources(context.Context, service.ProjectProfileBindingInput) error {
+	panic("unexpected ValidateProjectProfileBindingResources call")
+}
+
+func (s *stubProjectRepo) SearchProjectBindableResources(context.Context, int64, string, int) (*service.ProjectResourceSearchResult, error) {
+	panic("unexpected SearchProjectBindableResources call")
 }
 
 type stubUserRepo struct {

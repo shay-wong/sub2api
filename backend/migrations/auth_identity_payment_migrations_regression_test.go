@@ -168,3 +168,67 @@ func TestMigration151AddsAccountAutoPauseExpiryPartialIndex(t *testing.T) {
 	require.Contains(t, sql, "auto_pause_on_expired = TRUE")
 	require.Contains(t, sql, "expires_at IS NOT NULL")
 }
+
+func TestMigration154CreatesDefaultProjectAndDemotesLegacyOperators(t *testing.T) {
+	content, err := FS.ReadFile("154_project_isolation_default_project.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS projects")
+	require.Contains(t, sql, "VALUES ('默认项目', 'default'")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS project_members")
+	require.Contains(t, sql, "Legacy operator permissions are intentionally not migrated")
+	require.Contains(t, sql, "SET role = 'super_admin'")
+	require.Contains(t, sql, "SET role = 'user'")
+	require.Contains(t, sql, "WHERE id IN (SELECT id FROM legacy_user_roles WHERE role = 'operator')")
+	require.Contains(t, sql, "WHEN lur.role = 'admin' OR u.role = 'super_admin' THEN 'admin'")
+	require.Contains(t, sql, "ELSE 'user'")
+	require.NotContains(t, sql, "THEN 'operator'")
+
+	for _, table := range []string{"groups", "accounts", "api_keys", "usage_logs"} {
+		require.Contains(t, sql, "ALTER TABLE "+table+"\n    ADD COLUMN IF NOT EXISTS project_id BIGINT")
+		require.Contains(t, sql, "UPDATE "+table+"\nSET project_id = (SELECT id FROM projects WHERE slug = 'default')")
+		require.Contains(t, sql, "ALTER TABLE "+table+"\n    ALTER COLUMN project_id SET NOT NULL")
+	}
+	for _, table := range []string{"ops_error_logs", "ops_system_metrics", "ops_metrics_hourly", "ops_metrics_daily", "ops_alert_events", "ops_system_logs"} {
+		require.Contains(t, sql, "ALTER TABLE "+table+"\n    ADD COLUMN IF NOT EXISTS project_id BIGINT")
+		require.Contains(t, sql, table+"_project_id_fkey")
+	}
+}
+
+func TestMigration155EnforcesSingleProjectOwnerAndMemberStatus(t *testing.T) {
+	content, err := FS.ReadFile("155_project_member_status_owner_unique.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
+	require.Contains(t, sql, "ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at ASC, id ASC)")
+	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_members_single_owner")
+	require.Contains(t, sql, "ON project_members(project_id)")
+	require.Contains(t, sql, "WHERE is_owner = TRUE")
+	require.Contains(t, sql, "CREATE INDEX IF NOT EXISTS idx_project_members_project_status")
+	require.Contains(t, sql, "ON project_members(project_id, status)")
+}
+
+func TestMigration156AddsProjectProfilesWithUnrestrictedModeAndResourceBindings(t *testing.T) {
+	content, err := FS.ReadFile("156_project_profiles_bindings.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS project_profiles")
+	require.Contains(t, sql, "mode VARCHAR(20) NOT NULL DEFAULT 'restricted'")
+	require.Contains(t, sql, "CHECK (mode IN ('restricted', 'unrestricted'))")
+	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_profiles_one_active")
+	require.Contains(t, sql, "WHERE is_active = TRUE AND deleted_at IS NULL")
+
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS project_profile_bindings")
+	require.Contains(t, sql, "CHECK (resource_type IN ('user', 'group', 'account', 'subscription', 'api_key'))")
+	require.Contains(t, sql, "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_profile_bindings_unique")
+	require.Contains(t, sql, "ON project_profile_bindings(project_profile_id, resource_type, resource_id)")
+	require.Contains(t, sql, "'Default active project application profile.'")
+	require.Contains(t, sql, "pm.status = 'active'")
+
+	for _, resourceType := range []string{"user", "group", "account", "api_key", "subscription"} {
+		require.Contains(t, sql, "SELECT pp.id, '"+resourceType+"'")
+	}
+}

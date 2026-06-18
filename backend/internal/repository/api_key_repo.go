@@ -74,6 +74,9 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		key.LastUsedAt = created.LastUsedAt
 		key.CreatedAt = created.CreatedAt
 		key.UpdatedAt = created.UpdatedAt
+		if err := bindResourceToActiveProjectProfile(ctx, r.sql, projectID, service.ProjectResourceTypeAPIKey, key.ID); err != nil {
+			return err
+		}
 	}
 	return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
 }
@@ -238,10 +241,6 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetUsage1d(key.Usage1d).
 		SetUsage7d(key.Usage7d).
 		SetUpdatedAt(now)
-	if projectID, ok := projectIDForUpdate(ctx, key.ProjectID); ok {
-		builder.SetProjectID(projectID)
-		key.ProjectID = projectID
-	}
 	if key.GroupID != nil {
 		builder.SetGroupID(*key.GroupID)
 	} else {
@@ -363,31 +362,25 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 
 func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
 	// 1. 审计:数据源即 api_keys 当前行;WHERE deleted_at IS NULL 保证只对未删除行写一次。
-	projectClause := ""
 	args := []any{id}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND project_id = $2"
-		args = append(args, projectID)
-	}
-	if _, err := exec.ExecContext(ctx, `
+	auditQuery := `
 		INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
 		SELECT key, id, user_id, name, NOW()
 		FROM api_keys
-		WHERE id = $1 AND deleted_at IS NULL`+projectClause, args...); err != nil {
+		WHERE id = $1 AND deleted_at IS NULL`
+	auditQuery, args = appendProjectProfileScopedQuery(ctx, auditQuery, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
+	if _, err := exec.ExecContext(ctx, auditQuery, args...); err != nil {
 		return err
 	}
 
 	// 2. 软删除(tombstone 覆盖 key)。
 	updateArgs := []any{tombstoneKey, id}
-	updateProjectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		updateProjectClause = " AND project_id = $3"
-		updateArgs = append(updateArgs, projectID)
-	}
-	res, err := exec.ExecContext(ctx, `
+	updateQuery := `
 		UPDATE api_keys
 		SET key = $1, deleted_at = NOW(), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`+updateProjectClause, updateArgs...)
+		WHERE id = $2 AND deleted_at IS NULL`
+	updateQuery, updateArgs = appendProjectProfileScopedQuery(ctx, updateQuery, updateArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
+	res, err := exec.ExecContext(ctx, updateQuery, updateArgs...)
 	if err != nil {
 		return err
 	}
@@ -647,11 +640,11 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 				ELSE status
 			END,
 			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL
-		RETURNING quota_used, quota, key, status
+			WHERE id = $3 AND deleted_at IS NULL
 	`
 	args := []any{amount, service.StatusAPIKeyQuotaExhausted, id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
+	query += " RETURNING quota_used, quota, key, status"
 
 	state := &service.APIKeyQuotaUsageState{}
 	if err := scanSingleRow(ctx, r.sql, query, args, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
@@ -692,7 +685,7 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL`
 	args := []any{cost, id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
@@ -710,7 +703,7 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
@@ -722,7 +715,7 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

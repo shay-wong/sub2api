@@ -146,6 +146,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	if err := bindResourceToActiveProjectProfile(ctx, r.sql, projectID, service.ProjectResourceTypeAccount, account.ID); err != nil {
+		return err
+	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
 	}
@@ -350,11 +353,6 @@ func (r *accountRepository) Update(ctx context.Context, account *service.Account
 		SetErrorMessage(account.ErrorMessage).
 		SetSchedulable(schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
-	if projectID, ok := projectIDForUpdate(ctx, account.ProjectID); ok {
-		builder.SetProjectID(projectID)
-		account.ProjectID = projectID
-	}
-
 	if account.RateMultiplier != nil {
 		builder.SetRateMultiplier(*account.RateMultiplier)
 	}
@@ -500,9 +498,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 
 func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.client.Account.Query()
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		q = q.Where(dbaccount.ProjectIDEQ(projectID))
-	}
+	q = q.Where(projectScopedAccountPredicate(ctx)...)
 
 	if platform != "" {
 		q = q.Where(dbaccount.PlatformEQ(platform))
@@ -1265,7 +1261,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 			updated_at = NOW()
 		WHERE id = $3 AND deleted_at IS NULL`
 	args := []any{scope, raw, id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -1311,7 +1307,7 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 			AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until < $1)
 	`
 	args := []any{until, reason, id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -1340,7 +1336,7 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 			AND deleted_at IS NULL
 	`
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -1373,7 +1369,7 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	client := clientFromContext(ctx, r.client)
 	query := "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'antigravity_quota_scopes', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL"
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -1396,7 +1392,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	query := "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL"
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -1510,7 +1506,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	client := clientFromContext(ctx, r.client)
 	query := "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL"
 	args := []any{string(payload), id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 
 	if err != nil {
@@ -1652,7 +1648,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 
 	query := "UPDATE accounts SET " + joinClauses(setClauses, ", ") + " WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
 	args = append(args, pq.Array(ids))
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -2295,7 +2291,7 @@ func (r *accountRepository) ResetQuotaUsed(ctx context.Context, id int64) error 
 		) - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at', updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2322,7 +2318,7 @@ func (r *accountRepository) RevertProxyFallback(ctx context.Context, accountID i
 		UPDATE accounts SET proxy_id=proxy_fallback_origin_id, proxy_fallback_origin_id=NULL, updated_at=NOW()
 		WHERE id=$1 AND proxy_fallback_origin_id IS NOT NULL AND deleted_at IS NULL`
 	args := []any{accountID}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err

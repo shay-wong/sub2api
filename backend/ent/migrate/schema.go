@@ -1114,6 +1114,7 @@ var (
 		{Name: "role", Type: field.TypeString, Size: 20, Default: "user"},
 		{Name: "scopes", Type: field.TypeJSON},
 		{Name: "is_owner", Type: field.TypeBool, Default: false},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "project_id", Type: field.TypeInt64},
 		{Name: "user_id", Type: field.TypeInt64},
 	}
@@ -1125,13 +1126,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "project_members_projects_members",
-				Columns:    []*schema.Column{ProjectMembersColumns[6]},
+				Columns:    []*schema.Column{ProjectMembersColumns[7]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "project_members_users_project_members",
-				Columns:    []*schema.Column{ProjectMembersColumns[7]},
+				Columns:    []*schema.Column{ProjectMembersColumns[8]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1140,17 +1141,111 @@ var (
 			{
 				Name:    "projectmember_project_id_user_id",
 				Unique:  true,
-				Columns: []*schema.Column{ProjectMembersColumns[6], ProjectMembersColumns[7]},
+				Columns: []*schema.Column{ProjectMembersColumns[7], ProjectMembersColumns[8]},
 			},
 			{
 				Name:    "projectmember_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{ProjectMembersColumns[7]},
+				Columns: []*schema.Column{ProjectMembersColumns[8]},
 			},
 			{
 				Name:    "projectmember_project_id_role",
 				Unique:  false,
-				Columns: []*schema.Column{ProjectMembersColumns[6], ProjectMembersColumns[3]},
+				Columns: []*schema.Column{ProjectMembersColumns[7], ProjectMembersColumns[3]},
+			},
+			{
+				Name:    "projectmember_project_id_is_owner",
+				Unique:  true,
+				Columns: []*schema.Column{ProjectMembersColumns[7], ProjectMembersColumns[5]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "is_owner = true",
+				},
+			},
+		},
+	}
+	// ProjectProfilesColumns holds the columns for the "project_profiles" table.
+	ProjectProfilesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "description", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "mode", Type: field.TypeString, Size: 20, Default: "restricted"},
+		{Name: "is_active", Type: field.TypeBool, Default: false},
+		{Name: "project_id", Type: field.TypeInt64},
+	}
+	// ProjectProfilesTable holds the schema information for the "project_profiles" table.
+	ProjectProfilesTable = &schema.Table{
+		Name:       "project_profiles",
+		Columns:    ProjectProfilesColumns,
+		PrimaryKey: []*schema.Column{ProjectProfilesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "project_profiles_projects_app_profiles",
+				Columns:    []*schema.Column{ProjectProfilesColumns[8]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "projectprofile_project_id_is_active",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectProfilesColumns[8], ProjectProfilesColumns[7]},
+			},
+			{
+				Name:    "projectprofile_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectProfilesColumns[3]},
+			},
+			{
+				Name:    "projectprofile_project_id",
+				Unique:  true,
+				Columns: []*schema.Column{ProjectProfilesColumns[8]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "is_active = true AND deleted_at IS NULL",
+				},
+			},
+		},
+	}
+	// ProjectProfileBindingsColumns holds the columns for the "project_profile_bindings" table.
+	ProjectProfileBindingsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "resource_type", Type: field.TypeString, Size: 30},
+		{Name: "resource_id", Type: field.TypeInt64},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "metadata", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "project_profile_id", Type: field.TypeInt64},
+	}
+	// ProjectProfileBindingsTable holds the schema information for the "project_profile_bindings" table.
+	ProjectProfileBindingsTable = &schema.Table{
+		Name:       "project_profile_bindings",
+		Columns:    ProjectProfileBindingsColumns,
+		PrimaryKey: []*schema.Column{ProjectProfileBindingsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "project_profile_bindings_project_profiles_bindings",
+				Columns:    []*schema.Column{ProjectProfileBindingsColumns[5]},
+				RefColumns: []*schema.Column{ProjectProfilesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "projectprofilebinding_project_profile_id_resource_type_resource_id",
+				Unique:  true,
+				Columns: []*schema.Column{ProjectProfileBindingsColumns[5], ProjectProfileBindingsColumns[1], ProjectProfileBindingsColumns[2]},
+			},
+			{
+				Name:    "projectprofilebinding_resource_type_resource_id",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectProfileBindingsColumns[1], ProjectProfileBindingsColumns[2]},
+			},
+			{
+				Name:    "projectprofilebinding_project_profile_id_resource_type",
+				Unique:  false,
+				Columns: []*schema.Column{ProjectProfileBindingsColumns[5], ProjectProfileBindingsColumns[1]},
 			},
 		},
 	}
@@ -2006,6 +2101,8 @@ var (
 		PendingAuthSessionsTable,
 		ProjectsTable,
 		ProjectMembersTable,
+		ProjectProfilesTable,
+		ProjectProfileBindingsTable,
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
@@ -2110,6 +2207,14 @@ func init() {
 	ProjectMembersTable.ForeignKeys[1].RefTable = UsersTable
 	ProjectMembersTable.Annotation = &entsql.Annotation{
 		Table: "project_members",
+	}
+	ProjectProfilesTable.ForeignKeys[0].RefTable = ProjectsTable
+	ProjectProfilesTable.Annotation = &entsql.Annotation{
+		Table: "project_profiles",
+	}
+	ProjectProfileBindingsTable.ForeignKeys[0].RefTable = ProjectProfilesTable
+	ProjectProfileBindingsTable.Annotation = &entsql.Annotation{
+		Table: "project_profile_bindings",
 	}
 	PromoCodesTable.Annotation = &entsql.Annotation{
 		Table: "promo_codes",

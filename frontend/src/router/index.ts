@@ -409,7 +409,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'User Management',
       titleKey: 'admin.users.title',
       descriptionKey: 'admin.users.description'
@@ -422,7 +421,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'Project Management',
       titleKey: 'admin.projects.title',
       descriptionKey: 'admin.projects.description'
@@ -435,7 +433,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'Group Management',
       titleKey: 'admin.groups.title',
       descriptionKey: 'admin.groups.description'
@@ -489,7 +486,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'Subscription Management',
       titleKey: 'admin.subscriptions.title',
       descriptionKey: 'admin.subscriptions.description'
@@ -593,7 +589,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'

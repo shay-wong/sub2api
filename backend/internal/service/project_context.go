@@ -24,3 +24,23 @@ func ProjectIDFromContext(ctx context.Context) (int64, bool) {
 	id, ok := ctx.Value(projectContextKey{}).(int64)
 	return id, ok && id > 0
 }
+
+type withoutProjectIDContext struct {
+	context.Context
+}
+
+func (c withoutProjectIDContext) Value(key any) any {
+	if _, ok := key.(projectContextKey); ok {
+		return nil
+	}
+	return c.Context.Value(key)
+}
+
+// WithoutProjectID returns a context that keeps cancellation/deadline metadata while
+// removing the project scope value for internal maintenance work.
+func WithoutProjectID(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return withoutProjectIDContext{Context: ctx}
+}

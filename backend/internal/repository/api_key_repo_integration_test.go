@@ -173,6 +173,48 @@ func (s *APIKeyRepoSuite) TestUpdate_ClearGroupID() {
 	s.Require().Nil(got.GroupID, "expected GroupID to be cleared")
 }
 
+func (s *APIKeyRepoSuite) TestUpdateKeepsHomeProjectForProfileBoundResource() {
+	user := s.mustCreateUser("update-profile-bound@test.com")
+	homeProjectID := mustDefaultProjectID(s.T(), s.client)
+	workspace, err := s.client.Project.Create().
+		SetName("Update Profile Bound API Key Project").
+		SetSlug("update-profile-bound-api-key-project").
+		SetProfiles(map[string]any{}).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	profile, err := s.client.ProjectProfile.Create().
+		SetProjectID(workspace.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	key := &service.APIKey{
+		UserID:    user.ID,
+		ProjectID: homeProjectID,
+		Key:       "sk-update-profile-bound",
+		Name:      "Profile Bound Key",
+		Status:    service.StatusActive,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, key))
+	_, err = s.client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAPIKey).
+		SetResourceID(key.ID).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	key.Name = "Edited Profile Bound Key"
+	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
+	s.Require().NoError(s.repo.Update(projectCtx, key))
+
+	got, err := s.repo.GetByID(projectCtx, key.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(homeProjectID, got.ProjectID)
+	s.Require().Equal("Edited Profile Bound Key", got.Name)
+}
+
 // --- Delete ---
 
 func (s *APIKeyRepoSuite) TestDelete() {
@@ -587,6 +629,55 @@ func (s *APIKeyRepoSuite) TestDeleteWithAudit_WritesAuditAndSoftDeletes() {
 	s.Require().Equal("Audit Me", auditName)
 	s.Require().Equal(user.ID, auditUserID)
 	s.Require().Equal(key.ID, auditAPIKeyID)
+}
+
+func (s *APIKeyRepoSuite) TestDeleteWithAudit_AllowsProjectProfileBoundAPIKeyFromDifferentHomeProject() {
+	user := s.mustCreateUser("delwithaudit-profile-bound@test.com")
+	homeProjectID := mustDefaultProjectID(s.T(), s.client)
+	workspace, err := s.client.Project.Create().
+		SetName("Profile Bound API Key Project").
+		SetSlug("profile-bound-api-key-project").
+		SetProfiles(map[string]any{}).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	profile, err := s.client.ProjectProfile.Create().
+		SetProjectID(workspace.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	key := &service.APIKey{
+		UserID:    user.ID,
+		ProjectID: homeProjectID,
+		Key:       "sk-del-audit-profile-bound",
+		Name:      "Profile Bound Key",
+		Status:    service.StatusActive,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, key))
+	s.Require().NotEqual(workspace.ID, key.ProjectID)
+
+	_, err = s.client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAPIKey).
+		SetResourceID(key.ID).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
+	s.Require().NoError(s.repo.DeleteWithAudit(projectCtx, key.ID))
+
+	_, err = s.repo.GetByID(projectCtx, key.ID)
+	s.Require().ErrorIs(err, service.ErrAPIKeyNotFound)
+
+	var auditCount int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql,
+		`SELECT COUNT(*) FROM deleted_api_key_audits WHERE api_key_id = $1 AND user_id = $2`,
+		[]any{key.ID, user.ID},
+		&auditCount,
+	))
+	s.Require().Equal(1, auditCount)
 }
 
 func (s *APIKeyRepoSuite) TestDeleteWithAudit_RepeatIsIdempotent() {

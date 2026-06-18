@@ -167,8 +167,11 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	`
 	args := []any{costUSD, subscriptionID}
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		updateSQL += " AND g.project_id = $" + itoa(len(args))
+		updateSQL += " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{
+			SubscriptionID: "us.id",
+			UserID:         "us.user_id",
+			GroupID:        "us.group_id",
+		})
 	}
 	res, err := tx.ExecContext(ctx, updateSQL, args...)
 	if err != nil {
@@ -207,8 +210,7 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 	args := []any{amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted}
 	projectClause := ""
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND project_id = $" + itoa(len(args))
+		projectClause = " AND " + projectProfileScopeSQL(projectID, apiKeySQLScopeResources("api_keys"))
 	}
 	err := tx.QueryRowContext(ctx, `
 		UPDATE api_keys
@@ -238,8 +240,7 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 	args := []any{cost, apiKeyID}
 	projectClause := ""
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND project_id = $" + itoa(len(args))
+		projectClause = " AND " + projectProfileScopeSQL(projectID, apiKeySQLScopeResources("api_keys"))
 	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE api_keys SET
@@ -268,8 +269,10 @@ func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, us
 	args := []any{userID, groupID, cost}
 	projectClause := ""
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND g.project_id = $" + itoa(len(args))
+		projectClause = " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{
+			UserID:  "u.id",
+			GroupID: "g.id",
+		})
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO user_group_rate_limit_windows (
@@ -317,8 +320,7 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 	args := []any{amount, accountID}
 	projectClause := ""
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND project_id = $" + itoa(len(args))
+		projectClause = " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{AccountID: "accounts.id"})
 	}
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE accounts SET extra = (

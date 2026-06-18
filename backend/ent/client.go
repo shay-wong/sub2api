@@ -36,6 +36,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/projectprofilebinding"
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -104,6 +106,10 @@ type Client struct {
 	Project *ProjectClient
 	// ProjectMember is the client for interacting with the ProjectMember builders.
 	ProjectMember *ProjectMemberClient
+	// ProjectProfile is the client for interacting with the ProjectProfile builders.
+	ProjectProfile *ProjectProfileClient
+	// ProjectProfileBinding is the client for interacting with the ProjectProfileBinding builders.
+	ProjectProfileBinding *ProjectProfileBindingClient
 	// PromoCode is the client for interacting with the PromoCode builders.
 	PromoCode *PromoCodeClient
 	// PromoCodeUsage is the client for interacting with the PromoCodeUsage builders.
@@ -170,6 +176,8 @@ func (c *Client) init() {
 	c.PendingAuthSession = NewPendingAuthSessionClient(c.config)
 	c.Project = NewProjectClient(c.config)
 	c.ProjectMember = NewProjectMemberClient(c.config)
+	c.ProjectProfile = NewProjectProfileClient(c.config)
+	c.ProjectProfileBinding = NewProjectProfileBindingClient(c.config)
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
@@ -300,6 +308,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		Project:                       NewProjectClient(cfg),
 		ProjectMember:                 NewProjectMemberClient(cfg),
+		ProjectProfile:                NewProjectProfileClient(cfg),
+		ProjectProfileBinding:         NewProjectProfileBindingClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
@@ -357,6 +367,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
 		Project:                       NewProjectClient(cfg),
 		ProjectMember:                 NewProjectMemberClient(cfg),
+		ProjectProfile:                NewProjectProfileClient(cfg),
+		ProjectProfileBinding:         NewProjectProfileBindingClient(cfg),
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
@@ -409,11 +421,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.Project,
-		c.ProjectMember, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserGroupRateLimitWindow,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ProjectMember, c.ProjectProfile, c.ProjectProfileBinding, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserGroupRateLimitWindow, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -429,11 +441,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorRequestTemplate, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.Project,
-		c.ProjectMember, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserGroupRateLimitWindow,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ProjectMember, c.ProjectProfile, c.ProjectProfileBinding, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserGroupRateLimitWindow, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -484,6 +496,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Project.mutate(ctx, m)
 	case *ProjectMemberMutation:
 		return c.ProjectMember.mutate(ctx, m)
+	case *ProjectProfileMutation:
+		return c.ProjectProfile.mutate(ctx, m)
+	case *ProjectProfileBindingMutation:
+		return c.ProjectProfileBinding.mutate(ctx, m)
 	case *PromoCodeMutation:
 		return c.PromoCode.mutate(ctx, m)
 	case *PromoCodeUsageMutation:
@@ -3755,6 +3771,22 @@ func (c *ProjectClient) QueryMembers(_m *Project) *ProjectMemberQuery {
 	return query
 }
 
+// QueryAppProfiles queries the app_profiles edge of a Project.
+func (c *ProjectClient) QueryAppProfiles(_m *Project) *ProjectProfileQuery {
+	query := (&ProjectProfileClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(project.Table, project.FieldID, id),
+			sqlgraph.To(projectprofile.Table, projectprofile.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, project.AppProfilesTable, project.AppProfilesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryAccounts queries the accounts edge of a Project.
 func (c *ProjectClient) QueryAccounts(_m *Project) *AccountQuery {
 	query := (&AccountClient{config: c.config}).Query()
@@ -4008,6 +4040,322 @@ func (c *ProjectMemberClient) mutate(ctx context.Context, m *ProjectMemberMutati
 		return (&ProjectMemberDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown ProjectMember mutation op: %q", m.Op())
+	}
+}
+
+// ProjectProfileClient is a client for the ProjectProfile schema.
+type ProjectProfileClient struct {
+	config
+}
+
+// NewProjectProfileClient returns a client for the ProjectProfile from the given config.
+func NewProjectProfileClient(c config) *ProjectProfileClient {
+	return &ProjectProfileClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `projectprofile.Hooks(f(g(h())))`.
+func (c *ProjectProfileClient) Use(hooks ...Hook) {
+	c.hooks.ProjectProfile = append(c.hooks.ProjectProfile, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `projectprofile.Intercept(f(g(h())))`.
+func (c *ProjectProfileClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProjectProfile = append(c.inters.ProjectProfile, interceptors...)
+}
+
+// Create returns a builder for creating a ProjectProfile entity.
+func (c *ProjectProfileClient) Create() *ProjectProfileCreate {
+	mutation := newProjectProfileMutation(c.config, OpCreate)
+	return &ProjectProfileCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProjectProfile entities.
+func (c *ProjectProfileClient) CreateBulk(builders ...*ProjectProfileCreate) *ProjectProfileCreateBulk {
+	return &ProjectProfileCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProjectProfileClient) MapCreateBulk(slice any, setFunc func(*ProjectProfileCreate, int)) *ProjectProfileCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProjectProfileCreateBulk{err: fmt.Errorf("calling to ProjectProfileClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProjectProfileCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProjectProfileCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProjectProfile.
+func (c *ProjectProfileClient) Update() *ProjectProfileUpdate {
+	mutation := newProjectProfileMutation(c.config, OpUpdate)
+	return &ProjectProfileUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProjectProfileClient) UpdateOne(_m *ProjectProfile) *ProjectProfileUpdateOne {
+	mutation := newProjectProfileMutation(c.config, OpUpdateOne, withProjectProfile(_m))
+	return &ProjectProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProjectProfileClient) UpdateOneID(id int64) *ProjectProfileUpdateOne {
+	mutation := newProjectProfileMutation(c.config, OpUpdateOne, withProjectProfileID(id))
+	return &ProjectProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProjectProfile.
+func (c *ProjectProfileClient) Delete() *ProjectProfileDelete {
+	mutation := newProjectProfileMutation(c.config, OpDelete)
+	return &ProjectProfileDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProjectProfileClient) DeleteOne(_m *ProjectProfile) *ProjectProfileDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProjectProfileClient) DeleteOneID(id int64) *ProjectProfileDeleteOne {
+	builder := c.Delete().Where(projectprofile.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProjectProfileDeleteOne{builder}
+}
+
+// Query returns a query builder for ProjectProfile.
+func (c *ProjectProfileClient) Query() *ProjectProfileQuery {
+	return &ProjectProfileQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProjectProfile},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProjectProfile entity by its id.
+func (c *ProjectProfileClient) Get(ctx context.Context, id int64) (*ProjectProfile, error) {
+	return c.Query().Where(projectprofile.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProjectProfileClient) GetX(ctx context.Context, id int64) *ProjectProfile {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryProject queries the project edge of a ProjectProfile.
+func (c *ProjectProfileClient) QueryProject(_m *ProjectProfile) *ProjectQuery {
+	query := (&ProjectClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(projectprofile.Table, projectprofile.FieldID, id),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, projectprofile.ProjectTable, projectprofile.ProjectColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryBindings queries the bindings edge of a ProjectProfile.
+func (c *ProjectProfileClient) QueryBindings(_m *ProjectProfile) *ProjectProfileBindingQuery {
+	query := (&ProjectProfileBindingClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(projectprofile.Table, projectprofile.FieldID, id),
+			sqlgraph.To(projectprofilebinding.Table, projectprofilebinding.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, projectprofile.BindingsTable, projectprofile.BindingsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *ProjectProfileClient) Hooks() []Hook {
+	hooks := c.hooks.ProjectProfile
+	return append(hooks[:len(hooks):len(hooks)], projectprofile.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProjectProfileClient) Interceptors() []Interceptor {
+	inters := c.inters.ProjectProfile
+	return append(inters[:len(inters):len(inters)], projectprofile.Interceptors[:]...)
+}
+
+func (c *ProjectProfileClient) mutate(ctx context.Context, m *ProjectProfileMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProjectProfileCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProjectProfileUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProjectProfileUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProjectProfileDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProjectProfile mutation op: %q", m.Op())
+	}
+}
+
+// ProjectProfileBindingClient is a client for the ProjectProfileBinding schema.
+type ProjectProfileBindingClient struct {
+	config
+}
+
+// NewProjectProfileBindingClient returns a client for the ProjectProfileBinding from the given config.
+func NewProjectProfileBindingClient(c config) *ProjectProfileBindingClient {
+	return &ProjectProfileBindingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `projectprofilebinding.Hooks(f(g(h())))`.
+func (c *ProjectProfileBindingClient) Use(hooks ...Hook) {
+	c.hooks.ProjectProfileBinding = append(c.hooks.ProjectProfileBinding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `projectprofilebinding.Intercept(f(g(h())))`.
+func (c *ProjectProfileBindingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ProjectProfileBinding = append(c.inters.ProjectProfileBinding, interceptors...)
+}
+
+// Create returns a builder for creating a ProjectProfileBinding entity.
+func (c *ProjectProfileBindingClient) Create() *ProjectProfileBindingCreate {
+	mutation := newProjectProfileBindingMutation(c.config, OpCreate)
+	return &ProjectProfileBindingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ProjectProfileBinding entities.
+func (c *ProjectProfileBindingClient) CreateBulk(builders ...*ProjectProfileBindingCreate) *ProjectProfileBindingCreateBulk {
+	return &ProjectProfileBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ProjectProfileBindingClient) MapCreateBulk(slice any, setFunc func(*ProjectProfileBindingCreate, int)) *ProjectProfileBindingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ProjectProfileBindingCreateBulk{err: fmt.Errorf("calling to ProjectProfileBindingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ProjectProfileBindingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ProjectProfileBindingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ProjectProfileBinding.
+func (c *ProjectProfileBindingClient) Update() *ProjectProfileBindingUpdate {
+	mutation := newProjectProfileBindingMutation(c.config, OpUpdate)
+	return &ProjectProfileBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ProjectProfileBindingClient) UpdateOne(_m *ProjectProfileBinding) *ProjectProfileBindingUpdateOne {
+	mutation := newProjectProfileBindingMutation(c.config, OpUpdateOne, withProjectProfileBinding(_m))
+	return &ProjectProfileBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ProjectProfileBindingClient) UpdateOneID(id int64) *ProjectProfileBindingUpdateOne {
+	mutation := newProjectProfileBindingMutation(c.config, OpUpdateOne, withProjectProfileBindingID(id))
+	return &ProjectProfileBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ProjectProfileBinding.
+func (c *ProjectProfileBindingClient) Delete() *ProjectProfileBindingDelete {
+	mutation := newProjectProfileBindingMutation(c.config, OpDelete)
+	return &ProjectProfileBindingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ProjectProfileBindingClient) DeleteOne(_m *ProjectProfileBinding) *ProjectProfileBindingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ProjectProfileBindingClient) DeleteOneID(id int64) *ProjectProfileBindingDeleteOne {
+	builder := c.Delete().Where(projectprofilebinding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ProjectProfileBindingDeleteOne{builder}
+}
+
+// Query returns a query builder for ProjectProfileBinding.
+func (c *ProjectProfileBindingClient) Query() *ProjectProfileBindingQuery {
+	return &ProjectProfileBindingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeProjectProfileBinding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ProjectProfileBinding entity by its id.
+func (c *ProjectProfileBindingClient) Get(ctx context.Context, id int64) (*ProjectProfileBinding, error) {
+	return c.Query().Where(projectprofilebinding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ProjectProfileBindingClient) GetX(ctx context.Context, id int64) *ProjectProfileBinding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryProfile queries the profile edge of a ProjectProfileBinding.
+func (c *ProjectProfileBindingClient) QueryProfile(_m *ProjectProfileBinding) *ProjectProfileQuery {
+	query := (&ProjectProfileClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(projectprofilebinding.Table, projectprofilebinding.FieldID, id),
+			sqlgraph.To(projectprofile.Table, projectprofile.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, projectprofilebinding.ProfileTable, projectprofilebinding.ProfileColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *ProjectProfileBindingClient) Hooks() []Hook {
+	return c.hooks.ProjectProfileBinding
+}
+
+// Interceptors returns the client interceptors.
+func (c *ProjectProfileBindingClient) Interceptors() []Interceptor {
+	return c.inters.ProjectProfileBinding
+}
+
+func (c *ProjectProfileBindingClient) mutate(ctx context.Context, m *ProjectProfileBindingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ProjectProfileBindingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ProjectProfileBindingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ProjectProfileBindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ProjectProfileBindingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown ProjectProfileBinding mutation op: %q", m.Op())
 	}
 }
 
@@ -6899,10 +7247,11 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, Project,
-		ProjectMember, PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret,
-		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
-		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserGroupRateLimitWindow, UserPlatformQuota, UserSubscription []ent.Hook
+		ProjectMember, ProjectProfile, ProjectProfileBinding, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
+		UserAttributeDefinition, UserAttributeValue, UserGroupRateLimitWindow,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6910,10 +7259,11 @@ type (
 		ChannelMonitorHistory, ChannelMonitorRequestTemplate, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, Project,
-		ProjectMember, PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret,
-		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
-		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserGroupRateLimitWindow, UserPlatformQuota, UserSubscription []ent.Interceptor
+		ProjectMember, ProjectProfile, ProjectProfileBinding, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
+		UserAttributeDefinition, UserAttributeValue, UserGroupRateLimitWindow,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

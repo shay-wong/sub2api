@@ -56,6 +56,7 @@ func (Project) Fields() []ent.Field {
 func (Project) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.To("members", ProjectMember.Type),
+		edge.To("app_profiles", ProjectProfile.Type),
 		edge.To("accounts", Account.Type),
 		edge.To("api_keys", APIKey.Type),
 		edge.To("groups", Group.Type),

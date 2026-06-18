@@ -33,8 +33,14 @@ func TestAccountRepository_ResetQuotaUsedScopesByContextProject(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "project_id = $2")
-	require.Equal(t, []any{int64(42), int64(7)}, exec.execArgs[0])
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.NotContains(t, normalized, "accounts.project_id = $2")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "FROM project_profiles pp")
+	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = accounts.id")
+	require.Equal(t, []any{int64(42)}, exec.execArgs[0])
 }
 
 func TestAccountRepository_RevertProxyFallbackScopesByContextProject(t *testing.T) {
@@ -45,8 +51,14 @@ func TestAccountRepository_RevertProxyFallbackScopesByContextProject(t *testing.
 
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "project_id = $2")
-	require.Equal(t, []any{int64(42), int64(7)}, exec.execArgs[0])
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.NotContains(t, normalized, "accounts.project_id = $2")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "FROM project_profiles pp")
+	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = accounts.id")
+	require.Equal(t, []any{int64(42)}, exec.execArgs[0])
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidates_SQLFilter(t *testing.T) {

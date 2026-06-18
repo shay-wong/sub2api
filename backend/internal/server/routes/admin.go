@@ -43,11 +43,11 @@ func RegisterAdminRoutes(
 		adminOnly := admin.Group("")
 		adminOnly.Use(middleware.RequireAdminOnly())
 
-		// 项目空间管理
-		registerProjectRoutes(adminOnly, h)
+		// 项目空间管理：项目管理员可管理当前项目配置；创建/更新项目本体仅超级管理员。
+		registerProjectRoutes(admin, h)
 
-		// 用户管理
-		registerUserManagementRoutes(adminOnly, h)
+		// 用户管理：项目管理员只能看到当前项目配置范围内的用户。
+		registerUserManagementRoutes(admin, h)
 
 		// 公告管理
 		registerAnnouncementRoutes(adminOnly, h)
@@ -73,11 +73,11 @@ func RegisterAdminRoutes(
 		// 系统管理
 		registerSystemRoutes(adminOnly, h)
 
-		// 订阅管理
-		registerSubscriptionRoutes(adminOnly, h)
+		// 订阅管理：项目管理员只能看到当前项目配置范围内的订阅。
+		registerSubscriptionRoutes(admin, h)
 
-		// 使用记录管理
-		registerUsageRoutes(adminOnly, h)
+		// 使用记录管理：项目管理员可查看当前项目范围，清理任务仍限超级管理员。
+		registerUsageRoutes(admin, h)
 
 		// 用户属性管理
 		registerUserAttributeRoutes(adminOnly, h)
@@ -89,7 +89,7 @@ func RegisterAdminRoutes(
 		registerTLSFingerprintProfileRoutes(adminOnly, h)
 
 		// API Key 管理
-		registerAdminAPIKeyRoutes(adminOnly, h)
+		registerAdminAPIKeyRoutes(admin, h)
 
 		// 定时测试计划
 		registerScheduledTestRoutes(adminOnly, h)
@@ -119,13 +119,22 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 func registerProjectRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	projects := admin.Group("/projects")
 	{
+		adminOnly := middleware.RequireAdminOnly()
 		projects.GET("", h.Admin.Project.List)
-		projects.POST("", h.Admin.Project.Create)
-		projects.PUT("/:id", h.Admin.Project.Update)
+		projects.POST("", adminOnly, h.Admin.Project.Create)
+		projects.GET("/resources/search", adminOnly, h.Admin.Project.SearchGlobalBindableResources)
+		projects.PUT("/:id", adminOnly, h.Admin.Project.Update)
 		projects.GET("/:id/members", h.Admin.Project.ListMembers)
 		projects.PUT("/:id/members/:user_id", h.Admin.Project.SetMember)
 		projects.DELETE("/:id/members/:user_id", h.Admin.Project.RemoveMember)
-		projects.POST("/:id/resources/move", h.Admin.Project.MoveResources)
+		projects.GET("/:id/profiles", h.Admin.Project.ListProfiles)
+		projects.POST("/:id/profiles", h.Admin.Project.CreateProfile)
+		projects.PUT("/:id/profiles/:profile_id", h.Admin.Project.UpdateProfile)
+		projects.DELETE("/:id/profiles/:profile_id", h.Admin.Project.DeleteProfile)
+		projects.POST("/:id/profiles/:profile_id/activate", h.Admin.Project.ActivateProfile)
+		projects.GET("/:id/profiles/:profile_id/bindings", h.Admin.Project.GetProfileBindings)
+		projects.PUT("/:id/profiles/:profile_id/bindings", h.Admin.Project.SetProfileBindings)
+		projects.GET("/:id/resources/search", h.Admin.Project.SearchBindableResources)
 	}
 }
 
@@ -146,7 +155,8 @@ func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	apiKeys := admin.Group("/api-keys")
 	{
-		apiKeys.PUT("/:id", h.Admin.APIKey.UpdateGroup)
+		apiKeysWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+		apiKeys.PUT("/:id", apiKeysWrite, h.Admin.APIKey.UpdateGroup)
 	}
 }
 
@@ -294,23 +304,24 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminOnly := middleware.RequireAdminOnly()
 		accountRead := middleware.RequireAdminPermission(service.AdminPermissionAccountsRead)
 
-		groups.GET("", adminOnly, h.Admin.Group.List)
+		groups.GET("", accountRead, h.Admin.Group.List)
 		groups.GET("/all", accountRead, h.Admin.Group.GetAll)
-		groups.GET("/usage-summary", adminOnly, h.Admin.Group.GetUsageSummary)
-		groups.GET("/capacity-summary", adminOnly, h.Admin.Group.GetCapacitySummary)
-		groups.PUT("/sort-order", adminOnly, h.Admin.Group.UpdateSortOrder)
-		groups.GET("/:id/models-list-candidates", adminOnly, h.Admin.Group.GetModelsListCandidates)
-		groups.GET("/:id", adminOnly, h.Admin.Group.GetByID)
-		groups.POST("", adminOnly, h.Admin.Group.Create)
-		groups.PUT("/:id", adminOnly, h.Admin.Group.Update)
-		groups.DELETE("/:id", adminOnly, h.Admin.Group.Delete)
-		groups.GET("/:id/stats", adminOnly, h.Admin.Group.GetStats)
-		groups.GET("/:id/rate-multipliers", adminOnly, h.Admin.Group.GetGroupRateMultipliers)
-		groups.PUT("/:id/rate-multipliers", adminOnly, h.Admin.Group.BatchSetGroupRateMultipliers)
-		groups.DELETE("/:id/rate-multipliers", adminOnly, h.Admin.Group.ClearGroupRateMultipliers)
-		groups.PUT("/:id/rpm-overrides", adminOnly, h.Admin.Group.BatchSetGroupRPMOverrides)
-		groups.DELETE("/:id/rpm-overrides", adminOnly, h.Admin.Group.ClearGroupRPMOverrides)
-		groups.GET("/:id/api-keys", adminOnly, h.Admin.Group.GetGroupAPIKeys)
+		groups.GET("/usage-summary", accountRead, h.Admin.Group.GetUsageSummary)
+		groups.GET("/capacity-summary", accountRead, h.Admin.Group.GetCapacitySummary)
+		groups.PUT("/sort-order", accountRead, h.Admin.Group.UpdateSortOrder)
+		groups.GET("/:id/models-list-candidates", accountRead, h.Admin.Group.GetModelsListCandidates)
+		groups.GET("/:id", accountRead, h.Admin.Group.GetByID)
+		groups.POST("", accountRead, h.Admin.Group.Create)
+		groups.PUT("/:id", accountRead, h.Admin.Group.Update)
+		groups.DELETE("/:id", accountRead, h.Admin.Group.Delete)
+		groups.GET("/:id/stats", accountRead, h.Admin.Group.GetStats)
+		groups.GET("/:id/rate-multipliers", accountRead, h.Admin.Group.GetGroupRateMultipliers)
+		groups.PUT("/:id/rate-multipliers", accountRead, h.Admin.Group.BatchSetGroupRateMultipliers)
+		groups.DELETE("/:id/rate-multipliers", accountRead, h.Admin.Group.ClearGroupRateMultipliers)
+		groups.PUT("/:id/rpm-overrides", accountRead, h.Admin.Group.BatchSetGroupRPMOverrides)
+		groups.DELETE("/:id/rpm-overrides", accountRead, h.Admin.Group.ClearGroupRPMOverrides)
+		groups.GET("/:id/api-keys", accountRead, h.Admin.Group.GetGroupAPIKeys)
+		_ = adminOnly
 	}
 }
 
@@ -586,14 +597,16 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	usage := admin.Group("/usage")
 	{
+		adminOnly := middleware.RequireAdminOnly()
+
 		usage.GET("", h.Admin.Usage.List)
 		usage.GET("/count", h.Admin.Usage.Count)
 		usage.GET("/stats", h.Admin.Usage.Stats)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
-		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
-		usage.POST("/cleanup-tasks", h.Admin.Usage.CreateCleanupTask)
-		usage.POST("/cleanup-tasks/:id/cancel", h.Admin.Usage.CancelCleanupTask)
+		usage.GET("/cleanup-tasks", adminOnly, h.Admin.Usage.ListCleanupTasks)
+		usage.POST("/cleanup-tasks", adminOnly, h.Admin.Usage.CreateCleanupTask)
+		usage.POST("/cleanup-tasks/:id/cancel", adminOnly, h.Admin.Usage.CancelCleanupTask)
 	}
 }
 

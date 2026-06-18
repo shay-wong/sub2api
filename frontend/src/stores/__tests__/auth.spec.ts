@@ -367,7 +367,7 @@ describe('useAuthStore', () => {
       expect(store.isAdmin).toBe(false)
     })
 
-    it('运营用户保留普通用户访问，但不能进入管理后台', async () => {
+    it('旧运营角色不再作为当前权限入口', async () => {
       const operatorResponse = { ...fakeAuthResponse, user: { ...fakeOperatorUser } }
       mockLogin.mockResolvedValue(operatorResponse)
       const store = useAuthStore()
@@ -375,8 +375,7 @@ describe('useAuthStore', () => {
       await store.login({ email: 'operator@example.com', password: '123456' })
 
       expect(store.isAdmin).toBe(false)
-      expect(store.isOperator).toBe(true)
-      expect(store.hasUserAccess).toBe(true)
+      expect(store.hasUserAccess).toBe(false)
       expect(store.canAccessAdminConsole).toBe(false)
     })
 

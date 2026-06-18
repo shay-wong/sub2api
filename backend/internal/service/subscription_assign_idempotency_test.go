@@ -217,6 +217,119 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 	return nil
 }
 
+type subscriptionUserRepoNoop struct{}
+
+func (subscriptionUserRepoNoop) Create(context.Context, *User) error {
+	panic("unexpected Create call")
+}
+func (subscriptionUserRepoNoop) GetByID(context.Context, int64) (*User, error) {
+	panic("unexpected GetByID call")
+}
+func (subscriptionUserRepoNoop) GetByIDIncludeDeleted(context.Context, int64) (*User, error) {
+	panic("unexpected GetByIDIncludeDeleted call")
+}
+func (subscriptionUserRepoNoop) GetByEmail(context.Context, string) (*User, error) {
+	panic("unexpected GetByEmail call")
+}
+func (subscriptionUserRepoNoop) GetFirstAdmin(context.Context) (*User, error) {
+	panic("unexpected GetFirstAdmin call")
+}
+func (subscriptionUserRepoNoop) Update(context.Context, *User) error {
+	panic("unexpected Update call")
+}
+func (subscriptionUserRepoNoop) Delete(context.Context, int64) error {
+	panic("unexpected Delete call")
+}
+func (subscriptionUserRepoNoop) GetUserAvatar(context.Context, int64) (*UserAvatar, error) {
+	panic("unexpected GetUserAvatar call")
+}
+func (subscriptionUserRepoNoop) UpsertUserAvatar(context.Context, int64, UpsertUserAvatarInput) (*UserAvatar, error) {
+	panic("unexpected UpsertUserAvatar call")
+}
+func (subscriptionUserRepoNoop) DeleteUserAvatar(context.Context, int64) error {
+	panic("unexpected DeleteUserAvatar call")
+}
+func (subscriptionUserRepoNoop) List(context.Context, pagination.PaginationParams) ([]User, *pagination.PaginationResult, error) {
+	panic("unexpected List call")
+}
+func (subscriptionUserRepoNoop) ListWithFilters(context.Context, pagination.PaginationParams, UserListFilters) ([]User, *pagination.PaginationResult, error) {
+	panic("unexpected ListWithFilters call")
+}
+func (subscriptionUserRepoNoop) GetLatestUsedAtByUserIDs(context.Context, []int64) (map[int64]*time.Time, error) {
+	panic("unexpected GetLatestUsedAtByUserIDs call")
+}
+func (subscriptionUserRepoNoop) GetLatestUsedAtByUserID(context.Context, int64) (*time.Time, error) {
+	panic("unexpected GetLatestUsedAtByUserID call")
+}
+func (subscriptionUserRepoNoop) UpdateUserLastActiveAt(context.Context, int64, time.Time) error {
+	panic("unexpected UpdateUserLastActiveAt call")
+}
+func (subscriptionUserRepoNoop) UpdateBalance(context.Context, int64, float64) error {
+	panic("unexpected UpdateBalance call")
+}
+func (subscriptionUserRepoNoop) DeductBalance(context.Context, int64, float64) error {
+	panic("unexpected DeductBalance call")
+}
+func (subscriptionUserRepoNoop) UpdateConcurrency(context.Context, int64, int) error {
+	panic("unexpected UpdateConcurrency call")
+}
+func (subscriptionUserRepoNoop) BatchSetConcurrency(context.Context, []int64, int) (int, error) {
+	panic("unexpected BatchSetConcurrency call")
+}
+func (subscriptionUserRepoNoop) BatchAddConcurrency(context.Context, []int64, int) (int, error) {
+	panic("unexpected BatchAddConcurrency call")
+}
+func (subscriptionUserRepoNoop) ExistsByEmail(context.Context, string) (bool, error) {
+	panic("unexpected ExistsByEmail call")
+}
+func (subscriptionUserRepoNoop) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
+	panic("unexpected RemoveGroupFromAllowedGroups call")
+}
+func (subscriptionUserRepoNoop) AddGroupToAllowedGroups(context.Context, int64, int64) error {
+	panic("unexpected AddGroupToAllowedGroups call")
+}
+func (subscriptionUserRepoNoop) RemoveGroupFromUserAllowedGroups(context.Context, int64, int64) error {
+	panic("unexpected RemoveGroupFromUserAllowedGroups call")
+}
+func (subscriptionUserRepoNoop) ListUserAuthIdentities(context.Context, int64) ([]UserAuthIdentityRecord, error) {
+	panic("unexpected ListUserAuthIdentities call")
+}
+func (subscriptionUserRepoNoop) UnbindUserAuthProvider(context.Context, int64, string) error {
+	panic("unexpected UnbindUserAuthProvider call")
+}
+func (subscriptionUserRepoNoop) UpdateTotpSecret(context.Context, int64, *string) error {
+	panic("unexpected UpdateTotpSecret call")
+}
+func (subscriptionUserRepoNoop) EnableTotp(context.Context, int64) error {
+	panic("unexpected EnableTotp call")
+}
+func (subscriptionUserRepoNoop) DisableTotp(context.Context, int64) error {
+	panic("unexpected DisableTotp call")
+}
+
+type subscriptionUserRepoStub struct {
+	subscriptionUserRepoNoop
+
+	scopedUsers []User
+	listCalls   []UserListFilters
+}
+
+func (s *subscriptionUserRepoStub) ListWithFilters(_ context.Context, params pagination.PaginationParams, filters UserListFilters) ([]User, *pagination.PaginationResult, error) {
+	s.listCalls = append(s.listCalls, filters)
+	out := make([]User, 0, len(s.scopedUsers))
+	for _, user := range s.scopedUsers {
+		if filters.ID > 0 && user.ID != filters.ID {
+			continue
+		}
+		out = append(out, user)
+	}
+	return out, &pagination.PaginationResult{
+		Total:    int64(len(out)),
+		Page:     params.Page,
+		PageSize: params.PageSize,
+	}, nil
+}
+
 func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	start := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	groupRepo := &subscriptionGroupRepoStub{
@@ -242,6 +355,54 @@ func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(10), sub.ID)
 	require.Equal(t, 0, subRepo.createCalls, "reuse should not create new subscription")
+}
+
+func TestAssignSubscriptionProjectContextRejectsInvisibleUser(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	userRepo := &subscriptionUserRepoStub{
+		scopedUsers: []User{{ID: 1001, Email: "visible@example.com", Role: RoleUser}},
+	}
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	svc.userRepo = userRepo
+
+	_, err := svc.AssignSubscription(WithProjectID(context.Background(), 7), &AssignSubscriptionInput{
+		UserID:       2002,
+		GroupID:      1,
+		ValidityDays: 30,
+	})
+
+	require.ErrorIs(t, err, ErrUserNotFound)
+	require.Equal(t, 0, subRepo.createCalls)
+	require.Len(t, userRepo.listCalls, 1)
+	require.Equal(t, int64(2002), userRepo.listCalls[0].ID)
+	require.NotNil(t, userRepo.listCalls[0].IncludeSubscriptions)
+	require.False(t, *userRepo.listCalls[0].IncludeSubscriptions)
+}
+
+func TestAssignSubscriptionProjectContextAllowsVisibleUser(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	userRepo := &subscriptionUserRepoStub{
+		scopedUsers: []User{{ID: 1001, Email: "visible@example.com", Role: RoleUser}},
+	}
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	svc.userRepo = userRepo
+
+	sub, err := svc.AssignSubscription(WithProjectID(context.Background(), 7), &AssignSubscriptionInput{
+		UserID:       1001,
+		GroupID:      1,
+		ValidityDays: 30,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, sub)
+	require.Equal(t, int64(1001), sub.UserID)
+	require.Equal(t, 1, subRepo.createCalls)
 }
 
 func TestAssignSubscriptionConflictWhenSemanticsMismatch(t *testing.T) {
@@ -313,6 +474,36 @@ func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 	require.Equal(t, "created", result.Statuses[2])
 	require.Equal(t, "failed", result.Statuses[3])
 	require.Equal(t, 1, subRepo.createCalls)
+}
+
+func TestBulkAssignSubscriptionProjectContextRejectsInvisibleUsers(t *testing.T) {
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	userRepo := &subscriptionUserRepoStub{
+		scopedUsers: []User{{ID: 1, Email: "visible@example.com", Role: RoleUser}},
+	}
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, nil)
+	svc.userRepo = userRepo
+
+	result, err := svc.BulkAssignSubscription(WithProjectID(context.Background(), 7), &BulkAssignSubscriptionInput{
+		UserIDs:      []int64{1, 2},
+		GroupID:      1,
+		ValidityDays: 30,
+		Notes:        "project scoped",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.SuccessCount)
+	require.Equal(t, 1, result.CreatedCount)
+	require.Equal(t, 1, result.FailedCount)
+	require.Equal(t, "created", result.Statuses[1])
+	require.Equal(t, "failed", result.Statuses[2])
+	require.Equal(t, 1, subRepo.createCalls)
+	require.Len(t, userRepo.listCalls, 2)
+	require.Equal(t, int64(1), userRepo.listCalls[0].ID)
+	require.Equal(t, int64(2), userRepo.listCalls[1].ID)
 }
 
 func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testing.T) {

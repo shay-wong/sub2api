@@ -62,6 +62,9 @@ func (s *authCacheInvalidatorStub) InvalidateAuthCacheByGroupID(ctx context.Cont
 	s.groupIDs = append(s.groupIDs, groupID)
 }
 
+func (s *authCacheInvalidatorStub) InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKeyID int64) {
+}
+
 func TestAdminService_UpdateUserBalance_InvalidatesAuthCache(t *testing.T) {
 	baseRepo := &userRepoStub{user: &User{ID: 7, Balance: 10}}
 	repo := &balanceUserRepoStub{userRepoStub: baseRepo}

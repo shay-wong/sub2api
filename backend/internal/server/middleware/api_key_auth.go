@@ -77,10 +77,15 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 
+		projectID, ok := resolveAPIKeyRequestProject(c, apiKeyService, apiKey)
+		if !ok {
+			return
+		}
+
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
 		// IP 限制等早退中断，也让 Ops 错误日志能回退取到 user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
-		setProjectContext(c, apiKey.ProjectID)
+		setProjectContext(c, projectID)
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
@@ -299,6 +304,42 @@ func setProjectContext(c *gin.Context, projectID int64) {
 	}
 	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
 	c.Set("project_id", projectID)
+}
+
+func resolveAPIKeyRequestProject(c *gin.Context, apiKeyService *service.APIKeyService, apiKey *service.APIKey) (int64, bool) {
+	if apiKey == nil {
+		return 0, true
+	}
+	requestedProjectID, ok := parseRequestedProjectID(c)
+	if !ok {
+		return 0, false
+	}
+	effectiveProjectID := requestedProjectID
+	if effectiveProjectID <= 0 {
+		effectiveProjectID = apiKey.ProjectID
+	}
+	if effectiveProjectID <= 0 {
+		return apiKey.ProjectID, true
+	}
+	if apiKeyService == nil {
+		AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
+		return 0, false
+	}
+	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
+	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
+	if err != nil {
+		if errors.Is(err, service.ErrAPIKeyNotFound) {
+			AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
+			return 0, false
+		}
+		AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
+		return 0, false
+	}
+	if visible == nil || visible.ID != apiKey.ID {
+		AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
+		return 0, false
+	}
+	return effectiveProjectID, true
 }
 
 func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool {

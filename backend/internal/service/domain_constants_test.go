@@ -32,7 +32,7 @@ func TestRoleHierarchyHelpers(t *testing.T) {
 	}{
 		{role: RoleSuperAdmin, wantAdmin: true, wantUserAccess: true, wantAdminConsole: true},
 		{role: RoleAdmin, wantAdmin: true, wantUserAccess: true, wantAdminConsole: true},
-		{role: RoleOperator, wantOperator: true, wantUserAccess: true},
+		{role: RoleOperator, wantOperator: true},
 		{role: RoleUser, wantUserAccess: true},
 		{role: ""},
 		{role: "unknown"},

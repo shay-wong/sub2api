@@ -24,25 +24,27 @@ func TestResolveProjectIDForCreateUsesRequestedWithoutContext(t *testing.T) {
 	require.Equal(t, int64(99), projectID)
 }
 
-func TestProjectIDForUpdatePrefersContextProject(t *testing.T) {
-	ctx := service.WithProjectID(context.Background(), 7)
+func TestProjectProfileScopeUnrestrictedKeepsProjectMembershipBoundary(t *testing.T) {
+	clause := projectProfileScopeSQL(7, projectSQLScopeResources{
+		ProjectID:        "usage_logs.project_id",
+		RequireProjectID: true,
+		UserID:           "usage_logs.user_id",
+		GroupID:          "usage_logs.group_id",
+		AccountID:        "usage_logs.account_id",
+		APIKeyID:         "usage_logs.api_key_id",
+	})
+	normalized := normalizeSQLWhitespace(clause)
 
-	projectID, ok := projectIDForUpdate(ctx, 99)
-
-	require.True(t, ok)
-	require.Equal(t, int64(7), projectID)
-}
-
-func TestProjectIDForUpdateUsesRequestedWithoutContext(t *testing.T) {
-	projectID, ok := projectIDForUpdate(context.Background(), 99)
-
-	require.True(t, ok)
-	require.Equal(t, int64(99), projectID)
-}
-
-func TestProjectIDForUpdateSkipsEmptyProject(t *testing.T) {
-	projectID, ok := projectIDForUpdate(context.Background(), 0)
-
-	require.False(t, ok)
-	require.Zero(t, projectID)
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "usage_logs.project_id = 7")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.project_id = 7")
+	require.Contains(t, normalized, "ppb.resource_type = 'user'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.user_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.group_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.account_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'api_key'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.api_key_id")
 }

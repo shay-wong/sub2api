@@ -50,4 +50,24 @@ describe('AppSidebar admin/user hierarchy', () => {
   it('does not keep a legacy operator-only admin navigation list', () => {
     expect(componentSource).not.toContain('operatorItems')
   })
+
+  it('keeps project admins on project-scoped management pages only', () => {
+    const projectItemsMatch = componentSource.match(/const projectItems: NavItem\[\] = \[[\s\S]*?\n {2}\]/)
+    const projectItemsSource = projectItemsMatch?.[0] ?? ''
+
+    expect(projectItemsSource).toContain("path: '/admin/dashboard'")
+    expect(projectItemsSource).toContain("path: '/admin/ops'")
+    expect(projectItemsSource).toContain("path: '/admin/projects'")
+    expect(projectItemsSource).toContain("path: '/admin/users'")
+    expect(projectItemsSource).toContain("path: '/admin/groups'")
+    expect(projectItemsSource).toContain("path: '/admin/subscriptions'")
+    expect(projectItemsSource).toContain("path: '/admin/accounts'")
+
+    const projectAdminBranchMatch = componentSource.match(/if \(!authStore\.isAdmin\) \{[\s\S]*?\n {2}\}/)
+    const projectAdminBranchSource = projectAdminBranchMatch?.[0] ?? ''
+    expect(projectAdminBranchSource).toContain('return applyFeatureFlags(projectItems)')
+    expect(projectAdminBranchSource).not.toContain('/admin/settings')
+    expect(projectAdminBranchSource).not.toContain('/admin/channels')
+    expect(projectAdminBranchSource).not.toContain('/admin/redeem')
+  })
 })

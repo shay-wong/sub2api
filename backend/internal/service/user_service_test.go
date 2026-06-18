@@ -267,8 +267,9 @@ type mockAuthCacheInvalidator struct {
 	mu                 sync.Mutex
 }
 
-func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByKey(context.Context, string)    {}
-func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByGroupID(context.Context, int64) {}
+func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByKey(context.Context, string)     {}
+func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByGroupID(context.Context, int64)  {}
+func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByAPIKeyID(context.Context, int64) {}
 func (m *mockAuthCacheInvalidator) InvalidateAuthCacheByUserID(_ context.Context, userID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

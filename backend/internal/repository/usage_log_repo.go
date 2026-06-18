@@ -294,7 +294,7 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
 	}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var requestCount int64
 	var tokenCount int64
@@ -451,7 +451,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 		if errors.Is(err, sql.ErrNoRows) && prepared.requestID != "" {
 			selectQuery := "SELECT id, created_at FROM usage_logs WHERE request_id = $1 AND api_key_id = $2"
 			selectArgs := []any{prepared.requestID, log.APIKeyID}
-			selectQuery, selectArgs = appendProjectScopeQuery(ctx, selectQuery, selectArgs, "project_id")
+			selectQuery, selectArgs = appendProjectProfileScopedQuery(ctx, selectQuery, selectArgs, "project_id", usageLogSQLScopeResources(""))
 			if err := scanSingleRow(ctx, sqlq, selectQuery, selectArgs, &log.ID, &log.CreatedAt); err != nil {
 				return false, err
 			}
@@ -1443,7 +1443,7 @@ func (r *usageLogRepository) bestEffortRecentKey(requestID string, apiKeyID int6
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -1503,7 +1503,7 @@ func (r *usageLogRepository) GetUserStats(ctx context.Context, userID int64, sta
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	stats := &UserStats{}
 	if err := scanSingleRow(
@@ -1592,8 +1592,7 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 	`
 	userStatsArgs := []any{todayUTC}
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		userStatsQuery += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.user_id = users.id AND pm.project_id = $%d)", len(userStatsArgs)+1)
-		userStatsArgs = append(userStatsArgs, projectID)
+		userStatsQuery += " AND " + projectUserScopeSQL(projectID, "users.id")
 	}
 	if err := scanSingleRow(
 		ctx,
@@ -1614,7 +1613,11 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		WHERE deleted_at IS NULL
 	`
 	apiKeyStatsArgs := []any{service.StatusActive}
-	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectScopeQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "project_id")
+	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectProfileScopedQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "project_id", projectSQLScopeResources{
+		UserID:   "user_id",
+		GroupID:  "group_id",
+		APIKeyID: "id",
+	})
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -1637,7 +1640,9 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		WHERE deleted_at IS NULL
 	`
 	accountStatsArgs := []any{service.StatusActive, service.StatusError, now, now}
-	accountStatsQuery, accountStatsArgs = appendProjectScopeQuery(ctx, accountStatsQuery, accountStatsArgs, "project_id")
+	accountStatsQuery, accountStatsArgs = appendProjectProfileScopedQuery(ctx, accountStatsQuery, accountStatsArgs, "project_id", projectSQLScopeResources{
+		AccountID: "id",
+	})
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -1746,9 +1751,10 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 	todayEnd := todayUTC.Add(24 * time.Hour)
 	args := []any{startUTC, endUTC, todayUTC, todayEnd}
 	projectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
+	projectClauses, projectArgs, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "project_id", usageLogSQLScopeResources(""))
+	if len(projectClauses) > 0 {
+		args = projectArgs
+		projectCondition = " AND " + projectClauses[0]
 	}
 	combinedStatsQuery := `
 		WITH scoped AS (
@@ -1824,9 +1830,10 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 	hourEnd := hourStart.Add(time.Hour)
 	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd}
 	activeProjectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		activeArgs = append(activeArgs, projectID)
-		activeProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(activeArgs))
+	activeProjectClauses, activeProjectArgs, _ := appendProjectProfileScopedWhereAt(ctx, nil, activeArgs, len(activeArgs)+1, "project_id", usageLogSQLScopeResources(""))
+	if len(activeProjectClauses) > 0 {
+		activeArgs = activeProjectArgs
+		activeProjectCondition = " AND " + activeProjectClauses[0]
 	}
 	activeUsersQuery := `
 		WITH scoped AS (
@@ -1855,7 +1862,7 @@ func (r *usageLogRepository) ListByAccount(ctx context.Context, accountID int64,
 func (r *usageLogRepository) ListByUserAndTimeRange(ctx context.Context, userID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE user_id = $1 AND created_at >= $2 AND created_at < $3"
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " ORDER BY id DESC LIMIT 10000"
 	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
@@ -1878,7 +1885,7 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
@@ -1919,7 +1926,7 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{apiKeyID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
@@ -1970,7 +1977,7 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{accountID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
@@ -2012,7 +2019,7 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		WHERE %s = $1 AND created_at >= $2 AND created_at < $3
 	`, rawUsageLogModelColumn)
 	args := []any{modelName, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var stats usagestats.UsageStats
 	if err := scanSingleRow(
@@ -2055,7 +2062,7 @@ func (r *usageLogRepository) GetDailyStatsAggregated(ctx context.Context, userID
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{userID, startTime, endTime, tzName}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += `
 		GROUP BY 1
 		ORDER BY 1
@@ -2132,7 +2139,7 @@ func resolveUsageStatsTimezone() string {
 func (r *usageLogRepository) ListByAPIKeyAndTimeRange(ctx context.Context, apiKeyID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE api_key_id = $1 AND created_at >= $2 AND created_at < $3"
 	args := []any{apiKeyID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " ORDER BY id DESC LIMIT 10000"
 	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
@@ -2141,7 +2148,7 @@ func (r *usageLogRepository) ListByAPIKeyAndTimeRange(ctx context.Context, apiKe
 func (r *usageLogRepository) ListByAccountAndTimeRange(ctx context.Context, accountID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
 	args := []any{accountID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " ORDER BY id DESC LIMIT 10000"
 	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
@@ -2150,7 +2157,7 @@ func (r *usageLogRepository) ListByAccountAndTimeRange(ctx context.Context, acco
 func (r *usageLogRepository) ListByModelAndTimeRange(ctx context.Context, modelName string, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	query := fmt.Sprintf("SELECT %s FROM usage_logs WHERE %s = $1 AND created_at >= $2 AND created_at < $3", usageLogSelectColumns, rawUsageLogModelColumn)
 	args := []any{modelName, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " ORDER BY id DESC LIMIT 10000"
 	logs, err := r.queryUsageLogs(ctx, query, args...)
 	return logs, nil, err
@@ -2159,7 +2166,7 @@ func (r *usageLogRepository) ListByModelAndTimeRange(ctx context.Context, modelN
 func (r *usageLogRepository) Delete(ctx context.Context, id int64) error {
 	query := "DELETE FROM usage_logs WHERE id = $1"
 	args := []any{id}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
@@ -2179,7 +2186,7 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 		WHERE account_id = $1 AND created_at >= $2
 	`
 	args := []any{accountID, today}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	stats := &usagestats.AccountStats{}
 	if err := scanSingleRow(
@@ -2211,7 +2218,7 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 		WHERE account_id = $1 AND created_at >= $2
 	`
 	args := []any{accountID, startTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	stats := &usagestats.AccountStats{}
 	if err := scanSingleRow(
@@ -2250,7 +2257,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 		WHERE account_id = ANY($1) AND created_at >= $2
 	`
 	args := []any{pq.Array(accountIDs), startTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY account_id"
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -2306,7 +2313,7 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 		WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{pq.Array(accountIDs), startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY account_id"
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -2362,13 +2369,8 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := ""
-	outerProjectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		topProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
-		outerProjectCondition = fmt.Sprintf(" AND u.project_id = $%d", len(args))
-	}
+	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
+	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
@@ -2427,13 +2429,8 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := ""
-	outerProjectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		topProjectCondition = fmt.Sprintf(" AND project_id = $%d", len(args))
-		outerProjectCondition = fmt.Sprintf(" AND u.project_id = $%d", len(args))
-	}
+	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
+	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
@@ -2538,11 +2535,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
 	`
 	args := []any{startTime, endTime, limit}
-	projectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectCondition = fmt.Sprintf("AND u.project_id = $%d", len(args))
-	}
+	projectCondition := strings.TrimSpace(buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u")))
 	query = fmt.Sprintf(query, projectCondition)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -2593,7 +2586,11 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	// API Key 统计
 	totalKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL"
 	totalKeysArgs := []any{userID}
-	totalKeysQuery, totalKeysArgs = appendProjectScopeQuery(ctx, totalKeysQuery, totalKeysArgs, "project_id")
+	totalKeysQuery, totalKeysArgs = appendProjectProfileScopedQuery(ctx, totalKeysQuery, totalKeysArgs, "project_id", projectSQLScopeResources{
+		UserID:   "api_keys.user_id",
+		GroupID:  "api_keys.group_id",
+		APIKeyID: "api_keys.id",
+	})
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2605,7 +2602,11 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	}
 	activeKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL"
 	activeKeysArgs := []any{userID, service.StatusActive}
-	activeKeysQuery, activeKeysArgs = appendProjectScopeQuery(ctx, activeKeysQuery, activeKeysArgs, "project_id")
+	activeKeysQuery, activeKeysArgs = appendProjectProfileScopedQuery(ctx, activeKeysQuery, activeKeysArgs, "project_id", projectSQLScopeResources{
+		UserID:   "api_keys.user_id",
+		GroupID:  "api_keys.group_id",
+		APIKeyID: "api_keys.id",
+	})
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2631,7 +2632,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		WHERE user_id = $1
 	`
 	totalStatsArgs := []any{userID}
-	totalStatsQuery, totalStatsArgs = appendProjectScopeQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id")
+	totalStatsQuery, totalStatsArgs = appendProjectProfileScopedQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2664,7 +2665,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		WHERE user_id = $1 AND created_at >= $2
 	`
 	todayStatsArgs := []any{userID, today}
-	todayStatsQuery, todayStatsArgs = appendProjectScopeQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id")
+	todayStatsQuery, todayStatsArgs = appendProjectProfileScopedQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2716,11 +2717,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		ORDER BY total_actual_cost DESC
 	`
 	platformArgs := []any{userID, today}
-	platformProjectCondition := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		platformArgs = append(platformArgs, projectID)
-		platformProjectCondition = fmt.Sprintf("AND ul.project_id = $%d", len(platformArgs))
-	}
+	platformProjectCondition := strings.TrimSpace(buildProjectProfileScopedClause(ctx, &platformArgs, "ul.project_id", usageLogSQLScopeResources("ul")))
 	platformQuery = fmt.Sprintf(platformQuery, platformProjectCondition)
 	rows, err := r.sql.QueryContext(ctx, platformQuery, platformArgs...)
 	if err != nil {
@@ -2762,7 +2759,7 @@ func (r *usageLogRepository) getPerformanceStatsByAPIKey(ctx context.Context, ap
 		FROM usage_logs
 		WHERE created_at >= $1 AND api_key_id = $2`
 	args := []any{fiveMinutesAgo, apiKeyID}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var requestCount int64
 	var tokenCount int64
@@ -2796,7 +2793,7 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		WHERE api_key_id = $1
 	`
 	totalStatsArgs := []any{apiKeyID}
-	totalStatsQuery, totalStatsArgs = appendProjectScopeQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id")
+	totalStatsQuery, totalStatsArgs = appendProjectProfileScopedQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2829,7 +2826,7 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		WHERE api_key_id = $1 AND created_at >= $2
 	`
 	todayStatsArgs := []any{apiKeyID, today}
-	todayStatsQuery, todayStatsArgs = appendProjectScopeQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id")
+	todayStatsQuery, todayStatsArgs = appendProjectProfileScopedQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2877,7 +2874,7 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`, dateFormat)
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY date ORDER BY date ASC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -2918,7 +2915,7 @@ func (r *usageLogRepository) GetUserModelStats(ctx context.Context, userID int64
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY model ORDER BY total_tokens DESC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -2948,7 +2945,7 @@ func buildUsageLogFilterWhere(ctx context.Context, filters UsageLogFilters) (str
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
-	conditions, args = appendProjectScopeWhere(ctx, conditions, args, "project_id")
+	conditions, args = appendProjectProfileScopedWhere(ctx, conditions, args, "project_id", usageLogSQLScopeResources(""))
 	if filters.UserID > 0 {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
 		args = append(args, filters.UserID)
@@ -3088,7 +3085,7 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 	`
 	today := timezone.Today()
 	args := []any{pq.Array(normalizedUserIDs), startTime, endTime, today}
-	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 	query += " GROUP BY ul.user_id, " + usageLogEffectivePlatformExpr
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -3162,7 +3159,7 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 	`
 	today := timezone.Today()
 	args := []any{pq.Array(normalizedAPIKeyIDs), startTime, endTime, today}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY api_key_id"
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -3218,7 +3215,7 @@ func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, start
 	`, dateFormat)
 
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3374,7 +3371,7 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	`, modelExpr, actualCostExpr, accountCostExpr)
 
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3435,7 +3432,7 @@ func (r *usageLogRepository) GetGroupStatsWithFilters(ctx context.Context, start
 	`
 
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 	if userID > 0 {
 		query += fmt.Sprintf(" AND ul.user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3508,7 +3505,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
 	`
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "ul.project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 
 	if dim.GroupID > 0 {
 		query += fmt.Sprintf(" AND ul.group_id = $%d", len(args)+1)
@@ -3601,10 +3598,14 @@ func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayS
 		LEFT JOIN usage_logs ul ON ul.group_id = g.id
 	`
 	args := []any{todayStart}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		query += fmt.Sprintf(" WHERE g.project_id = $%d AND (ul.project_id = $%d OR ul.id IS NULL)", len(args), len(args))
+	groupClauses := []string{"g.deleted_at IS NULL"}
+	groupClauses, args = appendProjectProfileScopedWhere(ctx, groupClauses, args, "g.project_id", projectSQLScopeResources{GroupID: "g.id"})
+	usageClauses, usageArgs, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "ul.project_id", usageLogSQLScopeResources("ul"))
+	args = usageArgs
+	if len(usageClauses) > 0 {
+		groupClauses = append(groupClauses, "(ul.id IS NULL OR "+usageClauses[0]+")")
 	}
+	query += " WHERE " + strings.Join(groupClauses, " AND ")
 	query += " GROUP BY g.id"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -3666,7 +3667,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 		WHERE created_at >= $1 AND created_at < $2
 	`
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	stats := &UsageStats{}
 	if err := scanSingleRow(
@@ -3693,7 +3694,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
-	conditions, args = appendProjectScopeWhere(ctx, conditions, args, "project_id")
+	conditions, args = appendProjectProfileScopedWhere(ctx, conditions, args, "project_id", usageLogSQLScopeResources(""))
 	if filters.UserID > 0 {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
 		args = append(args, filters.UserID)
@@ -3859,7 +3860,7 @@ func (r *usageLogRepository) getEndpointStatsByColumnWithFilters(ctx context.Con
 	`, endpointColumn, actualCostExpr)
 
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -3931,7 +3932,7 @@ func (r *usageLogRepository) getEndpointPathStatsWithFilters(ctx context.Context
 	`, actualCostExpr)
 
 	args := []any{startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	if userID > 0 {
 		query += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, userID)
@@ -4010,7 +4011,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{accountID, startTime, endTime}
-	query, args = appendProjectScopeQuery(ctx, query, args, "project_id")
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY date ORDER BY date ASC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -4079,7 +4080,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 
 	avgQuery := "SELECT COALESCE(AVG(duration_ms), 0) as avg_duration_ms FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
 	avgArgs := []any{accountID, startTime, endTime}
-	avgQuery, avgArgs = appendProjectScopeQuery(ctx, avgQuery, avgArgs, "project_id")
+	avgQuery, avgArgs = appendProjectProfileScopedQuery(ctx, avgQuery, avgArgs, "project_id", usageLogSQLScopeResources(""))
 	var avgDuration float64
 	if err := scanSingleRow(ctx, r.sql, avgQuery, avgArgs, &avgDuration); err != nil {
 		return nil, err

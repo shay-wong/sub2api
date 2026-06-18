@@ -25,13 +25,13 @@
       <div class="flex items-center gap-3">
         <label
           v-if="showProjectSwitcher"
-          class="hidden items-center gap-2 rounded-xl border border-gray-200 bg-white/70 px-2.5 py-1.5 text-sm text-gray-600 shadow-sm dark:border-dark-700 dark:bg-dark-900/70 dark:text-dark-300 md:flex"
+          class="flex min-w-0 max-w-36 items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2 py-1.5 text-sm text-primary-700 shadow-sm dark:border-primary-800/70 dark:bg-primary-950/30 dark:text-primary-200 sm:max-w-52 sm:gap-2 sm:px-3 md:max-w-none"
         >
-          <Icon name="grid" size="sm" class="text-gray-400 dark:text-dark-400" />
-          <span class="sr-only">{{ t('admin.projectSwitcher.label') }}</span>
+          <Icon name="grid" size="sm" class="shrink-0 text-primary-500 dark:text-primary-300" />
+          <span class="hidden font-medium sm:inline">{{ t('admin.projectSwitcher.label') }}</span>
           <select
             v-model="selectedProjectID"
-            class="max-w-40 bg-transparent text-sm font-medium text-gray-800 outline-none dark:text-gray-100"
+            class="min-w-0 max-w-24 bg-transparent text-sm font-semibold text-primary-900 outline-none dark:text-primary-50 sm:max-w-36 md:max-w-44"
             :title="t('admin.projectSwitcher.label')"
             @change="handleProjectChange"
           >
@@ -231,7 +231,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -259,7 +259,7 @@ const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const userProjects = computed(() => user.value?.projects ?? [])
-const showProjectSwitcher = computed(() => authStore.canAccessAdminConsole && userProjects.value.length > 1)
+const showProjectSwitcher = computed(() => userProjects.value.length > 1)
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
@@ -291,8 +291,6 @@ const roleLabel = computed(() => {
       return t('admin.users.roles.super_admin')
     case 'admin':
       return t('admin.users.roles.admin')
-    case 'operator':
-      return t('admin.users.roles.operator')
     case 'user':
       return t('admin.users.roles.user')
     default:
@@ -368,11 +366,21 @@ function handleClickOutside(event: MouseEvent) {
   }
 }
 
-onMounted(() => {
+function syncSelectedProjectID() {
   const persisted = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
   if (persisted && userProjects.value.some(project => String(project.id) === persisted)) {
     selectedProjectID.value = persisted
+    return
   }
+  selectedProjectID.value = userProjects.value[0]?.id ? String(userProjects.value[0].id) : ''
+}
+
+watch(userProjects, () => {
+  syncSelectedProjectID()
+})
+
+onMounted(() => {
+  syncSelectedProjectID()
   document.addEventListener('click', handleClickOutside)
 })
 
