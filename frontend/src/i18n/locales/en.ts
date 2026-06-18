@@ -1824,7 +1824,7 @@ export default {
     // Project Management
     projects: {
       title: 'Projects',
-      description: 'Manage project members and application profiles. Project admins can only manage data visible in the current project.',
+      description: 'Manage project members and application profiles. Only super admins can manage project spaces.',
       createProject: 'Create Project',
       project: 'Project',
       projects: 'Projects',

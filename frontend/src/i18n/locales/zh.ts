@@ -1845,7 +1845,7 @@ export default {
     // Project Management
     projects: {
       title: '项目空间',
-      description: '维护项目成员和应用配置，项目管理员只能管理当前项目空间可见的数据。',
+      description: '维护项目成员和应用配置，仅超级管理员可管理项目空间。',
       createProject: '创建项目',
       project: '项目',
       projects: '项目',

@@ -43,8 +43,8 @@ func RegisterAdminRoutes(
 		adminOnly := admin.Group("")
 		adminOnly.Use(middleware.RequireAdminOnly())
 
-		// 项目空间管理：项目管理员可管理当前项目配置；创建/更新项目本体仅超级管理员。
-		registerProjectRoutes(admin, h)
+		// 项目空间管理：仅超级管理员可配置项目空间和应用配置。
+		registerProjectRoutes(adminOnly, h)
 
 		// 用户管理：项目管理员只能看到当前项目配置范围内的用户。
 		registerUserManagementRoutes(admin, h)

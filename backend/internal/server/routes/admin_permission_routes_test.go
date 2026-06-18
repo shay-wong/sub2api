@@ -40,7 +40,7 @@ func TestPaymentAdminRoutesRequireAdminOnly(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestProjectAdminCanAccessProjectList(t *testing.T) {
+func TestProjectAdminCannotAccessProjectManagement(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -63,7 +63,7 @@ func TestProjectAdminCanAccessProjectList(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/projects", nil)
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestProjectCreateStillRequiresSuperAdmin(t *testing.T) {
@@ -220,7 +220,7 @@ func TestProjectAdminCanAccessUsageReadRoutesButNotCleanup(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, cleanupRec.Code)
 }
 
-func TestProjectAdminValidatesScopeBeforeAddingProjectMember(t *testing.T) {
+func TestProjectAdminCannotManageProjectMembers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -244,14 +244,12 @@ func TestProjectAdminValidatesScopeBeforeAddingProjectMember(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.validateBindingScopeCalled)
-	require.Equal(t, service.ProjectProfileBindingInput{UserIDs: []int64{42}}, repo.scopeInput)
-	require.True(t, repo.setMemberCalled)
-	require.Equal(t, int64(42), repo.memberInput.UserID)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, repo.validateBindingScopeCalled)
+	require.False(t, repo.setMemberCalled)
 }
 
-func TestProjectAdminRejectsOutOfScopeProjectMemberBeforeSave(t *testing.T) {
+func TestProjectAdminProjectMemberScopeValidationIsNotReached(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -276,11 +274,11 @@ func TestProjectAdminRejectsOutOfScopeProjectMemberBeforeSave(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.True(t, repo.validateBindingScopeCalled)
+	require.False(t, repo.validateBindingScopeCalled)
 	require.False(t, repo.setMemberCalled)
 }
 
-func TestProjectAdminCanUpdateExistingProjectMemberWithoutRebindingScope(t *testing.T) {
+func TestSuperAdminCanUpdateExistingProjectMemberWithoutRebindingScope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -294,7 +292,7 @@ func TestProjectAdminCanUpdateExistingProjectMemberWithoutRebindingScope(t *test
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
-			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
 			c.Next()
 		}),
@@ -337,7 +335,7 @@ func TestProjectAdminCannotAccessDifferentProjectPath(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestProjectAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -349,7 +347,7 @@ func TestProjectAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
-			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
 			c.Next()
 		}),
@@ -367,7 +365,7 @@ func TestProjectAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
 	require.Equal(t, service.ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
 }
 
-func TestProjectAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -389,7 +387,7 @@ func TestProjectAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
-			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
 			c.Next()
 		}),
@@ -407,7 +405,7 @@ func TestProjectAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
 	require.Equal(t, "Renamed", *repo.profileInput.Name)
 }
 
-func TestProjectAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
+func TestProjectAdminCannotCreateProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -431,10 +429,8 @@ func TestProjectAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusCreated, rec.Code)
-	require.True(t, repo.createProfileCalled)
-	require.NotNil(t, repo.profileInput.Mode)
-	require.Equal(t, service.ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, repo.createProfileCalled)
 }
 
 func TestSuperAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
@@ -467,7 +463,7 @@ func TestSuperAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
 	require.Equal(t, service.ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
 }
 
-func TestProjectAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
+func TestProjectAdminCannotActivateProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -500,8 +496,8 @@ func TestProjectAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/projects/1/profiles/2/activate", nil)
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.activateProfileCalled)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, repo.activateProfileCalled)
 }
 
 func TestSuperAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
@@ -539,7 +535,7 @@ func TestSuperAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
 	require.True(t, repo.activateProfileCalled)
 }
 
-func TestProjectAdminCanDeleteExistingUnrestrictedProjectProfile(t *testing.T) {
+func TestProjectAdminCannotDeleteProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -572,8 +568,8 @@ func TestProjectAdminCanDeleteExistingUnrestrictedProjectProfile(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/projects/1/profiles/2", nil)
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.deleteProfileCalled)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, repo.deleteProfileCalled)
 }
 
 func TestProjectAdminCannotSetBindingsForUnrestrictedProfile(t *testing.T) {
@@ -615,7 +611,7 @@ func TestProjectAdminCannotSetBindingsForUnrestrictedProfile(t *testing.T) {
 	require.False(t, repo.validateBindingScopeCalled)
 }
 
-func TestProjectAdminValidatesScopeBeforeBindingResourcesIntoProjectProfile(t *testing.T) {
+func TestProjectAdminCannotBindResourcesIntoProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -649,13 +645,12 @@ func TestProjectAdminValidatesScopeBeforeBindingResourcesIntoProjectProfile(t *t
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.setBindingsCalled)
-	require.True(t, repo.validateBindingScopeCalled)
-	require.Equal(t, service.ProjectProfileBindingInput{UserIDs: []int64{99}}, repo.scopeInput)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, repo.setBindingsCalled)
+	require.False(t, repo.validateBindingScopeCalled)
 }
 
-func TestProjectAdminRejectsOutOfScopeProfileBindingsBeforeSave(t *testing.T) {
+func TestProjectAdminProfileBindingScopeValidationIsNotReached(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -691,7 +686,7 @@ func TestProjectAdminRejectsOutOfScopeProfileBindingsBeforeSave(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.True(t, repo.validateBindingScopeCalled)
+	require.False(t, repo.validateBindingScopeCalled)
 	require.False(t, repo.setBindingsCalled)
 }
 
@@ -733,7 +728,7 @@ func TestSuperAdminCanBindGlobalResourcesIntoProjectProfile(t *testing.T) {
 	require.False(t, repo.validateBindingScopeCalled)
 }
 
-func TestProjectAdminSearchesScopedCandidatesThroughCurrentProjectPath(t *testing.T) {
+func TestSuperAdminSearchesScopedCandidatesThroughProjectPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -745,7 +740,7 @@ func TestProjectAdminSearchesScopedCandidatesThroughCurrentProjectPath(t *testin
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
-			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
 			c.Next()
 		}),

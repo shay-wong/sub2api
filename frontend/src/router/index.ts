@@ -421,6 +421,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
+      requiresAdminOnly: true,
       title: 'Project Management',
       titleKey: 'admin.projects.title',
       descriptionKey: 'admin.projects.description'

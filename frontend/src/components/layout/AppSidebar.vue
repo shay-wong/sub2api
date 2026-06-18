@@ -718,7 +718,6 @@ const adminNavItems = computed((): NavItem[] => {
   const projectItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
@@ -731,7 +730,8 @@ const adminNavItems = computed((): NavItem[] => {
 
   const baseItems: NavItem[] = [
     ...projectItems.slice(0, 2),
-    ...projectItems.slice(2, 5),
+    { path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true },
+    ...projectItems.slice(2, 4),
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),
@@ -743,7 +743,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    ...projectItems.slice(5),
+    ...projectItems.slice(4),
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },

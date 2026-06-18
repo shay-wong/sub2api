@@ -51,13 +51,13 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(componentSource).not.toContain('operatorItems')
   })
 
-  it('keeps project admins on project-scoped management pages only', () => {
+  it('keeps project admins on scoped management pages only', () => {
     const projectItemsMatch = componentSource.match(/const projectItems: NavItem\[\] = \[[\s\S]*?\n {2}\]/)
     const projectItemsSource = projectItemsMatch?.[0] ?? ''
 
     expect(projectItemsSource).toContain("path: '/admin/dashboard'")
     expect(projectItemsSource).toContain("path: '/admin/ops'")
-    expect(projectItemsSource).toContain("path: '/admin/projects'")
+    expect(projectItemsSource).not.toContain("path: '/admin/projects'")
     expect(projectItemsSource).toContain("path: '/admin/users'")
     expect(projectItemsSource).toContain("path: '/admin/groups'")
     expect(projectItemsSource).toContain("path: '/admin/subscriptions'")
@@ -68,6 +68,11 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(projectAdminBranchSource).toContain('return applyFeatureFlags(projectItems)')
     expect(projectAdminBranchSource).not.toContain('/admin/settings')
     expect(projectAdminBranchSource).not.toContain('/admin/channels')
+    expect(projectAdminBranchSource).not.toContain('/admin/projects')
     expect(projectAdminBranchSource).not.toContain('/admin/redeem')
+  })
+
+  it('keeps project-space management on the super-admin navigation only', () => {
+    expect(componentSource).toContain("{ path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true }")
   })
 })

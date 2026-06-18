@@ -278,13 +278,13 @@ describe('路由守卫逻辑', () => {
       expect(simulateGuard('/admin/dashboard', { requiresAdmin: true }, authState)).toBeNull()
       expect(simulateGuard('/admin/accounts', { requiresAdmin: true }, authState)).toBeNull()
       expect(simulateGuard('/admin/ops', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/projects', { requiresAdmin: true }, authState)).toBeNull()
       expect(simulateGuard('/admin/users', { requiresAdmin: true }, authState)).toBeNull()
       expect(simulateGuard('/admin/groups', { requiresAdmin: true }, authState)).toBeNull()
       expect(simulateGuard('/admin/subscriptions', { requiresAdmin: true }, authState)).toBeNull()
     })
 
     it('访问超级管理员页面重定向到后台仪表盘', () => {
+      expect(simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/settings', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
     })
