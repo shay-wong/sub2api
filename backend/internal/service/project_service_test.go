@@ -251,6 +251,48 @@ func TestProjectServiceSetProjectProfileBindingsNormalizesResourceIDs(t *testing
 	require.Equal(t, []int64{2, 4}, repo.bindingInput.APIKeyIDs)
 }
 
+func TestProjectServiceGetProjectProfileBindingsReturnsEmptySlices(t *testing.T) {
+	repo := &projectServiceRepoStub{projectExists: true}
+	svc := NewProjectService(repo)
+
+	bindings, err := svc.GetProjectProfileBindings(context.Background(), 10, 20)
+
+	require.NoError(t, err)
+	require.NotNil(t, bindings)
+	require.Equal(t, int64(20), bindings.ProfileID)
+	require.NotNil(t, bindings.UserIDs)
+	require.Empty(t, bindings.UserIDs)
+	require.NotNil(t, bindings.GroupIDs)
+	require.Empty(t, bindings.GroupIDs)
+	require.NotNil(t, bindings.AccountIDs)
+	require.Empty(t, bindings.AccountIDs)
+	require.NotNil(t, bindings.SubscriptionIDs)
+	require.Empty(t, bindings.SubscriptionIDs)
+	require.NotNil(t, bindings.APIKeyIDs)
+	require.Empty(t, bindings.APIKeyIDs)
+}
+
+func TestProjectServiceSetProjectProfileBindingsReturnsEmptySlices(t *testing.T) {
+	repo := &projectServiceRepoStub{projectExists: true}
+	svc := NewProjectService(repo)
+
+	bindings, err := svc.SetProjectProfileBindings(context.Background(), 10, 20, ProjectProfileBindingInput{})
+
+	require.NoError(t, err)
+	require.NotNil(t, bindings)
+	require.Equal(t, int64(20), bindings.ProfileID)
+	require.NotNil(t, bindings.UserIDs)
+	require.Empty(t, bindings.UserIDs)
+	require.NotNil(t, bindings.GroupIDs)
+	require.Empty(t, bindings.GroupIDs)
+	require.NotNil(t, bindings.AccountIDs)
+	require.Empty(t, bindings.AccountIDs)
+	require.NotNil(t, bindings.SubscriptionIDs)
+	require.Empty(t, bindings.SubscriptionIDs)
+	require.NotNil(t, bindings.APIKeyIDs)
+	require.Empty(t, bindings.APIKeyIDs)
+}
+
 func TestProjectServiceSetProjectProfileBindingsInvalidatesAuthCache(t *testing.T) {
 	repo := &projectServiceRepoStub{
 		projectExists: true,

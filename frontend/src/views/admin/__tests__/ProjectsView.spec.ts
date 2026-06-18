@@ -17,7 +17,9 @@ const {
   activateProfile,
   searchBindableResources,
   searchGlobalBindableResources,
-  setMember
+  setMember,
+  showError,
+  showSuccess
 } = vi.hoisted(() => ({
   authState: { isAdmin: false },
   listProjects: vi.fn(),
@@ -32,7 +34,9 @@ const {
   activateProfile: vi.fn(),
   searchBindableResources: vi.fn(),
   searchGlobalBindableResources: vi.fn(),
-  setMember: vi.fn()
+  setMember: vi.fn(),
+  showError: vi.fn(),
+  showSuccess: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -60,8 +64,8 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/stores', () => ({
   useAuthStore: () => authState,
   useAppStore: () => ({
-    showError: vi.fn(),
-    showSuccess: vi.fn()
+    showError,
+    showSuccess
   })
 }))
 
@@ -107,6 +111,8 @@ describe('admin ProjectsView profile permissions', () => {
     searchBindableResources.mockReset()
     searchGlobalBindableResources.mockReset()
     setMember.mockReset()
+    showError.mockReset()
+    showSuccess.mockReset()
 
     listProjects.mockResolvedValue([
       { id: 1, name: 'Project One', slug: 'project-one', role: 'admin', is_owner: false }
@@ -182,7 +188,9 @@ describe('admin ProjectsView profile permissions', () => {
     })
   })
 
-  it('lets project admins choose unrestricted profile mode for current project profiles', async () => {
+  it('lets super admins choose unrestricted profile mode for current project profiles', async () => {
+    authState.isAdmin = true
+
     const wrapper = mountProjectsView()
     await flushPromises()
 
@@ -266,7 +274,9 @@ describe('admin ProjectsView profile permissions', () => {
     expect(wrapper.text()).toContain('admin.projects.unrestrictedHint')
   })
 
-  it('lets project admins create unrestricted profiles in the current project', async () => {
+  it('lets super admins create unrestricted profiles in the current project', async () => {
+    authState.isAdmin = true
+
     const wrapper = mountProjectsView()
     await flushPromises()
 
@@ -318,15 +328,9 @@ describe('admin ProjectsView profile permissions', () => {
     }))
   })
 
-  it('does not expose project creation to project admins', async () => {
-    const wrapper = mountProjectsView()
-    await flushPromises()
+  it('lets super admins edit and activate existing unrestricted profiles in the current project', async () => {
+    authState.isAdmin = true
 
-    expect(wrapper.findAll('button').some(button => button.text() === 'admin.projects.createProject')).toBe(false)
-    expect(wrapper.find('#project-form').exists()).toBe(false)
-  })
-
-  it('lets project admins edit and activate existing unrestricted profiles in the current project', async () => {
     listProfiles.mockResolvedValue([
       {
         id: 2,
@@ -409,7 +413,9 @@ describe('admin ProjectsView profile permissions', () => {
     expect(activateProfile).toHaveBeenCalledWith(1, 3)
   })
 
-  it('lets project admins delete inactive unrestricted profiles in the current project', async () => {
+  it('lets super admins delete inactive unrestricted profiles in the current project', async () => {
+    authState.isAdmin = true
+
     listProfiles.mockResolvedValue([
       {
         id: 2,
@@ -491,7 +497,9 @@ describe('admin ProjectsView profile permissions', () => {
     expect(setProfileBindings).toHaveBeenCalledWith(1, 2, expect.objectContaining({ group_ids: [7] }))
   })
 
-  it('uses project resource search for project admins when configuring profile bindings', async () => {
+  it('uses project resource search when configuring profile bindings', async () => {
+    authState.isAdmin = true
+
     searchBindableResources.mockResolvedValue({
       users: [],
       groups: [{ id: 8, project_id: 77, name: 'External Group', description: '', platform: 'anthropic', status: 'active' }],
@@ -528,6 +536,71 @@ describe('admin ProjectsView profile permissions', () => {
     expect(setProfileBindings).toHaveBeenCalledWith(1, 2, expect.objectContaining({ group_ids: [8] }))
   })
 
+  it('keeps profile bindings usable when the API returns null ID arrays', async () => {
+    authState.isAdmin = true
+    getProfileBindings.mockResolvedValue({
+      profile_id: 2,
+      user_ids: null,
+      group_ids: null,
+      account_ids: null,
+      subscription_ids: null,
+      api_key_ids: null
+    })
+    searchBindableResources.mockResolvedValue({
+      users: [],
+      groups: [{ id: 8, project_id: 77, name: 'External Group', description: '', platform: 'anthropic', status: 'active' }],
+      accounts: [],
+      subscriptions: [],
+      api_keys: []
+    })
+    setProfileBindings.mockResolvedValue({
+      profile_id: 2,
+      user_ids: [],
+      group_ids: [8],
+      account_ids: [],
+      subscription_ids: [],
+      api_key_ids: []
+    })
+
+    const wrapper = mountProjectsView()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'admin.projects.appProfiles')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.projects.noBindings')
+    const resourceSelects = wrapper.findAll('select')
+    await resourceSelects[0].setValue('groups')
+    await wrapper.get('input[placeholder="admin.projects.searchResourcesPlaceholder"]').trigger('keydown.enter')
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'admin.projects.bind')!.trigger('click')
+    await flushPromises()
+
+    expect(setProfileBindings).toHaveBeenCalledWith(1, 2, expect.objectContaining({
+      user_ids: [],
+      group_ids: [8],
+      account_ids: [],
+      subscription_ids: [],
+      api_key_ids: []
+    }))
+  })
+
+  it('keeps the app profile list open when profile bindings fail to load', async () => {
+    authState.isAdmin = true
+    getProfileBindings.mockRejectedValue(new Error('bindings unavailable'))
+
+    const wrapper = mountProjectsView()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'admin.projects.appProfiles')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Restricted')
+    expect(showError).toHaveBeenCalledWith('admin.projects.failedToLoadBindings')
+    expect(showError).not.toHaveBeenCalledWith('admin.projects.failedToLoadProfiles')
+  })
+
   it('uses global member search for super admins when adding project members', async () => {
     authState.isAdmin = true
     searchGlobalBindableResources.mockResolvedValue({
@@ -557,8 +630,16 @@ describe('admin ProjectsView profile permissions', () => {
     expect(setMember).toHaveBeenCalledWith(1, 42, expect.objectContaining({ role: 'user', status: 'active' }))
   })
 
-  it('uses project resource search for project admins when adding project members', async () => {
+  it('uses global member search when adding project members as super admin', async () => {
+    authState.isAdmin = true
     searchBindableResources.mockResolvedValue({
+      users: [{ id: 43, email: 'project-member@example.test', username: '', notes: '', status: 'active' }],
+      groups: [],
+      accounts: [],
+      subscriptions: [],
+      api_keys: []
+    })
+    searchGlobalBindableResources.mockResolvedValue({
       users: [{ id: 43, email: 'project-member@example.test', username: '', notes: '', status: 'active' }],
       groups: [],
       accounts: [],
@@ -575,8 +656,8 @@ describe('admin ProjectsView profile permissions', () => {
     await wrapper.get('input[placeholder="admin.projects.searchMemberPlaceholder"]').trigger('keydown.enter')
     await flushPromises()
 
-    expect(searchBindableResources).toHaveBeenCalledWith(1, '', 20)
-    expect(searchGlobalBindableResources).not.toHaveBeenCalled()
+    expect(searchGlobalBindableResources).toHaveBeenCalledWith('', 20)
+    expect(searchBindableResources).not.toHaveBeenCalled()
 
     await wrapper.findAll('button').find(button => button.text().includes('project-member@example.test'))!.trigger('click')
     await wrapper.get('#member-form').trigger('submit.prevent')

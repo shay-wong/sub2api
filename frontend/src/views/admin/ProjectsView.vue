@@ -765,9 +765,11 @@ async function loadProfiles() {
 async function loadBindings(profile: ProjectProfile) {
   if (!selectedProject.value) return
   try {
-    bindings.value = await adminAPI.projects.getProfileBindings(selectedProject.value.id, profile.id)
+    const next = await adminAPI.projects.getProfileBindings(selectedProject.value.id, profile.id)
+    bindings.value = normalizeProfileBindings(next, profile.id)
   } catch (error) {
     console.error('Failed to load project profile bindings:', error)
+    bindings.value = emptyProjectBindingsFor(profile.id)
     appStore.showError(t('admin.projects.failedToLoadBindings'))
   }
 }
@@ -1075,7 +1077,8 @@ async function saveBindings(next: ProjectProfileBindings) {
   if (!selectedProject.value || !selectedProfile.value || savingBindings.value) return
   savingBindings.value = true
   try {
-    bindings.value = await adminAPI.projects.setProfileBindings(selectedProject.value.id, selectedProfile.value.id, normalizeBindings(next))
+    const saved = await adminAPI.projects.setProfileBindings(selectedProject.value.id, selectedProfile.value.id, normalizeBindings(next))
+    bindings.value = normalizeProfileBindings(saved, selectedProfile.value.id)
     appStore.showSuccess(t('admin.projects.bindingsSaved'))
   } catch (error) {
     console.error('Failed to save project profile bindings:', error)
@@ -1097,8 +1100,12 @@ function cloneBindings(value: ProjectProfileBindings): ProjectProfileBindings {
 }
 
 function emptyProjectBindings(): ProjectProfileBindings {
+  return emptyProjectBindingsFor(0)
+}
+
+function emptyProjectBindingsFor(profileID: number): ProjectProfileBindings {
   return {
-    profile_id: 0,
+    profile_id: profileID,
     user_ids: [],
     group_ids: [],
     account_ids: [],
@@ -1107,9 +1114,20 @@ function emptyProjectBindings(): ProjectProfileBindings {
   }
 }
 
-function normalizeBindings(value: ProjectProfileBindings): ProjectProfileBindings {
+function normalizeProfileBindings(value: Partial<ProjectProfileBindings> | null | undefined, fallbackProfileID = 0): ProjectProfileBindings {
+  return normalizeBindings({
+    profile_id: value?.profile_id ?? fallbackProfileID,
+    user_ids: value?.user_ids ?? [],
+    group_ids: value?.group_ids ?? [],
+    account_ids: value?.account_ids ?? [],
+    subscription_ids: value?.subscription_ids ?? [],
+    api_key_ids: value?.api_key_ids ?? []
+  })
+}
+
+function normalizeBindings(value: Partial<ProjectProfileBindings>): ProjectProfileBindings {
   return {
-    profile_id: value.profile_id,
+    profile_id: value.profile_id ?? 0,
     user_ids: uniqueSorted(value.user_ids),
     group_ids: uniqueSorted(value.group_ids),
     account_ids: uniqueSorted(value.account_ids),
@@ -1118,17 +1136,17 @@ function normalizeBindings(value: ProjectProfileBindings): ProjectProfileBinding
   }
 }
 
-function uniqueSorted(ids: number[]): number[] {
-  return Array.from(new Set(ids.filter(id => Number.isSafeInteger(id) && id > 0))).sort((a, b) => a - b)
+function uniqueSorted(ids: number[] | null | undefined): number[] {
+  return Array.from(new Set((ids ?? []).filter(id => Number.isSafeInteger(id) && id > 0))).sort((a, b) => a - b)
 }
 
 function bindingIDsRef(value: ProjectProfileBindings, type: ProjectResourceType): number[] {
   switch (type) {
-    case 'users': return value.user_ids
-    case 'groups': return value.group_ids
-    case 'accounts': return value.account_ids
-    case 'subscriptions': return value.subscription_ids
-    case 'api_keys': return value.api_key_ids
+    case 'users': return value.user_ids ?? []
+    case 'groups': return value.group_ids ?? []
+    case 'accounts': return value.account_ids ?? []
+    case 'subscriptions': return value.subscription_ids ?? []
+    case 'api_keys': return value.api_key_ids ?? []
   }
 }
 

@@ -577,7 +577,11 @@ func (s *ProjectService) GetProjectProfileBindings(ctx context.Context, projectI
 	if err := s.ensureProjectExists(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return s.repo.GetProjectProfileBindings(ctx, projectID, profileID)
+	bindings, err := s.repo.GetProjectProfileBindings(ctx, projectID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeProjectProfileBindings(bindings), nil
 }
 
 func (s *ProjectService) SetProjectProfileBindings(ctx context.Context, projectID int64, profileID int64, input ProjectProfileBindingInput) (*ProjectProfileBindings, error) {
@@ -599,10 +603,12 @@ func (s *ProjectService) SetProjectProfileBindings(ctx context.Context, projectI
 	if err != nil {
 		return nil, err
 	}
+	currentBindings = normalizeProjectProfileBindings(currentBindings)
 	updatedBindings, err := s.repo.SetProjectProfileBindings(ctx, projectID, profileID, input)
 	if err != nil {
 		return nil, err
 	}
+	updatedBindings = normalizeProjectProfileBindings(updatedBindings)
 	s.invalidateProjectProfileAuthCache(ctx, currentBindings, updatedBindings)
 	return updatedBindings, nil
 }
@@ -716,6 +722,28 @@ func projectProfileBindingsEmpty(input ProjectProfileBindingInput) bool {
 		len(input.APIKeyIDs) == 0
 }
 
+func normalizeProjectProfileBindings(bindings *ProjectProfileBindings) *ProjectProfileBindings {
+	if bindings == nil {
+		return nil
+	}
+	if bindings.UserIDs == nil {
+		bindings.UserIDs = []int64{}
+	}
+	if bindings.GroupIDs == nil {
+		bindings.GroupIDs = []int64{}
+	}
+	if bindings.AccountIDs == nil {
+		bindings.AccountIDs = []int64{}
+	}
+	if bindings.SubscriptionIDs == nil {
+		bindings.SubscriptionIDs = []int64{}
+	}
+	if bindings.APIKeyIDs == nil {
+		bindings.APIKeyIDs = []int64{}
+	}
+	return bindings
+}
+
 func (s *ProjectService) projectProfileActivationAuthCacheBindings(ctx context.Context, projectID int64, profileID int64) ([]*ProjectProfileBindings, error) {
 	profiles, err := s.repo.ListProjectProfiles(ctx, projectID)
 	if err != nil {
@@ -735,7 +763,7 @@ func (s *ProjectService) projectProfileActivationAuthCacheBindings(ctx context.C
 		if err != nil {
 			return nil, err
 		}
-		affected = append(affected, bindings)
+		affected = append(affected, normalizeProjectProfileBindings(bindings))
 	}
 	return affected, nil
 }
