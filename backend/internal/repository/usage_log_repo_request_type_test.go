@@ -288,7 +288,7 @@ func TestUsageLogRepositoryCreateConflictLookupUsesContextProject(t *testing.T) 
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2 AND \\(project_id = 7 AND").
+	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2 AND \\(EXISTS \\(\\s*SELECT 1\\s+FROM project_members pm\\s+WHERE pm\\.project_id = 7\\s+AND pm\\.user_id = usage_logs\\.user_id\\s*\\) AND").
 		WithArgs(log.RequestID, log.APIKeyID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(202), createdAt))
 

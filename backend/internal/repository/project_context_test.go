@@ -45,6 +45,38 @@ func TestProjectProfileScopeUnrestrictedKeepsProjectIDBoundaryOnlyWhenRequired(t
 	require.NotContains(t, normalized, "ppb.resource_type = 'api_key'")
 }
 
+func TestUsageLogProjectScopeUsesBoundResourcesWithoutHardProjectIDBoundary(t *testing.T) {
+	clause := projectProfileScopeSQL(7, usageLogSQLScopeResources("usage_logs"))
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.project_id = 7")
+	require.Contains(t, normalized, "pm.user_id = usage_logs.user_id")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.group_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.account_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'subscription'")
+	require.Contains(t, normalized, "ppb.resource_id = usage_logs.subscription_id")
+	require.NotContains(t, normalized, "usage_logs.project_id = 7")
+}
+
+func TestOpsErrorProjectScopeUsesBoundResourcesWithoutHardProjectIDBoundary(t *testing.T) {
+	clause := projectProfileScopeSQL(7, opsErrorSQLScopeResources("ops_error_logs"))
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.project_id = 7")
+	require.Contains(t, normalized, "pm.user_id = ops_error_logs.user_id")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = ops_error_logs.group_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = ops_error_logs.account_id")
+	require.NotContains(t, normalized, "ops_error_logs.project_id = 7")
+}
+
 func TestAPIKeyProjectScopeRequiresSingleProjectAndMemberOwner(t *testing.T) {
 	clause := projectProfileScopeSQL(7, apiKeySQLScopeResources("api_keys"))
 	normalized := normalizeSQLWhitespace(clause)

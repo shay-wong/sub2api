@@ -8,6 +8,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -229,6 +230,53 @@ func TestUsageLogProjectProfileRestrictedScopesByConfiguredAccount(t *testing.T)
 	count, err = repo.CountWithFilters(service.WithProjectID(ctx, fixture.ProjectID), usagestats.UsageLogFilters{UserID: fixture.OtherUserID})
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+func TestUsageLogProjectProfileRestrictedIncludesLogsFromBoundResourcesAcrossProjects(t *testing.T) {
+	repo, client := newUsageLogProfileScopeSQLite(t)
+	ctx := context.Background()
+	fixture := createUsageLogProfileScopeFixture(t, ctx, client)
+
+	workspace, err := client.Project.Create().
+		SetName("Shared Workspace").
+		SetSlug("shared-workspace").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectMember.Create().
+		SetProjectID(workspace.ID).
+		SetUserID(fixture.BoundUserID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(workspace.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	boundLog, err := client.UsageLog.Query().
+		Where(usagelog.RequestIDEQ("req-bound-profile")).
+		Only(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(boundLog.AccountID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	projectCtx := service.WithProjectID(ctx, workspace.ID)
+	count, err := repo.CountWithFilters(projectCtx, usagestats.UsageLogFilters{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	stats, err := repo.GetDashboardStats(projectCtx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats.TotalRequests)
+	require.Equal(t, int64(1), stats.TotalAccounts)
 }
 
 func TestUsageLogProjectProfileUnrestrictedAllowsAllResources(t *testing.T) {

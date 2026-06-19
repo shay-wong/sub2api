@@ -203,6 +203,7 @@ func buildProjectProfileScopedClause(ctx context.Context, args *[]any, column st
 type projectSQLScopeResources struct {
 	ProjectID        string
 	RequireProjectID bool
+	RequireMember    bool
 	APIKeyResource   bool
 	UserID           string
 	GroupID          string
@@ -220,8 +221,13 @@ func withProjectIDColumn(resources projectSQLScopeResources, column string) proj
 }
 
 func usageLogSQLScopeResources(alias string) projectSQLScopeResources {
+	if strings.TrimSpace(alias) == "" {
+		alias = "usage_logs"
+	}
 	resources := eventSQLScopeResources(alias)
+	resources.RequireProjectID = false
 	resources.SubscriptionID = prefixedSQLColumn(alias, "subscription_id")
+	resources.RequireMember = true
 	return resources
 }
 
@@ -241,7 +247,13 @@ func eventSQLScopeResources(alias string) projectSQLScopeResources {
 }
 
 func opsErrorSQLScopeResources(alias string) projectSQLScopeResources {
-	return eventSQLScopeResources(alias)
+	if strings.TrimSpace(alias) == "" {
+		alias = "ops_error_logs"
+	}
+	resources := eventSQLScopeResources(alias)
+	resources.RequireProjectID = false
+	resources.RequireMember = true
+	return resources
 }
 
 func prefixedSQLColumn(alias string, column string) string {
@@ -304,7 +316,12 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 	scope := "(" + strings.Join(clauses, " OR ") + ")"
 	if resources.RequireProjectID {
 		if c := projectIDColumnSQL(projectID, resources.ProjectID); c != "" {
-			return "(" + c + " AND " + scope + ")"
+			scope = "(" + c + " AND " + scope + ")"
+		}
+	}
+	if resources.RequireMember {
+		if c := projectMemberExistsSQL(projectID, resources.UserID); c != "" {
+			scope = "(" + c + " AND " + scope + ")"
 		}
 	}
 	return scope
