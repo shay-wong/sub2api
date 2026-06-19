@@ -584,6 +584,33 @@ func (_u *UsageLogUpdate) ClearAccountRateMultiplier() *UsageLogUpdate {
 	return _u
 }
 
+// SetAccountStatsCost sets the "account_stats_cost" field.
+func (_u *UsageLogUpdate) SetAccountStatsCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetAccountStatsCost()
+	_u.mutation.SetAccountStatsCost(v)
+	return _u
+}
+
+// SetNillableAccountStatsCost sets the "account_stats_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableAccountStatsCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetAccountStatsCost(*v)
+	}
+	return _u
+}
+
+// AddAccountStatsCost adds value to the "account_stats_cost" field.
+func (_u *UsageLogUpdate) AddAccountStatsCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddAccountStatsCost(v)
+	return _u
+}
+
+// ClearAccountStatsCost clears the value of the "account_stats_cost" field.
+func (_u *UsageLogUpdate) ClearAccountStatsCost() *UsageLogUpdate {
+	_u.mutation.ClearAccountStatsCost()
+	return _u
+}
+
 // SetBillingType sets the "billing_type" field.
 func (_u *UsageLogUpdate) SetBillingType(v int8) *UsageLogUpdate {
 	_u.mutation.ResetBillingType()
@@ -1163,6 +1190,15 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.AccountRateMultiplierCleared() {
 		_spec.ClearField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.AccountStatsCost(); ok {
+		_spec.SetField(usagelog.FieldAccountStatsCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedAccountStatsCost(); ok {
+		_spec.AddField(usagelog.FieldAccountStatsCost, field.TypeFloat64, value)
+	}
+	if _u.mutation.AccountStatsCostCleared() {
+		_spec.ClearField(usagelog.FieldAccountStatsCost, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.BillingType(); ok {
 		_spec.SetField(usagelog.FieldBillingType, field.TypeInt8, value)
@@ -1987,6 +2023,33 @@ func (_u *UsageLogUpdateOne) ClearAccountRateMultiplier() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetAccountStatsCost sets the "account_stats_cost" field.
+func (_u *UsageLogUpdateOne) SetAccountStatsCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetAccountStatsCost()
+	_u.mutation.SetAccountStatsCost(v)
+	return _u
+}
+
+// SetNillableAccountStatsCost sets the "account_stats_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableAccountStatsCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetAccountStatsCost(*v)
+	}
+	return _u
+}
+
+// AddAccountStatsCost adds value to the "account_stats_cost" field.
+func (_u *UsageLogUpdateOne) AddAccountStatsCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddAccountStatsCost(v)
+	return _u
+}
+
+// ClearAccountStatsCost clears the value of the "account_stats_cost" field.
+func (_u *UsageLogUpdateOne) ClearAccountStatsCost() *UsageLogUpdateOne {
+	_u.mutation.ClearAccountStatsCost()
+	return _u
+}
+
 // SetBillingType sets the "billing_type" field.
 func (_u *UsageLogUpdateOne) SetBillingType(v int8) *UsageLogUpdateOne {
 	_u.mutation.ResetBillingType()
@@ -2596,6 +2659,15 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.AccountRateMultiplierCleared() {
 		_spec.ClearField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.AccountStatsCost(); ok {
+		_spec.SetField(usagelog.FieldAccountStatsCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedAccountStatsCost(); ok {
+		_spec.AddField(usagelog.FieldAccountStatsCost, field.TypeFloat64, value)
+	}
+	if _u.mutation.AccountStatsCostCleared() {
+		_spec.ClearField(usagelog.FieldAccountStatsCost, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.BillingType(); ok {
 		_spec.SetField(usagelog.FieldBillingType, field.TypeInt8, value)

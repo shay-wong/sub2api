@@ -1608,16 +1608,15 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 	apiKeyStatsQuery := `
 		SELECT
 			COUNT(*) as total_api_keys,
-			COUNT(CASE WHEN status = $1 THEN 1 END) as active_api_keys
+			COUNT(CASE WHEN api_keys.status = $1 THEN 1 END) as active_api_keys
 		FROM api_keys
-		WHERE deleted_at IS NULL
+		JOIN users ON users.id = api_keys.user_id
+		WHERE api_keys.deleted_at IS NULL
+		  AND users.deleted_at IS NULL
+		  AND users.status = $1
 	`
 	apiKeyStatsArgs := []any{service.StatusActive}
-	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectProfileScopedQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "project_id", projectSQLScopeResources{
-		UserID:   "user_id",
-		GroupID:  "group_id",
-		APIKeyID: "id",
-	})
+	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectProfileScopedQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -1640,8 +1639,8 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		WHERE deleted_at IS NULL
 	`
 	accountStatsArgs := []any{service.StatusActive, service.StatusError, now, now}
-	accountStatsQuery, accountStatsArgs = appendProjectProfileScopedQuery(ctx, accountStatsQuery, accountStatsArgs, "project_id", projectSQLScopeResources{
-		AccountID: "id",
+	accountStatsQuery, accountStatsArgs = appendProjectProfileScopedQuery(ctx, accountStatsQuery, accountStatsArgs, "accounts.project_id", projectSQLScopeResources{
+		AccountID: "accounts.id",
 	})
 	if err := scanSingleRow(
 		ctx,
@@ -1749,7 +1748,15 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 
 func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Context, stats *DashboardStats, startUTC, endUTC, todayUTC, now time.Time) error {
 	todayEnd := todayUTC.Add(24 * time.Hour)
-	args := []any{startUTC, endUTC, todayUTC, todayEnd}
+	scanStart := startUTC
+	if todayUTC.Before(scanStart) {
+		scanStart = todayUTC
+	}
+	scanEnd := endUTC
+	if todayEnd.After(scanEnd) {
+		scanEnd = todayEnd
+	}
+	args := []any{startUTC, endUTC, todayUTC, todayEnd, scanStart, scanEnd}
 	projectCondition := ""
 	projectClauses, projectArgs, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "project_id", usageLogSQLScopeResources(""))
 	if len(projectClauses) > 0 {
@@ -1769,28 +1776,28 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
 				COALESCE(duration_ms, 0) AS duration_ms
 			FROM usage_logs
-			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
-				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+			WHERE created_at >= $5
+				AND created_at < $6
 				` + projectCondition + `
 		)
 		SELECT
-			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz) AS total_requests,
-			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_input_tokens,
-			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_output_tokens,
-			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_read_tokens,
-			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_actual_cost,
-			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_account_cost,
-			COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_duration_ms,
-			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz) AS today_requests,
-			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_input_tokens,
-			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_output_tokens,
-			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_read_tokens,
-			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost,
-			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_account_cost
+			COUNT(CASE WHEN created_at >= $1 AND created_at < $2 THEN 1 END) AS total_requests,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN input_tokens ELSE 0 END), 0) AS total_input_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN output_tokens ELSE 0 END), 0) AS total_output_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN cache_creation_tokens ELSE 0 END), 0) AS total_cache_creation_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN cache_read_tokens ELSE 0 END), 0) AS total_cache_read_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN total_cost ELSE 0 END), 0) AS total_cost,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN actual_cost ELSE 0 END), 0) AS total_actual_cost,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN account_cost ELSE 0 END), 0) AS total_account_cost,
+			COALESCE(SUM(CASE WHEN created_at >= $1 AND created_at < $2 THEN duration_ms ELSE 0 END), 0) AS total_duration_ms,
+			COUNT(CASE WHEN created_at >= $3 AND created_at < $4 THEN 1 END) AS today_requests,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN input_tokens ELSE 0 END), 0) AS today_input_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN output_tokens ELSE 0 END), 0) AS today_output_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN cache_creation_tokens ELSE 0 END), 0) AS today_cache_creation_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN cache_read_tokens ELSE 0 END), 0) AS today_cache_read_tokens,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN total_cost ELSE 0 END), 0) AS today_cost,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN actual_cost ELSE 0 END), 0) AS today_actual_cost,
+			COALESCE(SUM(CASE WHEN created_at >= $3 AND created_at < $4 THEN account_cost ELSE 0 END), 0) AS today_account_cost
 		FROM scoped
 	`
 	var totalDurationMs int64
@@ -1828,7 +1835,15 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 
 	hourStart := now.UTC().Truncate(time.Hour)
 	hourEnd := hourStart.Add(time.Hour)
-	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd}
+	activeScanStart := todayUTC
+	if hourStart.Before(activeScanStart) {
+		activeScanStart = hourStart
+	}
+	activeScanEnd := todayEnd
+	if hourEnd.After(activeScanEnd) {
+		activeScanEnd = hourEnd
+	}
+	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd, activeScanStart, activeScanEnd}
 	activeProjectCondition := ""
 	activeProjectClauses, activeProjectArgs, _ := appendProjectProfileScopedWhereAt(ctx, nil, activeArgs, len(activeArgs)+1, "project_id", usageLogSQLScopeResources(""))
 	if len(activeProjectClauses) > 0 {
@@ -1839,13 +1854,13 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		WITH scoped AS (
 			SELECT user_id, created_at
 			FROM usage_logs
-			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
-				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+			WHERE created_at >= $5
+				AND created_at < $6
 				` + activeProjectCondition + `
 		)
 		SELECT
-			COUNT(DISTINCT CASE WHEN created_at >= $1::timestamptz AND created_at < $2::timestamptz THEN user_id END) AS active_users,
-			COUNT(DISTINCT CASE WHEN created_at >= $3::timestamptz AND created_at < $4::timestamptz THEN user_id END) AS hourly_active_users
+			COUNT(DISTINCT CASE WHEN created_at >= $1 AND created_at < $2 THEN user_id END) AS active_users,
+			COUNT(DISTINCT CASE WHEN created_at >= $3 AND created_at < $4 THEN user_id END) AS hourly_active_users
 		FROM scoped
 	`
 	if err := scanSingleRow(ctx, r.sql, activeUsersQuery, activeArgs, &stats.ActiveUsers, &stats.HourlyActiveUsers); err != nil {
@@ -2586,11 +2601,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	// API Key 统计
 	totalKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL"
 	totalKeysArgs := []any{userID}
-	totalKeysQuery, totalKeysArgs = appendProjectProfileScopedQuery(ctx, totalKeysQuery, totalKeysArgs, "project_id", projectSQLScopeResources{
-		UserID:   "api_keys.user_id",
-		GroupID:  "api_keys.group_id",
-		APIKeyID: "api_keys.id",
-	})
+	totalKeysQuery, totalKeysArgs = appendProjectProfileScopedQuery(ctx, totalKeysQuery, totalKeysArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -2602,11 +2613,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	}
 	activeKeysQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL"
 	activeKeysArgs := []any{userID, service.StatusActive}
-	activeKeysQuery, activeKeysArgs = appendProjectProfileScopedQuery(ctx, activeKeysQuery, activeKeysArgs, "project_id", projectSQLScopeResources{
-		UserID:   "api_keys.user_id",
-		GroupID:  "api_keys.group_id",
-		APIKeyID: "api_keys.id",
-	})
+	activeKeysQuery, activeKeysArgs = appendProjectProfileScopedQuery(ctx, activeKeysQuery, activeKeysArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,

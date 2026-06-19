@@ -127,10 +127,17 @@ func (s *userRepoStubForGroupUpdate) RemoveGroupFromUserAllowedGroups(context.Co
 
 // apiKeyRepoStubForGroupUpdate implements APIKeyRepository for AdminUpdateAPIKeyGroupID tests.
 type apiKeyRepoStubForGroupUpdate struct {
-	key       *APIKey
-	getErr    error
-	updateErr error
-	updated   *APIKey // captures what was passed to Update
+	key              *APIKey
+	getErr           error
+	updateErr        error
+	updateProjectErr error
+	updated          *APIKey // captures what was passed to Update
+	projectUpdates   []apiKeyProjectUpdate
+}
+
+type apiKeyProjectUpdate struct {
+	ID        int64
+	ProjectID int64
 }
 
 func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*APIKey, error) {
@@ -146,6 +153,16 @@ func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey) er
 	}
 	clone := *key
 	s.updated = &clone
+	return nil
+}
+func (s *apiKeyRepoStubForGroupUpdate) UpdateProjectID(_ context.Context, id int64, projectID int64) error {
+	if s.updateProjectErr != nil {
+		return s.updateProjectErr
+	}
+	s.projectUpdates = append(s.projectUpdates, apiKeyProjectUpdate{ID: id, ProjectID: projectID})
+	if s.key != nil && s.key.ID == id {
+		s.key.ProjectID = projectID
+	}
 	return nil
 }
 
@@ -218,10 +235,12 @@ type groupRepoStubForGroupUpdate struct {
 	group          *Group
 	getErr         error
 	lastGetByIDArg int64
+	getContexts    []context.Context
 }
 
-func (s *groupRepoStubForGroupUpdate) GetByID(_ context.Context, id int64) (*Group, error) {
+func (s *groupRepoStubForGroupUpdate) GetByID(ctx context.Context, id int64) (*Group, error) {
 	s.lastGetByIDArg = id
+	s.getContexts = append(s.getContexts, ctx)
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
@@ -562,6 +581,23 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_ProjectContextRejectsExclusiveGro
 	require.Equal(t, int64(42), userRepo.listCalls[0].ID)
 }
 
+func TestAdminService_AdminUpdateAPIKeyGroupID_ProjectAdminRejectsProjectAdminOwner(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test", GroupID: nil}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	userRepo := &userRepoStubForGroupUpdate{
+		scopedUsers: []User{{ID: 42, Email: "admin@example.com", Role: RoleUser, ProjectRole: ProjectRoleAdmin}},
+	}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, userRepo: userRepo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.AdminUpdateAPIKeyGroupID(ctx, 1, int64Ptr(0))
+
+	require.ErrorIs(t, err, ErrProjectAdminCannotManageAdminUser)
+	require.Nil(t, apiKeyRepo.updated)
+	require.Len(t, userRepo.listCalls, 1)
+	require.Equal(t, int64(42), userRepo.listCalls[0].ID)
+}
+
 func TestAdminService_AdminUpdateAPIKeyGroupID_Unbind_NoAllowedGroupUpdate(t *testing.T) {
 	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test", GroupID: int64Ptr(10), Group: &Group{ID: 10, Name: "Exclusive"}}
 	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
@@ -575,4 +611,136 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_Unbind_NoAllowedGroupUpdate(t *te
 	// 解绑时不修改 allowed_groups
 	require.False(t, userRepo.addGroupCalled)
 	require.False(t, got.AutoGrantedGroupAccess)
+}
+
+func TestAdminService_AdminResetAPIKeyRateLimitUsage_ProjectAdminRejectsProjectAdminOwner(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test"}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	userRepo := &userRepoStubForGroupUpdate{
+		scopedUsers: []User{{ID: 42, Email: "admin@example.com", Role: RoleUser, ProjectRole: ProjectRoleAdmin}},
+	}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, userRepo: userRepo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.AdminResetAPIKeyRateLimitUsage(ctx, 1)
+
+	require.ErrorIs(t, err, ErrProjectAdminCannotManageAdminUser)
+	require.Nil(t, apiKeyRepo.updated)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_UpdatesProjectAndInvalidatesCache(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	cache := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, authCacheInvalidator: cache}
+
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleSuperAdmin)
+
+	got, err := svc.AdminTransferAPIKeyProject(ctx, 1, 9)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(9), got.ProjectID)
+	require.Equal(t, []apiKeyProjectUpdate{{ID: 1, ProjectID: 9}}, apiKeyRepo.projectUpdates)
+	require.Equal(t, []string{"sk-test"}, cache.keys)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_ValidatesBoundGroupInTargetProject(t *testing.T) {
+	groupID := int64(10)
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", GroupID: &groupID, Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	groupRepo := &groupRepoStubForGroupUpdate{group: &Group{ID: groupID, Status: StatusActive}}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, groupRepo: groupRepo}
+
+	ctx := WithAdminRole(context.Background(), RoleSuperAdmin)
+
+	got, err := svc.AdminTransferAPIKeyProject(ctx, 1, 9)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, int64(9), got.ProjectID)
+	require.Equal(t, int64(10), groupRepo.lastGetByIDArg)
+	require.Len(t, groupRepo.getContexts, 1)
+	targetProjectID, ok := ProjectIDFromContext(groupRepo.getContexts[0])
+	require.True(t, ok)
+	require.Equal(t, int64(9), targetProjectID)
+	require.Equal(t, []apiKeyProjectUpdate{{ID: 1, ProjectID: 9}}, apiKeyRepo.projectUpdates)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_RejectsGroupUnavailableInTargetProject(t *testing.T) {
+	groupID := int64(10)
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", GroupID: &groupID, Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	groupRepo := &groupRepoStubForGroupUpdate{getErr: ErrGroupNotFound}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, groupRepo: groupRepo}
+
+	ctx := WithAdminRole(context.Background(), RoleSuperAdmin)
+
+	_, err := svc.AdminTransferAPIKeyProject(ctx, 1, 9)
+
+	require.ErrorIs(t, err, ErrProjectAPIKeyGroupUnavailable)
+	require.Equal(t, "PROJECT_API_KEY_GROUP_UNAVAILABLE", infraerrors.Reason(err))
+	require.Empty(t, apiKeyRepo.projectUpdates)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_ProjectAdminRejected(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.AdminTransferAPIKeyProject(ctx, 1, 9)
+
+	require.Error(t, err)
+	require.Equal(t, "PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN", infraerrors.Reason(err))
+	require.Empty(t, apiKeyRepo.projectUpdates)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_RequiresAdminRoleContext(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo}
+
+	_, err := svc.AdminTransferAPIKeyProject(context.Background(), 1, 9)
+
+	require.Error(t, err)
+	require.Equal(t, "PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN", infraerrors.Reason(err))
+	require.Empty(t, apiKeyRepo.projectUpdates)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_SameProjectNoOp(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
+	cache := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, authCacheInvalidator: cache}
+
+	ctx := WithAdminRole(context.Background(), RoleSuperAdmin)
+
+	got, err := svc.AdminTransferAPIKeyProject(ctx, 1, 7)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(7), got.ProjectID)
+	require.Empty(t, apiKeyRepo.projectUpdates)
+	require.Empty(t, cache.keys)
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_InvalidProjectID(t *testing.T) {
+	svc := &adminServiceImpl{apiKeyRepo: &apiKeyRepoStubForGroupUpdate{}}
+
+	_, err := svc.AdminTransferAPIKeyProject(context.Background(), 1, 0)
+
+	require.Error(t, err)
+	require.Equal(t, "INVALID_PROJECT_ID", infraerrors.Reason(err))
+}
+
+func TestAdminService_AdminTransferAPIKeyProject_TargetMembershipRequired(t *testing.T) {
+	existing := &APIKey{ID: 1, UserID: 42, ProjectID: 7, Key: "sk-test", Status: StatusActive}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing, updateProjectErr: ErrProjectAccessForbidden}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo}
+
+	ctx := WithAdminRole(context.Background(), RoleSuperAdmin)
+
+	_, err := svc.AdminTransferAPIKeyProject(ctx, 1, 9)
+
+	require.ErrorIs(t, err, ErrProjectAccessForbidden)
+	require.Empty(t, apiKeyRepo.projectUpdates)
 }

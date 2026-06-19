@@ -187,6 +187,7 @@ import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } 
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { AdminPermissions } from '@/constants/adminPermissions'
 
 interface NavItem {
   path: string
@@ -207,6 +208,7 @@ interface NavItem {
    * 开关切换时菜单自动更新。
    */
   featureFlag?: () => boolean | undefined
+  adminPermission?: string
 }
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
@@ -691,6 +693,24 @@ function finalizeNav(items: NavItem[]): NavItem[] {
   return authStore.isSimpleMode ? visible.filter(item => !item.hideInSimpleMode) : visible
 }
 
+function applyAdminPermissions(items: NavItem[]): NavItem[] {
+  if (authStore.isAdmin) {
+    return items
+  }
+  const out: NavItem[] = []
+  for (const item of items) {
+    if (item.adminPermission && !authStore.hasAdminPermission(item.adminPermission)) {
+      continue
+    }
+    if (item.children) {
+      out.push({ ...item, children: applyAdminPermissions(item.children) })
+    } else {
+      out.push(item)
+    }
+  }
+  return out
+}
+
 // User navigation items (for regular users)
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
 
@@ -716,16 +736,16 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const projectItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
-    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
-    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon }
+    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon, adminPermission: AdminPermissions.dashboard },
+    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring, adminPermission: AdminPermissions.ops },
+    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.users },
+    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.groups },
+    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.subscriptions },
+    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts }
   ]
 
   if (!authStore.isAdmin) {
-    return applyFeatureFlags(projectItems)
+    return applyAdminPermissions(applyFeatureFlags(projectItems))
   }
 
   const baseItems: NavItem[] = [

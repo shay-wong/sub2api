@@ -52,6 +52,7 @@ interface MockAuthState {
   isAuthenticated: boolean
   isAdmin: boolean
   canAccessAdminConsole?: boolean
+  adminPermissions?: string[]
   isSimpleMode: boolean
   backendModeEnabled: boolean
   hasPendingAuthSession: boolean
@@ -118,6 +119,22 @@ function simulateGuard(
   }
 
   if (requiresAdmin && requiresAdminOnly && !authState.isAdmin) {
+    return '/admin/dashboard'
+  }
+
+  if (
+    requiresAdmin
+    && typeof toMeta.adminPermission === 'string'
+    && !authState.isAdmin
+    && !(authState.adminPermissions ?? [
+      'admin.dashboard.read',
+      'admin.ops.read',
+      'admin.users.manage',
+      'admin.groups.manage',
+      'admin.subscriptions.manage',
+      'admin.accounts.write',
+    ]).includes(toMeta.adminPermission)
+  ) {
     return '/admin/dashboard'
   }
 
@@ -275,16 +292,27 @@ describe('路由守卫逻辑', () => {
     }
 
     it('访问项目级后台页面允许通过', () => {
-      expect(simulateGuard('/admin/dashboard', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/accounts', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/ops', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/users', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/groups', { requiresAdmin: true }, authState)).toBeNull()
-      expect(simulateGuard('/admin/subscriptions', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/dashboard', { requiresAdmin: true, adminPermission: 'admin.dashboard.read' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/accounts', { requiresAdmin: true, adminPermission: 'admin.accounts.write' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/ops', { requiresAdmin: true, adminPermission: 'admin.ops.read' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/users', { requiresAdmin: true, adminPermission: 'admin.users.manage' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/groups', { requiresAdmin: true, adminPermission: 'admin.groups.manage' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/subscriptions', { requiresAdmin: true, adminPermission: 'admin.subscriptions.manage' }, authState)).toBeNull()
+    })
+
+    it('没有对应项目权限时阻止访问项目级后台页面', () => {
+      const limitedAuthState = {
+        ...authState,
+        adminPermissions: ['admin.dashboard.read', 'admin.users.manage'],
+      }
+
+      expect(simulateGuard('/admin/users', { requiresAdmin: true, adminPermission: 'admin.users.manage' }, limitedAuthState)).toBeNull()
+      expect(simulateGuard('/admin/accounts', { requiresAdmin: true, adminPermission: 'admin.accounts.write' }, limitedAuthState)).toBe('/admin/dashboard')
     })
 
     it('访问超级管理员页面重定向到后台仪表盘', () => {
       expect(simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
+      expect(simulateGuard('/admin/usage', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/settings', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
     })

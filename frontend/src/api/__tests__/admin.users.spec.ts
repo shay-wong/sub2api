@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { post } = vi.hoisted(() => ({
+const { get, post } = vi.hoisted(() => ({
+  get: vi.fn(),
   post: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
   apiClient: {
+    get,
     post,
   },
 }))
 
 import {
   bindUserAuthIdentity,
+  getUserApiKeys,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
 } from '@/api/admin/users'
@@ -66,6 +69,7 @@ const responseContractExact: Assert<
 
 describe('admin users api auth identity binding', () => {
   beforeEach(() => {
+    get.mockReset()
     post.mockReset()
   })
 
@@ -113,5 +117,17 @@ describe('admin users api auth identity binding', () => {
   it('keeps bind auth identity request and response types aligned with the backend contract', () => {
     expect(requestContractExact).toBe(true)
     expect(responseContractExact).toBe(true)
+  })
+
+  it('passes an explicit project context when listing a user api keys from project management', async () => {
+    get.mockResolvedValue({
+      data: { items: [], total: 0, page: 1, page_size: 20, pages: 0 },
+    })
+
+    await getUserApiKeys(42, 7)
+
+    expect(get).toHaveBeenCalledWith('/admin/users/42/api-keys', {
+      headers: { 'X-Project-ID': '7' },
+    })
   })
 })

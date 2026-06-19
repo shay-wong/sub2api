@@ -157,7 +157,7 @@ func applyAdminProjectContext(c *gin.Context, user *service.User, projectService
 
 	effectiveRole := user.Role
 	if projectService != nil {
-		resolvedProjectID, role, err := projectService.ResolveAdminProject(c.Request.Context(), user, projectID)
+		resolvedProjectID, role, permissions, err := projectService.ResolveAdminProject(c.Request.Context(), user, projectID)
 		if err != nil {
 			if service.IsProjectNotFound(err) {
 				AbortWithError(c, 404, "PROJECT_NOT_FOUND", "project not found")
@@ -174,6 +174,7 @@ func applyAdminProjectContext(c *gin.Context, user *service.User, projectService
 		if role != "" {
 			effectiveRole = role
 		}
+		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), permissions))
 	} else if projectID > 0 {
 		AbortWithError(c, 500, "PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
 		return false
@@ -184,6 +185,7 @@ func applyAdminProjectContext(c *gin.Context, user *service.User, projectService
 		Concurrency: user.Concurrency,
 	})
 	c.Set(string(ContextKeyUserRole), effectiveRole)
+	c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), effectiveRole))
 	c.Set("auth_method", authMethod)
 	return true
 }

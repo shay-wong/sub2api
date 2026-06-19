@@ -622,6 +622,7 @@ func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) 
 		User:      user,
 	}
 	var checkedProjectID int64
+	var requireActiveMember bool
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -635,6 +636,7 @@ func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) 
 			projectID, ok := service.ProjectIDFromContext(ctx)
 			require.True(t, ok)
 			checkedProjectID = projectID
+			requireActiveMember = service.RequireActiveProjectMemberFromContext(ctx)
 			clone := *apiKey
 			clone.ProjectID = projectID
 			return &clone, nil
@@ -659,6 +661,7 @@ func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) 
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, int64(2), checkedProjectID)
+	require.True(t, requireActiveMember)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, float64(2), body["project_id"])
@@ -683,6 +686,7 @@ func TestAPIKeyAuthValidatesHomeProjectProfileVisibility(t *testing.T) {
 		User:      user,
 	}
 	var checkedProjectID int64
+	var requireActiveMember bool
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -696,6 +700,7 @@ func TestAPIKeyAuthValidatesHomeProjectProfileVisibility(t *testing.T) {
 			projectID, ok := service.ProjectIDFromContext(ctx)
 			require.True(t, ok)
 			checkedProjectID = projectID
+			requireActiveMember = service.RequireActiveProjectMemberFromContext(ctx)
 			clone := *apiKey
 			return &clone, nil
 		},
@@ -712,9 +717,10 @@ func TestAPIKeyAuthValidatesHomeProjectProfileVisibility(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, int64(1), checkedProjectID)
+	require.True(t, requireActiveMember)
 }
 
-func TestAPIKeyAuthRejectsHomeProjectWhenAPIKeyIsNotProfileVisible(t *testing.T) {
+func TestAPIKeyAuthRejectsHomeProjectWhenProjectMemberIsDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	user := &service.User{
@@ -728,10 +734,12 @@ func TestAPIKeyAuthRejectsHomeProjectWhenAPIKeyIsNotProfileVisible(t *testing.T)
 		ID:        100,
 		UserID:    user.ID,
 		ProjectID: 1,
-		Key:       "home-profile-hidden-key",
+		Key:       "home-disabled-project-member-key",
 		Status:    service.StatusActive,
 		User:      user,
 	}
+	var activeMemberLookupSeen bool
+	var fallbackLookupSeen bool
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -742,7 +750,13 @@ func TestAPIKeyAuthRejectsHomeProjectWhenAPIKeyIsNotProfileVisible(t *testing.T)
 		},
 		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
 			require.Equal(t, apiKey.ID, id)
-			return nil, service.ErrAPIKeyNotFound
+			if service.RequireActiveProjectMemberFromContext(ctx) {
+				activeMemberLookupSeen = true
+				return nil, service.ErrAPIKeyNotFound
+			}
+			fallbackLookupSeen = true
+			clone := *apiKey
+			return &clone, nil
 		},
 	}
 
@@ -755,8 +769,10 @@ func TestAPIKeyAuthRejectsHomeProjectWhenAPIKeyIsNotProfileVisible(t *testing.T)
 	req.Header.Set("x-api-key", apiKey.Key)
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusUnauthorized, w.Code)
-	requireAPIKeyAuthError(t, w, "INVALID_API_KEY", "Invalid API key")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.True(t, activeMemberLookupSeen)
+	require.True(t, fallbackLookupSeen)
+	requireAPIKeyAuthError(t, w, "PROJECT_MEMBER_DISABLED", "API Key 所属用户在当前项目空间已禁用")
 }
 
 func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testing.T) {
@@ -1294,6 +1310,10 @@ func (r *stubApiKeyRepo) ClearGroupIDByGroupID(ctx context.Context, groupID int6
 
 func (r *stubApiKeyRepo) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	return 0, errors.New("not implemented")
+}
+
+func (r *stubApiKeyRepo) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
+	return errors.New("not implemented")
 }
 
 func (r *stubApiKeyRepo) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {

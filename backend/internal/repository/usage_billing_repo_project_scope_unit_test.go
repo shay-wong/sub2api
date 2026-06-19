@@ -66,13 +66,9 @@ func TestUsageBillingProjectScopeSQLUsesActiveProfileBindings(t *testing.T) {
 		UserID:         "us.user_id",
 		GroupID:        "us.group_id",
 	})
-	groupClause := projectProfileScopeSQL(77, projectSQLScopeResources{
-		UserID:  "u.id",
-		GroupID: "g.id",
-	})
+	groupClause := projectUserGroupScopeSQL(77, "u.id", "g.id")
 
 	for name, clause := range map[string]string{
-		"api_key":      apiKeyClause,
 		"account":      accountClause,
 		"subscription": subscriptionClause,
 		"group":        groupClause,
@@ -84,12 +80,10 @@ func TestUsageBillingProjectScopeSQLUsesActiveProfileBindings(t *testing.T) {
 	}
 
 	normalizedAPIKey := normalizeSQLWhitespace(apiKeyClause)
-	require.Contains(t, normalizedAPIKey, "ppb.resource_type = 'api_key'")
-	require.Contains(t, normalizedAPIKey, "ppb.resource_id = api_keys.id")
-	require.Contains(t, normalizedAPIKey, "ppb.resource_type = 'user'")
-	require.Contains(t, normalizedAPIKey, "ppb.resource_id = api_keys.user_id")
-	require.Contains(t, normalizedAPIKey, "ppb.resource_type = 'group'")
-	require.Contains(t, normalizedAPIKey, "ppb.resource_id = api_keys.group_id")
+	require.Contains(t, normalizedAPIKey, "api_keys.project_id = 77")
+	require.Contains(t, normalizedAPIKey, "FROM project_members pm")
+	require.Contains(t, normalizedAPIKey, "pm.user_id = api_keys.user_id")
+	require.NotContains(t, normalizedAPIKey, "project_profile_bindings")
 
 	normalizedAccount := normalizeSQLWhitespace(accountClause)
 	require.Contains(t, normalizedAccount, "ppb.resource_type = 'account'")
@@ -98,16 +92,16 @@ func TestUsageBillingProjectScopeSQLUsesActiveProfileBindings(t *testing.T) {
 	normalizedSubscription := normalizeSQLWhitespace(subscriptionClause)
 	require.Contains(t, normalizedSubscription, "ppb.resource_type = 'subscription'")
 	require.Contains(t, normalizedSubscription, "ppb.resource_id = us.id")
-	require.Contains(t, normalizedSubscription, "ppb.resource_type = 'user'")
-	require.Contains(t, normalizedSubscription, "ppb.resource_id = us.user_id")
 	require.Contains(t, normalizedSubscription, "ppb.resource_type = 'group'")
 	require.Contains(t, normalizedSubscription, "ppb.resource_id = us.group_id")
+	require.NotContains(t, normalizedSubscription, "ppb.resource_type = 'user'")
 
 	normalizedGroup := normalizeSQLWhitespace(groupClause)
-	require.Contains(t, normalizedGroup, "ppb.resource_type = 'user'")
-	require.Contains(t, normalizedGroup, "ppb.resource_id = u.id")
+	require.Contains(t, normalizedGroup, "FROM project_members pm")
+	require.Contains(t, normalizedGroup, "pm.user_id = u.id")
 	require.Contains(t, normalizedGroup, "ppb.resource_type = 'group'")
 	require.Contains(t, normalizedGroup, "ppb.resource_id = g.id")
+	require.NotContains(t, normalizedGroup, "ppb.resource_type = 'user'")
 
 	_, ok := service.ProjectIDFromContext(ctx)
 	require.True(t, ok)

@@ -5,7 +5,7 @@ export type AssignableProjectRole = 'admin' | 'user'
 export type ProjectStatus = 'active' | 'disabled'
 export type ProjectMemberStatus = 'active' | 'disabled'
 export type ProjectProfileMode = 'restricted' | 'unrestricted'
-export type ProjectResourceType = 'users' | 'groups' | 'accounts' | 'subscriptions' | 'api_keys'
+export type ProjectResourceType = 'groups' | 'accounts' | 'subscriptions'
 
 export interface AdminProject {
   id: number
@@ -14,6 +14,7 @@ export interface AdminProject {
   description?: string | null
   role?: ProjectRole
   is_owner?: boolean
+  permissions?: string[]
 }
 
 export interface ProjectMember {
@@ -22,8 +23,11 @@ export interface ProjectMember {
   email: string
   username: string
   role: AssignableProjectRole
+  user_role?: ProjectRole
   is_owner: boolean
   status: ProjectMemberStatus
+  user_status?: ProjectMemberStatus
+  permissions?: string[]
   created_at?: string
   updated_at?: string
 }
@@ -41,11 +45,12 @@ export interface ProjectProfile {
 
 export interface ProjectProfileBindings {
   profile_id: number
-  user_ids: number[]
   group_ids: number[]
   account_ids: number[]
   subscription_ids: number[]
-  api_key_ids: number[]
+  groups?: ProjectResourceGroupCandidate[]
+  accounts?: ProjectResourceAccountCandidate[]
+  subscriptions?: ProjectResourceSubscriptionCandidate[]
 }
 
 export interface ProjectResourceUserCandidate {
@@ -109,11 +114,9 @@ export interface CreateProjectRequest {
   slug: string
   description?: string | null
   profile_mode?: ProjectProfileMode
-  user_ids?: number[]
   group_ids?: number[]
   account_ids?: number[]
   subscription_ids?: number[]
-  api_key_ids?: number[]
 }
 
 export interface UpdateProjectRequest {
@@ -145,7 +148,7 @@ export async function listMembers(projectId: number): Promise<ProjectMember[]> {
 export async function setMember(
   projectId: number,
   userId: number,
-  payload: { role: AssignableProjectRole; is_owner?: boolean; status?: ProjectMemberStatus }
+  payload: { role: AssignableProjectRole; is_owner?: boolean; status?: ProjectMemberStatus; permissions?: string[] }
 ): Promise<ProjectMember> {
   const { data } = await apiClient.put<ProjectMember>(
     `/admin/projects/${projectId}/members/${userId}`,
@@ -161,7 +164,7 @@ export async function listProfiles(projectId: number): Promise<ProjectProfile[]>
 
 export async function createProfile(
   projectId: number,
-  payload: { name: string; description?: string | null; mode: ProjectProfileMode }
+  payload: { name: string; description?: string | null }
 ): Promise<ProjectProfile> {
   const { data } = await apiClient.post<ProjectProfile>(`/admin/projects/${projectId}/profiles`, payload)
   return data
@@ -170,7 +173,7 @@ export async function createProfile(
 export async function updateProfile(
   projectId: number,
   profileId: number,
-  payload: { name?: string; description?: string | null; mode?: ProjectProfileMode }
+  payload: { name?: string; description?: string | null }
 ): Promise<ProjectProfile> {
   const { data } = await apiClient.put<ProjectProfile>(`/admin/projects/${projectId}/profiles/${profileId}`, payload)
   return data
@@ -183,6 +186,11 @@ export async function deleteProfile(projectId: number, profileId: number): Promi
 
 export async function activateProfile(projectId: number, profileId: number): Promise<ProjectProfile> {
   const { data } = await apiClient.post<ProjectProfile>(`/admin/projects/${projectId}/profiles/${profileId}/activate`)
+  return data
+}
+
+export async function activateUnrestrictedScope(projectId: number): Promise<ProjectProfile> {
+  const { data } = await apiClient.post<ProjectProfile>(`/admin/projects/${projectId}/resource-scope/unrestricted`)
   return data
 }
 
@@ -243,6 +251,7 @@ export default {
   updateProfile,
   deleteProfile,
   activateProfile,
+  activateUnrestrictedScope,
   getProfileBindings,
   setProfileBindings,
   searchBindableResources,

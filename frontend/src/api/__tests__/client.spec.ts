@@ -124,11 +124,13 @@ describe('API Client', () => {
       await apiClient.post('/auth/logout', { refresh_token: 'rt' })
       await apiClient.get('/settings/public')
       await apiClient.get('/admin/users')
+      await apiClient.get('/admin/users/42/api-keys', { headers: { 'X-Project-ID': '20' } })
 
       expect(adapter.mock.calls[0][0].headers.get('X-Project-ID')).toBeFalsy()
       expect(adapter.mock.calls[1][0].headers.get('X-Project-ID')).toBeFalsy()
       expect(adapter.mock.calls[2][0].headers.get('X-Project-ID')).toBeFalsy()
       expect(adapter.mock.calls[3][0].headers.get('X-Project-ID')).toBe('10')
+      expect(adapter.mock.calls[4][0].headers.get('X-Project-ID')).toBe('20')
     })
   })
 

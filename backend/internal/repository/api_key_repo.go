@@ -74,9 +74,6 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		key.LastUsedAt = created.LastUsedAt
 		key.CreatedAt = created.CreatedAt
 		key.UpdatedAt = created.UpdatedAt
-		if err := bindResourceToActiveProjectProfile(ctx, r.sql, projectID, service.ProjectResourceTypeAPIKey, key.ID); err != nil {
-			return err
-		}
 	}
 	return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
 }
@@ -297,6 +294,57 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 	return nil
 }
 
+func (r *apiKeyRepository) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
+	if projectID <= 0 {
+		return service.ErrProjectInvalidInput
+	}
+	if r == nil || r.sql == nil {
+		return fmt.Errorf("nil api key repository")
+	}
+	groupScopeSQL := projectProfileScopeSQL(projectID, projectSQLScopeResources{GroupID: "g.id"})
+	res, err := r.sql.ExecContext(service.WithoutProjectID(ctx), fmt.Sprintf(`
+		UPDATE api_keys ak
+		SET project_id = $2,
+			updated_at = NOW()
+		WHERE ak.id = $1
+		  AND ak.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM projects p
+			WHERE p.id = $2
+			  AND p.deleted_at IS NULL
+			  AND p.status = $3
+		  )
+		  AND EXISTS (
+			SELECT 1
+			FROM project_members pm
+			WHERE pm.project_id = $2
+			  AND pm.user_id = ak.user_id
+		  )
+		  AND (
+			ak.group_id IS NULL
+			OR EXISTS (
+				SELECT 1
+				FROM groups g
+				WHERE g.id = ak.group_id
+				  AND g.deleted_at IS NULL
+				  AND %s
+			)
+		  )
+	`, groupScopeSQL), id, projectID, service.StatusActive)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrProjectAccessForbidden
+	}
+	return nil
+}
+
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
@@ -389,14 +437,14 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 		return err
 	}
 	if affected == 0 {
-		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
-		exists, existErr := r.client.APIKey.Query().
-			Where(apikey.IDEQ(id)).
+		// 并发/重复删除:只有记录已软删才幂等成功；未软删但不在当前项目范围内仍返回 NotFound。
+		deleted, deletedErr := r.client.APIKey.Query().
+			Where(apikey.IDEQ(id), apikey.DeletedAtNotNil()).
 			Exist(mixins.SkipSoftDelete(ctx))
-		if existErr != nil {
-			return existErr
+		if deletedErr != nil {
+			return deletedErr
 		}
-		if exists {
+		if deleted {
 			return nil
 		}
 		return service.ErrAPIKeyNotFound

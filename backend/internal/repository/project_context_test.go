@@ -24,7 +24,7 @@ func TestResolveProjectIDForCreateUsesRequestedWithoutContext(t *testing.T) {
 	require.Equal(t, int64(99), projectID)
 }
 
-func TestProjectProfileScopeUnrestrictedKeepsProjectMembershipBoundary(t *testing.T) {
+func TestProjectProfileScopeUnrestrictedKeepsProjectIDBoundaryOnlyWhenRequired(t *testing.T) {
 	clause := projectProfileScopeSQL(7, projectSQLScopeResources{
 		ProjectID:        "usage_logs.project_id",
 		RequireProjectID: true,
@@ -37,14 +37,52 @@ func TestProjectProfileScopeUnrestrictedKeepsProjectMembershipBoundary(t *testin
 
 	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
 	require.Contains(t, normalized, "usage_logs.project_id = 7")
-	require.Contains(t, normalized, "FROM project_members pm")
-	require.Contains(t, normalized, "pm.project_id = 7")
-	require.Contains(t, normalized, "ppb.resource_type = 'user'")
-	require.Contains(t, normalized, "ppb.resource_id = usage_logs.user_id")
 	require.Contains(t, normalized, "ppb.resource_type = 'group'")
 	require.Contains(t, normalized, "ppb.resource_id = usage_logs.group_id")
 	require.Contains(t, normalized, "ppb.resource_type = 'account'")
 	require.Contains(t, normalized, "ppb.resource_id = usage_logs.account_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'api_key'")
-	require.Contains(t, normalized, "ppb.resource_id = usage_logs.api_key_id")
+	require.NotContains(t, normalized, "ppb.resource_type = 'user'")
+	require.NotContains(t, normalized, "ppb.resource_type = 'api_key'")
+}
+
+func TestAPIKeyProjectScopeRequiresSingleProjectAndMemberOwner(t *testing.T) {
+	clause := projectProfileScopeSQL(7, apiKeySQLScopeResources("api_keys"))
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "api_keys.project_id = 7")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.project_id = 7")
+	require.Contains(t, normalized, "pm.user_id = api_keys.user_id")
+	require.NotContains(t, normalized, "pm.status")
+	require.NotContains(t, normalized, "project_profile_bindings")
+	require.NotContains(t, normalized, "pp.mode = 'unrestricted'")
+}
+
+func TestAPIKeyProjectPredicateRequiresActiveMemberForAuthContext(t *testing.T) {
+	predicate := projectScopedAPIKeyPredicate(service.WithRequireActiveProjectMember(service.WithProjectID(context.Background(), 7)))
+
+	require.Len(t, predicate, 1)
+	require.True(t, service.RequireActiveProjectMemberFromContext(service.WithRequireActiveProjectMember(context.Background())))
+}
+
+func TestAccountProjectScopeDoesNotExpandFromConfiguredGroups(t *testing.T) {
+	clause := projectProfileScopeSQL(7, projectSQLScopeResources{AccountID: "accounts.id"})
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = accounts.id")
+	require.NotContains(t, normalized, "account_groups")
+	require.NotContains(t, normalized, "ppb.resource_type = 'group'")
+}
+
+func TestProjectUserGroupScopeRequiresMemberAndConfiguredGroup(t *testing.T) {
+	clause := projectUserGroupScopeSQL(7, "u.id", "g.id")
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.user_id = u.id")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = g.id")
+	require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 }

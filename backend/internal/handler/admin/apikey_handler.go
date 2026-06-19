@@ -2,8 +2,10 @@ package admin
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -25,6 +27,7 @@ func NewAdminAPIKeyHandler(adminService service.AdminService) *AdminAPIKeyHandle
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
 	GroupID             *int64 `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
+	ProjectID           *int64 `json:"project_id"`             // nil=不修改, >0=转移到目标项目
 	ResetRateLimitUsage *bool  `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
 }
 
@@ -40,6 +43,30 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 	var req AdminUpdateAPIKeyGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	isProjectTransferPath := strings.HasSuffix(c.FullPath(), "/project")
+	if isProjectTransferPath && req.ProjectID == nil {
+		response.BadRequest(c, "project_id is required")
+		return
+	}
+	if req.ProjectID != nil {
+		if !isProjectTransferPath {
+			response.ErrorFrom(c, infraerrors.Forbidden("PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN", "api key project transfer requires super admin"))
+			return
+		}
+		transferred, err := h.adminService.AdminTransferAPIKeyProject(c.Request.Context(), keyID, *req.ProjectID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, struct {
+			APIKey                 *dto.APIKey `json:"api_key"`
+			AutoGrantedGroupAccess bool        `json:"auto_granted_group_access"`
+		}{
+			APIKey: dto.APIKeyFromService(transferred),
+		})
 		return
 	}
 

@@ -105,6 +105,52 @@ func TestAdminService_UpdateUser_ProjectContextRejectsInvisibleTarget(t *testing
 	require.Equal(t, int64(42), repo.listCalls[0].ID)
 }
 
+func TestAdminService_UpdateUser_ProjectAdminRejectsProjectAdminTarget(t *testing.T) {
+	repo := &scopedAdminUserRepoStub{
+		scopedUsers: []User{{ID: 42, Email: "admin@example.com", Role: RoleUser, ProjectRole: ProjectRoleAdmin}},
+	}
+	svc := &adminServiceImpl{userRepo: repo}
+	notes := "blocked"
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.UpdateUser(ctx, 42, &UpdateUserInput{Notes: &notes})
+
+	require.ErrorIs(t, err, ErrProjectAdminCannotManageAdminUser)
+	require.Empty(t, repo.updated)
+	require.Len(t, repo.listCalls, 1)
+	require.Equal(t, int64(42), repo.listCalls[0].ID)
+}
+
+func TestAdminService_UpdateUser_ProjectAdminRejectsSuperAdminTarget(t *testing.T) {
+	repo := &scopedAdminUserRepoStub{
+		scopedUsers: []User{{ID: 42, Email: "root@example.com", Role: RoleSuperAdmin, ProjectRole: ProjectRoleAdmin}},
+	}
+	svc := &adminServiceImpl{userRepo: repo}
+	notes := "blocked"
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.UpdateUser(ctx, 42, &UpdateUserInput{Notes: &notes})
+
+	require.ErrorIs(t, err, ErrProjectAdminCannotManageAdminUser)
+	require.Empty(t, repo.updated)
+}
+
+func TestAdminService_BatchUpdateConcurrency_ProjectAdminRejectsProjectAdminTarget(t *testing.T) {
+	repo := &scopedAdminUserRepoStub{
+		scopedUsers: []User{
+			{ID: 41, Email: "user@example.com", Role: RoleUser, ProjectRole: ProjectRoleUser},
+			{ID: 42, Email: "admin@example.com", Role: RoleUser, ProjectRole: ProjectRoleAdmin},
+		},
+	}
+	svc := &adminServiceImpl{userRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	affected, err := svc.BatchUpdateConcurrency(ctx, []int64{41, 42}, 3, "set")
+
+	require.ErrorIs(t, err, ErrProjectAdminCannotManageAdminUser)
+	require.Zero(t, affected)
+}
+
 func TestAdminService_CreateUser_ProjectContextRejectsOutOfScopeAllowedGroups(t *testing.T) {
 	userRepo := &scopedAdminUserRepoStub{userRepoStub: userRepoStub{nextID: 50}}
 	groupRepo := &scopedAdminGroupRepoStub{groups: map[int64]*Group{

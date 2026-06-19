@@ -28,6 +28,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
 )
 
+var ErrProjectAdminCannotManageAdminUser = infraerrors.Forbidden("PROJECT_ADMIN_TARGET_FORBIDDEN", "project admin can only manage regular users")
+
 // AdminService interface defines admin management operations
 type AdminService interface {
 	// User management
@@ -72,6 +74,7 @@ type AdminService interface {
 
 	// API Key management (admin)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
+	AdminTransferAPIKeyProject(ctx context.Context, keyID int64, projectID int64) (*APIKey, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
 
 	// ReplaceUserGroup 替换用户的专属分组：授予新分组权限、迁移 Key、移除旧分组权限
@@ -707,6 +710,38 @@ func (s *adminServiceImpl) getAdminScopedUser(ctx context.Context, id int64, inc
 	return &users[0], nil
 }
 
+func ensureProjectAdminCanManageUser(ctx context.Context, user *User) error {
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if !isProjectAdminContext(ctx) {
+		return nil
+	}
+	if RoleIsAdmin(user.Role) || user.ProjectRole == ProjectRoleAdmin {
+		return ErrProjectAdminCannotManageAdminUser
+	}
+	return nil
+}
+
+func isProjectAdminContext(ctx context.Context) bool {
+	if _, ok := ProjectIDFromContext(ctx); !ok {
+		return false
+	}
+	adminRole, ok := AdminRoleFromContext(ctx)
+	return ok && adminRole == RoleAdmin
+}
+
+func (s *adminServiceImpl) ensureProjectAdminCanManageUserID(ctx context.Context, userID int64) error {
+	if !isProjectAdminContext(ctx) {
+		return nil
+	}
+	user, err := s.getAdminScopedUser(ctx, userID, false)
+	if err != nil {
+		return err
+	}
+	return ensureProjectAdminCanManageUser(ctx, user)
+}
+
 func (s *adminServiceImpl) ensureAdminScopedUsers(ctx context.Context, userIDs []int64) error {
 	if _, ok := ProjectIDFromContext(ctx); !ok {
 		return nil
@@ -836,6 +871,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
+		return nil, err
+	}
 	if input.AllowedGroups != nil {
 		if err := s.ensureAdminScopedGroups(ctx, *input.AllowedGroups); err != nil {
 			return nil, err
@@ -963,6 +1001,9 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
+		return err
+	}
 	if RoleIsAdmin(user.Role) {
 		return errors.New("cannot delete admin user")
 	}
@@ -1058,8 +1099,14 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	if len(cleaned) == 0 {
 		return 0, nil
 	}
-	if err := s.ensureAdminScopedUsers(ctx, cleaned); err != nil {
-		return 0, err
+	for _, userID := range cleaned {
+		user, err := s.getAdminScopedUser(ctx, userID, false)
+		if err != nil {
+			return 0, err
+		}
+		if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
+			return 0, err
+		}
 	}
 
 	var affected int
@@ -1087,6 +1134,9 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
 	user, err := s.getAdminScopedUser(ctx, userID, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -1256,7 +1306,11 @@ func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, us
 	if groupID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
 	}
-	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+	user, err := s.getAdminScopedUser(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
@@ -1504,7 +1558,11 @@ func (s *adminServiceImpl) BindUserAuthIdentity(ctx context.Context, userID int6
 	if s == nil || s.entClient == nil || s.userRepo == nil {
 		return nil, infraerrors.InternalServer("ADMIN_AUTH_IDENTITY_BIND_UNAVAILABLE", "auth identity binding service is unavailable")
 	}
-	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+	user, err := s.getAdminScopedUser(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -2534,6 +2592,9 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureProjectAdminCanManageUserID(ctx, apiKey.UserID); err != nil {
+		return nil, err
+	}
 
 	if groupID == nil {
 		// nil 表示不修改，直接返回
@@ -2578,8 +2639,10 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 
 		// 专属标准分组：使用事务保证「添加分组权限」与「更新 API Key」的原子性
 		if group.IsExclusive && !group.IsSubscriptionType() {
-			if _, err := s.getAdminScopedUser(ctx, apiKey.UserID, false); err != nil {
-				return nil, err
+			if _, ok := ProjectIDFromContext(ctx); ok && !isProjectAdminContext(ctx) {
+				if _, err := s.getAdminScopedUser(ctx, apiKey.UserID, false); err != nil {
+					return nil, err
+				}
 			}
 			opCtx := ctx
 			var tx *dbent.Tx
@@ -2635,10 +2698,49 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	return result, nil
 }
 
+func (s *adminServiceImpl) AdminTransferAPIKeyProject(ctx context.Context, keyID int64, projectID int64) (*APIKey, error) {
+	if projectID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_PROJECT_ID", "project_id must be positive")
+	}
+	if adminRole, ok := AdminRoleFromContext(ctx); !ok || !RoleIsSuperAdmin(adminRole) {
+		return nil, infraerrors.Forbidden("PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN", "api key project transfer requires super admin")
+	}
+	lookupCtx := WithoutProjectID(ctx)
+	apiKey, err := s.apiKeyRepo.GetByID(lookupCtx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey.ProjectID == projectID {
+		return apiKey, nil
+	}
+	if apiKey.GroupID != nil {
+		if s.groupRepo == nil {
+			return nil, fmt.Errorf("group repository is required")
+		}
+		if _, err := s.groupRepo.GetByID(WithProjectID(lookupCtx, projectID), *apiKey.GroupID); err != nil {
+			if errors.Is(err, ErrGroupNotFound) {
+				return nil, ErrProjectAPIKeyGroupUnavailable
+			}
+			return nil, fmt.Errorf("validate api key group target project: %w", err)
+		}
+	}
+	if err := s.apiKeyRepo.UpdateProjectID(lookupCtx, apiKey.ID, projectID); err != nil {
+		return nil, fmt.Errorf("transfer api key project: %w", err)
+	}
+	apiKey.ProjectID = projectID
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+	}
+	return apiKey, nil
+}
+
 // AdminResetAPIKeyRateLimitUsage resets all API key rate-limit usage windows.
 func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error) {
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureProjectAdminCanManageUserID(ctx, apiKey.UserID); err != nil {
 		return nil, err
 	}
 	apiKey.Usage5h = 0
@@ -2664,7 +2766,11 @@ func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 	if oldGroupID == newGroupID {
 		return nil, infraerrors.BadRequest("SAME_GROUP", "old and new group must be different")
 	}
-	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
+	user, err := s.getAdminScopedUser(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 

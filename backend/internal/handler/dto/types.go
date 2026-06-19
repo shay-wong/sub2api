@@ -9,18 +9,21 @@ import (
 )
 
 type User struct {
-	ID            int64      `json:"id"`
-	Email         string     `json:"email"`
-	Username      string     `json:"username"`
-	Role          string     `json:"role"`
-	Balance       float64    `json:"balance"`
-	Concurrency   int        `json:"concurrency"`
-	Status        string     `json:"status"`
-	AllowedGroups []int64    `json:"allowed_groups"`
-	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	ID                  int64      `json:"id"`
+	Email               string     `json:"email"`
+	Username            string     `json:"username"`
+	Role                string     `json:"role"`
+	ProjectRole         string     `json:"project_role,omitempty"`
+	ProjectMemberStatus string     `json:"project_member_status,omitempty"`
+	ProjectPermissions  []string   `json:"project_permissions,omitempty"`
+	Balance             float64    `json:"balance"`
+	Concurrency         int        `json:"concurrency"`
+	Status              string     `json:"status"`
+	AllowedGroups       []int64    `json:"allowed_groups"`
+	LastActiveAt        *time.Time `json:"last_active_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	DeletedAt           *time.Time `json:"deleted_at,omitempty"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -51,6 +54,7 @@ type AdminUser struct {
 type APIKey struct {
 	ID          int64      `json:"id"`
 	UserID      int64      `json:"user_id"`
+	ProjectID   int64      `json:"project_id,omitempty"`
 	Key         string     `json:"key"`
 	Name        string     `json:"name"`
 	GroupID     *int64     `json:"group_id"`

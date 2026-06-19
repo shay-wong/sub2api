@@ -203,10 +203,14 @@ export async function toggleStatus(id: number, status: 'active' | 'disabled'): P
 /**
  * Get user's API keys
  * @param id - User ID
+ * @param projectId - Optional project context for project-scoped API key listing
  * @returns List of user's API keys
  */
-export async function getUserApiKeys(id: number): Promise<PaginatedResponse<ApiKey>> {
-  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`)
+export async function getUserApiKeys(id: number, projectId?: number): Promise<PaginatedResponse<ApiKey>> {
+  const headers = projectId ? { 'X-Project-ID': String(projectId) } : undefined
+  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`, {
+    headers
+  })
   return data
 }
 

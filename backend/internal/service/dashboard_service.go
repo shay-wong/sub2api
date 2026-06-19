@@ -103,6 +103,15 @@ func NewDashboardService(usageRepo UsageLogRepository, aggRepo DashboardAggregat
 }
 
 func (s *DashboardService) GetDashboardStats(ctx context.Context) (*usagestats.DashboardStats, error) {
+	if _, projectScoped := ProjectIDFromContext(ctx); projectScoped {
+		stats, err := s.fetchDashboardStats(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get dashboard stats: %w", err)
+		}
+		s.applyAggregationStatus(ctx, stats)
+		return stats, nil
+	}
+
 	if s.cache != nil {
 		cached, fresh, err := s.getCachedDashboardStats(ctx)
 		if err == nil && cached != nil {

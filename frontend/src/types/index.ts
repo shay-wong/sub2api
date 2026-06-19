@@ -70,6 +70,7 @@ export interface UserProject {
   description?: string | null
   role: ProjectRole
   is_owner: boolean
+  permissions?: string[]
 }
 
 export type GlobalUserRole = 'super_admin' | 'user'
@@ -118,6 +119,10 @@ export interface User {
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
+  // 当前项目空间内的成员角色；为空时仅使用全局 role
+  project_role?: ProjectRole
+  project_member_status?: 'active' | 'disabled'
+  project_permissions?: string[]
   last_used_at?: string | null
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
@@ -581,6 +586,7 @@ export interface ModelsListConfig {
 export interface ApiKey {
   id: number
   user_id: number
+  project_id?: number
   key: string
   name: string
   group_id: number | null

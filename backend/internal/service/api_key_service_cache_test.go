@@ -53,6 +53,10 @@ func (s *authRepoStub) Update(ctx context.Context, key *APIKey) error {
 	panic("unexpected Update call")
 }
 
+func (s *authRepoStub) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
+	panic("unexpected UpdateProjectID call")
+}
+
 func (s *authRepoStub) Delete(ctx context.Context, id int64) error {
 	panic("unexpected Delete call")
 }

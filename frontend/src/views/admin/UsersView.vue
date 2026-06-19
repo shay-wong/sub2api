@@ -306,9 +306,9 @@
             </div>
           </template>
 
-          <template #cell-role="{ value }">
-            <span :class="['badge', roleBadgeClass(value)]">
-              {{ roleLabel(value) }}
+          <template #cell-role="{ row }">
+            <span :class="['badge', roleBadgeClass(effectiveUserRole(row))]">
+              {{ roleLabel(effectiveUserRole(row)) }}
             </span>
           </template>
 
@@ -418,6 +418,7 @@
                 </div>
               </div>
               <button
+                v-if="canOperateUser(row)"
                 @click.stop="handleDeposit(row)"
                 class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
@@ -429,6 +430,7 @@
 
           <template #cell-balance_platform_quota="{ row }">
             <button
+              v-if="canOperateUser(row)"
               type="button"
               class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
               :title="t('admin.users.platformQuota.cellColumnTooltip')"
@@ -436,6 +438,7 @@
             >
               <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
             </button>
+            <UserPlatformQuotaCell v-else :quotas="platformQuotaStats[row.id]" />
           </template>
 
           <!-- 用量列自定义表头：列名 + 单个排序图标按钮，点击展开"今日/近30天"菜单。
@@ -548,16 +551,22 @@
             />
           </template>
 
-          <template #cell-status="{ value }">
+          <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <span
                 :class="[
                   'inline-block h-2 w-2 rounded-full',
-                  value === 'active' ? 'bg-green-500' : 'bg-red-500'
+                  visibleUserStatus(row) === 'active' ? 'bg-green-500' : 'bg-red-500'
                 ]"
               ></span>
               <span class="text-sm text-gray-700 dark:text-gray-300">
-                {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
+                {{ visibleUserStatus(row) === 'active' ? t('common.active') : t('admin.users.disabled') }}
+              </span>
+              <span
+                v-if="row.project_member_status && row.status !== row.project_member_status"
+                class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-dark-300"
+              >
+                {{ row.status === 'active' ? t('common.active') : t('admin.users.disabled') }}
               </span>
             </div>
           </template>
@@ -582,6 +591,7 @@
             <div class="flex items-center gap-1">
               <!-- Edit Button -->
               <button
+                v-if="canOperateUser(row)"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -591,22 +601,23 @@
 
               <!-- Toggle Status Button (not for admin) -->
               <button
-                v-if="!isAdminRole(row.role)"
+                v-if="canOperateUser(row)"
                 @click="handleToggleStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
-                  row.status === 'active'
+                  visibleUserStatus(row) === 'active'
                     ? 'hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400'
                     : 'hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400'
                 ]"
               >
-                <Icon v-if="row.status === 'active'" name="ban" size="sm" />
+                <Icon v-if="visibleUserStatus(row) === 'active'" name="ban" size="sm" />
                 <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ row.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}</span>
+                <span class="text-xs">{{ visibleUserStatus(row) === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}</span>
               </button>
 
               <!-- More Actions Menu Trigger -->
               <button
+                v-if="canOperateUser(row)"
                 @click="openActionMenu(row, $event)"
                 class="action-menu-trigger flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
                 :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
@@ -748,6 +759,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import Icon from '@/components/icons/Icon.vue'
@@ -784,6 +796,7 @@ import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 import type { GlobalUserRole, UserRole } from '@/types'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 type UserRoleFilter = '' | GlobalUserRole
 
@@ -811,6 +824,17 @@ const roleBadgeClass = (role?: string) => {
 const roleLabel = (role?: string) => {
   if (!role) return '-'
   return displayableUserRoles.includes(role as UserRole) ? t(`admin.users.roles.${role}`) : role
+}
+const effectiveUserRole = (user: AdminUser): UserRole => {
+  if (user.role === 'super_admin') return 'super_admin'
+  return (user.project_role || user.role) as UserRole
+}
+const visibleUserStatus = (user: AdminUser): 'active' | 'disabled' => {
+  return user.project_member_status || user.status
+}
+const isAdminRole = (role?: string) => role === 'super_admin' || role === 'admin'
+const canOperateUser = (user: AdminUser) => {
+  return authStore.isAdmin || !isAdminRole(effectiveUserRole(user))
 }
 
 // Generate dynamic attribute columns from enabled definitions
@@ -1020,7 +1044,6 @@ const columns = computed<Column[]>(() =>
 )
 
 const users = ref<AdminUser[]>([])
-const isAdminRole = (role?: string) => role === 'super_admin' || role === 'admin'
 const loading = ref(false)
 const searchQuery = ref('')
 const USER_SORT_STORAGE_KEY = 'admin-users-table-sort'
@@ -1308,6 +1331,7 @@ const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
 
 const handlePlatformQuota = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   platformQuotaUser.value = user
   showPlatformQuotaModal.value = true
 }
@@ -1408,6 +1432,7 @@ const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
 
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
+  if (!canOperateUser(user)) return
   if (activeMenuId.value === user.id) {
     closeActionMenu()
   } else {
@@ -1681,6 +1706,7 @@ const applyFilter = () => {
 }
 
 const handleEdit = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   editingUser.value = user
   showEditModal.value = true
 }
@@ -1691,9 +1717,18 @@ const closeEditModal = () => {
 }
 
 const handleToggleStatus = async (user: AdminUser) => {
-  const newStatus = user.status === 'active' ? 'disabled' : 'active'
+  if (!canOperateUser(user)) return
+  const newStatus = visibleUserStatus(user) === 'active' ? 'disabled' : 'active'
   try {
-    await adminAPI.users.toggleStatus(user.id, newStatus)
+    if (user.project_member_status && authStore.selectedProject?.id) {
+      await adminAPI.projects.setMember(authStore.selectedProject.id, user.id, {
+        role: (user.project_role === 'admin' ? 'admin' : 'user'),
+        status: newStatus,
+        permissions: user.project_role === 'admin' ? user.project_permissions : []
+      })
+    } else {
+      await adminAPI.users.toggleStatus(user.id, newStatus)
+    }
     appStore.showSuccess(
       newStatus === 'active' ? t('admin.users.userEnabled') : t('admin.users.userDisabled')
     )
@@ -1715,6 +1750,7 @@ const closeApiKeysModal = () => {
 }
 
 const handleAllowedGroups = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   allowedGroupsUser.value = user
   showAllowedGroupsModal.value = true
 }
@@ -1725,6 +1761,7 @@ const closeAllowedGroupsModal = () => {
 }
 
 const openGroupReplace = (user: AdminUser, group: { id: number; name: string }) => {
+  if (!canOperateUser(user)) return
   expandedGroupUserId.value = null
   groupReplaceUser.value = user
   groupReplaceOldGroup.value = group
@@ -1738,6 +1775,7 @@ const closeGroupReplaceModal = () => {
 }
 
 const handleDelete = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   deletingUser.value = user
   showDeleteDialog.value = true
 }
@@ -1757,12 +1795,14 @@ const confirmDelete = async () => {
 }
 
 const handleDeposit = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   balanceUser.value = user
   balanceOperation.value = 'add'
   showBalanceModal.value = true
 }
 
 const handleWithdraw = (user: AdminUser) => {
+  if (!canOperateUser(user)) return
   balanceUser.value = user
   balanceOperation.value = 'subtract'
   showBalanceModal.value = true

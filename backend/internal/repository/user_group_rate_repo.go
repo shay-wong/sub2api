@@ -23,8 +23,7 @@ func userGroupRateProjectScopeCondition(ctx context.Context, groupIDColumn, user
 	if !ok {
 		return ""
 	}
-	return projectProfileScopeSQL(projectID, projectSQLScopeResources{GroupID: groupIDColumn}) +
-		" AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{UserID: userIDColumn})
+	return projectUserGroupScopeSQL(projectID, userIDColumn, groupIDColumn)
 }
 
 func userGroupRateProjectScopeClause(ctx context.Context, groupIDColumn, userIDColumn string) string {

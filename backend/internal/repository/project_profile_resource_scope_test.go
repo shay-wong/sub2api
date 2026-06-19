@@ -106,8 +106,7 @@ func TestProjectScopedAccountPredicateRequiresActiveProfileBinding(t *testing.T)
 		Where(projectScopedAccountPredicate(projectCtx)...).
 		IDs(ctx)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{bound.ID, unbound.ID}, visible)
-	require.NotContains(t, visible, foreign.ID)
+	require.ElementsMatch(t, []int64{bound.ID, unbound.ID, foreign.ID}, visible)
 }
 
 func TestAccountRepositoryListUsesActiveProjectProfileScope(t *testing.T) {
@@ -183,11 +182,10 @@ func TestAccountRepositoryListUsesActiveProjectProfileScope(t *testing.T) {
 	for _, account := range accounts {
 		ids = append(ids, account.ID)
 	}
-	require.ElementsMatch(t, []int64{bound.ID, unbound.ID}, ids)
-	require.NotContains(t, ids, foreign.ID)
+	require.ElementsMatch(t, []int64{bound.ID, unbound.ID, foreign.ID}, ids)
 }
 
-func TestAccountRepositoryListIncludesAccountsFromBoundProjectGroups(t *testing.T) {
+func TestAccountRepositoryListDoesNotExpandAccountsFromBoundProjectGroups(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()
 
@@ -212,9 +210,17 @@ func TestAccountRepositoryListIncludesAccountsFromBoundProjectGroups(t *testing.
 		SetSubscriptionType(service.SubscriptionTypeStandard).
 		Save(ctx)
 	require.NoError(t, err)
+	boundAccount, err := client.Account.Create().
+		SetProjectID(home.ID).
+		SetName("directly-bound-visible-account").
+		SetPlatform(service.PlatformAnthropic).
+		SetType("api_key").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
 	groupedAccount, err := client.Account.Create().
 		SetProjectID(home.ID).
-		SetName("grouped-visible-account").
+		SetName("grouped-hidden-account").
 		SetPlatform(service.PlatformAnthropic).
 		SetType("api_key").
 		SetStatus(service.StatusActive).
@@ -248,12 +254,19 @@ func TestAccountRepositoryListIncludesAccountsFromBoundProjectGroups(t *testing.
 		SetResourceID(group.ID).
 		Save(ctx)
 	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(boundAccount.ID).
+		Save(ctx)
+	require.NoError(t, err)
 
 	repo := newAccountRepositoryWithSQL(client, nil, nil)
 	accounts, _, err := repo.ListWithFilters(service.WithProjectID(ctx, workspace.ID), pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "", "", 0, "")
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
-	require.Equal(t, groupedAccount.ID, accounts[0].ID)
+	require.Equal(t, boundAccount.ID, accounts[0].ID)
+	require.NotEqual(t, groupedAccount.ID, accounts[0].ID)
 	require.NotEqual(t, unboundAccount.ID, accounts[0].ID)
 }
 

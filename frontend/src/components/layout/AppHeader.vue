@@ -23,23 +23,79 @@
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex items-center gap-3">
-        <label
+        <div
           v-if="showProjectSwitcher"
-          class="flex min-w-0 max-w-36 items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2 py-1.5 text-sm text-primary-700 shadow-sm dark:border-primary-800/70 dark:bg-primary-950/30 dark:text-primary-200 sm:max-w-52 sm:gap-2 sm:px-3 md:max-w-none"
+          ref="projectSwitcherRef"
+          class="relative min-w-0"
         >
-          <Icon name="grid" size="sm" class="shrink-0 text-primary-500 dark:text-primary-300" />
-          <span class="hidden font-medium sm:inline">{{ t('admin.projectSwitcher.label') }}</span>
-          <select
-            v-model="selectedProjectID"
-            class="min-w-0 max-w-24 bg-transparent text-sm font-semibold text-primary-900 outline-none dark:text-primary-50 sm:max-w-36 md:max-w-44"
+          <button
+            type="button"
+            class="flex h-10 w-auto min-w-0 max-w-48 items-center gap-2 rounded-xl border border-primary-200 bg-primary-50 px-3 text-sm text-primary-700 shadow-sm transition-colors hover:border-primary-300 hover:bg-primary-100 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-primary-800/70 dark:bg-primary-950/30 dark:text-primary-200 dark:hover:border-primary-700 dark:hover:bg-primary-900/40 sm:max-w-64 md:max-w-80"
             :title="t('admin.projectSwitcher.label')"
-            @change="handleProjectChange"
+            :aria-expanded="projectSwitcherOpen"
+            aria-haspopup="listbox"
+            @click="toggleProjectSwitcher"
           >
-            <option v-for="project in userProjects" :key="project.id" :value="String(project.id)">
-              {{ project.name }}
-            </option>
-          </select>
-        </label>
+            <Icon name="grid" size="sm" class="shrink-0 text-primary-500 dark:text-primary-300" />
+            <span class="hidden font-medium sm:inline">{{ t('admin.projectSwitcher.label') }}</span>
+            <span class="min-w-0 flex-1 truncate text-left font-semibold text-primary-900 dark:text-primary-50">
+              {{ selectedProject?.name || t('admin.projectSwitcher.label') }}
+            </span>
+            <Icon
+              name="chevronDown"
+              size="sm"
+              class="shrink-0 text-primary-500 transition-transform dark:text-primary-300"
+              :class="projectSwitcherOpen ? 'rotate-180' : ''"
+            />
+          </button>
+
+          <transition name="dropdown">
+            <div
+              v-if="projectSwitcherOpen"
+              class="absolute right-0 z-50 mt-2 min-w-80 max-w-[min(28rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl shadow-gray-900/10 dark:border-dark-700 dark:bg-dark-900 dark:shadow-black/30"
+              role="listbox"
+            >
+              <div class="border-b border-gray-100 px-3 py-2 dark:border-dark-700">
+                <div class="text-xs font-medium uppercase text-gray-500 dark:text-dark-400">
+                  {{ t('admin.projectSwitcher.label') }}
+                </div>
+              </div>
+              <div class="max-h-72 overflow-y-auto p-1.5">
+                <button
+                  v-for="project in userProjects"
+                  :key="project.id"
+                  type="button"
+                  class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors"
+                  :class="String(project.id) === selectedProjectID
+                    ? 'bg-primary-50 text-primary-900 dark:bg-primary-900/25 dark:text-primary-50'
+                    : 'text-gray-700 hover:bg-gray-50 dark:text-dark-200 dark:hover:bg-dark-800'"
+                  role="option"
+                  :aria-selected="String(project.id) === selectedProjectID"
+                  @click="selectProject(project.id)"
+                >
+                  <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-600 dark:bg-dark-800 dark:text-dark-200">
+                    {{ projectInitials(project.name) }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate text-sm font-semibold">{{ project.name }}</div>
+                    <div class="mt-1 flex min-w-0 items-center gap-1.5">
+                      <span class="min-w-0 truncate font-mono text-xs text-gray-500 dark:text-dark-400">{{ project.slug }}</span>
+                      <span v-if="project.role" class="badge badge-primary shrink-0">{{ projectRoleLabel(project.role) }}</span>
+                      <span v-if="project.is_owner" class="badge badge-success shrink-0">{{ t('admin.projects.owner') }}</span>
+                    </div>
+                  </div>
+                  <Icon
+                    v-if="String(project.id) === selectedProjectID"
+                    name="check"
+                    size="sm"
+                    class="shrink-0 text-primary-600 dark:text-primary-300"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
+            </div>
+          </transition>
+        </div>
 
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
@@ -254,12 +310,17 @@ const onboardingStore = useOnboardingStore()
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const projectSwitcherOpen = ref(false)
+const projectSwitcherRef = ref<HTMLElement | null>(null)
 const selectedProjectID = ref(localStorage.getItem(SELECTED_PROJECT_ID_KEY) ?? '')
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => appStore.docUrl)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const userProjects = computed(() => user.value?.projects ?? [])
 const showProjectSwitcher = computed(() => userProjects.value.length > 1)
+const selectedProject = computed(() => {
+  return userProjects.value.find(project => String(project.id) === selectedProjectID.value) ?? userProjects.value[0] ?? null
+})
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
@@ -286,7 +347,12 @@ const displayName = computed(() => {
 })
 
 const roleLabel = computed(() => {
-  switch (user.value?.role) {
+  if (user.value?.role === 'super_admin') {
+    return t('admin.users.roles.super_admin')
+  }
+  const selectedProject = userProjects.value.find(project => String(project.id) === selectedProjectID.value)
+  const role = selectedProject?.role || user.value?.role
+  switch (role) {
     case 'super_admin':
       return t('admin.users.roles.super_admin')
     case 'admin':
@@ -327,11 +393,21 @@ function toggleMobileSidebar() {
 }
 
 function toggleDropdown() {
+  projectSwitcherOpen.value = false
   dropdownOpen.value = !dropdownOpen.value
 }
 
 function closeDropdown() {
   dropdownOpen.value = false
+}
+
+function toggleProjectSwitcher() {
+  dropdownOpen.value = false
+  projectSwitcherOpen.value = !projectSwitcherOpen.value
+}
+
+function closeProjectSwitcher() {
+  projectSwitcherOpen.value = false
 }
 
 async function handleLogout() {
@@ -360,9 +436,42 @@ async function handleProjectChange() {
   window.location.reload()
 }
 
+async function selectProject(projectID: number) {
+  const nextProjectID = String(projectID)
+  if (nextProjectID === selectedProjectID.value) {
+    closeProjectSwitcher()
+    return
+  }
+  selectedProjectID.value = nextProjectID
+  closeProjectSwitcher()
+  await handleProjectChange()
+}
+
+function projectInitials(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return 'P'
+  return trimmed.slice(0, 2).toUpperCase()
+}
+
+function projectRoleLabel(role?: string): string {
+  switch (role) {
+    case 'super_admin':
+      return t('admin.users.roles.super_admin')
+    case 'admin':
+      return t('admin.users.roles.admin')
+    case 'user':
+      return t('admin.users.roles.user')
+    default:
+      return role || ''
+  }
+}
+
 function handleClickOutside(event: MouseEvent) {
   if (dropdownRef.value && !dropdownRef.value.contains(event.target as Node)) {
     closeDropdown()
+  }
+  if (projectSwitcherRef.value && !projectSwitcherRef.value.contains(event.target as Node)) {
+    closeProjectSwitcher()
   }
 }
 

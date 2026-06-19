@@ -65,7 +65,6 @@ func projectScopedAccountPredicate(ctx context.Context) []dbpredicate.Account {
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
 		return []dbpredicate.Account{dbaccount.Or(
 			dbpredicate.Account(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeAccount, dbaccount.FieldID)),
-			dbpredicate.Account(projectProfileAccountGroupBindingPredicate(projectID, dbaccount.FieldID)),
 			dbpredicate.Account(projectProfileUnrestrictedAccountPredicate(projectID)),
 		)}
 	}
@@ -84,11 +83,13 @@ func projectScopedGroupPredicate(ctx context.Context) []dbpredicate.Group {
 
 func projectScopedAPIKeyPredicate(ctx context.Context) []dbpredicate.APIKey {
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		return []dbpredicate.APIKey{dbapikey.Or(
-			dbpredicate.APIKey(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeAPIKey, dbapikey.FieldID)),
-			dbpredicate.APIKey(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeUser, dbapikey.FieldUserID)),
-			dbpredicate.APIKey(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeGroup, dbapikey.FieldGroupID)),
-			dbpredicate.APIKey(projectProfileUnrestrictedAPIKeyPredicate(projectID)),
+		memberPredicate := projectMemberExistsPredicate
+		if service.RequireActiveProjectMemberFromContext(ctx) {
+			memberPredicate = projectMemberBindingPredicate
+		}
+		return []dbpredicate.APIKey{dbapikey.And(
+			dbapikey.ProjectIDEQ(projectID),
+			dbpredicate.APIKey(memberPredicate(projectID, dbapikey.FieldUserID)),
 		)}
 	}
 	return nil
@@ -96,10 +97,7 @@ func projectScopedAPIKeyPredicate(ctx context.Context) []dbpredicate.APIKey {
 
 func projectScopedUserPredicate(ctx context.Context) []dbpredicate.User {
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		return []dbpredicate.User{dbuser.Or(
-			dbpredicate.User(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeUser, dbuser.FieldID)),
-			dbpredicate.User(projectProfileUnrestrictedUserPredicate(projectID)),
-		)}
+		return []dbpredicate.User{dbpredicate.User(projectMemberExistsPredicate(projectID, dbuser.FieldID))}
 	}
 	return nil
 }
@@ -108,7 +106,6 @@ func projectScopedUserSubscriptionPredicate(ctx context.Context) []dbpredicate.U
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
 		return []dbpredicate.UserSubscription{dbusersubscription.Or(
 			dbpredicate.UserSubscription(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeSubscription, dbusersubscription.FieldID)),
-			dbpredicate.UserSubscription(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeUser, dbusersubscription.FieldUserID)),
 			dbpredicate.UserSubscription(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeGroup, dbusersubscription.FieldGroupID)),
 			dbpredicate.UserSubscription(projectProfileUnrestrictedUserSubscriptionPredicate(projectID)),
 		)}
@@ -206,6 +203,7 @@ func buildProjectProfileScopedClause(ctx context.Context, args *[]any, column st
 type projectSQLScopeResources struct {
 	ProjectID        string
 	RequireProjectID bool
+	APIKeyResource   bool
 	UserID           string
 	GroupID          string
 	AccountID        string
@@ -260,21 +258,28 @@ func apiKeySQLScopeResources(alias string) projectSQLScopeResources {
 		prefix += "."
 	}
 	return projectSQLScopeResources{
-		UserID:   prefix + "user_id",
-		GroupID:  prefix + "group_id",
-		APIKeyID: prefix + "id",
+		ProjectID:        prefix + "project_id",
+		RequireProjectID: true,
+		APIKeyResource:   true,
+		UserID:           prefix + "user_id",
 	}
 }
 
 func projectUserScopeSQL(projectID int64, userIDColumn string) string {
 	userIDColumn = strings.TrimSpace(userIDColumn)
 	if userIDColumn == "" {
-		return projectProfileScopeSQL(projectID, projectSQLScopeResources{})
+		return "FALSE"
 	}
-	return projectProfileScopeSQL(projectID, projectSQLScopeResources{UserID: userIDColumn})
+	return projectMemberExistsSQL(projectID, userIDColumn)
 }
 
 func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources) string {
+	if resources.APIKeyResource {
+		return apiKeyProjectScopeSQL(projectID, resources)
+	}
+	if resources.UserID != "" && resources.GroupID == "" && resources.AccountID == "" && resources.SubscriptionID == "" && resources.APIKeyID == "" {
+		return projectUserScopeSQL(projectID, resources.UserID)
+	}
 	clauses := []string{
 		fmt.Sprintf(`(
 			EXISTS (
@@ -285,11 +290,7 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 			  AND pp.deleted_at IS NULL
 			  AND pp.mode = '%s'
 			)
-			AND %s
-		)`, projectID, service.ProjectProfileModeUnrestricted, projectResourceMembershipSQL(projectID, resources)),
-	}
-	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeUser, resources.UserID); c != "" {
-		clauses = append(clauses, c)
+		)`, projectID, service.ProjectProfileModeUnrestricted),
 	}
 	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeGroup, resources.GroupID); c != "" {
 		clauses = append(clauses, c)
@@ -297,13 +298,7 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeAccount, resources.AccountID); c != "" {
 		clauses = append(clauses, c)
 	}
-	if c := accountGroupBindingExistsSQL(projectID, resources.AccountID); c != "" {
-		clauses = append(clauses, c)
-	}
 	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeSubscription, resources.SubscriptionID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeAPIKey, resources.APIKeyID); c != "" {
 		clauses = append(clauses, c)
 	}
 	scope := "(" + strings.Join(clauses, " OR ") + ")"
@@ -315,51 +310,22 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 	return scope
 }
 
-func projectResourceMembershipSQL(projectID int64, resources projectSQLScopeResources) string {
-	clauses := make([]string, 0, 12)
-	if c := projectIDColumnSQL(projectID, resources.ProjectID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := projectMemberSQL(projectID, resources.UserID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileBindingExistsSQL(projectID, service.ProjectResourceTypeUser, resources.UserID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := groupHomeProjectSQL(projectID, resources.GroupID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileBindingExistsSQL(projectID, service.ProjectResourceTypeGroup, resources.GroupID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := accountHomeProjectSQL(projectID, resources.AccountID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileBindingExistsSQL(projectID, service.ProjectResourceTypeAccount, resources.AccountID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := accountGroupProjectMembershipSQL(projectID, resources.AccountID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileAccountGroupBindingExistsSQL(projectID, resources.AccountID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := subscriptionProjectMembershipSQL(projectID, resources.SubscriptionID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileBindingExistsSQL(projectID, service.ProjectResourceTypeSubscription, resources.SubscriptionID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := apiKeyProjectMembershipSQL(projectID, resources.APIKeyID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if c := anyProfileBindingExistsSQL(projectID, service.ProjectResourceTypeAPIKey, resources.APIKeyID); c != "" {
-		clauses = append(clauses, c)
-	}
-	if len(clauses) == 0 {
+func apiKeyProjectScopeSQL(projectID int64, resources projectSQLScopeResources) string {
+	projectClause := projectIDColumnSQL(projectID, resources.ProjectID)
+	memberClause := projectMemberExistsSQL(projectID, resources.UserID)
+	if projectClause == "" || memberClause == "" {
 		return "FALSE"
 	}
-	return "(" + strings.Join(clauses, " OR ") + ")"
+	return "(" + projectClause + " AND " + memberClause + ")"
+}
+
+func projectUserGroupScopeSQL(projectID int64, userIDColumn string, groupIDColumn string) string {
+	userClause := projectUserScopeSQL(projectID, userIDColumn)
+	groupClause := projectProfileScopeSQL(projectID, projectSQLScopeResources{GroupID: groupIDColumn})
+	if userClause == "FALSE" || groupClause == "FALSE" {
+		return "FALSE"
+	}
+	return "(" + userClause + " AND " + groupClause + ")"
 }
 
 func bindResourceToActiveProjectProfile(ctx context.Context, sqlq sqlExecutor, projectID int64, resourceType string, resourceID int64) error {
@@ -400,22 +366,6 @@ func bindingExistsSQL(projectID int64, resourceType string, column string) strin
 	)`, projectID, service.ProjectProfileModeRestricted, resourceType, column)
 }
 
-func anyProfileBindingExistsSQL(projectID int64, resourceType string, column string) string {
-	column = strings.TrimSpace(column)
-	if column == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM project_profiles pp
-		JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id
-		WHERE pp.project_id = %d
-		  AND pp.deleted_at IS NULL
-		  AND ppb.resource_type = '%s'
-		  AND ppb.resource_id = %s
-	)`, projectID, resourceType, column)
-}
-
 func projectIDColumnSQL(projectID int64, column string) string {
 	column = strings.TrimSpace(column)
 	if column == "" {
@@ -424,135 +374,26 @@ func projectIDColumnSQL(projectID int64, column string) string {
 	return fmt.Sprintf("%s = %d", column, projectID)
 }
 
-func projectMemberSQL(projectID int64, userIDColumn string) string {
+func projectMemberExistsSQL(projectID int64, userIDColumn string) string {
+	return projectMemberSQLWithStatus(projectID, userIDColumn, false)
+}
+
+func projectMemberSQLWithStatus(projectID int64, userIDColumn string, activeOnly bool) string {
 	userIDColumn = strings.TrimSpace(userIDColumn)
 	if userIDColumn == "" {
 		return ""
+	}
+	statusClause := ""
+	if activeOnly {
+		statusClause = fmt.Sprintf(`
+		  AND pm.status = '%s'`, service.StatusActive)
 	}
 	return fmt.Sprintf(`EXISTS (
 		SELECT 1
 		FROM project_members pm
 		WHERE pm.project_id = %d
-		  AND pm.user_id = %s
-		  AND pm.status = '%s'
-	)`, projectID, userIDColumn, service.StatusActive)
-}
-
-func groupHomeProjectSQL(projectID int64, groupIDColumn string) string {
-	groupIDColumn = strings.TrimSpace(groupIDColumn)
-	if groupIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM groups pg
-		WHERE pg.id = %s
-		  AND pg.project_id = %d
-		  AND pg.deleted_at IS NULL
-	)`, groupIDColumn, projectID)
-}
-
-func accountHomeProjectSQL(projectID int64, accountIDColumn string) string {
-	accountIDColumn = strings.TrimSpace(accountIDColumn)
-	if accountIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM accounts account_home
-		WHERE account_home.id = %s
-		  AND account_home.project_id = %d
-		  AND account_home.deleted_at IS NULL
-	)`, accountIDColumn, projectID)
-}
-
-func accountGroupProjectMembershipSQL(projectID int64, accountIDColumn string) string {
-	accountIDColumn = strings.TrimSpace(accountIDColumn)
-	if accountIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM account_groups pag
-		JOIN groups pg ON pg.id = pag.group_id
-		WHERE pag.account_id = %s
-		  AND pg.project_id = %d
-		  AND pg.deleted_at IS NULL
-	)`, accountIDColumn, projectID)
-}
-
-func subscriptionProjectMembershipSQL(projectID int64, subscriptionIDColumn string) string {
-	subscriptionIDColumn = strings.TrimSpace(subscriptionIDColumn)
-	if subscriptionIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM user_subscriptions pus
-		LEFT JOIN project_members ppm ON ppm.project_id = %d AND ppm.user_id = pus.user_id AND ppm.status = '%s'
-		LEFT JOIN groups pg ON pg.id = pus.group_id AND pg.project_id = %d AND pg.deleted_at IS NULL
-		LEFT JOIN project_profiles pp ON pp.project_id = %d AND pp.deleted_at IS NULL
-		LEFT JOIN project_profile_bindings ppb_user ON ppb_user.project_profile_id = pp.id AND ppb_user.resource_type = '%s' AND ppb_user.resource_id = pus.user_id
-		LEFT JOIN project_profile_bindings ppb_group ON ppb_group.project_profile_id = pp.id AND ppb_group.resource_type = '%s' AND ppb_group.resource_id = pus.group_id
-		WHERE pus.id = %s
-		  AND pus.deleted_at IS NULL
-		  AND (ppm.user_id IS NOT NULL OR pg.id IS NOT NULL OR ppb_user.id IS NOT NULL OR ppb_group.id IS NOT NULL)
-	)`, projectID, service.StatusActive, projectID, projectID, service.ProjectResourceTypeUser, service.ProjectResourceTypeGroup, subscriptionIDColumn)
-}
-
-func apiKeyProjectMembershipSQL(projectID int64, apiKeyIDColumn string) string {
-	apiKeyIDColumn = strings.TrimSpace(apiKeyIDColumn)
-	if apiKeyIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM api_keys pak
-		LEFT JOIN project_members ppm ON ppm.project_id = %d AND ppm.user_id = pak.user_id AND ppm.status = '%s'
-		LEFT JOIN groups pg ON pg.id = pak.group_id AND pg.project_id = %d AND pg.deleted_at IS NULL
-		LEFT JOIN project_profiles pp ON pp.project_id = %d AND pp.deleted_at IS NULL
-		LEFT JOIN project_profile_bindings ppb_user ON ppb_user.project_profile_id = pp.id AND ppb_user.resource_type = '%s' AND ppb_user.resource_id = pak.user_id
-		LEFT JOIN project_profile_bindings ppb_group ON ppb_group.project_profile_id = pp.id AND ppb_group.resource_type = '%s' AND ppb_group.resource_id = pak.group_id
-		WHERE pak.id = %s
-		  AND pak.deleted_at IS NULL
-		  AND (pak.project_id = %d OR ppm.user_id IS NOT NULL OR pg.id IS NOT NULL OR ppb_user.id IS NOT NULL OR ppb_group.id IS NOT NULL)
-	)`, projectID, service.StatusActive, projectID, projectID, service.ProjectResourceTypeUser, service.ProjectResourceTypeGroup, apiKeyIDColumn, projectID)
-}
-
-func accountGroupBindingExistsSQL(projectID int64, accountIDColumn string) string {
-	accountIDColumn = strings.TrimSpace(accountIDColumn)
-	if accountIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM account_groups ag
-		JOIN project_profiles pp ON pp.project_id = %d
-		JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id
-		WHERE ag.account_id = %s
-		  AND pp.is_active = TRUE
-		  AND pp.deleted_at IS NULL
-		  AND pp.mode = '%s'
-		  AND ppb.resource_type = '%s'
-		  AND ppb.resource_id = ag.group_id
-	)`, projectID, accountIDColumn, service.ProjectProfileModeRestricted, service.ProjectResourceTypeGroup)
-}
-
-func anyProfileAccountGroupBindingExistsSQL(projectID int64, accountIDColumn string) string {
-	accountIDColumn = strings.TrimSpace(accountIDColumn)
-	if accountIDColumn == "" {
-		return ""
-	}
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM account_groups ag
-		JOIN project_profiles pp ON pp.project_id = %d
-		JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id
-		WHERE ag.account_id = %s
-		  AND pp.deleted_at IS NULL
-		  AND ppb.resource_type = '%s'
-		  AND ppb.resource_id = ag.group_id
-	)`, projectID, accountIDColumn, service.ProjectResourceTypeGroup)
+		  AND pm.user_id = %s%s
+	)`, projectID, userIDColumn, statusClause)
 }
 
 func projectProfileBindingPredicate(projectID int64, resourceType string, resourceIDField string) func(*entsql.Selector) {
@@ -576,96 +417,47 @@ func projectProfileBindingPredicate(projectID int64, resourceType string, resour
 	}
 }
 
-func projectProfileAccountGroupBindingPredicate(projectID int64, accountIDField string) func(*entsql.Selector) {
-	return func(s *entsql.Selector) {
-		pp := entsql.Table("project_profiles")
-		pb := entsql.Table("project_profile_bindings")
-		ag := entsql.Table("account_groups")
-		s.Where(entsql.Exists(
-			entsql.SelectExpr(entsql.Expr("1")).
-				From(pp).
-				Join(pb).
-				On(pp.C("id"), pb.C("project_profile_id")).
-				Join(ag).
-				On(pb.C("resource_id"), ag.C("group_id")).
-				Where(entsql.And(
-					entsql.EQ(pp.C("project_id"), projectID),
-					entsql.EQ(pp.C("is_active"), true),
-					entsql.IsNull(pp.C("deleted_at")),
-					entsql.EQ(pp.C("mode"), service.ProjectProfileModeRestricted),
-					entsql.EQ(pb.C("resource_type"), service.ProjectResourceTypeGroup),
-					entsql.ColumnsEQ(ag.C("account_id"), s.C(accountIDField)),
-				)),
-		))
-	}
+func projectMemberBindingPredicate(projectID int64, userIDField string) func(*entsql.Selector) {
+	return projectMemberPredicate(projectID, userIDField, true)
 }
 
-func projectProfileUnrestrictedUserPredicate(projectID int64) func(*entsql.Selector) {
+func projectMemberExistsPredicate(projectID int64, userIDField string) func(*entsql.Selector) {
+	return projectMemberPredicate(projectID, userIDField, false)
+}
+
+func projectMemberPredicate(projectID int64, userIDField string, activeOnly bool) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
-		s.Where(entsql.And(
-			projectProfileUnrestrictedExists(projectID),
-			entsql.Or(
-				projectMemberExistsPredicate(projectID, s.C(dbuser.FieldID)),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeUser, s.C(dbuser.FieldID)),
-			),
+		pm := entsql.Table("project_members")
+		conditions := []*entsql.Predicate{
+			entsql.EQ(pm.C("project_id"), projectID),
+			entsql.ColumnsEQ(pm.C("user_id"), s.C(userIDField)),
+		}
+		if activeOnly {
+			conditions = append(conditions, entsql.EQ(pm.C("status"), service.StatusActive))
+		}
+		s.Where(entsql.Exists(
+			entsql.SelectExpr(entsql.Expr("1")).
+				From(pm).
+				Where(entsql.And(conditions...)),
 		))
 	}
 }
 
 func projectProfileUnrestrictedGroupPredicate(projectID int64) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
-		s.Where(entsql.And(
-			projectProfileUnrestrictedExists(projectID),
-			entsql.Or(
-				entsql.EQ(s.C(dbgroup.FieldProjectID), projectID),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeGroup, s.C(dbgroup.FieldID)),
-			),
-		))
+		s.Where(projectProfileUnrestrictedExists(projectID))
 	}
 }
 
 func projectProfileUnrestrictedAccountPredicate(projectID int64) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
-		s.Where(entsql.And(
-			projectProfileUnrestrictedExists(projectID),
-			entsql.Or(
-				entsql.EQ(s.C(dbaccount.FieldProjectID), projectID),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeAccount, s.C(dbaccount.FieldID)),
-				accountGroupProjectMembershipPredicate(projectID, s.C(dbaccount.FieldID)),
-				projectProfileAnyAccountGroupBindingExistsPredicate(projectID, s.C(dbaccount.FieldID)),
-			),
-		))
-	}
-}
-
-func projectProfileUnrestrictedAPIKeyPredicate(projectID int64) func(*entsql.Selector) {
-	return func(s *entsql.Selector) {
-		s.Where(entsql.And(
-			projectProfileUnrestrictedExists(projectID),
-			entsql.Or(
-				entsql.EQ(s.C(dbapikey.FieldProjectID), projectID),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeAPIKey, s.C(dbapikey.FieldID)),
-				projectMemberExistsPredicate(projectID, s.C(dbapikey.FieldUserID)),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeUser, s.C(dbapikey.FieldUserID)),
-				groupHomeProjectPredicate(projectID, s.C(dbapikey.FieldGroupID)),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeGroup, s.C(dbapikey.FieldGroupID)),
-			),
-		))
+		s.Where(projectProfileUnrestrictedExists(projectID))
 	}
 }
 
 func projectProfileUnrestrictedUserSubscriptionPredicate(projectID int64) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
-		s.Where(entsql.And(
-			projectProfileUnrestrictedExists(projectID),
-			entsql.Or(
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeSubscription, s.C(dbusersubscription.FieldID)),
-				projectMemberExistsPredicate(projectID, s.C(dbusersubscription.FieldUserID)),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeUser, s.C(dbusersubscription.FieldUserID)),
-				groupHomeProjectPredicate(projectID, s.C(dbusersubscription.FieldGroupID)),
-				projectProfileAnyBindingExistsPredicate(projectID, service.ProjectResourceTypeGroup, s.C(dbusersubscription.FieldGroupID)),
-			),
-		))
+		s.Where(projectProfileUnrestrictedExists(projectID))
 	}
 }
 
@@ -676,61 +468,5 @@ func projectProfileUnrestrictedExists(projectID int64) *entsql.Predicate {
 			WriteString(" AND pp.is_active = TRUE AND pp.deleted_at IS NULL AND pp.mode = ").
 			Arg(service.ProjectProfileModeUnrestricted).
 			WriteString(")")
-	})
-}
-
-func projectProfileAnyBindingExistsPredicate(projectID int64, resourceType string, resourceIDColumn string) *entsql.Predicate {
-	return entsql.P(func(b *entsql.Builder) {
-		b.WriteString("EXISTS (SELECT 1 FROM project_profiles pp JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id WHERE pp.project_id = ").
-			Arg(projectID).
-			WriteString(" AND pp.deleted_at IS NULL AND ppb.resource_type = ").
-			Arg(resourceType).
-			WriteString(" AND ppb.resource_id = ").
-			WriteString(resourceIDColumn).
-			WriteString(")")
-	})
-}
-
-func projectMemberExistsPredicate(projectID int64, userIDColumn string) *entsql.Predicate {
-	return entsql.P(func(b *entsql.Builder) {
-		b.WriteString("EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ").
-			Arg(projectID).
-			WriteString(" AND pm.user_id = ").
-			WriteString(userIDColumn).
-			WriteString(" AND pm.status = ").
-			Arg(service.StatusActive).
-			WriteString(")")
-	})
-}
-
-func groupHomeProjectPredicate(projectID int64, groupIDColumn string) *entsql.Predicate {
-	return entsql.P(func(b *entsql.Builder) {
-		b.WriteString("EXISTS (SELECT 1 FROM groups pg WHERE pg.id = ").
-			WriteString(groupIDColumn).
-			WriteString(" AND pg.project_id = ").
-			Arg(projectID).
-			WriteString(" AND pg.deleted_at IS NULL)")
-	})
-}
-
-func accountGroupProjectMembershipPredicate(projectID int64, accountIDColumn string) *entsql.Predicate {
-	return entsql.P(func(b *entsql.Builder) {
-		b.WriteString("EXISTS (SELECT 1 FROM account_groups pag JOIN groups pg ON pg.id = pag.group_id WHERE pag.account_id = ").
-			WriteString(accountIDColumn).
-			WriteString(" AND pg.project_id = ").
-			Arg(projectID).
-			WriteString(" AND pg.deleted_at IS NULL)")
-	})
-}
-
-func projectProfileAnyAccountGroupBindingExistsPredicate(projectID int64, accountIDColumn string) *entsql.Predicate {
-	return entsql.P(func(b *entsql.Builder) {
-		b.WriteString("EXISTS (SELECT 1 FROM account_groups pag JOIN project_profiles pp ON pp.project_id = ").
-			Arg(projectID).
-			WriteString(" JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id WHERE pag.account_id = ").
-			WriteString(accountIDColumn).
-			WriteString(" AND pp.deleted_at IS NULL AND ppb.resource_type = ").
-			Arg(service.ProjectResourceTypeGroup).
-			WriteString(" AND ppb.resource_id = pag.group_id)")
 	})
 }

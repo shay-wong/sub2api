@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveDocumentTitle } from './title'
+import { AdminPermissions, defaultProjectAdminPermissions } from '@/constants/adminPermissions'
 
 /**
  * Route definitions with lazy loading
@@ -387,6 +388,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Admin Dashboard',
       titleKey: 'admin.dashboard.title',
+      adminPermission: AdminPermissions.dashboard,
       descriptionKey: 'admin.dashboard.description'
     }
   },
@@ -399,6 +401,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Ops Monitoring',
       titleKey: 'admin.ops.title',
+      adminPermission: AdminPermissions.ops,
       descriptionKey: 'admin.ops.description'
     }
   },
@@ -411,6 +414,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'User Management',
       titleKey: 'admin.users.title',
+      adminPermission: AdminPermissions.users,
       descriptionKey: 'admin.users.description'
     }
   },
@@ -436,6 +440,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Group Management',
       titleKey: 'admin.groups.title',
+      adminPermission: AdminPermissions.groups,
       descriptionKey: 'admin.groups.description'
     }
   },
@@ -489,6 +494,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Subscription Management',
       titleKey: 'admin.subscriptions.title',
+      adminPermission: AdminPermissions.subscriptions,
       descriptionKey: 'admin.subscriptions.description'
     }
   },
@@ -501,6 +507,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Account Management',
       titleKey: 'admin.accounts.title',
+      adminPermission: AdminPermissions.accounts,
       descriptionKey: 'admin.accounts.description'
     }
   },
@@ -590,6 +597,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
+      requiresAdminOnly: true,
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'
@@ -728,6 +736,23 @@ const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/wechat/payment/callback',
 ]
 const BACKEND_MODE_PENDING_AUTH_PATHS = ['/register', '/email-verify']
+const ADMIN_PERMISSION_FALLBACK_PATHS: Record<string, string> = {
+  [AdminPermissions.dashboard]: '/admin/dashboard',
+  [AdminPermissions.ops]: '/admin/ops',
+  [AdminPermissions.users]: '/admin/users',
+  [AdminPermissions.groups]: '/admin/groups',
+  [AdminPermissions.subscriptions]: '/admin/subscriptions',
+  [AdminPermissions.accounts]: '/admin/accounts',
+}
+
+function resolveAllowedAdminPath(authStore: ReturnType<typeof useAuthStore>): string {
+  for (const permission of defaultProjectAdminPermissions) {
+    if (authStore.hasAdminPermission(permission)) {
+      return ADMIN_PERMISSION_FALLBACK_PATHS[permission]
+    }
+  }
+  return '/dashboard'
+}
 
 function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: boolean): boolean {
   if (BACKEND_MODE_ALLOWED_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(allowedPath))) {
@@ -837,7 +862,17 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (requiresAdmin && requiresAdminOnly && !authStore.isAdmin) {
-    next('/admin/dashboard')
+    next(resolveAllowedAdminPath(authStore))
+    return
+  }
+
+  const adminPermission = to.meta.adminPermission
+  if (
+    requiresAdmin
+    && typeof adminPermission === 'string'
+    && !authStore.hasAdminPermission(adminPermission)
+  ) {
+    next(resolveAllowedAdminPath(authStore))
     return
   }
 

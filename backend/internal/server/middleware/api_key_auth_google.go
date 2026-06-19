@@ -194,6 +194,14 @@ func resolveAPIKeyRequestProjectGoogle(c *gin.Context, apiKeyService *service.AP
 	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
 	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
 	if err != nil {
+		if errors.Is(err, service.ErrProjectMemberDisabled) {
+			abortWithGoogleError(c, 403, "API Key owner is disabled in this project")
+			return 0, false
+		}
+		if errors.Is(err, service.ErrProjectAPIKeyGroupUnavailable) {
+			abortWithGoogleError(c, 403, "API Key group is not available in this project")
+			return 0, false
+		}
 		if errors.Is(err, service.ErrAPIKeyNotFound) {
 			abortWithGoogleError(c, 401, "Invalid API key")
 			return 0, false

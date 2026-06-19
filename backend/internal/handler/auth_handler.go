@@ -93,12 +93,13 @@ type authUser struct {
 }
 
 type authProject struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description,omitempty"`
-	Role        string  `json:"role"`
-	IsOwner     bool    `json:"is_owner"`
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Slug        string   `json:"slug"`
+	Description *string  `json:"description,omitempty"`
+	Role        string   `json:"role"`
+	IsOwner     bool     `json:"is_owner"`
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 func ensureLoginUserActive(user *service.User) error {
@@ -182,6 +183,7 @@ func (h *AuthHandler) authProjectsForUser(ctx context.Context, user *service.Use
 			Description: project.Description,
 			Role:        project.Role,
 			IsOwner:     project.IsOwner,
+			Permissions: project.Permissions,
 		})
 	}
 	return out, nil

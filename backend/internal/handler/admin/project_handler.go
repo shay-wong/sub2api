@@ -23,11 +23,9 @@ type createProjectRequest struct {
 	Slug            string  `json:"slug" binding:"required"`
 	Description     *string `json:"description"`
 	ProfileMode     string  `json:"profile_mode"`
-	UserIDs         []int64 `json:"user_ids"`
 	GroupIDs        []int64 `json:"group_ids"`
 	AccountIDs      []int64 `json:"account_ids"`
 	SubscriptionIDs []int64 `json:"subscription_ids"`
-	APIKeyIDs       []int64 `json:"api_key_ids"`
 }
 
 type updateProjectRequest struct {
@@ -37,9 +35,10 @@ type updateProjectRequest struct {
 }
 
 type setProjectMemberRequest struct {
-	Role    string  `json:"role" binding:"required"`
-	IsOwner bool    `json:"is_owner"`
-	Status  *string `json:"status"`
+	Role        string   `json:"role" binding:"required"`
+	IsOwner     bool     `json:"is_owner"`
+	Status      *string  `json:"status"`
+	Permissions []string `json:"permissions"`
 }
 
 type projectProfileRequest struct {
@@ -49,11 +48,9 @@ type projectProfileRequest struct {
 }
 
 type setProjectProfileBindingsRequest struct {
-	UserIDs         []int64 `json:"user_ids"`
 	GroupIDs        []int64 `json:"group_ids"`
 	AccountIDs      []int64 `json:"account_ids"`
 	SubscriptionIDs []int64 `json:"subscription_ids"`
-	APIKeyIDs       []int64 `json:"api_key_ids"`
 }
 
 func (h *ProjectHandler) List(c *gin.Context) {
@@ -98,11 +95,9 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		OwnerUserID: subject.UserID,
 		ProfileMode: req.ProfileMode,
 		Bindings: service.ProjectProfileBindingInput{
-			UserIDs:         req.UserIDs,
 			GroupIDs:        req.GroupIDs,
 			AccountIDs:      req.AccountIDs,
 			SubscriptionIDs: req.SubscriptionIDs,
-			APIKeyIDs:       req.APIKeyIDs,
 		},
 	})
 	if err != nil {
@@ -180,7 +175,7 @@ func (h *ProjectHandler) SetMember(c *gin.Context) {
 		return
 	}
 	if !service.RoleIsSuperAdmin(currentAdminRole(c)) {
-		allowed, err := h.canProjectAdminSetMember(c.Request.Context(), projectID, userID)
+		member, allowed, err := h.canProjectAdminUpdateMemberStatus(c.Request.Context(), projectID, userID, req)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -189,12 +184,15 @@ func (h *ProjectHandler) SetMember(c *gin.Context) {
 			response.Forbidden(c, "Project access forbidden")
 			return
 		}
+		response.Success(c, member)
+		return
 	}
 	member, err := h.projectService.SetProjectMember(c.Request.Context(), projectID, service.ProjectMemberInput{
-		UserID:  userID,
-		Role:    req.Role,
-		IsOwner: req.IsOwner,
-		Status:  req.Status,
+		UserID:      userID,
+		Role:        req.Role,
+		IsOwner:     req.IsOwner,
+		Status:      req.Status,
+		Permissions: req.Permissions,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -240,10 +238,13 @@ func (h *ProjectHandler) CreateProfile(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.Mode != nil {
+		response.BadRequest(c, "Profile mode cannot be set on an application profile")
+		return
+	}
 	profile, err := h.projectService.CreateProjectProfile(c.Request.Context(), projectID, service.ProjectProfileInput{
 		Name:        req.Name,
 		Description: req.Description,
-		Mode:        req.Mode,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -273,10 +274,13 @@ func (h *ProjectHandler) UpdateProfile(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.Mode != nil {
+		response.BadRequest(c, "Profile mode cannot be set on an application profile")
+		return
+	}
 	profile, err := h.projectService.UpdateProjectProfile(c.Request.Context(), projectID, profileID, service.ProjectProfileInput{
 		Name:        req.Name,
 		Description: req.Description,
-		Mode:        req.Mode,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -325,6 +329,26 @@ func (h *ProjectHandler) ActivateProfile(c *gin.Context) {
 		return
 	}
 	profile, err := h.projectService.ActivateProjectProfile(c.Request.Context(), projectID, profileID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, profile)
+}
+
+func (h *ProjectHandler) ActivateUnrestrictedScope(c *gin.Context) {
+	if h.projectService == nil {
+		response.InternalError(c, "Project service unavailable")
+		return
+	}
+	projectID, ok := parseProjectIDParam(c)
+	if !ok {
+		return
+	}
+	if !authorizeProjectPath(c, projectID) {
+		return
+	}
+	profile, err := h.projectService.ActivateProjectUnrestrictedScope(c.Request.Context(), projectID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -388,22 +412,18 @@ func (h *ProjectHandler) SetProfileBindings(c *gin.Context) {
 			return
 		}
 		if err := h.projectService.ValidateProjectProfileBindingScope(c.Request.Context(), projectID, service.ProjectProfileBindingInput{
-			UserIDs:         req.UserIDs,
 			GroupIDs:        req.GroupIDs,
 			AccountIDs:      req.AccountIDs,
 			SubscriptionIDs: req.SubscriptionIDs,
-			APIKeyIDs:       req.APIKeyIDs,
 		}); err != nil {
 			response.ErrorFrom(c, err)
 			return
 		}
 	}
 	bindings, err := h.projectService.SetProjectProfileBindings(c.Request.Context(), projectID, profileID, service.ProjectProfileBindingInput{
-		UserIDs:         req.UserIDs,
 		GroupIDs:        req.GroupIDs,
 		AccountIDs:      req.AccountIDs,
 		SubscriptionIDs: req.SubscriptionIDs,
-		APIKeyIDs:       req.APIKeyIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -503,22 +523,48 @@ func parseUserIDParam(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
-func (h *ProjectHandler) canProjectAdminSetMember(ctx context.Context, projectID int64, userID int64) (bool, error) {
+func (h *ProjectHandler) canProjectAdminUpdateMemberStatus(ctx context.Context, projectID int64, userID int64, req setProjectMemberRequest) (*service.ProjectMember, bool, error) {
+	if req.Status == nil || req.IsOwner || len(req.Permissions) > 0 {
+		return nil, false, nil
+	}
+	if !adminContextHasPermission(ctx, service.AdminPermissionUsersManage) {
+		return nil, false, nil
+	}
 	members, err := h.projectService.ListProjectMembers(ctx, projectID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	for _, member := range members {
-		if member.UserID == userID {
-			return true, nil
+		if member.UserID != userID {
+			continue
+		}
+		if member.IsOwner || member.Role != service.ProjectRoleUser || req.Role != service.ProjectRoleUser {
+			return nil, false, nil
+		}
+		updated, err := h.projectService.SetProjectMember(ctx, projectID, service.ProjectMemberInput{
+			UserID: userID,
+			Role:   service.ProjectRoleUser,
+			Status: req.Status,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		return updated, true, nil
+	}
+	return nil, false, nil
+}
+
+func adminContextHasPermission(ctx context.Context, permission string) bool {
+	permissions, ok := service.AdminPermissionsFromContext(ctx)
+	if !ok {
+		return false
+	}
+	for _, item := range permissions {
+		if item == permission {
+			return true
 		}
 	}
-	if err := h.projectService.ValidateProjectProfileBindingScope(ctx, projectID, service.ProjectProfileBindingInput{
-		UserIDs: []int64{userID},
-	}); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false
 }
 
 func parseProfileIDParam(c *gin.Context) (int64, bool) {

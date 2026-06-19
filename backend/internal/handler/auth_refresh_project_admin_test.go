@@ -203,6 +203,10 @@ func (r *authRefreshProjectRepoStub) ActivateProjectProfile(context.Context, int
 	panic("unexpected ActivateProjectProfile call")
 }
 
+func (r *authRefreshProjectRepoStub) ActivateProjectUnrestrictedScope(context.Context, int64) (*service.ProjectProfile, error) {
+	panic("unexpected ActivateProjectUnrestrictedScope call")
+}
+
 func (r *authRefreshProjectRepoStub) GetProjectProfileBindings(context.Context, int64, int64) (*service.ProjectProfileBindings, error) {
 	panic("unexpected GetProjectProfileBindings call")
 }

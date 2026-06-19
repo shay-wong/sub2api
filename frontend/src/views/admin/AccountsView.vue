@@ -446,7 +446,7 @@
       <div class="space-y-3">
         <div>
           <label class="input-label">{{ t('admin.accounts.dataFormat') }}</label>
-          <select v-model="exportDataFormat" class="input-field">
+          <select v-model="exportDataFormat" class="input">
             <option value="sub2api">{{ t('admin.accounts.dataFormatSub2API') }}</option>
             <option value="cpa">{{ t('admin.accounts.dataFormatCPA') }}</option>
           </select>

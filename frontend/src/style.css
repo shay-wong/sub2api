@@ -170,6 +170,28 @@
     @apply disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-dark-900;
   }
 
+  select.input,
+  .select-native {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 1rem center;
+    background-repeat: no-repeat;
+    background-size: 1rem 1rem;
+    padding-right: 2.75rem;
+  }
+
+  select.input.text-xs,
+  .select-native-compact {
+    background-position: right 0.5rem center;
+    background-size: 0.875rem 0.875rem;
+    padding-right: 1.75rem;
+  }
+
+  .dark select.input,
+  .dark .select-native {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23d1d5db' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
   .input-error {
     @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
   }

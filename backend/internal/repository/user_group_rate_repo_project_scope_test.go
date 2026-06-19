@@ -32,8 +32,9 @@ func TestUserGroupRateRepository_GetByGroupIDUsesProjectProfileUserScope(t *test
 	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 	require.Contains(t, normalized, "ppb.resource_type = 'group'")
 	require.Contains(t, normalized, "ppb.resource_id = ugr.group_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'user'")
-	require.Contains(t, normalized, "ppb.resource_id = ugr.user_id")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.user_id = ugr.user_id")
+	require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -58,8 +59,9 @@ func TestUserGroupRateRepository_GetByUserIDUsesProjectProfileGroupAndUserScope(
 	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 	require.Contains(t, normalized, "ppb.resource_type = 'group'")
 	require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.group_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'user'")
-	require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.user_id = user_group_rate_multipliers.user_id")
+	require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -83,8 +85,9 @@ func TestUserGroupRateRepository_GetByUserIDsUsesProjectProfileGroupAndUserScope
 	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 	require.Contains(t, normalized, "ppb.resource_type = 'group'")
 	require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.group_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'user'")
-	require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.user_id = user_group_rate_multipliers.user_id")
+	require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -104,14 +107,15 @@ func TestUserGroupRateRepository_SyncGroupRateMultipliersScopesProjectUserCleanu
 		require.Contains(t, normalized, "FROM project_profiles pp")
 		require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 		require.Contains(t, normalized, "ppb.resource_type = 'group'")
-		require.Contains(t, normalized, "ppb.resource_type = 'user'")
+		require.Contains(t, normalized, "FROM project_members pm")
+		require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	}
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "ppb.resource_id = user_group_rate_multipliers.group_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "ppb.resource_id = user_group_rate_multipliers.group_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "ppb.resource_id = $1::bigint")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "ppb.resource_id = user_group_rate_multipliers.user_id")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "ppb.resource_id = user_group_rate_multipliers.user_id")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "ppb.resource_id = data.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "pm.user_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "pm.user_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "pm.user_id = data.user_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "user_id <> ALL($2)")
 }
 
@@ -132,14 +136,15 @@ func TestUserGroupRateRepository_SyncGroupRPMOverridesScopesProjectUserCleanup(t
 		require.Contains(t, normalized, "FROM project_profiles pp")
 		require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 		require.Contains(t, normalized, "ppb.resource_type = 'group'")
-		require.Contains(t, normalized, "ppb.resource_type = 'user'")
+		require.Contains(t, normalized, "FROM project_members pm")
+		require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	}
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "ppb.resource_id = user_group_rate_multipliers.group_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "ppb.resource_id = user_group_rate_multipliers.group_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "ppb.resource_id = $1::bigint")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "ppb.resource_id = user_group_rate_multipliers.user_id")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "ppb.resource_id = user_group_rate_multipliers.user_id")
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "ppb.resource_id = data.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "pm.user_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[1]), "pm.user_id = user_group_rate_multipliers.user_id")
+	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[2]), "pm.user_id = data.user_id")
 	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "user_id <> ALL($2)")
 }
 
@@ -158,7 +163,8 @@ func TestUserGroupRateRepository_ClearGroupRPMOverridesScopesProjectUsers(t *tes
 		require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
 		require.Contains(t, normalized, "ppb.resource_type = 'group'")
 		require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.group_id")
-		require.Contains(t, normalized, "ppb.resource_type = 'user'")
-		require.Contains(t, normalized, "ppb.resource_id = user_group_rate_multipliers.user_id")
+		require.Contains(t, normalized, "FROM project_members pm")
+		require.Contains(t, normalized, "pm.user_id = user_group_rate_multipliers.user_id")
+		require.NotContains(t, normalized, "ppb.resource_type = 'user'")
 	}
 }

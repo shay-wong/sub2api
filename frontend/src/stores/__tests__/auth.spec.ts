@@ -41,7 +41,7 @@ const fakeAdminUser = {
   username: 'admin',
   email: 'admin@example.com',
   role: 'admin' as const,
-  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true }],
+  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true, permissions: ['admin.dashboard.read', 'admin.users.manage'] }],
 }
 
 const fakeSuperAdminUser = {
@@ -355,7 +355,25 @@ describe('useAuthStore', () => {
 
       expect(store.isAdmin).toBe(false)
       expect(store.canAccessAdminConsole).toBe(true)
+      expect(store.hasAdminPermission('admin.dashboard.read')).toBe(true)
+      expect(store.hasAdminPermission('admin.accounts.write')).toBe(false)
       expect(localStorage.getItem('sub2api_selected_project_id')).toBe('10')
+    })
+
+    it('旧项目管理员没有 permissions 字段时使用默认后台权限', async () => {
+      const adminResponse = {
+        ...fakeAuthResponse,
+        user: {
+          ...fakeAdminUser,
+          projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true }],
+        },
+      }
+      mockLogin.mockResolvedValue(adminResponse)
+      const store = useAuthStore()
+
+      await store.login({ email: 'admin@example.com', password: '123456' })
+
+      expect(store.hasAdminPermission('admin.accounts.write')).toBe(true)
     })
 
     it('普通用户返回 false', async () => {

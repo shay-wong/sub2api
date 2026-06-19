@@ -9,13 +9,17 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  authState
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  authState: {
+    isAdmin: false
+  }
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -43,6 +47,10 @@ vi.mock('@/stores/app', () => ({
     showError: vi.fn(),
     showSuccess: vi.fn()
   })
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -83,11 +91,46 @@ const DataTableStub = {
       <div data-test="columns">{{ columns.map(col => col.key).join(',') }}</div>
       <button data-test="sort-last-used" @click="$emit('sort', 'last_used_at', 'desc')">sort</button>
       <div v-for="row in data" :key="row.id">
+        <div :data-test="'role-' + row.id">
+          <slot name="cell-role" :value="row.role" :row="row" />
+        </div>
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <div :data-test="'actions-' + row.id">
+          <slot name="cell-actions" :row="row" />
+        </div>
       </div>
     </div>
   `
 }
+
+const mountUsersView = () => mount(UsersView, {
+  global: {
+    stubs: {
+      AppLayout: { template: '<div><slot /></div>' },
+      TablePageLayout: {
+        template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+      },
+      DataTable: DataTableStub,
+      Pagination: true,
+      ConfirmDialog: true,
+      EmptyState: true,
+      GroupBadge: true,
+      Select: true,
+      UserAttributesConfigModal: true,
+      UserConcurrencyCell: true,
+      UserCreateModal: true,
+      UserEditModal: true,
+      UserPlatformQuotaModal: true,
+      UserApiKeysModal: true,
+      UserAllowedGroupsModal: true,
+      UserBalanceModal: true,
+      UserBalanceHistoryModal: true,
+      GroupReplaceModal: true,
+      Icon: true,
+      Teleport: true
+    }
+  }
+})
 
 describe('admin UsersView', () => {
   beforeEach(() => {
@@ -98,6 +141,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    authState.isAdmin = false
 
     listUsers.mockResolvedValue({
       items: [createAdminUser()],
@@ -113,33 +157,7 @@ describe('admin UsersView', () => {
   })
 
   it('shows active, used, and created activity columns in order and requests last_used_at sort', async () => {
-    const wrapper = mount(UsersView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: {
-            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
-          },
-          DataTable: DataTableStub,
-          Pagination: true,
-          ConfirmDialog: true,
-          EmptyState: true,
-          GroupBadge: true,
-          Select: true,
-          UserAttributesConfigModal: true,
-          UserConcurrencyCell: true,
-          UserCreateModal: true,
-          UserEditModal: true,
-          UserApiKeysModal: true,
-          UserAllowedGroupsModal: true,
-          UserBalanceModal: true,
-          UserBalanceHistoryModal: true,
-          GroupReplaceModal: true,
-          Icon: true,
-          Teleport: true
-        }
-      }
-    })
+    const wrapper = mountUsersView()
 
     await flushPromises()
 
@@ -160,5 +178,24 @@ describe('admin UsersView', () => {
       }),
       expect.any(Object)
     )
+  })
+
+  it('shows project admins as admins and hides operation buttons from project admin viewers', async () => {
+    listUsers.mockResolvedValue({
+      items: [{ ...createAdminUser(), project_role: 'admin' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="role-42"]').text()).toContain('admin.users.roles.admin')
+    const actions = wrapper.get('[data-test="actions-42"]').text()
+    expect(actions).not.toContain('common.edit')
+    expect(actions).not.toContain('admin.users.disable')
+    expect(actions).not.toContain('common.more')
   })
 })

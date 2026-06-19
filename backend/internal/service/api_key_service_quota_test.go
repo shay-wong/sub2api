@@ -98,6 +98,9 @@ func (s *quotaBaseAPIKeyRepoStub) GetByKeyForAuth(context.Context, string) (*API
 func (s *quotaBaseAPIKeyRepoStub) Update(context.Context, *APIKey) error {
 	panic("unexpected Update call")
 }
+func (s *quotaBaseAPIKeyRepoStub) UpdateProjectID(context.Context, int64, int64) error {
+	panic("unexpected UpdateProjectID call")
+}
 func (s *quotaBaseAPIKeyRepoStub) Delete(context.Context, int64) error {
 	panic("unexpected Delete call")
 }

@@ -16,7 +16,11 @@ describe('AppHeader project switcher visibility', () => {
 
   it('keeps the project switcher visible on mobile layouts', () => {
     expect(componentSource).toContain('v-if="showProjectSwitcher"')
-    expect(componentSource).toContain('class="flex min-w-0 max-w-36')
+    expect(componentSource).toContain('class="flex h-10 w-auto min-w-0 max-w-48')
+    expect(componentSource).toContain('max-w-[min(28rem,calc(100vw-2rem))]')
+    expect(componentSource).toContain('role="listbox"')
+    expect(componentSource).toContain('aria-haspopup="listbox"')
     expect(componentSource).not.toContain('class="hidden items-center gap-2 rounded-lg border border-primary-200')
+    expect(componentSource).not.toContain('select-native select-native-compact')
   })
 })

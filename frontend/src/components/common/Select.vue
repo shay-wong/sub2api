@@ -455,8 +455,8 @@ onUnmounted(() => {
 
 <style scoped>
 .select-trigger {
-  @apply flex w-full items-center justify-between gap-2;
-  @apply rounded-xl px-4 py-2.5 text-sm;
+  @apply flex w-full items-center justify-between gap-2.5;
+  @apply rounded-lg px-3 py-2.5 text-sm;
   @apply bg-white dark:bg-dark-800;
   @apply border border-gray-200 dark:border-dark-600;
   @apply text-gray-900 dark:text-gray-100;
@@ -483,7 +483,7 @@ onUnmounted(() => {
 }
 
 .select-icon {
-  @apply flex-shrink-0 text-gray-400 dark:text-dark-400;
+  @apply flex h-5 w-5 flex-shrink-0 items-center justify-center text-gray-400 dark:text-dark-400;
 }
 
 .select-clear {

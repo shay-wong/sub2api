@@ -29,7 +29,7 @@ func TestProjectServiceCreateProjectNormalizesInputAndAssignsOwner(t *testing.T)
 	require.Equal(t, ProjectProfileModeRestricted, repo.created.ProfileMode)
 }
 
-func TestProjectServiceCreateProjectAcceptsUnrestrictedProfileMode(t *testing.T) {
+func TestProjectServiceCreateProjectKeepsDefaultProfileBindingsWhenScopeIsUnrestricted(t *testing.T) {
 	repo := &projectServiceRepoStub{}
 	svc := NewProjectService(repo)
 
@@ -39,15 +39,19 @@ func TestProjectServiceCreateProjectAcceptsUnrestrictedProfileMode(t *testing.T)
 		OwnerUserID: 42,
 		ProfileMode: " unrestricted ",
 		Bindings: ProjectProfileBindingInput{
-			UserIDs: []int64{1, 2},
+			GroupIDs:        []int64{7, 6, 7},
+			AccountIDs:      []int64{5},
+			SubscriptionIDs: []int64{9},
 		},
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, int64(10), project.ID)
 	require.Equal(t, ProjectProfileModeUnrestricted, repo.created.ProfileMode)
-	require.Empty(t, repo.created.Bindings.UserIDs)
-	require.False(t, repo.validateBindingResourcesCalled)
+	require.True(t, repo.validateBindingResourcesCalled)
+	require.Equal(t, []int64{6, 7}, repo.created.Bindings.GroupIDs)
+	require.Equal(t, []int64{5}, repo.created.Bindings.AccountIDs)
+	require.Equal(t, []int64{9}, repo.created.Bindings.SubscriptionIDs)
 }
 
 func TestProjectServiceCreateProjectValidatesRestrictedInitialBindings(t *testing.T) {
@@ -60,20 +64,18 @@ func TestProjectServiceCreateProjectValidatesRestrictedInitialBindings(t *testin
 		OwnerUserID: 42,
 		ProfileMode: ProjectProfileModeRestricted,
 		Bindings: ProjectProfileBindingInput{
-			UserIDs:    []int64{3, 1, 3, 0},
-			GroupIDs:   []int64{7, -1, 6},
-			AccountIDs: []int64{5, 5},
-			APIKeyIDs:  []int64{4, 2, 4},
+			GroupIDs:        []int64{7, -1, 6},
+			AccountIDs:      []int64{5, 5},
+			SubscriptionIDs: []int64{9, 8, 9},
 		},
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, project)
 	require.True(t, repo.validateBindingResourcesCalled)
-	require.Equal(t, []int64{1, 3}, repo.bindingInput.UserIDs)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
-	require.Equal(t, []int64{2, 4}, repo.bindingInput.APIKeyIDs)
+	require.Equal(t, []int64{8, 9}, repo.bindingInput.SubscriptionIDs)
 	require.Equal(t, repo.bindingInput, repo.created.Bindings)
 }
 
@@ -86,7 +88,7 @@ func TestProjectServiceCreateProjectRejectsInvalidInitialBindingsBeforeCreate(t 
 		Slug:        "demo",
 		OwnerUserID: 42,
 		Bindings: ProjectProfileBindingInput{
-			UserIDs: []int64{99},
+			GroupIDs: []int64{99},
 		},
 	})
 
@@ -141,13 +143,34 @@ func TestProjectServiceResolveAdminProjectDefaultsToFirstAdminMembership(t *test
 	}
 	svc := NewProjectService(repo)
 
-	projectID, role, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleUser}, 0)
+	projectID, role, permissions, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleUser}, 0)
 
 	require.NoError(t, err)
 	require.Equal(t, int64(20), projectID)
 	require.Equal(t, RoleAdmin, role)
+	require.Empty(t, permissions)
 	require.False(t, repo.defaultProjectCalled)
 	require.Equal(t, []int64{7}, repo.listUserProjectsCalls)
+}
+
+func TestProjectServiceResolveAdminProjectReturnsProjectPermissions(t *testing.T) {
+	repo := &projectServiceRepoStub{
+		userProjects: []ProjectSummary{
+			{
+				ID:          20,
+				Role:        ProjectRoleAdmin,
+				Permissions: []string{AdminPermissionDashboardRead, AdminPermissionUsersManage},
+			},
+		},
+	}
+	svc := NewProjectService(repo)
+
+	projectID, role, permissions, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleUser}, 20)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(20), projectID)
+	require.Equal(t, RoleAdmin, role)
+	require.ElementsMatch(t, []string{AdminPermissionDashboardRead, AdminPermissionUsersManage}, permissions)
 }
 
 func TestProjectServiceResolveAdminProjectRejectsUsersWithoutAdminMembership(t *testing.T) {
@@ -159,10 +182,11 @@ func TestProjectServiceResolveAdminProjectRejectsUsersWithoutAdminMembership(t *
 	}
 	svc := NewProjectService(repo)
 
-	projectID, role, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleUser}, 0)
+	projectID, role, permissions, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleUser}, 0)
 
 	require.Zero(t, projectID)
 	require.Empty(t, role)
+	require.Nil(t, permissions)
 	require.ErrorIs(t, err, ErrProjectAccessForbidden)
 	require.False(t, repo.defaultProjectCalled)
 }
@@ -176,10 +200,11 @@ func TestProjectServiceResolveAdminProjectRejectsLegacyOperatorRole(t *testing.T
 	}
 	svc := NewProjectService(repo)
 
-	projectID, role, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleOperator}, 10)
+	projectID, role, permissions, err := svc.ResolveAdminProject(context.Background(), &User{ID: 7, Role: RoleOperator}, 10)
 
 	require.Zero(t, projectID)
 	require.Empty(t, role)
+	require.Nil(t, permissions)
 	require.ErrorIs(t, err, ErrLegacyOperatorRoleDisabled)
 	require.False(t, repo.defaultProjectCalled)
 }
@@ -199,6 +224,62 @@ func TestProjectServiceSetProjectMemberAllowsProjectAdmin(t *testing.T) {
 	require.True(t, repo.setMemberCalled)
 	require.Equal(t, ProjectRoleAdmin, repo.memberInput.Role)
 	require.True(t, repo.memberInput.IsOwner)
+	require.ElementsMatch(t, DefaultProjectAdminPermissions(), repo.memberInput.Permissions)
+}
+
+func TestProjectServiceSetProjectMemberPromotesOwnerToAdmin(t *testing.T) {
+	repo := &projectServiceRepoStub{projectExists: true}
+	svc := NewProjectService(repo)
+
+	member, err := svc.SetProjectMember(context.Background(), 10, ProjectMemberInput{
+		UserID:  20,
+		Role:    ProjectRoleUser,
+		IsOwner: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, member)
+	require.True(t, repo.setMemberCalled)
+	require.Equal(t, ProjectRoleAdmin, repo.memberInput.Role)
+	require.True(t, repo.memberInput.IsOwner)
+	require.ElementsMatch(t, DefaultProjectAdminPermissions(), repo.memberInput.Permissions)
+	require.NotNil(t, repo.memberInput.Status)
+	require.Equal(t, StatusActive, *repo.memberInput.Status)
+}
+
+func TestProjectServiceSetProjectMemberNormalizesAdminPermissions(t *testing.T) {
+	repo := &projectServiceRepoStub{projectExists: true}
+	svc := NewProjectService(repo)
+
+	member, err := svc.SetProjectMember(context.Background(), 10, ProjectMemberInput{
+		UserID: 20,
+		Role:   ProjectRoleAdmin,
+		Permissions: []string{
+			AdminPermissionUsersManage,
+			"unknown",
+			AdminPermissionDashboardRead,
+			AdminPermissionUsersManage,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, member)
+	require.Equal(t, []string{AdminPermissionDashboardRead, AdminPermissionUsersManage}, repo.memberInput.Permissions)
+}
+
+func TestProjectServiceSetProjectMemberStoresExplicitEmptyAdminPermissions(t *testing.T) {
+	repo := &projectServiceRepoStub{projectExists: true}
+	svc := NewProjectService(repo)
+
+	member, err := svc.SetProjectMember(context.Background(), 10, ProjectMemberInput{
+		UserID:      20,
+		Role:        ProjectRoleAdmin,
+		Permissions: []string{},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, member)
+	require.Equal(t, []string{"__none__"}, repo.memberInput.Permissions)
 }
 
 func TestProjectServiceCreateProjectProfileDefaultsRestrictedMode(t *testing.T) {
@@ -212,47 +293,44 @@ func TestProjectServiceCreateProjectProfileDefaultsRestrictedMode(t *testing.T) 
 	require.NotNil(t, profile)
 	require.True(t, repo.createProfileCalled)
 	require.Equal(t, "Production", *repo.profileInput.Name)
-	require.NotNil(t, repo.profileInput.Mode)
-	require.Equal(t, ProjectProfileModeRestricted, *repo.profileInput.Mode)
 }
 
-func TestProjectServiceUpdateProjectProfileAcceptsUnrestrictedMode(t *testing.T) {
+func TestProjectServiceUpdateProjectProfileRejectsEmptyPatch(t *testing.T) {
 	repo := &projectServiceRepoStub{projectExists: true}
 	svc := NewProjectService(repo)
-	mode := ProjectProfileModeUnrestricted
 
-	profile, err := svc.UpdateProjectProfile(context.Background(), 10, 20, ProjectProfileInput{Mode: &mode})
+	profile, err := svc.UpdateProjectProfile(context.Background(), 10, 20, ProjectProfileInput{})
 
-	require.NoError(t, err)
-	require.NotNil(t, profile)
-	require.True(t, repo.updateProfileCalled)
-	require.NotNil(t, repo.profileInput.Mode)
-	require.Equal(t, ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
+	require.ErrorIs(t, err, ErrProjectInvalidInput)
+	require.Nil(t, profile)
+	require.False(t, repo.updateProfileCalled)
 }
 
 func TestProjectServiceSetProjectProfileBindingsNormalizesResourceIDs(t *testing.T) {
-	repo := &projectServiceRepoStub{projectExists: true}
+	repo := &projectServiceRepoStub{
+		projectExists: true,
+		profiles:      []ProjectProfile{{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted}},
+	}
 	svc := NewProjectService(repo)
 
 	bindings, err := svc.SetProjectProfileBindings(context.Background(), 10, 20, ProjectProfileBindingInput{
-		UserIDs:         []int64{3, 1, 3, 0},
 		GroupIDs:        []int64{7, -1, 6},
 		AccountIDs:      []int64{5, 5},
 		SubscriptionIDs: []int64{9, 8, 9},
-		APIKeyIDs:       []int64{4, 2, 4},
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, bindings)
-	require.Equal(t, []int64{1, 3}, repo.bindingInput.UserIDs)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
 	require.Equal(t, []int64{8, 9}, repo.bindingInput.SubscriptionIDs)
-	require.Equal(t, []int64{2, 4}, repo.bindingInput.APIKeyIDs)
 }
 
 func TestProjectServiceGetProjectProfileBindingsReturnsEmptySlices(t *testing.T) {
-	repo := &projectServiceRepoStub{projectExists: true}
+	repo := &projectServiceRepoStub{
+		projectExists: true,
+		profiles:      []ProjectProfile{{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted}},
+	}
 	svc := NewProjectService(repo)
 
 	bindings, err := svc.GetProjectProfileBindings(context.Background(), 10, 20)
@@ -260,20 +338,19 @@ func TestProjectServiceGetProjectProfileBindingsReturnsEmptySlices(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, bindings)
 	require.Equal(t, int64(20), bindings.ProfileID)
-	require.NotNil(t, bindings.UserIDs)
-	require.Empty(t, bindings.UserIDs)
 	require.NotNil(t, bindings.GroupIDs)
 	require.Empty(t, bindings.GroupIDs)
 	require.NotNil(t, bindings.AccountIDs)
 	require.Empty(t, bindings.AccountIDs)
 	require.NotNil(t, bindings.SubscriptionIDs)
 	require.Empty(t, bindings.SubscriptionIDs)
-	require.NotNil(t, bindings.APIKeyIDs)
-	require.Empty(t, bindings.APIKeyIDs)
 }
 
 func TestProjectServiceSetProjectProfileBindingsReturnsEmptySlices(t *testing.T) {
-	repo := &projectServiceRepoStub{projectExists: true}
+	repo := &projectServiceRepoStub{
+		projectExists: true,
+		profiles:      []ProjectProfile{{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted}},
+	}
 	svc := NewProjectService(repo)
 
 	bindings, err := svc.SetProjectProfileBindings(context.Background(), 10, 20, ProjectProfileBindingInput{})
@@ -281,75 +358,44 @@ func TestProjectServiceSetProjectProfileBindingsReturnsEmptySlices(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, bindings)
 	require.Equal(t, int64(20), bindings.ProfileID)
-	require.NotNil(t, bindings.UserIDs)
-	require.Empty(t, bindings.UserIDs)
 	require.NotNil(t, bindings.GroupIDs)
 	require.Empty(t, bindings.GroupIDs)
 	require.NotNil(t, bindings.AccountIDs)
 	require.Empty(t, bindings.AccountIDs)
 	require.NotNil(t, bindings.SubscriptionIDs)
 	require.Empty(t, bindings.SubscriptionIDs)
-	require.NotNil(t, bindings.APIKeyIDs)
-	require.Empty(t, bindings.APIKeyIDs)
 }
 
 func TestProjectServiceSetProjectProfileBindingsInvalidatesAuthCache(t *testing.T) {
 	repo := &projectServiceRepoStub{
 		projectExists: true,
+		profiles:      []ProjectProfile{{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted}},
 		existingBindings: &ProjectProfileBindings{
 			ProfileID: 20,
-			UserIDs:   []int64{3, 9},
 			GroupIDs:  []int64{7, 10},
-			APIKeyIDs: []int64{4, 11},
 		},
 	}
 	invalidator := &projectAuthCacheInvalidatorStub{}
 	svc := NewProjectService(repo, invalidator)
 
 	_, err := svc.SetProjectProfileBindings(context.Background(), 10, 20, ProjectProfileBindingInput{
-		UserIDs:   []int64{3, 1, 3},
-		GroupIDs:  []int64{7, 6},
-		APIKeyIDs: []int64{4, 2, 4},
+		GroupIDs: []int64{7, 6},
 	})
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{1, 3, 9}, invalidator.userIDs)
 	require.ElementsMatch(t, []int64{6, 7, 10}, invalidator.groupIDs)
-	require.ElementsMatch(t, []int64{2, 4, 11}, invalidator.apiKeyIDs)
-}
-
-func TestProjectServiceUpdateProjectProfileModeInvalidatesExistingBindings(t *testing.T) {
-	mode := ProjectProfileModeUnrestricted
-	repo := &projectServiceRepoStub{
-		projectExists: true,
-		existingBindings: &ProjectProfileBindings{
-			ProfileID: 20,
-			UserIDs:   []int64{1},
-			GroupIDs:  []int64{6},
-			APIKeyIDs: []int64{2},
-		},
-	}
-	invalidator := &projectAuthCacheInvalidatorStub{}
-	svc := NewProjectService(repo, invalidator)
-
-	_, err := svc.UpdateProjectProfile(context.Background(), 10, 20, ProjectProfileInput{Mode: &mode})
-
-	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{1}, invalidator.userIDs)
-	require.ElementsMatch(t, []int64{6}, invalidator.groupIDs)
-	require.ElementsMatch(t, []int64{2}, invalidator.apiKeyIDs)
 }
 
 func TestProjectServiceActivateProjectProfileInvalidatesPreviousAndNextBindings(t *testing.T) {
 	repo := &projectServiceRepoStub{
 		projectExists: true,
 		profiles: []ProjectProfile{
-			{ID: 20, ProjectID: 10, IsActive: true},
-			{ID: 30, ProjectID: 10, IsActive: false},
+			{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted, IsActive: true},
+			{ID: 30, ProjectID: 10, Mode: ProjectProfileModeRestricted, IsActive: false},
 		},
 		bindingsByProfileID: map[int64]*ProjectProfileBindings{
-			20: {ProfileID: 20, UserIDs: []int64{1}, GroupIDs: []int64{6}, APIKeyIDs: []int64{2}},
-			30: {ProfileID: 30, UserIDs: []int64{3}, GroupIDs: []int64{7}, APIKeyIDs: []int64{4}},
+			20: {ProfileID: 20, GroupIDs: []int64{6}},
+			30: {ProfileID: 30, GroupIDs: []int64{7}},
 		},
 	}
 	invalidator := &projectAuthCacheInvalidatorStub{}
@@ -358,9 +404,47 @@ func TestProjectServiceActivateProjectProfileInvalidatesPreviousAndNextBindings(
 	_, err := svc.ActivateProjectProfile(context.Background(), 10, 30)
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{1, 3}, invalidator.userIDs)
 	require.ElementsMatch(t, []int64{6, 7}, invalidator.groupIDs)
-	require.ElementsMatch(t, []int64{2, 4}, invalidator.apiKeyIDs)
+}
+
+func TestProjectServiceActivateProjectUnrestrictedScopeInvalidatesActiveBindings(t *testing.T) {
+	repo := &projectServiceRepoStub{
+		projectExists: true,
+		profiles: []ProjectProfile{
+			{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted, IsActive: true},
+		},
+		bindingsByProfileID: map[int64]*ProjectProfileBindings{
+			20: {ProfileID: 20, GroupIDs: []int64{6}},
+		},
+	}
+	invalidator := &projectAuthCacheInvalidatorStub{}
+	svc := NewProjectService(repo, invalidator)
+
+	profile, err := svc.ActivateProjectUnrestrictedScope(context.Background(), 10)
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.True(t, repo.activateUnrestrictedCalled)
+	require.ElementsMatch(t, []int64{6}, invalidator.groupIDs)
+}
+
+func TestProjectServiceActivateProjectUnrestrictedScopeSkipsInternalScopeBindings(t *testing.T) {
+	repo := &projectServiceRepoStub{
+		projectExists: true,
+		profiles: []ProjectProfile{
+			{ID: 99, ProjectID: 10, Mode: ProjectProfileModeUnrestricted, IsActive: true},
+			{ID: 20, ProjectID: 10, Mode: ProjectProfileModeRestricted, IsActive: false},
+		},
+	}
+	invalidator := &projectAuthCacheInvalidatorStub{}
+	svc := NewProjectService(repo, invalidator)
+
+	profile, err := svc.ActivateProjectUnrestrictedScope(context.Background(), 10)
+
+	require.NoError(t, err)
+	require.NotNil(t, profile)
+	require.True(t, repo.activateUnrestrictedCalled)
+	require.Empty(t, invalidator.groupIDs)
 }
 
 func TestProjectServiceValidateProjectProfileBindingScopeNormalizesResourceIDs(t *testing.T) {
@@ -368,18 +452,14 @@ func TestProjectServiceValidateProjectProfileBindingScopeNormalizesResourceIDs(t
 	svc := NewProjectService(repo)
 
 	err := svc.ValidateProjectProfileBindingScope(context.Background(), 10, ProjectProfileBindingInput{
-		UserIDs:    []int64{3, 1, 3, 0},
 		GroupIDs:   []int64{7, -1, 6},
 		AccountIDs: []int64{5, 5},
-		APIKeyIDs:  []int64{4, 2, 4},
 	})
 
 	require.NoError(t, err)
 	require.True(t, repo.validateBindingScopeCalled)
-	require.Equal(t, []int64{1, 3}, repo.bindingInput.UserIDs)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
-	require.Equal(t, []int64{2, 4}, repo.bindingInput.APIKeyIDs)
 }
 
 type projectServiceRepoStub struct {
@@ -393,6 +473,7 @@ type projectServiceRepoStub struct {
 	memberInput                    ProjectMemberInput
 	createProfileCalled            bool
 	updateProfileCalled            bool
+	activateUnrestrictedCalled     bool
 	validateBindingScopeCalled     bool
 	validateBindingResourcesCalled bool
 	validateBindingResourcesErr    error
@@ -466,17 +547,13 @@ func (r *projectServiceRepoStub) ListProjectProfiles(context.Context, int64) ([]
 func (r *projectServiceRepoStub) CreateProjectProfile(_ context.Context, projectID int64, input ProjectProfileInput) (*ProjectProfile, error) {
 	r.createProfileCalled = true
 	r.profileInput = input
-	return &ProjectProfile{ID: 20, ProjectID: projectID, Name: *input.Name, Mode: *input.Mode}, nil
+	return &ProjectProfile{ID: 20, ProjectID: projectID, Name: *input.Name, Mode: ProjectProfileModeRestricted}, nil
 }
 
 func (r *projectServiceRepoStub) UpdateProjectProfile(_ context.Context, projectID int64, profileID int64, input ProjectProfileInput) (*ProjectProfile, error) {
 	r.updateProfileCalled = true
 	r.profileInput = input
-	mode := ProjectProfileModeRestricted
-	if input.Mode != nil {
-		mode = *input.Mode
-	}
-	return &ProjectProfile{ID: profileID, ProjectID: projectID, Name: "profile", Mode: mode}, nil
+	return &ProjectProfile{ID: profileID, ProjectID: projectID, Name: "profile", Mode: ProjectProfileModeRestricted}, nil
 }
 
 func (r *projectServiceRepoStub) DeleteProjectProfile(context.Context, int64, int64) error {
@@ -485,6 +562,11 @@ func (r *projectServiceRepoStub) DeleteProjectProfile(context.Context, int64, in
 
 func (r *projectServiceRepoStub) ActivateProjectProfile(_ context.Context, projectID int64, profileID int64) (*ProjectProfile, error) {
 	return &ProjectProfile{ID: profileID, ProjectID: projectID, Name: "profile", Mode: ProjectProfileModeRestricted, IsActive: true}, nil
+}
+
+func (r *projectServiceRepoStub) ActivateProjectUnrestrictedScope(_ context.Context, projectID int64) (*ProjectProfile, error) {
+	r.activateUnrestrictedCalled = true
+	return &ProjectProfile{ID: 99, ProjectID: projectID, Name: "Unrestricted", Mode: ProjectProfileModeUnrestricted, IsActive: true}, nil
 }
 
 func (r *projectServiceRepoStub) GetProjectProfileBindings(_ context.Context, _ int64, profileID int64) (*ProjectProfileBindings, error) {
@@ -503,11 +585,9 @@ func (r *projectServiceRepoStub) SetProjectProfileBindings(_ context.Context, _ 
 	r.bindingInput = input
 	return &ProjectProfileBindings{
 		ProfileID:       profileID,
-		UserIDs:         input.UserIDs,
 		GroupIDs:        input.GroupIDs,
 		AccountIDs:      input.AccountIDs,
 		SubscriptionIDs: input.SubscriptionIDs,
-		APIKeyIDs:       input.APIKeyIDs,
 	}, nil
 }
 
@@ -556,10 +636,8 @@ func cloneTestProjectProfileBindings(value *ProjectProfileBindings) *ProjectProf
 	}
 	return &ProjectProfileBindings{
 		ProfileID:       value.ProfileID,
-		UserIDs:         append([]int64(nil), value.UserIDs...),
 		GroupIDs:        append([]int64(nil), value.GroupIDs...),
 		AccountIDs:      append([]int64(nil), value.AccountIDs...),
 		SubscriptionIDs: append([]int64(nil), value.SubscriptionIDs...),
-		APIKeyIDs:       append([]int64(nil), value.APIKeyIDs...),
 	}
 }

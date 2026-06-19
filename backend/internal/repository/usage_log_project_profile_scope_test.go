@@ -93,7 +93,7 @@ func createUsageLogProfileScopeFixture(t *testing.T, ctx context.Context, client
 	require.NoError(t, err)
 
 	boundKey, err := client.APIKey.Create().
-		SetProjectID(otherProject.ID).
+		SetProjectID(project.ID).
 		SetUserID(boundUser.ID).
 		SetKey("sk-bound-profile").
 		SetName("bound-profile-key").
@@ -101,7 +101,7 @@ func createUsageLogProfileScopeFixture(t *testing.T, ctx context.Context, client
 		Save(ctx)
 	require.NoError(t, err)
 	otherKey, err := client.APIKey.Create().
-		SetProjectID(otherProject.ID).
+		SetProjectID(project.ID).
 		SetUserID(otherUser.ID).
 		SetKey("sk-other-profile").
 		SetName("other-profile-key").
@@ -133,6 +133,21 @@ func createUsageLogProfileScopeFixture(t *testing.T, ctx context.Context, client
 	require.NoError(t, err)
 
 	when := time.Now().UTC()
+	_, err = client.ProjectMember.Create().
+		SetProjectID(project.ID).
+		SetUserID(boundUser.ID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectMember.Create().
+		SetProjectID(project.ID).
+		SetUserID(otherUser.ID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
 	_, err = client.UsageLog.Create().
 		SetProjectID(project.ID).
 		SetUserID(boundUser.ID).
@@ -182,8 +197,8 @@ func createUsageLogProfileScopeFixture(t *testing.T, ctx context.Context, client
 	require.NoError(t, err)
 	_, err = client.ProjectProfileBinding.Create().
 		SetProjectProfileID(profile.ID).
-		SetResourceType(service.ProjectResourceTypeUser).
-		SetResourceID(boundUser.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(boundAccount.ID).
 		Save(ctx)
 	require.NoError(t, err)
 
@@ -198,7 +213,7 @@ func createUsageLogProfileScopeFixture(t *testing.T, ctx context.Context, client
 	}
 }
 
-func TestUsageLogProjectProfileRestrictedScopesByBoundUser(t *testing.T) {
+func TestUsageLogProjectProfileRestrictedScopesByConfiguredAccount(t *testing.T) {
 	repo, client := newUsageLogProfileScopeSQLite(t)
 	ctx := context.Background()
 	fixture := createUsageLogProfileScopeFixture(t, ctx, client)
@@ -210,6 +225,10 @@ func TestUsageLogProjectProfileRestrictedScopesByBoundUser(t *testing.T) {
 	count, err = repo.CountWithFilters(service.WithProjectID(ctx, fixture.ProjectID), usagestats.UsageLogFilters{UserID: fixture.BoundUserID})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), count)
+
+	count, err = repo.CountWithFilters(service.WithProjectID(ctx, fixture.ProjectID), usagestats.UsageLogFilters{UserID: fixture.OtherUserID})
+	require.NoError(t, err)
+	require.Zero(t, count)
 }
 
 func TestUsageLogProjectProfileUnrestrictedAllowsAllResources(t *testing.T) {
@@ -286,7 +305,7 @@ func TestUsageLogProjectProfileRestrictedAppliesToUserDashboard(t *testing.T) {
 
 	stats, err = repo.GetUserDashboardStats(projectCtx, fixture.OtherUserID)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), stats.TotalAPIKeys)
+	require.Equal(t, int64(1), stats.TotalAPIKeys)
 	require.Equal(t, int64(0), stats.TotalRequests)
 }
 
@@ -303,4 +322,18 @@ func TestUsageLogProjectProfileRestrictedAppliesToAPIKeyDashboard(t *testing.T) 
 	stats, err = repo.GetAPIKeyDashboardStats(projectCtx, fixture.OtherKeyID)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), stats.TotalRequests)
+}
+
+func TestUsageLogProjectProfileRestrictedAppliesToDashboardStats(t *testing.T) {
+	repo, client := newUsageLogProfileScopeSQLite(t)
+	ctx := context.Background()
+	fixture := createUsageLogProfileScopeFixture(t, ctx, client)
+
+	stats, err := repo.GetDashboardStats(service.WithProjectID(ctx, fixture.ProjectID))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), stats.TotalUsers)
+	require.Equal(t, int64(2), stats.TotalAPIKeys)
+	require.Equal(t, int64(1), stats.TotalAccounts)
+	require.Equal(t, int64(1), stats.NormalAccounts)
+	require.Equal(t, int64(1), stats.TotalRequests)
 }

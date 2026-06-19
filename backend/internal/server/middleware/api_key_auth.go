@@ -328,6 +328,14 @@ func resolveAPIKeyRequestProject(c *gin.Context, apiKeyService *service.APIKeySe
 	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
 	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
 	if err != nil {
+		if errors.Is(err, service.ErrProjectMemberDisabled) {
+			AbortWithError(c, 403, "PROJECT_MEMBER_DISABLED", "API Key 所属用户在当前项目空间已禁用")
+			return 0, false
+		}
+		if errors.Is(err, service.ErrProjectAPIKeyGroupUnavailable) {
+			AbortWithError(c, 403, "PROJECT_API_KEY_GROUP_UNAVAILABLE", "API Key 所属分组不在当前项目空间应用配置内")
+			return 0, false
+		}
 		if errors.Is(err, service.ErrAPIKeyNotFound) {
 			AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
 			return 0, false

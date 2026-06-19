@@ -7,6 +7,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, readonly } from 'vue'
 import { authAPI, isTotp2FARequired, type LoginResponse } from '@/api'
 import type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'
+import { defaultProjectAdminPermissions, type AdminPermission } from '@/constants/adminPermissions'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
@@ -98,6 +99,25 @@ export const useAuthStore = defineStore('auth', () => {
   const canAccessAdminConsole = computed(() => {
     return user.value?.role === 'super_admin' || user.value?.projects?.some(project => project.role === 'admin') === true
   })
+
+  const selectedProject = computed(() => {
+    const projects = user.value?.projects ?? []
+    if (projects.length === 0) return null
+    const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
+    return projects.find(project => String(project.id) === selectedProjectID) ?? projects.find(project => project.role === 'admin') ?? projects[0]
+  })
+
+  function hasAdminPermission(permission: AdminPermission | string): boolean {
+    if (user.value?.role === 'super_admin') {
+      return true
+    }
+    const project = selectedProject.value
+    if (!project || project.role !== 'admin') {
+      return false
+    }
+    const permissions = project.permissions ?? defaultProjectAdminPermissions
+    return permissions.includes(permission)
+  }
 
   const isSimpleMode = computed(() => runMode.value === 'simple')
   const hasPendingAuthSession = computed(() => pendingAuthSession.value !== null)
@@ -512,8 +532,10 @@ export const useAuthStore = defineStore('auth', () => {
     isAdmin,
     hasUserAccess,
     canAccessAdminConsole,
+    selectedProject,
     isSimpleMode,
     hasPendingAuthSession,
+    hasAdminPermission,
 
     // Actions
     login,

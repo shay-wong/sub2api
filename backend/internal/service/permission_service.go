@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -13,7 +14,21 @@ const (
 	AdminPermissionOpsRead       = "admin.ops.read"
 	AdminPermissionAccountsRead  = "admin.accounts.read"
 	AdminPermissionAccountsWrite = "admin.accounts.write"
+	AdminPermissionUsersManage   = "admin.users.manage"
+	AdminPermissionGroupsManage  = "admin.groups.manage"
+	AdminPermissionSubsManage    = "admin.subscriptions.manage"
 )
+
+const projectAdminPermissionNoneSentinel = "__none__"
+
+var defaultProjectAdminPermissions = []string{
+	AdminPermissionDashboardRead,
+	AdminPermissionOpsRead,
+	AdminPermissionUsersManage,
+	AdminPermissionGroupsManage,
+	AdminPermissionSubsManage,
+	AdminPermissionAccountsWrite,
+}
 
 var (
 	ErrPermissionUserNotFound       = infraerrors.NotFound("PERMISSION_USER_NOT_FOUND", "permission subject not found")
@@ -49,6 +64,77 @@ type OperatorPermissionSubject struct {
 type PermissionService struct {
 	repo     OperatorPermissionRepository
 	userRepo UserRepository
+}
+
+func DefaultProjectAdminPermissions() []string {
+	return append([]string(nil), defaultProjectAdminPermissions...)
+}
+
+func NormalizeProjectAdminPermissions(role string, permissions []string) []string {
+	if role != ProjectRoleAdmin {
+		return []string{}
+	}
+	allowed := map[string]struct{}{}
+	for _, permission := range defaultProjectAdminPermissions {
+		allowed[permission] = struct{}{}
+	}
+	out := make([]string, 0, len(defaultProjectAdminPermissions))
+	seen := map[string]struct{}{}
+	for _, raw := range permissions {
+		permission := strings.TrimSpace(raw)
+		if permission == "" || permission == projectAdminPermissionNoneSentinel {
+			continue
+		}
+		if _, ok := allowed[permission]; !ok {
+			continue
+		}
+		if _, ok := seen[permission]; ok {
+			continue
+		}
+		seen[permission] = struct{}{}
+		out = append(out, permission)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func ProjectAdminPermissionsForStorage(role string, permissions []string) []string {
+	normalized := NormalizeProjectAdminPermissions(role, permissions)
+	if role != ProjectRoleAdmin {
+		return []string{}
+	}
+	if permissions != nil && len(normalized) == 0 {
+		return []string{projectAdminPermissionNoneSentinel}
+	}
+	return normalized
+}
+
+func ProjectAdminPermissionsForDisplay(role string, stored []string) []string {
+	if role != ProjectRoleAdmin {
+		return []string{}
+	}
+	for _, permission := range stored {
+		if strings.TrimSpace(permission) == projectAdminPermissionNoneSentinel {
+			return []string{}
+		}
+	}
+	if len(stored) == 0 {
+		return DefaultProjectAdminPermissions()
+	}
+	return NormalizeProjectAdminPermissions(role, stored)
+}
+
+func ProjectAdminHasPermission(role string, stored []string, permission string) bool {
+	if RoleIsSuperAdmin(role) {
+		return true
+	}
+	permissions := ProjectAdminPermissionsForDisplay(role, stored)
+	for _, item := range permissions {
+		if item == permission {
+			return true
+		}
+	}
+	return false
 }
 
 func NewPermissionService(repo OperatorPermissionRepository, userRepo UserRepository, groupRepo GroupRepository) *PermissionService {

@@ -21,9 +21,22 @@ func RequireAdminOnly() gin.HandlerFunc {
 func RequireAdminPermission(permission string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := GetUserRoleFromContext(c)
-		if service.RoleIsAdmin(role) {
+		if service.RoleIsSuperAdmin(role) {
 			c.Next()
 			return
+		}
+		if role == service.RoleAdmin {
+			permissions, ok := service.AdminPermissionsFromContext(c.Request.Context())
+			if !ok {
+				AbortWithError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient admin permission")
+				return
+			}
+			for _, item := range permissions {
+				if item == permission {
+					c.Next()
+					return
+				}
+			}
 		}
 		AbortWithError(c, http.StatusForbidden, "FORBIDDEN", "Insufficient admin permission")
 	}

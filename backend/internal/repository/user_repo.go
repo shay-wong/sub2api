@@ -111,9 +111,6 @@ func (r *userRepository) Create(ctx context.Context, userIn *service.User) error
 		if err := ensureProjectMember(txCtx, sqlExec, projectID, created.ID, userIn.Role, false); err != nil {
 			return err
 		}
-		if err := bindResourceToActiveProjectProfile(txCtx, sqlExec, projectID, service.ProjectResourceTypeUser, created.ID); err != nil {
-			return err
-		}
 	} else {
 		if err := ensureDefaultProjectMember(txCtx, sqlExec, created.ID, userIn.Role); err != nil {
 			return err
@@ -567,6 +564,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		}
 	}
 
+	if err := r.loadProjectRoles(ctx, userIDs, userMap); err != nil {
+		return nil, nil, err
+	}
+
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
 }
 
@@ -961,6 +962,40 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 	}
 
 	return out, nil
+}
+
+func (r *userRepository) loadProjectRoles(ctx context.Context, userIDs []int64, users map[int64]*service.User) error {
+	projectID, ok := service.ProjectIDFromContext(ctx)
+	if !ok || r.sql == nil || len(userIDs) == 0 || len(users) == 0 {
+		return nil
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT user_id, role, status, COALESCE(scopes, '[]'::jsonb)
+		FROM project_members
+		WHERE project_id = $1
+		  AND user_id = ANY($2)
+	`, projectID, pq.Array(userIDs))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var userID int64
+		var role string
+		var status string
+		var scopes any
+		if err := rows.Scan(&userID, &role, &status, &scopes); err != nil {
+			return err
+		}
+		if user, ok := users[userID]; ok {
+			user.ProjectRole = role
+			user.ProjectMemberStatus = status
+			user.ProjectPermissions = service.ProjectAdminPermissionsForDisplay(role, decodeProjectMemberScopes(scopes))
+		}
+	}
+	return rows.Err()
 }
 
 // syncUserAllowedGroupsWithClient 在 ent client/事务内同步用户允许分组：

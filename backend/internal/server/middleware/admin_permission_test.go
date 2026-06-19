@@ -14,10 +14,11 @@ import (
 
 func TestRequireAdminPermissionRoleHierarchy(t *testing.T) {
 	tests := []struct {
-		name       string
-		role       string
-		permission string
-		wantStatus int
+		name        string
+		role        string
+		permission  string
+		permissions []string
+		wantStatus  int
 	}{
 		{
 			name:       "super_admin_allows_any_permission",
@@ -26,16 +27,24 @@ func TestRequireAdminPermissionRoleHierarchy(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:       "project_admin_allows_project_permission",
-			role:       service.RoleAdmin,
-			permission: service.AdminPermissionAccountsWrite,
-			wantStatus: http.StatusOK,
+			name:        "project_admin_allows_project_permission",
+			role:        service.RoleAdmin,
+			permission:  service.AdminPermissionAccountsWrite,
+			permissions: []string{service.AdminPermissionAccountsWrite},
+			wantStatus:  http.StatusOK,
 		},
 		{
-			name:       "project_admin_allowed_by_permission_middleware_global_scope_is_route_level",
+			name:        "project_admin_rejects_missing_permission",
+			role:        service.RoleAdmin,
+			permission:  service.AdminPermissionAccountsWrite,
+			permissions: []string{service.AdminPermissionDashboardRead},
+			wantStatus:  http.StatusForbidden,
+		},
+		{
+			name:       "project_admin_rejects_missing_permission_context",
 			role:       service.RoleAdmin,
 			permission: service.AdminPermissionAccountsWrite,
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "operator_rejects_accounts_write",
@@ -58,6 +67,9 @@ func TestRequireAdminPermissionRoleHierarchy(t *testing.T) {
 			r := gin.New()
 			r.Use(func(c *gin.Context) {
 				c.Set(string(ContextKeyUserRole), tc.role)
+				if tc.permissions != nil {
+					c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), tc.permissions))
+				}
 				c.Next()
 			})
 			r.Use(RequireAdminPermission(tc.permission))

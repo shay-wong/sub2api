@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAPIKeyRepository_IncrementQuotaUsedAndGetStateUsesProjectProfileScope(t *testing.T) {
+func TestAPIKeyRepository_IncrementQuotaUsedAndGetStateRequiresProjectAndMemberOwner(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -32,15 +32,46 @@ func TestAPIKeyRepository_IncrementQuotaUsedAndGetStateUsesProjectProfileScope(t
 	require.Equal(t, "sk-profile", state.Key)
 	require.Equal(t, service.StatusActive, state.Status)
 	normalized := normalizeSQLWhitespace(capturedSQL)
-	require.NotContains(t, normalized, "api_keys.project_id = $4")
-	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "ppb.resource_type = 'api_key'")
-	require.Contains(t, normalized, "ppb.resource_id = api_keys.id")
-	require.Contains(t, normalized, "ppb.resource_type = 'user'")
-	require.Contains(t, normalized, "ppb.resource_id = api_keys.user_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'group'")
-	require.Contains(t, normalized, "ppb.resource_id = api_keys.group_id")
+	require.Contains(t, normalized, "api_keys.project_id = 7")
+	require.Contains(t, normalized, "FROM project_members pm")
+	require.Contains(t, normalized, "pm.project_id = 7")
+	require.Contains(t, normalized, "pm.user_id = api_keys.user_id")
+	require.NotContains(t, normalized, "project_profile_bindings")
+	require.NotContains(t, normalized, "pp.mode = 'unrestricted'")
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAPIKeyRepository_UpdateProjectIDRequiresActiveProjectAndTargetMemberRecord(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+	repo := newAPIKeyRepositoryWithSQL(nil, exec)
+
+	err := repo.UpdateProjectID(service.WithProjectID(context.Background(), 7), 42, 9)
+
+	require.NoError(t, err)
+	require.Len(t, exec.execQueries, 1)
+	require.Equal(t, []any{int64(42), int64(9), service.StatusActive}, exec.execArgs[0])
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.Contains(t, normalized, "p.status = $3")
+	require.Contains(t, normalized, "pm.project_id = $2")
+	require.Contains(t, normalized, "pm.user_id = ak.user_id")
+	require.NotContains(t, normalized, "pm.status")
+	require.Contains(t, normalized, "ak.group_id IS NULL")
+	require.Contains(t, normalized, "FROM groups g")
+	require.Contains(t, normalized, "g.id = ak.group_id")
+	require.Contains(t, normalized, "g.deleted_at IS NULL")
+	require.Contains(t, normalized, "pp.project_id = 9")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = g.id")
+}
+
+func TestAPIKeyRepository_UpdateProjectIDRejectsMissingTargetMembership(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	repo := newAPIKeyRepositoryWithSQL(nil, exec)
+
+	err := repo.UpdateProjectID(context.Background(), 42, 9)
+
+	require.ErrorIs(t, err, service.ErrProjectAccessForbidden)
+	require.Len(t, exec.execQueries, 1)
+	require.Equal(t, []any{int64(42), int64(9), service.StatusActive}, exec.execArgs[0])
 }

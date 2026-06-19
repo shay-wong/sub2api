@@ -21,6 +21,7 @@ func setupAPIKeyHandler(adminSvc service.AdminService) *gin.Engine {
 	router := gin.New()
 	h := NewAdminAPIKeyHandler(adminSvc)
 	router.PUT("/api/v1/admin/api-keys/:id", h.UpdateGroup)
+	router.PUT("/api/v1/admin/api-keys/:id/project", h.UpdateGroup)
 	return router
 }
 
@@ -155,6 +156,53 @@ func TestAdminAPIKeyHandler_ResetRateLimitUsage(t *testing.T) {
 	require.Nil(t, resp.Data.APIKey.Window5hStart)
 	require.Nil(t, resp.Data.APIKey.Window1dStart)
 	require.Nil(t, resp.Data.APIKey.Window7dStart)
+}
+
+func TestAdminAPIKeyHandler_TransferProject(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10/project", bytes.NewBufferString(`{"project_id":9}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data struct {
+			APIKey struct {
+				ID        int64 `json:"id"`
+				ProjectID int64 `json:"project_id"`
+			} `json:"api_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, int64(10), resp.Data.APIKey.ID)
+	require.Equal(t, int64(9), resp.Data.APIKey.ProjectID)
+}
+
+func TestAdminAPIKeyHandler_TransferProjectRequiresProjectPath(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", bytes.NewBufferString(`{"project_id":9}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN")
+}
+
+func TestAdminAPIKeyHandler_TransferProjectRequiresProjectID(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10/project", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "project_id is required")
 }
 
 func TestAdminAPIKeyHandler_UpdateGroup_ServiceError(t *testing.T) {

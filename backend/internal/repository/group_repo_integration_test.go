@@ -326,9 +326,9 @@ func (s *GroupRepoSuite) TestListWithFiltersUsesActiveProjectProfileScope() {
 
 	groups, page, err = s.repo.ListWithFilters(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "cross-project-group", nil)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
+	s.Require().Equal(int64(2), page.Total)
 	s.Require().True(containsID(groups, boundGroup.ID))
-	s.Require().False(containsID(groups, unboundGroup.ID))
+	s.Require().True(containsID(groups, unboundGroup.ID))
 }
 
 func (s *GroupRepoSuite) TestListWithFilters_Status() {
@@ -796,12 +796,12 @@ func (s *GroupRepoSuite) TestGetAccountCountUsesActiveProjectProfileScope() {
 	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
 	total, active, err := s.repo.GetAccountCount(projectCtx, group.ID)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(2), total)
-	s.Require().Equal(int64(2), active)
+	s.Require().Equal(int64(1), total)
+	s.Require().Equal(int64(1), active)
 
 	accountIDs, err := s.repo.GetAccountIDsByGroupIDs(projectCtx, []int64{group.ID})
 	s.Require().NoError(err)
-	s.Require().Equal([]int64{boundAccountID, unboundAccountID}, accountIDs)
+	s.Require().Equal([]int64{boundAccountID}, accountIDs)
 
 	_, err = s.tx.Client().ProjectProfile.UpdateOneID(profileID).
 		SetMode(service.ProjectProfileModeUnrestricted).
@@ -1056,11 +1056,11 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDUsesActiveProjectProfil
 
 	affected, err := s.repo.DeleteAccountGroupsByGroupID(service.WithProjectID(s.ctx, workspaceProjectID), group.ID)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(2), affected)
+	s.Require().Equal(int64(1), affected)
 
 	accountIDs, err := s.repo.GetAccountIDsByGroupIDs(s.ctx, []int64{group.ID})
 	s.Require().NoError(err)
-	s.Require().Empty(accountIDs)
+	s.Require().Equal([]int64{unboundAccountID}, accountIDs)
 }
 
 // --- 软删除过滤测试 ---

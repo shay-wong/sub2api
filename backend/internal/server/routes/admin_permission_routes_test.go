@@ -40,7 +40,7 @@ func TestPaymentAdminRoutesRequireAdminOnly(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestProjectAdminCannotAccessProjectManagement(t *testing.T) {
+func TestProjectAdminCanListOwnProjectsForProjectSwitcher(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -63,7 +63,7 @@ func TestProjectAdminCannotAccessProjectManagement(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/projects", nil)
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestProjectCreateStillRequiresSuperAdmin(t *testing.T) {
@@ -110,6 +110,7 @@ func TestProjectAdminCanUpdateScopedAPIKey(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -124,6 +125,118 @@ func TestProjectAdminCanUpdateScopedAPIKey(t *testing.T) {
 	require.Equal(t, int64(10), adminSvc.updatedKeyID)
 	require.NotNil(t, adminSvc.updatedGroupID)
 	require.Equal(t, int64(2), *adminSvc.updatedGroupID)
+}
+
+func TestProjectAdminCannotUpdateAPIKeyWithoutAccountPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := &apiKeyRouteAdminServiceStub{}
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionDashboardRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", strings.NewReader(`{"group_id":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, adminSvc.updatedKeyID)
+}
+
+func TestProjectAdminCannotTransferAPIKeyProjectWithAccountPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := &apiKeyRouteAdminServiceStub{}
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10/project", strings.NewReader(`{"project_id":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, adminSvc.updatedKeyID)
+	require.Zero(t, adminSvc.transferProjectID)
+}
+
+func TestProjectAdminCannotTransferAPIKeyProjectWithoutAccountPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := &apiKeyRouteAdminServiceStub{}
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionUsersManage}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10/project", strings.NewReader(`{"project_id":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, adminSvc.transferProjectID)
+}
+
+func TestSuperAdminCanTransferAPIKeyProject(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := &apiKeyRouteAdminServiceStub{}
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 1})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10/project", strings.NewReader(`{"project_id":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(10), adminSvc.updatedKeyID)
+	require.Equal(t, int64(2), adminSvc.transferProjectID)
 }
 
 func TestUserCannotUpdateAdminAPIKey(t *testing.T) {
@@ -175,11 +288,9 @@ func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 		"name":"Ops",
 		"slug":"ops",
 		"profile_mode":"unrestricted",
-		"user_ids":[1],
 		"group_ids":[2],
 		"account_ids":[3],
-		"subscription_ids":[4],
-		"api_key_ids":[5]
+		"subscription_ids":[4]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
@@ -187,14 +298,12 @@ func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec.Code)
 	require.True(t, repo.createProjectCalled)
 	require.Equal(t, service.ProjectProfileModeUnrestricted, repo.projectInput.ProfileMode)
-	require.Empty(t, repo.projectInput.Bindings.UserIDs)
-	require.Empty(t, repo.projectInput.Bindings.GroupIDs)
-	require.Empty(t, repo.projectInput.Bindings.AccountIDs)
-	require.Empty(t, repo.projectInput.Bindings.SubscriptionIDs)
-	require.Empty(t, repo.projectInput.Bindings.APIKeyIDs)
+	require.Equal(t, []int64{2}, repo.projectInput.Bindings.GroupIDs)
+	require.Equal(t, []int64{3}, repo.projectInput.Bindings.AccountIDs)
+	require.Equal(t, []int64{4}, repo.projectInput.Bindings.SubscriptionIDs)
 }
 
-func TestProjectAdminCanAccessUsageReadRoutesButNotCleanup(t *testing.T) {
+func TestProjectAdminCannotAccessUsageRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	admin := router.Group("/api/v1/admin")
@@ -202,12 +311,46 @@ func TestProjectAdminCanAccessUsageReadRoutesButNotCleanup(t *testing.T) {
 		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 		c.Next()
 	})
 
 	usage := admin.Group("/usage")
+	usage.Use(servermiddleware.RequireAdminOnly())
 	usage.GET("", func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/stats", func(c *gin.Context) { c.Status(http.StatusOK) })
 	usage.GET("/cleanup-tasks", servermiddleware.RequireAdminOnly(), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	readRec := httptest.NewRecorder()
+	readReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil)
+	router.ServeHTTP(readRec, readReq)
+	require.Equal(t, http.StatusForbidden, readRec.Code)
+
+	statsRec := httptest.NewRecorder()
+	statsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/stats", nil)
+	router.ServeHTTP(statsRec, statsReq)
+	require.Equal(t, http.StatusForbidden, statsRec.Code)
+
+	cleanupRec := httptest.NewRecorder()
+	cleanupReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/cleanup-tasks", nil)
+	router.ServeHTTP(cleanupRec, cleanupReq)
+	require.Equal(t, http.StatusForbidden, cleanupRec.Code)
+}
+
+func TestSuperAdminCanAccessUsageRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 1})
+		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+		c.Next()
+	})
+
+	usage := admin.Group("/usage")
+	usage.Use(servermiddleware.RequireAdminOnly())
+	usage.GET("", func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/cleanup-tasks", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	readRec := httptest.NewRecorder()
 	readReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil)
@@ -217,14 +360,16 @@ func TestProjectAdminCanAccessUsageReadRoutesButNotCleanup(t *testing.T) {
 	cleanupRec := httptest.NewRecorder()
 	cleanupReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/cleanup-tasks", nil)
 	router.ServeHTTP(cleanupRec, cleanupReq)
-	require.Equal(t, http.StatusForbidden, cleanupRec.Code)
+	require.Equal(t, http.StatusOK, cleanupRec.Code)
 }
 
-func TestProjectAdminCannotManageProjectMembers(t *testing.T) {
+func TestProjectAdminCanUpdateRegularProjectMemberStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
-	repo := &projectRouteRepoStub{}
+	repo := &projectRouteRepoStub{
+		members: []service.ProjectMember{{ProjectID: 1, UserID: 42, Role: service.ProjectRoleUser, Status: service.StatusActive}},
+	}
 	projectSvc := service.NewProjectService(repo)
 
 	RegisterAdminRoutes(
@@ -234,26 +379,32 @@ func TestProjectAdminCannotManageProjectMembers(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/members/42", strings.NewReader(`{"role":"user"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/members/42", strings.NewReader(`{"role":"user","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
 	require.False(t, repo.validateBindingScopeCalled)
-	require.False(t, repo.setMemberCalled)
+	require.True(t, repo.setMemberCalled)
+	require.Equal(t, service.ProjectRoleUser, repo.memberInput.Role)
+	require.NotNil(t, repo.memberInput.Status)
+	require.Equal(t, service.StatusDisabled, *repo.memberInput.Status)
 }
 
-func TestProjectAdminProjectMemberScopeValidationIsNotReached(t *testing.T) {
+func TestProjectAdminCannotChangeProjectMemberRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
-	repo := &projectRouteRepoStub{validateBindingScopeErr: service.ErrProjectAccessForbidden}
+	repo := &projectRouteRepoStub{
+		members: []service.ProjectMember{{ProjectID: 1, UserID: 42, Role: service.ProjectRoleUser, Status: service.StatusActive}},
+	}
 	projectSvc := service.NewProjectService(repo)
 
 	RegisterAdminRoutes(
@@ -263,13 +414,14 @@ func TestProjectAdminProjectMemberScopeValidationIsNotReached(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/members/42", strings.NewReader(`{"role":"user"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/members/42", strings.NewReader(`{"role":"admin","status":"disabled"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
@@ -294,6 +446,7 @@ func TestSuperAdminCanUpdateExistingProjectMemberWithoutRebindingScope(t *testin
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -323,6 +476,7 @@ func TestProjectAdminCannotAccessDifferentProjectPath(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -335,11 +489,15 @@ func TestProjectAdminCannotAccessDifferentProjectPath(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestSuperAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCannotSetProjectProfileUnrestrictedMode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
-	repo := &projectRouteRepoStub{}
+	repo := &projectRouteRepoStub{
+		listProfiles: []service.ProjectProfile{
+			{ID: 2, ProjectID: 1, Name: "Restricted", Mode: service.ProjectProfileModeRestricted},
+		},
+	}
 	projectSvc := service.NewProjectService(repo)
 
 	RegisterAdminRoutes(
@@ -349,6 +507,7 @@ func TestSuperAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -359,13 +518,11 @@ func TestSuperAdminCanSetUnrestrictedProjectProfile(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.updateProfileCalled)
-	require.NotNil(t, repo.profileInput.Mode)
-	require.Equal(t, service.ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, repo.updateProfileCalled)
 }
 
-func TestSuperAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCannotEditInternalUnrestrictedProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -389,6 +546,7 @@ func TestSuperAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -399,10 +557,8 @@ func TestSuperAdminCanEditExistingUnrestrictedProjectProfile(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.updateProfileCalled)
-	require.NotNil(t, repo.profileInput.Name)
-	require.Equal(t, "Renamed", *repo.profileInput.Name)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, repo.updateProfileCalled)
 }
 
 func TestProjectAdminCannotCreateProjectProfile(t *testing.T) {
@@ -419,6 +575,7 @@ func TestProjectAdminCannotCreateProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -433,7 +590,7 @@ func TestProjectAdminCannotCreateProjectProfile(t *testing.T) {
 	require.False(t, repo.createProfileCalled)
 }
 
-func TestSuperAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCannotCreateUnrestrictedProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -447,6 +604,7 @@ func TestSuperAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -457,10 +615,8 @@ func TestSuperAdminCanCreateUnrestrictedProjectProfile(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusCreated, rec.Code)
-	require.True(t, repo.createProfileCalled)
-	require.NotNil(t, repo.profileInput.Mode)
-	require.Equal(t, service.ProjectProfileModeUnrestricted, *repo.profileInput.Mode)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, repo.createProfileCalled)
 }
 
 func TestProjectAdminCannotActivateProjectProfile(t *testing.T) {
@@ -487,6 +643,7 @@ func TestProjectAdminCannotActivateProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -500,17 +657,19 @@ func TestProjectAdminCannotActivateProjectProfile(t *testing.T) {
 	require.False(t, repo.activateProfileCalled)
 }
 
-func TestSuperAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
+func TestSuperAdminCannotActivateInternalUnrestrictedProjectProfile(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 	repo := &projectRouteRepoStub{
-		activateProfile: &service.ProjectProfile{
-			ID:        2,
-			ProjectID: 1,
-			Name:      "Unrestricted",
-			Mode:      service.ProjectProfileModeUnrestricted,
-			IsActive:  true,
+		listProfiles: []service.ProjectProfile{
+			{
+				ID:        2,
+				ProjectID: 1,
+				Name:      "Unrestricted",
+				Mode:      service.ProjectProfileModeUnrestricted,
+				IsActive:  false,
+			},
 		},
 	}
 	projectSvc := service.NewProjectService(repo)
@@ -522,6 +681,7 @@ func TestSuperAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -531,8 +691,46 @@ func TestSuperAdminCanActivateUnrestrictedProjectProfile(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/projects/1/profiles/2/activate", nil)
 	router.ServeHTTP(rec, req)
 
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.False(t, repo.activateProfileCalled)
+}
+
+func TestSuperAdminCanActivateUnrestrictedProjectScope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	repo := &projectRouteRepoStub{
+		listProfiles: []service.ProjectProfile{
+			{
+				ID:        2,
+				ProjectID: 1,
+				Name:      "Restricted",
+				Mode:      service.ProjectProfileModeRestricted,
+				IsActive:  true,
+			},
+		},
+	}
+	projectSvc := service.NewProjectService(repo)
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/projects/1/resource-scope/unrestricted", nil)
+	router.ServeHTTP(rec, req)
+
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, repo.activateProfileCalled)
+	require.True(t, repo.activateUnrestrictedCalled)
 }
 
 func TestProjectAdminCannotDeleteProjectProfile(t *testing.T) {
@@ -559,6 +757,7 @@ func TestProjectAdminCannotDeleteProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -596,13 +795,14 @@ func TestProjectAdminCannotSetBindingsForUnrestrictedProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"user_ids":[7]}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"group_ids":[7]}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
@@ -635,13 +835,14 @@ func TestProjectAdminCannotBindResourcesIntoProjectProfile(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"user_ids":[99]}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"group_ids":[99]}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
@@ -675,13 +876,14 @@ func TestProjectAdminProfileBindingScopeValidationIsNotReached(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"user_ids":[99]}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"group_ids":[99]}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
@@ -719,7 +921,7 @@ func TestSuperAdminCanBindGlobalResourcesIntoProjectProfile(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"user_ids":[99]}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/projects/1/profiles/2/bindings", strings.NewReader(`{"group_ids":[99]}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
@@ -742,6 +944,7 @@ func TestSuperAdminSearchesScopedCandidatesThroughProjectPath(t *testing.T) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
 			c.Next()
 		}),
 		nil,
@@ -768,6 +971,7 @@ type projectRouteRepoStub struct {
 	setBindingsCalled          bool
 	activateProfile            *service.ProjectProfile
 	activateProfileCalled      bool
+	activateUnrestrictedCalled bool
 	validateBindingScopeCalled bool
 	validateBindingScopeErr    error
 	scopeInput                 service.ProjectProfileBindingInput
@@ -842,11 +1046,7 @@ func (r *projectRouteRepoStub) CreateProjectProfile(_ context.Context, projectID
 	if input.Name != nil {
 		name = *input.Name
 	}
-	mode := service.ProjectProfileModeRestricted
-	if input.Mode != nil {
-		mode = *input.Mode
-	}
-	return &service.ProjectProfile{ID: 3, ProjectID: projectID, Name: name, Mode: mode}, nil
+	return &service.ProjectProfile{ID: 3, ProjectID: projectID, Name: name, Mode: service.ProjectProfileModeRestricted}, nil
 }
 
 func (r *projectRouteRepoStub) UpdateProjectProfile(_ context.Context, projectID int64, profileID int64, input service.ProjectProfileInput) (*service.ProjectProfile, error) {
@@ -856,11 +1056,7 @@ func (r *projectRouteRepoStub) UpdateProjectProfile(_ context.Context, projectID
 	if input.Name != nil {
 		name = *input.Name
 	}
-	mode := service.ProjectProfileModeRestricted
-	if input.Mode != nil {
-		mode = *input.Mode
-	}
-	return &service.ProjectProfile{ID: profileID, ProjectID: projectID, Name: name, Mode: mode}, nil
+	return &service.ProjectProfile{ID: profileID, ProjectID: projectID, Name: name, Mode: service.ProjectProfileModeRestricted}, nil
 }
 
 func (r *projectRouteRepoStub) DeleteProjectProfile(context.Context, int64, int64) error {
@@ -874,6 +1070,11 @@ func (r *projectRouteRepoStub) ActivateProjectProfile(context.Context, int64, in
 		return r.activateProfile, nil
 	}
 	return &service.ProjectProfile{ID: 2, ProjectID: 1, Name: "Restricted", Mode: service.ProjectProfileModeRestricted, IsActive: true}, nil
+}
+
+func (r *projectRouteRepoStub) ActivateProjectUnrestrictedScope(context.Context, int64) (*service.ProjectProfile, error) {
+	r.activateUnrestrictedCalled = true
+	return &service.ProjectProfile{ID: 99, ProjectID: 1, Name: "Unrestricted", Mode: service.ProjectProfileModeUnrestricted, IsActive: true}, nil
 }
 
 func (r *projectRouteRepoStub) GetProjectProfileBindings(context.Context, int64, int64) (*service.ProjectProfileBindings, error) {
@@ -911,8 +1112,9 @@ func (r *projectRouteRepoStub) SearchProjectBindableResources(_ context.Context,
 
 type apiKeyRouteAdminServiceStub struct {
 	service.AdminService
-	updatedKeyID   int64
-	updatedGroupID *int64
+	updatedKeyID      int64
+	updatedGroupID    *int64
+	transferProjectID int64
 }
 
 func (s *apiKeyRouteAdminServiceStub) AdminUpdateAPIKeyGroupID(_ context.Context, keyID int64, groupID *int64) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
@@ -923,6 +1125,13 @@ func (s *apiKeyRouteAdminServiceStub) AdminUpdateAPIKeyGroupID(_ context.Context
 	}
 	key := &service.APIKey{ID: keyID, UserID: 7, Key: "sk-test", Name: "test", Status: service.StatusAPIKeyActive, GroupID: s.updatedGroupID}
 	return &service.AdminUpdateAPIKeyGroupIDResult{APIKey: key}, nil
+}
+
+func (s *apiKeyRouteAdminServiceStub) AdminTransferAPIKeyProject(_ context.Context, keyID int64, projectID int64) (*service.APIKey, error) {
+	s.updatedKeyID = keyID
+	s.transferProjectID = projectID
+	key := &service.APIKey{ID: keyID, UserID: 7, ProjectID: projectID, Key: "sk-test", Name: "test", Status: service.StatusAPIKeyActive}
+	return key, nil
 }
 
 func (s *apiKeyRouteAdminServiceStub) AdminResetAPIKeyRateLimitUsage(_ context.Context, keyID int64) (*service.APIKey, error) {

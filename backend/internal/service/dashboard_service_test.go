@@ -16,19 +16,23 @@ import (
 
 type usageRepoStub struct {
 	UsageLogRepository
-	stats      *usagestats.DashboardStats
-	rangeStats *usagestats.DashboardStats
-	err        error
-	rangeErr   error
-	calls      int32
-	rangeCalls int32
-	rangeStart time.Time
-	rangeEnd   time.Time
-	onCall     chan struct{}
+	stats         *usagestats.DashboardStats
+	rangeStats    *usagestats.DashboardStats
+	err           error
+	rangeErr      error
+	calls         int32
+	rangeCalls    int32
+	rangeStart    time.Time
+	rangeEnd      time.Time
+	lastProjectID int64
+	onCall        chan struct{}
 }
 
 func (s *usageRepoStub) GetDashboardStats(ctx context.Context) (*usagestats.DashboardStats, error) {
 	atomic.AddInt32(&s.calls, 1)
+	if projectID, ok := ProjectIDFromContext(ctx); ok {
+		s.lastProjectID = projectID
+	}
 	if s.onCall != nil {
 		select {
 		case s.onCall <- struct{}{}:
@@ -43,6 +47,9 @@ func (s *usageRepoStub) GetDashboardStats(ctx context.Context) (*usagestats.Dash
 
 func (s *usageRepoStub) GetDashboardStatsWithRange(ctx context.Context, start, end time.Time) (*usagestats.DashboardStats, error) {
 	atomic.AddInt32(&s.rangeCalls, 1)
+	if projectID, ok := ProjectIDFromContext(ctx); ok {
+		s.lastProjectID = projectID
+	}
 	s.rangeStart = start
 	s.rangeEnd = end
 	if s.rangeErr != nil {
@@ -238,6 +245,44 @@ func TestDashboardService_CacheDisabled_SkipsCache(t *testing.T) {
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, stats, got)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.calls))
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalls))
+	require.Equal(t, int32(0), atomic.LoadInt32(&cache.setCalls))
+}
+
+func TestDashboardService_ProjectScopedBypassesGlobalCache(t *testing.T) {
+	globalStats := &usagestats.DashboardStats{
+		TotalAccounts:  100,
+		StatsUpdatedAt: time.Unix(0, 0).UTC().Format(time.RFC3339),
+	}
+	entry := dashboardStatsCacheEntry{
+		Stats:     globalStats,
+		UpdatedAt: time.Now().Unix(),
+	}
+	payload, err := json.Marshal(entry)
+	require.NoError(t, err)
+
+	cache := &dashboardCacheStub{
+		get: func(ctx context.Context) (string, error) {
+			return string(payload), nil
+		},
+	}
+	projectStats := &usagestats.DashboardStats{TotalAccounts: 4}
+	repo := &usageRepoStub{stats: projectStats}
+	aggRepo := &dashboardAggregationRepoStub{watermark: time.Unix(0, 0).UTC()}
+	cfg := &config.Config{
+		Dashboard: config.DashboardCacheConfig{Enabled: true},
+		DashboardAgg: config.DashboardAggregationConfig{
+			Enabled: true,
+		},
+	}
+	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+
+	ctx := WithProjectID(context.Background(), 42)
+	got, err := svc.GetDashboardStats(ctx)
+	require.NoError(t, err)
+	require.Equal(t, projectStats, got)
+	require.Equal(t, int64(42), repo.lastProjectID)
 	require.Equal(t, int32(1), atomic.LoadInt32(&repo.calls))
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.getCalls))
 	require.Equal(t, int32(0), atomic.LoadInt32(&cache.setCalls))

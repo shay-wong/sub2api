@@ -766,6 +766,26 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	s.Require().Equal(wantTpm, stats.Tpm, "Tpm mismatch")
 }
 
+func (s *UsageLogRepoSuite) TestDashboardStats_ExcludesAPIKeysOwnedByInactiveUsers() {
+	baseStats, err := s.repo.GetDashboardStats(s.ctx)
+	s.Require().NoError(err, "GetDashboardStats base")
+
+	activeUser := mustCreateUser(s.T(), s.client, &service.User{Email: "active-key-owner@example.com"})
+	disabledUser := mustCreateUser(s.T(), s.client, &service.User{Email: "disabled-key-owner@example.com", Status: service.StatusDisabled})
+	deletedUser := mustCreateUser(s.T(), s.client, &service.User{Email: "deleted-key-owner@example.com"})
+
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: activeUser.ID, Key: "sk-active-key-owner", Name: "active-owner-key"})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: disabledUser.ID, Key: "sk-disabled-key-owner", Name: "disabled-owner-key"})
+	mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: deletedUser.ID, Key: "sk-deleted-key-owner", Name: "deleted-owner-key"})
+	s.Require().NoError(s.client.User.DeleteOneID(deletedUser.ID).Exec(s.ctx))
+
+	stats, err := s.repo.GetDashboardStats(s.ctx)
+	s.Require().NoError(err, "GetDashboardStats")
+
+	s.Require().Equal(baseStats.TotalAPIKeys+1, stats.TotalAPIKeys, "disabled/deleted user keys must not count toward total API keys")
+	s.Require().Equal(baseStats.ActiveAPIKeys+1, stats.ActiveAPIKeys, "disabled/deleted user keys must not count toward active API keys")
+}
+
 func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_Fallback() {
 	now := time.Now().UTC()
 	todayStart := truncateToDayUTC(now)

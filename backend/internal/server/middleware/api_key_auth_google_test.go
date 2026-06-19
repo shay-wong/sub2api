@@ -24,6 +24,10 @@ type fakeAPIKeyRepo struct {
 	updateLastUsed func(ctx context.Context, id int64, usedAt time.Time) error
 }
 
+type fakeProjectScopedGroupRepo struct {
+	getByID func(ctx context.Context, id int64) (*service.Group, error)
+}
+
 type fakeGoogleSubscriptionRepo struct {
 	getActive      func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error)
 	updateStatus   func(ctx context.Context, subscriptionID int64, status string) error
@@ -113,6 +117,61 @@ func (f fakeAPIKeyRepo) GetRateLimitData(ctx context.Context, id int64) (*servic
 }
 func (f fakeAPIKeyRepo) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	return 0, errors.New("not implemented")
+}
+func (f fakeAPIKeyRepo) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
+	return errors.New("not implemented")
+}
+
+func (f fakeProjectScopedGroupRepo) Create(ctx context.Context, group *service.Group) error {
+	return errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) GetByID(ctx context.Context, id int64) (*service.Group, error) {
+	if f.getByID != nil {
+		return f.getByID(ctx, id)
+	}
+	return nil, service.ErrGroupNotFound
+}
+func (f fakeProjectScopedGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return f.GetByID(ctx, id)
+}
+func (f fakeProjectScopedGroupRepo) Update(ctx context.Context, group *service.Group) error {
+	return errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) Delete(ctx context.Context, id int64) error {
+	return errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) DeleteCascade(ctx context.Context, id int64) ([]int64, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) List(ctx context.Context, params pagination.PaginationParams) ([]service.Group, *pagination.PaginationResult, error) {
+	return nil, nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
+	return nil, nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) ListActive(ctx context.Context) ([]service.Group, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) ListActiveByPlatform(ctx context.Context, platform string) ([]service.Group, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) ExistsByName(ctx context.Context, name string) (bool, error) {
+	return false, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) GetAccountCount(ctx context.Context, groupID int64) (int64, int64, error) {
+	return 0, 0, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
+	return 0, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs []int64) ([]int64, error) {
+	return nil, errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) BindAccountsToGroup(ctx context.Context, groupID int64, accountIDs []int64) error {
+	return errors.New("not implemented")
+}
+func (f fakeProjectScopedGroupRepo) UpdateSortOrders(ctx context.Context, updates []service.GroupSortOrderUpdate) error {
+	return errors.New("not implemented")
 }
 
 func (f fakeGoogleSubscriptionRepo) Create(ctx context.Context, sub *service.UserSubscription) error {
@@ -346,6 +405,7 @@ func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfile
 		User:      user,
 	}
 	var checkedProjectID int64
+	var requireActiveMember bool
 	apiKeyService := service.NewAPIKeyService(
 		fakeAPIKeyRepo{
 			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
@@ -360,6 +420,7 @@ func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfile
 				projectID, ok := service.ProjectIDFromContext(ctx)
 				require.True(t, ok)
 				checkedProjectID = projectID
+				requireActiveMember = service.RequireActiveProjectMemberFromContext(ctx)
 				clone := *apiKey
 				clone.ProjectID = projectID
 				return &clone, nil
@@ -390,6 +451,7 @@ func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfile
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(2), checkedProjectID)
+	require.True(t, requireActiveMember)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, float64(2), body["project_id"])
@@ -414,6 +476,7 @@ func TestApiKeyAuthWithSubscriptionGoogleValidatesHomeProjectProfileVisibility(t
 		User:      user,
 	}
 	var checkedProjectID int64
+	var requireActiveMember bool
 	apiKeyService := service.NewAPIKeyService(
 		fakeAPIKeyRepo{
 			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
@@ -428,6 +491,7 @@ func TestApiKeyAuthWithSubscriptionGoogleValidatesHomeProjectProfileVisibility(t
 				projectID, ok := service.ProjectIDFromContext(ctx)
 				require.True(t, ok)
 				checkedProjectID = projectID
+				requireActiveMember = service.RequireActiveProjectMemberFromContext(ctx)
 				clone := *apiKey
 				return &clone, nil
 			},
@@ -456,6 +520,162 @@ func TestApiKeyAuthWithSubscriptionGoogleValidatesHomeProjectProfileVisibility(t
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(1), checkedProjectID)
+	require.True(t, requireActiveMember)
+}
+
+func TestAPIKeyAuthRejectsProjectScopedKeyWhenBoundGroupIsHidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(99)
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		GroupID:   &groupID,
+		Key:       "hidden-group-key",
+		Status:    service.StatusActive,
+		User:      user,
+		Group: &service.Group{
+			ID:       groupID,
+			Name:     "stale-visible-from-key-cache",
+			Status:   service.StatusActive,
+			Platform: service.PlatformAnthropic,
+			Hydrated: true,
+		},
+	}
+	var checkedGroupProjectID int64
+	apiKeyService := service.NewAPIKeyService(
+		fakeAPIKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != apiKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *apiKey
+				return &clone, nil
+			},
+			getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+				require.Equal(t, apiKey.ID, id)
+				clone := *apiKey
+				return &clone, nil
+			},
+		},
+		nil,
+		fakeProjectScopedGroupRepo{
+			getByID: func(ctx context.Context, id int64) (*service.Group, error) {
+				require.Equal(t, groupID, id)
+				projectID, ok := service.ProjectIDFromContext(ctx)
+				require.True(t, ok)
+				checkedGroupProjectID = projectID
+				return nil, service.ErrGroupNotFound
+			},
+		},
+		nil,
+		nil,
+		nil,
+		&config.Config{RunMode: config.RunModeSimple},
+	)
+
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, &config.Config{RunMode: config.RunModeSimple})))
+	router.GET("/t", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	req.Header.Set("X-Project-ID", "2")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, int64(2), checkedGroupProjectID)
+	var resp ErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, "PROJECT_API_KEY_GROUP_UNAVAILABLE", resp.Code)
+	require.Equal(t, "API Key 所属分组不在当前项目空间应用配置内", resp.Message)
+}
+
+func TestApiKeyAuthWithSubscriptionGoogleRejectsProjectScopedKeyWhenBoundGroupIsHidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(88)
+	user := &service.User{
+		ID:          7,
+		Role:        service.RoleUser,
+		Status:      service.StatusActive,
+		Balance:     10,
+		Concurrency: 3,
+	}
+	apiKey := &service.APIKey{
+		ID:        100,
+		UserID:    user.ID,
+		ProjectID: 1,
+		GroupID:   &groupID,
+		Key:       "google-hidden-group-key",
+		Status:    service.StatusActive,
+		User:      user,
+		Group: &service.Group{
+			ID:       groupID,
+			Name:     "stale-visible-from-key-cache",
+			Status:   service.StatusActive,
+			Platform: service.PlatformGemini,
+			Hydrated: true,
+		},
+	}
+	var checkedGroupProjectID int64
+	apiKeyService := service.NewAPIKeyService(
+		fakeAPIKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != apiKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *apiKey
+				return &clone, nil
+			},
+			getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
+				require.Equal(t, apiKey.ID, id)
+				clone := *apiKey
+				return &clone, nil
+			},
+		},
+		nil,
+		fakeProjectScopedGroupRepo{
+			getByID: func(ctx context.Context, id int64) (*service.Group, error) {
+				require.Equal(t, groupID, id)
+				projectID, ok := service.ProjectIDFromContext(ctx)
+				require.True(t, ok)
+				checkedGroupProjectID = projectID
+				return nil, service.ErrGroupNotFound
+			},
+		},
+		nil,
+		nil,
+		nil,
+		&config.Config{RunMode: config.RunModeSimple},
+	)
+
+	router := gin.New()
+	router.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, nil, &config.Config{RunMode: config.RunModeSimple}))
+	router.GET("/v1beta/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("x-goog-api-key", apiKey.Key)
+	req.Header.Set("X-Project-ID", "2")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, int64(2), checkedGroupProjectID)
+	var resp googleErrorResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, http.StatusForbidden, resp.Error.Code)
+	require.Equal(t, "API Key group is not available in this project", resp.Error.Message)
+	require.Equal(t, "PERMISSION_DENIED", resp.Error.Status)
 }
 
 func TestApiKeyAuthWithSubscriptionGoogle_QueryKeyAllowedOnV1Beta(t *testing.T) {

@@ -149,6 +149,9 @@ func TestAdminAuthJWTUsesProjectIDQueryForWebSocket(t *testing.T) {
 	}
 	userService := service.NewUserService(userRepo, nil, nil, nil)
 	projectService := service.NewProjectService(&stubProjectRepo{
+		projects: []service.ProjectSummary{
+			{ID: 42, Name: "Admin Project", Slug: "admin-project", Role: service.ProjectRoleAdmin},
+		},
 		roles: map[int64]map[int64]string{
 			42: {projectMember.ID: service.ProjectRoleAdmin},
 		},
@@ -495,6 +498,10 @@ func (s *stubProjectRepo) DeleteProjectProfile(context.Context, int64, int64) er
 
 func (s *stubProjectRepo) ActivateProjectProfile(context.Context, int64, int64) (*service.ProjectProfile, error) {
 	panic("unexpected ActivateProjectProfile call")
+}
+
+func (s *stubProjectRepo) ActivateProjectUnrestrictedScope(context.Context, int64) (*service.ProjectProfile, error) {
+	panic("unexpected ActivateProjectUnrestrictedScope call")
 }
 
 func (s *stubProjectRepo) GetProjectProfileBindings(context.Context, int64, int64) (*service.ProjectProfileBindings, error) {

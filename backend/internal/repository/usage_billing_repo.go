@@ -269,10 +269,7 @@ func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, us
 	args := []any{userID, groupID, cost}
 	projectClause := ""
 	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{
-			UserID:  "u.id",
-			GroupID: "g.id",
-		})
+		projectClause = " AND " + projectUserGroupScopeSQL(projectID, "u.id", "g.id")
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO user_group_rate_limit_windows (

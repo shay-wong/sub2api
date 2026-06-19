@@ -72,7 +72,12 @@ apiClient.interceptors.request.use(
     }
 
     const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
-    if (selectedProjectID && config.headers && shouldAttachProjectHeader(config.url)) {
+    if (
+      selectedProjectID
+      && config.headers
+      && shouldAttachProjectHeader(config.url)
+      && !hasRequestHeader(config.headers, 'X-Project-ID')
+    ) {
       config.headers['X-Project-ID'] = selectedProjectID
     }
 
@@ -97,6 +102,15 @@ function shouldAttachProjectHeader(url?: string): boolean {
     return false
   }
   return !PROJECT_HEADER_EXCLUDED_PREFIXES.some(prefix => path === prefix.slice(0, -1) || path.startsWith(prefix))
+}
+
+function hasRequestHeader(headers: InternalAxiosRequestConfig['headers'], name: string): boolean {
+  const getter = headers as { get?: (headerName: string) => unknown }
+  if (typeof getter.get === 'function') {
+    return getter.get(name) != null
+  }
+  const lowerName = name.toLowerCase()
+  return Object.keys(headers as Record<string, unknown>).some(key => key.toLowerCase() === lowerName)
 }
 
 function normalizeRequestPath(url?: string): string {
