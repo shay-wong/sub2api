@@ -603,7 +603,7 @@ func TestAPIKeyAuthGoogleSetsOpsFallbackKeyOnEarlyAbort(t *testing.T) {
 	require.Equal(t, user.ID, fallback.User.ID)
 }
 
-func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) {
+func TestAPIKeyAuthIgnoresRequestedProjectAndUsesAPIKeyProject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	user := &service.User{
@@ -617,7 +617,7 @@ func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) 
 		ID:        100,
 		UserID:    user.ID,
 		ProjectID: 1,
-		Key:       "profile-visible-key",
+		Key:       "requested-project-ignored-key",
 		Status:    service.StatusActive,
 		User:      user,
 	}
@@ -660,11 +660,11 @@ func TestAPIKeyAuthUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) 
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, int64(2), checkedProjectID)
+	require.Equal(t, int64(1), checkedProjectID)
 	require.True(t, requireActiveMember)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Equal(t, float64(2), body["project_id"])
+	require.Equal(t, float64(1), body["project_id"])
 }
 
 func TestAPIKeyAuthValidatesHomeProjectProfileVisibility(t *testing.T) {
@@ -775,7 +775,7 @@ func TestAPIKeyAuthRejectsHomeProjectWhenProjectMemberIsDisabled(t *testing.T) {
 	requireAPIKeyAuthError(t, w, "PROJECT_MEMBER_DISABLED", "API Key 所属用户在当前项目空间已禁用")
 }
 
-func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testing.T) {
+func TestAPIKeyAuthDoesNotUseRequestedProjectForProfileVisibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	user := &service.User{
@@ -789,10 +789,11 @@ func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testi
 		ID:        100,
 		UserID:    user.ID,
 		ProjectID: 1,
-		Key:       "profile-hidden-key",
+		Key:       "requested-project-hidden-key",
 		Status:    service.StatusActive,
 		User:      user,
 	}
+	var checkedProjectID int64
 	apiKeyRepo := &stubApiKeyRepo{
 		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
 			if key != apiKey.Key {
@@ -803,7 +804,11 @@ func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testi
 		},
 		getByID: func(ctx context.Context, id int64) (*service.APIKey, error) {
 			require.Equal(t, apiKey.ID, id)
-			return nil, service.ErrAPIKeyNotFound
+			projectID, ok := service.ProjectIDFromContext(ctx)
+			require.True(t, ok)
+			checkedProjectID = projectID
+			clone := *apiKey
+			return &clone, nil
 		},
 	}
 
@@ -817,8 +822,8 @@ func TestAPIKeyAuthRejectsRequestedProjectWhenAPIKeyIsNotProfileVisible(t *testi
 	req.Header.Set("X-Project-ID", "2")
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusUnauthorized, w.Code)
-	requireAPIKeyAuthError(t, w, "INVALID_API_KEY", "Invalid API key")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(1), checkedProjectID)
 }
 
 func TestRequireGroupAssignmentMarksUngroupedKeyBusinessLimited(t *testing.T) {

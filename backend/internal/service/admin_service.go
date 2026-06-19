@@ -2730,6 +2730,7 @@ func (s *adminServiceImpl) AdminTransferAPIKeyProject(ctx context.Context, keyID
 	apiKey.ProjectID = projectID
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
+		s.authCacheInvalidator.InvalidateAuthCacheByAPIKeyID(ctx, apiKey.ID)
 	}
 	return apiKey, nil
 }

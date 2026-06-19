@@ -176,14 +176,8 @@ func resolveAPIKeyRequestProjectGoogle(c *gin.Context, apiKeyService *service.AP
 	if apiKey == nil {
 		return 0, true
 	}
-	requestedProjectID, ok := parseRequestedProjectID(c)
-	if !ok {
-		return 0, false
-	}
-	effectiveProjectID := requestedProjectID
-	if effectiveProjectID <= 0 {
-		effectiveProjectID = apiKey.ProjectID
-	}
+	// API Key 只能归属一个项目空间；外部调用不能通过请求头切换到其他项目。
+	effectiveProjectID := apiKey.ProjectID
 	if effectiveProjectID <= 0 {
 		return apiKey.ProjectID, true
 	}

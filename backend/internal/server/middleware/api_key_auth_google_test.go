@@ -386,7 +386,7 @@ func TestApiKeyAuthWithSubscriptionGoogleSetsGroupContext(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfileVisible(t *testing.T) {
+func TestApiKeyAuthWithSubscriptionGoogleIgnoresRequestedProjectAndUsesAPIKeyProject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	user := &service.User{
@@ -400,7 +400,7 @@ func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfile
 		ID:        100,
 		UserID:    user.ID,
 		ProjectID: 1,
-		Key:       "google-profile-visible-key",
+		Key:       "google-requested-project-ignored-key",
 		Status:    service.StatusActive,
 		User:      user,
 	}
@@ -450,11 +450,11 @@ func TestApiKeyAuthWithSubscriptionGoogleUsesRequestedProjectWhenAPIKeyIsProfile
 	r.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, int64(2), checkedProjectID)
+	require.Equal(t, int64(1), checkedProjectID)
 	require.True(t, requireActiveMember)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	require.Equal(t, float64(2), body["project_id"])
+	require.Equal(t, float64(1), body["project_id"])
 }
 
 func TestApiKeyAuthWithSubscriptionGoogleValidatesHomeProjectProfileVisibility(t *testing.T) {
@@ -593,7 +593,7 @@ func TestAPIKeyAuthRejectsProjectScopedKeyWhenBoundGroupIsHidden(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Equal(t, int64(2), checkedGroupProjectID)
+	require.Equal(t, int64(1), checkedGroupProjectID)
 	var resp ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, "PROJECT_API_KEY_GROUP_UNAVAILABLE", resp.Code)
@@ -670,7 +670,7 @@ func TestApiKeyAuthWithSubscriptionGoogleRejectsProjectScopedKeyWhenBoundGroupIs
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Equal(t, int64(2), checkedGroupProjectID)
+	require.Equal(t, int64(1), checkedGroupProjectID)
 	var resp googleErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, http.StatusForbidden, resp.Error.Code)

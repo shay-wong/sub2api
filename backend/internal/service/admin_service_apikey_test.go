@@ -642,6 +642,7 @@ func TestAdminService_AdminTransferAPIKeyProject_UpdatesProjectAndInvalidatesCac
 	require.Equal(t, int64(9), got.ProjectID)
 	require.Equal(t, []apiKeyProjectUpdate{{ID: 1, ProjectID: 9}}, apiKeyRepo.projectUpdates)
 	require.Equal(t, []string{"sk-test"}, cache.keys)
+	require.Equal(t, []int64{1}, cache.apiKeyIDs)
 }
 
 func TestAdminService_AdminTransferAPIKeyProject_ValidatesBoundGroupInTargetProject(t *testing.T) {
