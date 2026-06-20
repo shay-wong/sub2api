@@ -156,6 +156,7 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 			"client_request_id": "creq-1",
 			"user_id":           "12",
 			"account_id":        json.Number("34"),
+			"project_id":        json.Number("169"),
 			"platform":          "openai",
 			"model":             "gpt-5",
 		},
@@ -179,6 +180,9 @@ func TestOpsSystemLogSink_StartStopAndFlushSuccess(t *testing.T) {
 	}
 	if item.AccountID == nil || *item.AccountID != 34 {
 		t.Fatalf("unexpected account_id: %+v", item.AccountID)
+	}
+	if item.ProjectID != 169 {
+		t.Fatalf("unexpected project_id: %d", item.ProjectID)
 	}
 	if strings.TrimSpace(item.Message) == "" {
 		t.Fatalf("message should not be empty")

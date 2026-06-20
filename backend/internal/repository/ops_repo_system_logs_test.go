@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,20 @@ func TestBuildOpsSystemLogsWhere_WithClientRequestIDAndUserID(t *testing.T) {
 	}
 	if !contains(where, "l.user_id = $") {
 		t.Fatalf("where should include user_id condition: %s", where)
+	}
+}
+
+func TestBuildOpsSystemLogsWhereForContext_IncludesProjectScope(t *testing.T) {
+	ctx := service.WithProjectID(context.Background(), 169)
+	where, args, hasConstraint := buildOpsSystemLogsWhereForContext(ctx, &service.OpsSystemLogFilter{})
+	if !hasConstraint {
+		t.Fatalf("expected project context to count as a constraint")
+	}
+	if !contains(where, "l.project_id = $1") {
+		t.Fatalf("where should include project scope: %s", where)
+	}
+	if len(args) != 1 || args[0] != int64(169) {
+		t.Fatalf("args = %#v, want [169]", args)
 	}
 }
 

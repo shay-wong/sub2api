@@ -232,3 +232,21 @@ func TestMigration156AddsProjectProfilesWithUnrestrictedModeAndResourceBindings(
 		require.Contains(t, sql, "SELECT pp.id, '"+resourceType+"'")
 	}
 }
+
+func TestMigration158BackfillsSystemLogsOnlyFromUnambiguousProjectMatches(t *testing.T) {
+	content, err := FS.ReadFile("158_backfill_system_log_project_scope.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.NotContains(t, sql, "DISTINCT ON", "project backfill must not pick an arbitrary latest project")
+	require.Contains(t, sql, "WITH candidate_projects AS (")
+	require.Contains(t, sql, "UNION ALL")
+	require.Contains(t, sql, "unambiguous_matches AS (")
+	require.Contains(t, sql, "FROM candidate_projects")
+	require.Contains(t, sql, "HAVING COUNT(DISTINCT project_id) = 1")
+	require.Equal(t, 2, strings.Count(sql, "UPDATE ops_system_logs sl\nSET project_id ="))
+	require.Contains(t, sql, "JOIN usage_logs ul\n      ON ul.request_id = sl.request_id")
+	require.Contains(t, sql, "JOIN ops_error_logs oel\n      ON oel.request_id = sl.request_id")
+	require.Contains(t, sql, "JOIN ops_error_logs oel\n      ON oel.client_request_id = sl.client_request_id")
+	require.Contains(t, sql, "NOT EXISTS (\n      SELECT 1\n      FROM usage_logs ul")
+}

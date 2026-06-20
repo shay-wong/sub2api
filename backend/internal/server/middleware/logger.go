@@ -6,6 +6,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -49,6 +50,9 @@ func Logger() gin.HandlerFunc {
 		}
 		if hasAccountID && accountID > 0 {
 			fields = append(fields, zap.Int64("account_id", accountID))
+		}
+		if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok && projectID > 0 {
+			fields = append(fields, zap.Int64("project_id", projectID))
 		}
 		if platform != "" {
 			fields = append(fields, zap.String("platform", platform))

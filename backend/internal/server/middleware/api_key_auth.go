@@ -9,9 +9,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
@@ -299,11 +301,23 @@ func setProjectContext(c *gin.Context, projectID int64) {
 	if c == nil || c.Request == nil || projectID <= 0 {
 		return
 	}
-	if existing, ok := service.ProjectIDFromContext(c.Request.Context()); ok && existing == projectID {
+	ctx := c.Request.Context()
+	if existing, ok := service.ProjectIDFromContext(ctx); ok && existing == projectID {
+		c.Set("project_id", projectID)
+		c.Request = c.Request.WithContext(withProjectLogger(ctx, projectID))
 		return
 	}
-	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
+	ctx = service.WithProjectID(ctx, projectID)
+	ctx = withProjectLogger(ctx, projectID)
+	c.Request = c.Request.WithContext(ctx)
 	c.Set("project_id", projectID)
+}
+
+func withProjectLogger(ctx context.Context, projectID int64) context.Context {
+	if projectID <= 0 {
+		return ctx
+	}
+	return logger.IntoContext(ctx, logger.FromContext(ctx).With(zap.Int64("project_id", projectID)))
 }
 
 func resolveAPIKeyRequestProject(c *gin.Context, apiKeyService *service.APIKeyService, apiKey *service.APIKey) (int64, bool) {

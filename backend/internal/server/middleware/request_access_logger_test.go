@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -123,6 +124,7 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		ctx = context.WithValue(ctx, ctxkey.AccountID, int64(101))
 		ctx = context.WithValue(ctx, ctxkey.Platform, "openai")
 		ctx = context.WithValue(ctx, ctxkey.Model, "gpt-5")
+		ctx = service.WithProjectID(ctx, 169)
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
@@ -174,10 +176,53 @@ func TestLogger_AccessLogIncludesCoreFields(t *testing.T) {
 		if event.Fields["platform"] != "openai" || event.Fields["model"] != "gpt-5" {
 			t.Fatalf("platform/model mismatch: %+v", event.Fields)
 		}
+		switch v := event.Fields["project_id"].(type) {
+		case int64:
+			if v != 169 {
+				t.Fatalf("project_id field mismatch: %v", v)
+			}
+		case int:
+			if v != 169 {
+				t.Fatalf("project_id field mismatch: %v", v)
+			}
+		default:
+			t.Fatalf("project_id type mismatch: %T", v)
+		}
 	}
 	if !found {
 		t.Fatalf("access log event not found")
 	}
+}
+
+func TestSetProjectContext_EnrichesRequestLogger(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sink := initMiddlewareTestLogger(t)
+
+	r := gin.New()
+	r.Use(RequestLogger())
+	r.Use(func(c *gin.Context) {
+		setProjectContext(c, 169)
+		logger.FromContext(c.Request.Context()).Warn("project scoped warning")
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+
+	for _, event := range sink.list() {
+		if event == nil || event.Message != "project scoped warning" {
+			continue
+		}
+		if got := event.Fields["project_id"]; got != int64(169) {
+			t.Fatalf("project_id=%v, want 169 in fields=%+v", got, event.Fields)
+		}
+		return
+	}
+	t.Fatalf("project scoped warning event not found")
 }
 
 func TestLogger_AccessLogUsesForwardedClientIP(t *testing.T) {
