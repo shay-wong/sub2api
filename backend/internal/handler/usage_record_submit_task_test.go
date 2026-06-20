@@ -107,6 +107,21 @@ func TestOpenAIGatewayHandlerSubmitUsageRecordTask_WithoutPoolSyncFallback(t *te
 	require.True(t, called.Load())
 }
 
+func TestOpenAIGatewayHandlerSubmitUsageRecordTask_PreservesProjectContext(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	parent := service.WithProjectID(context.Background(), 169)
+	var called atomic.Bool
+
+	h.submitUsageRecordTask(parent, func(ctx context.Context) {
+		projectID, ok := service.ProjectIDFromContext(ctx)
+		require.True(t, ok)
+		require.Equal(t, int64(169), projectID)
+		called.Store(true)
+	})
+
+	require.True(t, called.Load())
+}
+
 func TestOpenAIGatewayHandlerSubmitUsageRecordTask_NilTask(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 	require.NotPanics(t, func() {

@@ -85,6 +85,9 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
 	}
+	if projectID, ok := service.ProjectIDFromContext(parent); ok {
+		base = service.WithProjectID(base, projectID)
+	}
 	return base
 }
 
@@ -2125,6 +2128,7 @@ type cyberPolicyOpsErrorMeta struct {
 	InboundEndpoint string
 	UserAgent       string
 	APIKeyPrefix    string
+	ProjectID       int64
 	UserID          int64
 	APIKeyID        int64
 	AccountID       int64
@@ -2148,6 +2152,7 @@ func buildCyberPolicyOpsErrorEntry(meta cyberPolicyOpsErrorMeta, mark *service.C
 		Stream:            meta.Stream,
 		InboundEndpoint:   meta.InboundEndpoint,
 		RequestType:       &rt,
+		ProjectID:         meta.ProjectID,
 		UserAgent:         meta.UserAgent,
 		APIKeyPrefix:      meta.APIKeyPrefix,
 		ErrorPhase:        "request",
@@ -2196,6 +2201,7 @@ func buildCyberSessionBlockedOpsEntry(meta cyberPolicyOpsErrorMeta) *service.Ops
 		Stream:            meta.Stream,
 		InboundEndpoint:   meta.InboundEndpoint,
 		RequestType:       &rt,
+		ProjectID:         meta.ProjectID,
 		UserAgent:         meta.UserAgent,
 		APIKeyPrefix:      meta.APIKeyPrefix,
 		ErrorPhase:        "request",
@@ -2288,6 +2294,7 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 		}
 	}
 	meta.Platform = resolveOpsPlatform(apiKey, guessPlatformFromPath(meta.RequestPath))
+	meta.ProjectID = resolveOpsProjectID(c, apiKey)
 	if c.Request != nil {
 		meta.ClientRequestID, _ = c.Request.Context().Value(ctxkey.ClientRequestID).(string)
 		meta.UserAgent = c.GetHeader("User-Agent")
@@ -2374,6 +2381,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		InboundEndpoint: inboundEndpoint,
 		UserAgent:       userAgent,
 		APIKeyPrefix:    apiKeyPrefix,
+		ProjectID:       resolveOpsProjectID(c, apiKey),
 		UserID:          userID,
 		APIKeyID:        apiKeyID,
 		AccountID:       accountID,

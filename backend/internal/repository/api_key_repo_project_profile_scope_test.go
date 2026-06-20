@@ -51,6 +51,7 @@ func TestAPIKeyRepository_UpdateProjectIDRequiresActiveProjectAndTargetMemberRec
 	require.Len(t, exec.execQueries, 1)
 	require.Equal(t, []any{int64(42), int64(9), service.StatusActive}, exec.execArgs[0])
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.Contains(t, normalized, "WITH target_api_key AS")
 	require.Contains(t, normalized, "p.status = $3")
 	require.Contains(t, normalized, "pm.project_id = $2")
 	require.Contains(t, normalized, "pm.user_id = ak.user_id")
@@ -63,6 +64,9 @@ func TestAPIKeyRepository_UpdateProjectIDRequiresActiveProjectAndTargetMemberRec
 	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
 	require.Contains(t, normalized, "ppb.resource_type = 'group'")
 	require.Contains(t, normalized, "ppb.resource_id = g.id")
+	require.Contains(t, normalized, "UPDATE usage_logs ul SET project_id = $2 FROM target_api_key tak WHERE ul.api_key_id = tak.id AND ul.project_id IS DISTINCT FROM $2")
+	require.Contains(t, normalized, "UPDATE ops_error_logs oel SET project_id = $2 FROM target_api_key tak WHERE oel.api_key_id = tak.id AND oel.project_id IS DISTINCT FROM $2")
+	require.Contains(t, normalized, "UPDATE api_keys ak SET project_id = $2")
 }
 
 func TestAPIKeyRepository_UpdateProjectIDRejectsMissingTargetMembership(t *testing.T) {

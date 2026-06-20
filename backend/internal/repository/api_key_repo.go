@@ -303,34 +303,57 @@ func (r *apiKeyRepository) UpdateProjectID(ctx context.Context, id int64, projec
 	}
 	groupScopeSQL := projectProfileScopeSQL(projectID, projectSQLScopeResources{GroupID: "g.id"})
 	res, err := r.sql.ExecContext(service.WithoutProjectID(ctx), fmt.Sprintf(`
+		WITH target_api_key AS (
+			SELECT ak.id
+			FROM api_keys ak
+			WHERE ak.id = $1
+			  AND ak.deleted_at IS NULL
+			  AND EXISTS (
+				SELECT 1
+				FROM projects p
+				WHERE p.id = $2
+				  AND p.deleted_at IS NULL
+				  AND p.status = $3
+			  )
+			  AND EXISTS (
+				SELECT 1
+				FROM project_members pm
+				WHERE pm.project_id = $2
+				  AND pm.user_id = ak.user_id
+			  )
+			  AND (
+				ak.group_id IS NULL
+				OR EXISTS (
+					SELECT 1
+					FROM groups g
+					WHERE g.id = ak.group_id
+					  AND g.deleted_at IS NULL
+					  AND %s
+				)
+			  )
+			FOR UPDATE
+		),
+		updated_usage_logs AS (
+			UPDATE usage_logs ul
+			SET project_id = $2
+			FROM target_api_key tak
+			WHERE ul.api_key_id = tak.id
+			  AND ul.project_id IS DISTINCT FROM $2
+			RETURNING ul.id
+		),
+		updated_ops_error_logs AS (
+			UPDATE ops_error_logs oel
+			SET project_id = $2
+			FROM target_api_key tak
+			WHERE oel.api_key_id = tak.id
+			  AND oel.project_id IS DISTINCT FROM $2
+			RETURNING oel.id
+		)
 		UPDATE api_keys ak
 		SET project_id = $2,
 			updated_at = NOW()
-		WHERE ak.id = $1
-		  AND ak.deleted_at IS NULL
-		  AND EXISTS (
-			SELECT 1
-			FROM projects p
-			WHERE p.id = $2
-			  AND p.deleted_at IS NULL
-			  AND p.status = $3
-		  )
-		  AND EXISTS (
-			SELECT 1
-			FROM project_members pm
-			WHERE pm.project_id = $2
-			  AND pm.user_id = ak.user_id
-		  )
-		  AND (
-			ak.group_id IS NULL
-			OR EXISTS (
-				SELECT 1
-				FROM groups g
-				WHERE g.id = ak.group_id
-				  AND g.deleted_at IS NULL
-				  AND %s
-			)
-		  )
+		FROM target_api_key tak
+		WHERE ak.id = tak.id
 	`, groupScopeSQL), id, projectID, service.StatusActive)
 	if err != nil {
 		return err

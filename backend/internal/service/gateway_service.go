@@ -9603,6 +9603,7 @@ func (s *GatewayService) buildRecordUsageLog(
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	usageLog := &UsageLog{
 		UserID:                user.ID,
+		ProjectID:             apiKey.ProjectID,
 		APIKeyID:              apiKey.ID,
 		AccountID:             account.ID,
 		RequestID:             requestID,

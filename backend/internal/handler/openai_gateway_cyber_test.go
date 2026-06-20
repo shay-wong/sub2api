@@ -107,9 +107,10 @@ func TestClearCyberPolicyTurnState(t *testing.T) {
 // from upstream cyber_policy hits, and it must NOT touch moderation/violation.
 func TestBuildCyberSessionBlockedOpsEntry(t *testing.T) {
 	entry := buildCyberSessionBlockedOpsEntry(cyberPolicyOpsErrorMeta{
-		RequestID: "req-9", Model: "gpt-5", RequestPath: "/openai/v1/responses",
+		RequestID: "req-9", Model: "gpt-5", RequestPath: "/openai/v1/responses", ProjectID: 169,
 	})
 	require.Equal(t, 403, entry.StatusCode)
+	require.Equal(t, int64(169), entry.ProjectID)
 	require.Equal(t, "cyber_policy_session_blocked", entry.ErrorType)
 	require.Equal(t, "request", entry.ErrorPhase)
 	require.True(t, entry.IsBusinessLimited)
@@ -170,9 +171,10 @@ func TestBuildCyberPolicyOpsErrorEntry_StatusCode(t *testing.T) {
 				UpstreamStatus: tc.upstreamStatus,
 			}
 			entry := buildCyberPolicyOpsErrorEntry(cyberPolicyOpsErrorMeta{
-				RequestID: "req-1", Model: "gpt-5", RequestPath: "/openai/v1/responses",
+				RequestID: "req-1", Model: "gpt-5", RequestPath: "/openai/v1/responses", ProjectID: 169,
 			}, mark)
 			require.Equal(t, tc.upstreamStatus, entry.StatusCode)
+			require.Equal(t, int64(169), entry.ProjectID)
 			require.Equal(t, "cyber_policy", entry.ErrorType)
 			require.Equal(t, "request", entry.ErrorPhase)
 		})
