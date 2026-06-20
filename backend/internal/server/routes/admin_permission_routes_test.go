@@ -303,7 +303,7 @@ func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 	require.Equal(t, []int64{4}, repo.projectInput.Bindings.SubscriptionIDs)
 }
 
-func TestProjectAdminCannotAccessUsageRoutes(t *testing.T) {
+func TestProjectAdminCanReadUsageRoutesWithPermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	admin := router.Group("/api/v1/admin")
@@ -316,25 +316,65 @@ func TestProjectAdminCannotAccessUsageRoutes(t *testing.T) {
 	})
 
 	usage := admin.Group("/usage")
-	usage.Use(servermiddleware.RequireAdminOnly())
-	usage.GET("", func(c *gin.Context) { c.Status(http.StatusOK) })
-	usage.GET("/stats", func(c *gin.Context) { c.Status(http.StatusOK) })
+	usageRead := servermiddleware.RequireAdminPermission(service.AdminPermissionUsageRead)
+	usage.GET("", usageRead, func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/stats", usageRead, func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/search-models", usageRead, func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/search-accounts", usageRead, func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/search-groups", usageRead, func(c *gin.Context) { c.Status(http.StatusOK) })
 	usage.GET("/cleanup-tasks", servermiddleware.RequireAdminOnly(), func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	readRec := httptest.NewRecorder()
 	readReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil)
 	router.ServeHTTP(readRec, readReq)
-	require.Equal(t, http.StatusForbidden, readRec.Code)
+	require.Equal(t, http.StatusOK, readRec.Code)
 
 	statsRec := httptest.NewRecorder()
 	statsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/stats", nil)
 	router.ServeHTTP(statsRec, statsReq)
-	require.Equal(t, http.StatusForbidden, statsRec.Code)
+	require.Equal(t, http.StatusOK, statsRec.Code)
+
+	searchModelsRec := httptest.NewRecorder()
+	searchModelsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/search-models", nil)
+	router.ServeHTTP(searchModelsRec, searchModelsReq)
+	require.Equal(t, http.StatusOK, searchModelsRec.Code)
+
+	searchAccountsRec := httptest.NewRecorder()
+	searchAccountsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/search-accounts?q=claude", nil)
+	router.ServeHTTP(searchAccountsRec, searchAccountsReq)
+	require.Equal(t, http.StatusOK, searchAccountsRec.Code)
+
+	searchGroupsRec := httptest.NewRecorder()
+	searchGroupsReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/search-groups", nil)
+	router.ServeHTTP(searchGroupsRec, searchGroupsReq)
+	require.Equal(t, http.StatusOK, searchGroupsRec.Code)
 
 	cleanupRec := httptest.NewRecorder()
 	cleanupReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/cleanup-tasks", nil)
 	router.ServeHTTP(cleanupRec, cleanupReq)
 	require.Equal(t, http.StatusForbidden, cleanupRec.Code)
+}
+
+func TestProjectAdminCannotReadUsageRoutesWithoutPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionDashboardRead}))
+		c.Next()
+	})
+
+	usage := admin.Group("/usage")
+	usage.GET("", servermiddleware.RequireAdminPermission(service.AdminPermissionUsageRead), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestSuperAdminCanAccessUsageRoutes(t *testing.T) {
@@ -348,9 +388,8 @@ func TestSuperAdminCanAccessUsageRoutes(t *testing.T) {
 	})
 
 	usage := admin.Group("/usage")
-	usage.Use(servermiddleware.RequireAdminOnly())
-	usage.GET("", func(c *gin.Context) { c.Status(http.StatusOK) })
-	usage.GET("/cleanup-tasks", func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("", servermiddleware.RequireAdminPermission(service.AdminPermissionUsageRead), func(c *gin.Context) { c.Status(http.StatusOK) })
+	usage.GET("/cleanup-tasks", servermiddleware.RequireAdminOnly(), func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	readRec := httptest.NewRecorder()
 	readReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage", nil)

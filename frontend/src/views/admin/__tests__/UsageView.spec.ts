@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, authState } = vi.hoisted(() => {
+const { list, count, getStats, getSnapshotV2, getById, getModelStats, searchModels, listErrorLogs, authState } = await vi.hoisted(async () => {
+  const { reactive } = await import('vue')
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -17,8 +18,15 @@ const { list, count, getStats, getSnapshotV2, getById, getModelStats, listErrorL
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
     getModelStats: vi.fn(),
+    searchModels: vi.fn(),
     listErrorLogs: vi.fn(),
-    authState: { isAdmin: true },
+    authState: reactive({
+      isAdmin: true,
+      adminPermissions: ['admin.ops.read'],
+      hasAdminPermission(permission: string) {
+        return this.isAdmin || this.adminPermissions.includes(permission)
+      },
+    }),
   }
 })
 
@@ -57,6 +65,7 @@ vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: vi.fn(),
     count,
+    searchModels,
   },
 }))
 
@@ -103,8 +112,23 @@ const UsageFiltersStub = {
   template: '<div data-test="usage-filters" :data-show-cleanup="String(showCleanup)"><slot name="after-reset" /></div>',
 }
 const UsageTableStub = {
+  props: ['allowUserDetail'],
   emits: ['userClick'],
-  template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
+  template: '<div data-test="usage-table" :data-allow-user-detail="String(allowUserDetail)"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
+}
+const OpsErrorLogTableStub = {
+  props: ['rows'],
+  emits: ['openErrorDetail'],
+  template: `
+    <div data-test="ops-error-table">
+      <span v-for="row in rows" :key="row.id">{{ row.message }}</span>
+      <button class="open-error" @click="$emit('openErrorDetail', rows[0]?.id)">open</button>
+    </div>
+  `,
+}
+const OpsErrorDetailModalStub = {
+  props: ['show', 'errorId'],
+  template: '<div v-if="show" data-test="ops-error-detail">{{ errorId }}</div>',
 }
 const ModelDistributionChartStub = {
   props: ['metric'],
@@ -136,7 +160,9 @@ describe('admin UsageView distribution metric toggles', () => {
     getSnapshotV2.mockReset()
     getById.mockReset()
     getModelStats.mockReset()
+    searchModels.mockReset()
     authState.isAdmin = true
+    authState.adminPermissions = ['admin.ops.read']
 
     list.mockResolvedValue({
       items: [],
@@ -160,6 +186,7 @@ describe('admin UsageView distribution metric toggles', () => {
       groups: [],
     })
     getModelStats.mockResolvedValue({ models: [] })
+    searchModels.mockResolvedValue([{ name: 'claude-3' }, { name: 'gpt-4o' }])
   })
 
   afterEach(() => {
@@ -389,6 +416,9 @@ describe('admin UsageView cleanup visibility', () => {
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getModelStats.mockReset()
+    searchModels.mockReset()
+    authState.isAdmin = true
+    authState.adminPermissions = ['admin.ops.read']
 
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
     count.mockResolvedValue({ total: 0 })
@@ -404,10 +434,12 @@ describe('admin UsageView cleanup visibility', () => {
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
     getModelStats.mockResolvedValue({ models: [] })
+    searchModels.mockResolvedValue([{ name: 'claude-3' }, { name: 'gpt-4o' }])
   })
 
   afterEach(() => {
     authState.isAdmin = true
+    authState.adminPermissions = ['admin.ops.read']
     vi.useRealTimers()
   })
 
@@ -430,6 +462,126 @@ describe('admin UsageView cleanup visibility', () => {
     expect(wrapper.get('[data-test="usage-filters"]').attributes('data-show-cleanup')).toBe('false')
     wrapper.unmount()
   })
+
+  it('hides ops error tab without ops permission', async () => {
+    authState.isAdmin = false
+    authState.adminPermissions = ['admin.usage.read']
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('usage.tabs.errors')
+    expect(listErrorLogs).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not call dashboard APIs when only usage permission is granted', async () => {
+    authState.isAdmin = false
+    authState.adminPermissions = ['admin.usage.read']
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(list).toHaveBeenCalled()
+    expect(getStats).toHaveBeenCalled()
+    expect(searchModels).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }))
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+
+    ;(wrapper.vm as any).refreshData()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(searchModels).toHaveBeenCalledTimes(2)
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('disables usage row user detail without user management permission', async () => {
+    authState.isAdmin = false
+    authState.adminPermissions = ['admin.usage.read']
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: UsageTableStub, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="usage-table"]').attributes('data-allow-user-detail')).toBe('false')
+    await wrapper.find('[data-test="usage-table"] .user-click').trigger('click')
+    await flushPromises()
+
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('clears stale ops errors when ops permission is removed', async () => {
+    authState.isAdmin = false
+    authState.adminPermissions = ['admin.usage.read', 'admin.ops.read']
+    listErrorLogs.mockResolvedValueOnce({
+      items: [{ id: 99, message: 'stale ops error' }],
+      total: 1,
+    })
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: OpsErrorLogTableStub,
+        OpsErrorDetailModal: OpsErrorDetailModalStub,
+      } },
+    })
+
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'usage.tabs.errors')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('stale ops error')
+    await wrapper.find('[data-test="ops-error-table"] .open-error').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="ops-error-detail"]').exists()).toBe(true)
+
+    authState.adminPermissions = ['admin.usage.read']
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('stale ops error')
+    expect(wrapper.find('[data-test="ops-error-detail"]').exists()).toBe(false)
+    expect((wrapper.vm as any).activeTab).toBe('usage')
+    wrapper.unmount()
+  })
 })
 
 describe('admin UsageView handleUserClick', () => {
@@ -439,6 +591,9 @@ describe('admin UsageView handleUserClick', () => {
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getById.mockReset()
+    searchModels.mockReset()
+    authState.isAdmin = true
+    authState.adminPermissions = ['admin.ops.read']
 
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
     getStats.mockResolvedValue({
@@ -446,6 +601,7 @@ describe('admin UsageView handleUserClick', () => {
       total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0,
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
+    searchModels.mockResolvedValue([{ name: 'claude-3' }])
   })
 
   afterEach(() => {
@@ -495,6 +651,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getModelStats.mockReset()
+    searchModels.mockReset()
     listErrorLogs.mockReset()
 
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
@@ -504,6 +661,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
     getModelStats.mockResolvedValue({ models: [] })
+    searchModels.mockResolvedValue([{ name: 'claude-3' }])
     listErrorLogs.mockResolvedValue({ items: [], total: 0, pages: 0 })
   })
 

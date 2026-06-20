@@ -728,7 +728,8 @@ describe('admin ProjectsView project resource scope', () => {
         'admin.users.manage',
         'admin.groups.manage',
         'admin.subscriptions.manage',
-        'admin.accounts.write'
+        'admin.accounts.write',
+        'admin.usage.read'
       ])
     }))
   })
@@ -858,7 +859,8 @@ describe('admin ProjectsView project resource scope', () => {
         'admin.users.manage',
         'admin.groups.manage',
         'admin.subscriptions.manage',
-        'admin.accounts.write'
+        'admin.accounts.write',
+        'admin.usage.read'
       ])
     }))
   })

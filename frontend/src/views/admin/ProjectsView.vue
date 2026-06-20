@@ -996,7 +996,8 @@ const projectAdminPermissionOptions = computed(() => [
   { value: AdminPermissions.users, label: t('admin.projects.permissions.users') },
   { value: AdminPermissions.groups, label: t('admin.projects.permissions.groups') },
   { value: AdminPermissions.subscriptions, label: t('admin.projects.permissions.subscriptions') },
-  { value: AdminPermissions.accounts, label: t('admin.projects.permissions.accounts') }
+  { value: AdminPermissions.accounts, label: t('admin.projects.permissions.accounts') },
+  { value: AdminPermissions.usage, label: t('admin.projects.permissions.usage') }
 ])
 
 const memberColumns = computed<Column[]>(() => [

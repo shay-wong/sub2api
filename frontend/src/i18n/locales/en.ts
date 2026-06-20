@@ -1856,7 +1856,8 @@ export default {
         users: 'User Management',
         groups: 'Group Management',
         subscriptions: 'Subscription Management',
-        accounts: 'Account Management'
+        accounts: 'Account Management',
+        usage: 'Usage Records'
       },
       apiKeys: 'API Keys',
       memberApiKeys: 'Member API Keys',

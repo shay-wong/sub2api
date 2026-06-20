@@ -14,7 +14,7 @@
                 @change="onDateRangeChange"
               />
             </div>
-            <div class="ml-auto flex items-center gap-2">
+            <div v-if="canReadDashboardCharts" class="ml-auto flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
               <div class="w-28">
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
@@ -22,7 +22,7 @@
             </div>
           </div>
         </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div v-if="canReadDashboardCharts" class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ModelDistributionChart
             v-model:source="modelDistributionSource"
             v-model:metric="modelDistributionMetric"
@@ -46,7 +46,7 @@
             :filters="breakdownFilters"
           />
         </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-6" :class="{ 'lg:grid-cols-2': canReadDashboardCharts }">
           <EndpointDistributionChart
             v-model:source="endpointDistributionSource"
             v-model:metric="endpointDistributionMetric"
@@ -61,7 +61,7 @@
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          <TokenUsageTrend v-if="canReadDashboardCharts" :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
       <UsageFilters v-model="filters" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" :show-cleanup="authStore.isAdmin" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
@@ -104,7 +104,7 @@
         <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
           {{ t('usage.tabs.usage') }}
         </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrorsTab">
+        <button v-if="canReadOpsErrors" class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrorsTab">
           {{ t('usage.tabs.errors') }}
         </button>
       </div>
@@ -116,6 +116,7 @@
           :server-side-sort="true"
           :default-sort-key="'created_at'"
           :default-sort-order="'desc'"
+          :allow-user-detail="canManageUsers"
           @sort="handleSort"
           @userClick="handleUserClick"
         />
@@ -132,7 +133,7 @@
           @update:pageSize="handlePageSizeChange"
         />
       </div>
-      <div v-show="activeTab === 'errors'">
+      <div v-show="canReadOpsErrors && activeTab === 'errors'">
         <OpsErrorLogTable
           :rows="errRows" :total="errTotal" :loading="errLoading"
           :page="errPage" :page-size="errPageSize"
@@ -167,6 +168,7 @@ import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
 import { useAuthStore } from '@/stores/auth'
+import { AdminPermissions } from '@/constants/adminPermissions'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
@@ -193,6 +195,7 @@ type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const modelCandidates = ref<string[]>([])
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -217,6 +220,9 @@ let exactUsageTotalCache: { key: string; total: number } | null = null
 const USAGE_COUNT_TIMEOUT_MS = 6000
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
+const canReadDashboardCharts = computed(() => authStore.hasAdminPermission(AdminPermissions.dashboard))
+const canReadOpsErrors = computed(() => authStore.hasAdminPermission(AdminPermissions.ops))
+const canManageUsers = computed(() => authStore.hasAdminPermission(AdminPermissions.users))
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
@@ -232,11 +238,10 @@ const breakdownFilters = computed(() => {
   return f
 })
 
-const modelNameOptions = computed(() =>
-  Array.from(new Set(requestedModelStats.value.map((m) => m.model).filter(Boolean))).sort()
-)
+const modelNameOptions = computed(() => modelCandidates.value)
 
 const handleUserClick = async (userId: number) => {
+  if (!canManageUsers.value) return
   try {
     const user = await adminAPI.users.getById(userId, true)
     balanceHistoryUser.value = user
@@ -487,6 +492,22 @@ const loadStats = async (force = false) => {
   }
 }
 
+const loadModelCandidates = async () => {
+  try {
+    const requestType = filters.value.request_type
+    const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
+    const models = await adminUsageAPI.searchModels({
+      ...filters.value,
+      model: undefined,
+      stream: legacyStream === null ? undefined : legacyStream,
+    })
+    modelCandidates.value = Array.from(new Set(models.map((m) => m.name).filter(Boolean))).sort()
+  } catch (error) {
+    console.error('Failed to load usage model candidates:', error)
+    modelCandidates.value = []
+  }
+}
+
 // 失效模型统计缓存:仅标记需要重取,保留旧数据直到新数据到达(避免刷新时图表闪空)。
 const invalidateModelStatsCache = () => {
   loadedModelSources.requested = false
@@ -494,7 +515,24 @@ const invalidateModelStatsCache = () => {
   loadedModelSources.mapping = false
 }
 
+const resetDashboardChartState = () => {
+  chartReqSeq += 1
+  modelStatsReqSeq += 1
+  chartsLoading.value = false
+  modelStatsLoading.value = false
+  trendData.value = []
+  requestedModelStats.value = []
+  upstreamModelStats.value = []
+  mappingModelStats.value = []
+  groupStats.value = []
+  invalidateModelStatsCache()
+}
+
 const loadModelStats = async (source: ModelDistributionSource, force = false) => {
+  if (!canReadDashboardCharts.value) {
+    resetDashboardChartState()
+    return
+  }
   if (!force && loadedModelSources[source]) {
     return
   }
@@ -547,6 +585,10 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 }
 
 const loadChartData = async () => {
+  if (!canReadDashboardCharts.value) {
+    resetDashboardChartState()
+    return
+  }
   const seq = ++chartReqSeq
   chartsLoading.value = true
   try {
@@ -581,8 +623,13 @@ const applyFilters = () => {
   invalidateModelStatsCache()
   loadLogs()
   loadStats()
-  loadModelStats(modelDistributionSource.value, true)
-  loadChartData()
+  loadModelCandidates()
+  if (canReadDashboardCharts.value) {
+    loadModelStats(modelDistributionSource.value, true)
+    loadChartData()
+  } else {
+    resetDashboardChartState()
+  }
   errPage.value = 1
   if (activeTab.value === 'errors') {
     loadAdminErrors()
@@ -595,8 +642,13 @@ const refreshData = () => {
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
-  loadModelStats(modelDistributionSource.value, true)
-  loadChartData()
+  loadModelCandidates()
+  if (canReadDashboardCharts.value) {
+    loadModelStats(modelDistributionSource.value, true)
+    loadChartData()
+  } else {
+    resetDashboardChartState()
+  }
   if (activeTab.value === 'errors') loadAdminErrors()
 }
 const resetFilters = () => {
@@ -775,11 +827,28 @@ const errTotal = ref(0)
 const showErrorModal = ref(false)
 const selectedErrorId = ref<number | null>(null)
 
+const resetOpsErrorState = () => {
+  activeTab.value = 'usage'
+  errRows.value = []
+  errTotal.value = 0
+  errPage.value = 1
+  errLoading.value = false
+  showErrorModal.value = false
+  selectedErrorId.value = null
+}
+
+watch(canReadOpsErrors, (allowed) => {
+  if (!allowed) resetOpsErrorState()
+}, { immediate: true })
+
 // 注意：'YYYY-MM-DDT00:00:00' 无时区后缀，按本地时区解析后再转 UTC——与页面其它日期处理语义一致，刻意如此，勿改成 'T00:00:00Z'
 const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined =>
   d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
 
 const loadAdminErrors = async () => {
+  if (!canReadOpsErrors.value) {
+    return
+  }
   errLoading.value = true
   try {
     const resp = await listErrorLogs({
@@ -807,7 +876,11 @@ const loadAdminErrors = async () => {
 const onErrPage = (p: number) => { errPage.value = p; loadAdminErrors() }
 const onErrPageSize = (s: number) => { errPageSize.value = s; errPage.value = 1; loadAdminErrors() }
 const openError = (id: number) => { selectedErrorId.value = id; showErrorModal.value = true }
-const switchToErrorsTab = () => { activeTab.value = 'errors'; if (errRows.value.length === 0) loadAdminErrors() }
+const switchToErrorsTab = () => {
+  if (!canReadOpsErrors.value) return
+  activeTab.value = 'errors'
+  if (errRows.value.length === 0) loadAdminErrors()
+}
 
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
@@ -822,17 +895,33 @@ onMounted(() => {
   applyRouteQueryFilters()
   loadLogs()
   loadStats()
-  loadModelStats(modelDistributionSource.value, true)
-  window.setTimeout(() => {
-    void loadChartData()
-  }, 120)
+  loadModelCandidates()
+  if (canReadDashboardCharts.value) {
+    loadModelStats(modelDistributionSource.value, true)
+    window.setTimeout(() => {
+      void loadChartData()
+    }, 120)
+  } else {
+    resetDashboardChartState()
+  }
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
 onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); usageCountAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
+watch(canReadDashboardCharts, (allowed) => {
+  if (!allowed) {
+    resetDashboardChartState()
+    return
+  }
+  void loadModelStats(modelDistributionSource.value, true)
+  void loadChartData()
+})
+
 watch(modelDistributionSource, (source) => {
-  void loadModelStats(source)
+  if (canReadDashboardCharts.value) {
+    void loadModelStats(source)
+  }
 })
 
 defineExpose({ requestedModelStats, refreshData })

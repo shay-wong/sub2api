@@ -17,6 +17,7 @@ const (
 	AdminPermissionUsersManage   = "admin.users.manage"
 	AdminPermissionGroupsManage  = "admin.groups.manage"
 	AdminPermissionSubsManage    = "admin.subscriptions.manage"
+	AdminPermissionUsageRead     = "admin.usage.read"
 )
 
 const projectAdminPermissionNoneSentinel = "__none__"
@@ -28,6 +29,7 @@ var defaultProjectAdminPermissions = []string{
 	AdminPermissionGroupsManage,
 	AdminPermissionSubsManage,
 	AdminPermissionAccountsWrite,
+	AdminPermissionUsageRead,
 }
 
 var (

@@ -133,6 +133,7 @@ function simulateGuard(
       'admin.groups.manage',
       'admin.subscriptions.manage',
       'admin.accounts.write',
+      'admin.usage.read',
     ]).includes(toMeta.adminPermission)
   ) {
     return '/admin/dashboard'
@@ -298,6 +299,7 @@ describe('路由守卫逻辑', () => {
       expect(simulateGuard('/admin/users', { requiresAdmin: true, adminPermission: 'admin.users.manage' }, authState)).toBeNull()
       expect(simulateGuard('/admin/groups', { requiresAdmin: true, adminPermission: 'admin.groups.manage' }, authState)).toBeNull()
       expect(simulateGuard('/admin/subscriptions', { requiresAdmin: true, adminPermission: 'admin.subscriptions.manage' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/usage', { requiresAdmin: true, adminPermission: 'admin.usage.read' }, authState)).toBeNull()
     })
 
     it('没有对应项目权限时阻止访问项目级后台页面', () => {
@@ -312,7 +314,6 @@ describe('路由守卫逻辑', () => {
 
     it('访问超级管理员页面重定向到后台仪表盘', () => {
       expect(simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
-      expect(simulateGuard('/admin/usage', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/settings', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
     })

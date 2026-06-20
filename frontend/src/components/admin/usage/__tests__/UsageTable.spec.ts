@@ -375,6 +375,80 @@ describe('admin UsageTable deleted-user badge', () => {
     expect(wrapper.text()).toContain('d@test.com')
   })
 
+  it('renders user email as plain text when user detail is not allowed', async () => {
+    const row = {
+      request_id: 'req-user-detail-disabled',
+      model: 'claude-3',
+      user_id: 4,
+      user: { id: 4, email: 'readonly@test.com', deleted_at: null },
+      actual_cost: 0,
+      total_cost: 0,
+      input_cost: 0,
+      output_cost: 0,
+      rate_multiplier: 1,
+      input_tokens: 1,
+      output_tokens: 1,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'user', label: 'User' }],
+        allowUserDetail: false,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('readonly@test.com')
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.emitted('userClick')).toBeUndefined()
+  })
+
+  it('emits userClick when user detail is allowed', async () => {
+    const row = {
+      request_id: 'req-user-detail-enabled',
+      model: 'claude-3',
+      user_id: 5,
+      user: { id: 5, email: 'manager@test.com', deleted_at: null },
+      actual_cost: 0,
+      total_cost: 0,
+      input_cost: 0,
+      output_cost: 0,
+      rate_multiplier: 1,
+      input_tokens: 1,
+      output_tokens: 1,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'user', label: 'User' }],
+        allowUserDetail: true,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('button').trigger('click')
+
+    expect(wrapper.emitted('userClick')).toEqual([[5, 'manager@test.com']])
+  })
+
   it('does NOT render deleted badge for an active user row', () => {
     const row = {
       request_id: 'req-active-user-1',

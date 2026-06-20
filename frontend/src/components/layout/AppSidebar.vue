@@ -741,7 +741,8 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.users },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.groups },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.subscriptions },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts }
+    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts },
+    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon, adminPermission: AdminPermissions.usage }
   ]
 
   if (!authStore.isAdmin) {
@@ -794,8 +795,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
       ],
-    },
-    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon }
+    }
   ]
 
   const visible = applyFeatureFlags(baseItems)

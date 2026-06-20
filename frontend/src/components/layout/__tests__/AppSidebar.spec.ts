@@ -62,6 +62,7 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(projectItemsSource).toContain("path: '/admin/groups'")
     expect(projectItemsSource).toContain("path: '/admin/subscriptions'")
     expect(projectItemsSource).toContain("path: '/admin/accounts'")
+    expect(projectItemsSource).toContain("path: '/admin/usage'")
 
     const projectAdminBranchMatch = componentSource.match(/if \(!authStore\.isAdmin\) \{[\s\S]*?\n {2}\}/)
     const projectAdminBranchSource = projectAdminBranchMatch?.[0] ?? ''

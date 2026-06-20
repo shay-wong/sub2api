@@ -597,9 +597,9 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
+      adminPermission: AdminPermissions.usage,
       descriptionKey: 'admin.usage.description'
     }
   },
@@ -743,6 +743,7 @@ const ADMIN_PERMISSION_FALLBACK_PATHS: Record<string, string> = {
   [AdminPermissions.groups]: '/admin/groups',
   [AdminPermissions.subscriptions]: '/admin/subscriptions',
   [AdminPermissions.accounts]: '/admin/accounts',
+  [AdminPermissions.usage]: '/admin/usage',
 }
 
 function resolveAllowedAdminPath(authStore: ReturnType<typeof useAuthStore>): string {

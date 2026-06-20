@@ -3022,6 +3022,47 @@ func (r *usageLogRepository) CountWithFilters(ctx context.Context, filters Usage
 	return total, nil
 }
 
+// ListModelCandidates returns distinct raw model values matching the same filters as the usage log list.
+func (r *usageLogRepository) ListModelCandidates(ctx context.Context, filters UsageLogFilters, limit int) (results []string, err error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+
+	whereClause, args := buildUsageLogFilterWhere(ctx, filters)
+	query := `
+		SELECT model
+		FROM usage_logs
+		` + whereClause + `
+		GROUP BY model
+		HAVING COALESCE(model, '') <> ''
+		ORDER BY COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) DESC, model ASC
+		LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			results = nil
+		}
+	}()
+
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		results = append(results, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
 	return !filters.ExactTotal
 }

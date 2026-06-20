@@ -521,6 +521,36 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryListModelCandidatesUsesUsageFilters(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	requestType := int16(service.RequestTypeWSV2)
+	billingType := int8(1)
+	filters := usagestats.UsageLogFilters{
+		UserID:      11,
+		APIKeyID:    22,
+		AccountID:   33,
+		GroupID:     44,
+		RequestType: &requestType,
+		BillingType: &billingType,
+		BillingMode: string(service.BillingModeImage),
+		StartTime:   &start,
+		EndTime:     &end,
+	}
+
+	mock.ExpectQuery("SELECT model\\s+FROM usage_logs\\s+WHERE user_id = \\$1 AND api_key_id = \\$2 AND account_id = \\$3 AND group_id = \\$4 AND \\(request_type = \\$5 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\) AND billing_type = \\$6 AND \\(billing_mode = \\$7 OR COALESCE\\(image_count, 0\\) > 0\\) AND created_at >= \\$8 AND created_at < \\$9\\s+GROUP BY model\\s+HAVING COALESCE\\(model, ''\\) <> ''\\s+ORDER BY .*\\s+LIMIT \\$10").
+		WithArgs(filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, requestType, int16(billingType), string(service.BillingModeImage), start, end, 50).
+		WillReturnRows(sqlmock.NewRows([]string{"model"}).AddRow("claude-3").AddRow("gpt-4o"))
+
+	models, err := repo.ListModelCandidates(context.Background(), filters, 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"claude-3", "gpt-4o"}, models)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}

@@ -172,7 +172,7 @@ import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
-import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
+import type { SimpleAccount, SimpleApiKey, SimpleUser } from '@/api/admin/usage'
 
 type ModelValue = Record<string, any>
 
@@ -216,10 +216,6 @@ const apiKeyResults = ref<SimpleApiKey[]>([])
 const showApiKeyDropdown = ref(false)
 let apiKeySearchTimeout: ReturnType<typeof setTimeout> | null = null
 
-interface SimpleAccount {
-  id: number
-  name: string
-}
 const accountKeyword = ref('')
 const accountResults = ref<SimpleAccount[]>([])
 const showAccountDropdown = ref(false)
@@ -336,8 +332,7 @@ const debounceAccountSearch = () => {
       return
     }
     try {
-      const res = await adminAPI.accounts.list(1, 20, { search: accountKeyword.value })
-      accountResults.value = res.items.map((a) => ({ id: a.id, name: a.name }))
+      accountResults.value = await adminAPI.usage.searchAccounts(accountKeyword.value)
     } catch {
       accountResults.value = []
     }
@@ -429,8 +424,8 @@ watch(
 onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
   try {
-    const gs = await adminAPI.groups.list(1, 1000)
-    groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
+    const gs = await adminAPI.usage.searchGroups()
+    groupOptions.value.push(...gs.map((g) => ({ value: g.id, label: g.name })))
   } catch {
     // Ignore filter option loading errors (page still usable)
   }

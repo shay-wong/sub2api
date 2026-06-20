@@ -36,6 +36,20 @@ export interface SimpleApiKey {
   user_id: number
 }
 
+export interface SimpleAccount {
+  id: number
+  name: string
+}
+
+export interface SimpleGroup {
+  id: number
+  name: string
+}
+
+export interface SimpleModel {
+  name: string
+}
+
 export interface UsageCleanupFilters {
   start_time: string
   end_time: string
@@ -183,6 +197,33 @@ export async function searchApiKeys(userId?: number, keyword?: string): Promise<
 }
 
 /**
+ * Search accounts by name keyword (admin usage read permission).
+ */
+export async function searchAccounts(keyword: string): Promise<SimpleAccount[]> {
+  const { data } = await apiClient.get<SimpleAccount[]>('/admin/usage/search-accounts', {
+    params: { q: keyword }
+  })
+  return data
+}
+
+/**
+ * Search groups by name keyword (admin usage read permission).
+ */
+export async function searchGroups(keyword?: string): Promise<SimpleGroup[]> {
+  const params = keyword ? { q: keyword } : undefined
+  const { data } = await apiClient.get<SimpleGroup[]>('/admin/usage/search-groups', { params })
+  return data
+}
+
+/**
+ * List model filter candidates visible to admin usage read permission.
+ */
+export async function searchModels(params?: AdminUsageQueryParams): Promise<SimpleModel[]> {
+  const { data } = await apiClient.get<SimpleModel[]>('/admin/usage/search-models', { params })
+  return data
+}
+
+/**
  * List usage cleanup tasks (admin only)
  * @param params - Query parameters for pagination
  * @returns Paginated list of cleanup tasks
@@ -225,6 +266,9 @@ export const adminUsageAPI = {
   getStats,
   searchUsers,
   searchApiKeys,
+  searchAccounts,
+  searchGroups,
+  searchModels,
   listCleanupTasks,
   createCleanupTask,
   cancelCleanupTask

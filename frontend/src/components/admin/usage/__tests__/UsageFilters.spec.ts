@@ -50,6 +50,9 @@ vi.mock('vue-i18n', async () => {
 // Mock the admin API module — we control searchUsers return value per test
 const mockSearchUsers = vi.fn()
 const mockSearchApiKeys = vi.fn().mockResolvedValue([])
+const mockSearchAccounts = vi.fn().mockResolvedValue([])
+const mockSearchGroups = vi.fn().mockResolvedValue([])
+const mockSearchModels = vi.fn().mockResolvedValue([])
 const mockGroupsList = vi.fn().mockResolvedValue({ items: [] })
 const mockGetModelStats = vi.fn().mockResolvedValue({ models: [] })
 const mockAccountsList = vi.fn().mockResolvedValue({ items: [] })
@@ -59,6 +62,9 @@ vi.mock('@/api/admin', () => ({
     usage: {
       searchUsers: (...args: any[]) => mockSearchUsers(...args),
       searchApiKeys: (...args: any[]) => mockSearchApiKeys(...args),
+      searchAccounts: (...args: any[]) => mockSearchAccounts(...args),
+      searchGroups: (...args: any[]) => mockSearchGroups(...args),
+      searchModels: (...args: any[]) => mockSearchModels(...args),
     },
     groups: { list: (...args: any[]) => mockGroupsList(...args) },
     dashboard: { getModelStats: (...args: any[]) => mockGetModelStats(...args) },
@@ -170,6 +176,7 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
     vi.useFakeTimers()
     mockGetModelStats.mockClear()
     mockGroupsList.mockClear()
+    mockSearchGroups.mockClear()
   })
   afterEach(() => { vi.useRealTimers() })
 
@@ -188,9 +195,56 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
     await flushPromises()
 
     expect(mockGetModelStats).not.toHaveBeenCalled()
+    expect(mockGroupsList).not.toHaveBeenCalled()
+    expect(mockSearchGroups).toHaveBeenCalledWith()
 
     const opts = (wrapper.vm as any).modelOptions as Array<{ value: string | null; label: string }>
     expect(opts.map((o) => o.value)).toEqual([null, 'claude-3', 'gpt-4o'])
+  })
+})
+
+describe('UsageFilters — usage-scoped account and group candidates', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockAccountsList.mockClear()
+    mockGroupsList.mockClear()
+    mockSearchAccounts.mockReset()
+    mockSearchGroups.mockReset()
+    mockSearchGroups.mockResolvedValue([])
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('searches account candidates through usage API instead of account management API', async () => {
+    mockSearchAccounts.mockResolvedValue([{ id: 7, name: 'Claude Account' }])
+    const wrapper = mountFilters()
+    await flushPromises()
+
+    const inputs = wrapper.findAll('input[type="text"]')
+    const accountInput = inputs[2]
+    await accountInput.trigger('focus')
+    await accountInput.setValue('claude')
+    await accountInput.trigger('input')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(mockSearchAccounts).toHaveBeenCalledWith('claude')
+    expect(mockAccountsList).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Claude Account')
+  })
+
+  it('loads group candidates through usage API instead of group management API', async () => {
+    mockSearchGroups.mockResolvedValue([{ id: 3, name: 'Default Group' }])
+    const wrapper = mountFilters()
+    await flushPromises()
+
+    expect(mockSearchGroups).toHaveBeenCalledWith()
+    expect(mockGroupsList).not.toHaveBeenCalled()
+    const opts = (wrapper.vm as any).groupOptions as Array<{ value: number | null; label: string }>
+    expect(opts).toEqual([
+      { value: null, label: 'All Groups' },
+      { value: 3, label: 'Default Group' },
+    ])
   })
 })
 

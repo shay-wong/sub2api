@@ -402,3 +402,12 @@ func (s *UsageService) GetStatsWithFilters(ctx context.Context, filters usagesta
 	}
 	return stats, nil
 }
+
+// ListModelCandidates returns requested model names visible in the current usage scope.
+func (s *UsageService) ListModelCandidates(ctx context.Context, filters usagestats.UsageLogFilters) ([]string, error) {
+	models, err := s.usageRepo.ListModelCandidates(ctx, filters, 200)
+	if err != nil {
+		return nil, fmt.Errorf("list usage model candidates: %w", err)
+	}
+	return models, nil
+}

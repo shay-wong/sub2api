@@ -1877,7 +1877,8 @@ export default {
         users: '用户管理',
         groups: '分组管理',
         subscriptions: '订阅管理',
-        accounts: '账号管理'
+        accounts: '账号管理',
+        usage: '使用记录'
       },
       apiKeys: 'API Key',
       memberApiKeys: '成员 API Key',

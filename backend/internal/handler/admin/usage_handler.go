@@ -368,6 +368,97 @@ func (h *UsageHandler) SearchAPIKeys(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// SearchModels handles listing model filter candidates visible to usage readers.
+// GET /api/v1/admin/usage/search-models
+func (h *UsageHandler) SearchModels(c *gin.Context) {
+	filters, ok := parseAdminUsageLogFilters(c)
+	if !ok {
+		return
+	}
+	// Model candidates should not be constrained by the currently selected model.
+	filters.Model = ""
+	if !applyAdminUsageOptionalDateRange(c, &filters) {
+		return
+	}
+
+	models, err := h.usageService.ListModelCandidates(c.Request.Context(), filters)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type SimpleModel struct {
+		Name string `json:"name"`
+	}
+	result := make([]SimpleModel, 0, len(models))
+	for _, model := range models {
+		result = append(result, SimpleModel{Name: model})
+	}
+	response.Success(c, result)
+}
+
+// SearchAccounts handles searching account filter candidates.
+// GET /api/v1/admin/usage/search-accounts
+func (h *UsageHandler) SearchAccounts(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		response.Success(c, []any{})
+		return
+	}
+	if len(keyword) > 100 {
+		keyword = keyword[:100]
+	}
+
+	accounts, _, err := h.adminService.ListAccounts(c.Request.Context(), 1, 30, "", "", "", keyword, 0, "", "name", "asc")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type SimpleAccount struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+
+	result := make([]SimpleAccount, 0, len(accounts))
+	for i := range accounts {
+		result = append(result, SimpleAccount{
+			ID:   accounts[i].ID,
+			Name: accounts[i].Name,
+		})
+	}
+	response.Success(c, result)
+}
+
+// SearchGroups handles searching group filter candidates.
+// GET /api/v1/admin/usage/search-groups
+func (h *UsageHandler) SearchGroups(c *gin.Context) {
+	keyword := strings.TrimSpace(c.Query("q"))
+	if len(keyword) > 100 {
+		keyword = keyword[:100]
+	}
+
+	groups, _, err := h.adminService.ListGroups(c.Request.Context(), 1, 1000, "", "", keyword, nil, "sort_order", "asc")
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	type SimpleGroup struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+
+	result := make([]SimpleGroup, 0, len(groups))
+	for i := range groups {
+		result = append(result, SimpleGroup{
+			ID:   groups[i].ID,
+			Name: groups[i].Name,
+		})
+	}
+	response.Success(c, result)
+}
+
 // ListCleanupTasks handles listing usage cleanup tasks
 // GET /api/v1/admin/usage/cleanup-tasks
 func (h *UsageHandler) ListCleanupTasks(c *gin.Context) {

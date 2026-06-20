@@ -21,6 +21,8 @@ type adminUsageRepoCapture struct {
 	countTotal   int64
 	countErr     error
 	statsFilters usagestats.UsageLogFilters
+	modelFilters usagestats.UsageLogFilters
+	modelLimit   int
 }
 
 func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -47,6 +49,12 @@ func (s *adminUsageRepoCapture) CountWithFilters(ctx context.Context, filters us
 	return s.countTotal, nil
 }
 
+func (s *adminUsageRepoCapture) ListModelCandidates(ctx context.Context, filters usagestats.UsageLogFilters, limit int) ([]string, error) {
+	s.modelFilters = filters
+	s.modelLimit = limit
+	return []string{"claude-3", "gpt-4o"}, nil
+}
+
 func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	usageSvc := service.NewUsageService(repo, nil, nil, nil)
@@ -55,6 +63,7 @@ func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine
 	router.GET("/admin/usage", handler.List)
 	router.GET("/admin/usage/count", handler.Count)
 	router.GET("/admin/usage/stats", handler.Stats)
+	router.GET("/admin/usage/search-models", handler.SearchModels)
 	return router
 }
 
@@ -197,4 +206,32 @@ func TestAdminUsageStatsInvalidStream(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsageSearchModelsUsesUsageScopedFilters(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/search-models?user_id=11&api_key_id=22&account_id=33&group_id=44&model=ignored&request_type=ws_v2&billing_type=1&billing_mode=image&start_date=2026-01-02&end_date=2026-01-03&timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(11), repo.modelFilters.UserID)
+	require.Equal(t, int64(22), repo.modelFilters.APIKeyID)
+	require.Equal(t, int64(33), repo.modelFilters.AccountID)
+	require.Equal(t, int64(44), repo.modelFilters.GroupID)
+	require.Empty(t, repo.modelFilters.Model)
+	require.NotNil(t, repo.modelFilters.RequestType)
+	require.Equal(t, int16(service.RequestTypeWSV2), *repo.modelFilters.RequestType)
+	require.NotNil(t, repo.modelFilters.BillingType)
+	require.Equal(t, int8(1), *repo.modelFilters.BillingType)
+	require.Equal(t, "image", repo.modelFilters.BillingMode)
+	require.NotNil(t, repo.modelFilters.StartTime)
+	require.NotNil(t, repo.modelFilters.EndTime)
+	require.Equal(t, "2026-01-02", repo.modelFilters.StartTime.Format("2006-01-02"))
+	require.Equal(t, "2026-01-04", repo.modelFilters.EndTime.Format("2006-01-02"))
+	require.Equal(t, 200, repo.modelLimit)
+	require.Contains(t, rec.Body.String(), `"name":"claude-3"`)
+	require.Contains(t, rec.Body.String(), `"name":"gpt-4o"`)
 }

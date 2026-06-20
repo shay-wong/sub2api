@@ -374,6 +374,7 @@ describe('useAuthStore', () => {
       await store.login({ email: 'admin@example.com', password: '123456' })
 
       expect(store.hasAdminPermission('admin.accounts.write')).toBe(true)
+      expect(store.hasAdminPermission('admin.usage.read')).toBe(true)
     })
 
     it('普通用户返回 false', async () => {
