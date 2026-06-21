@@ -735,6 +735,7 @@ const customMenuItemsForAdmin = computed(() => {
 
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
+  const adminUsageItem: NavItem = { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon, adminPermission: AdminPermissions.usage }
   const projectItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon, adminPermission: AdminPermissions.dashboard },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring, adminPermission: AdminPermissions.ops },
@@ -742,7 +743,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.groups },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.subscriptions },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts },
-    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon, adminPermission: AdminPermissions.usage }
+    adminUsageItem
   ]
 
   if (!authStore.isAdmin) {
@@ -764,7 +765,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    ...projectItems.slice(4),
+    ...projectItems.slice(4, 6),
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
@@ -795,7 +796,8 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
       ],
-    }
+    },
+    adminUsageItem
   ]
 
   const visible = applyFeatureFlags(baseItems)
