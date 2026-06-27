@@ -398,7 +398,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/cmd/server/VERSION
           git commit -F - <<EOF
-          Keep VERSION aligned with released artifact [skip ci]
+          sync VERSION to $VERSION [skip ci]
 
           Constraint: release workflows embed tag versions before building
           Directive: sync VERSION to the branch that owns the release lane
