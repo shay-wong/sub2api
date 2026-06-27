@@ -37,6 +37,9 @@ func RegisterAdminRoutes(
 		registerGeminiOAuthRoutes(admin, h)
 		registerAntigravityOAuthRoutes(admin, h)
 
+		// Grok OAuth
+		registerGrokOAuthRoutes(admin, h)
+
 		// 运维监控（Ops）
 		registerOpsRoutes(admin, h)
 
@@ -405,6 +408,7 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/refresh-token", accountWrite, h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", accountWrite, h.Admin.OpenAIOAuth.RefreshAccountToken)
 		openai.POST("/create-from-oauth", accountWrite, h.Admin.OpenAIOAuth.CreateAccountFromOAuth)
+		openai.POST("/create-from-codex-pat", accountWrite, h.Admin.OpenAIOAuth.CreateAccountFromCodexPAT)
 		openai.GET("/accounts/:id/quota", accountWrite, h.Admin.OpenAIOAuth.QueryQuota)
 		openai.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.OpenAIOAuth.ResetQuota)
 	}
@@ -429,6 +433,22 @@ func registerAntigravityOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers)
 		antigravity.POST("/oauth/auth-url", accountWrite, h.Admin.AntigravityOAuth.GenerateAuthURL)
 		antigravity.POST("/oauth/exchange-code", accountWrite, h.Admin.AntigravityOAuth.ExchangeCode)
 		antigravity.POST("/oauth/refresh-token", accountWrite, h.Admin.AntigravityOAuth.RefreshToken)
+	}
+}
+
+func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	grok := admin.Group("/grok")
+	{
+		accountWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+
+		grok.POST("/oauth/auth-url", accountWrite, h.Admin.GrokOAuth.GenerateAuthURL)
+		grok.POST("/oauth/exchange-code", accountWrite, h.Admin.GrokOAuth.ExchangeCode)
+		grok.POST("/oauth/refresh-token", accountWrite, h.Admin.GrokOAuth.RefreshToken)
+		grok.POST("/oauth/create-from-oauth", accountWrite, h.Admin.GrokOAuth.CreateAccountFromOAuth)
+		grok.POST("/accounts/:id/refresh", accountWrite, h.Admin.GrokOAuth.RefreshAccountToken)
+		grok.GET("/accounts/:id/quota", accountWrite, h.Admin.GrokOAuth.QueryQuota)
+		grok.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.GrokOAuth.ResetQuota)
+		grok.GET("/runtime-sanity", accountWrite, h.Admin.GrokOAuth.RuntimeSanity)
 	}
 }
 

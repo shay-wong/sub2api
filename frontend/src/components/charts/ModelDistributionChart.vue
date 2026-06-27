@@ -345,8 +345,9 @@ const chartColors = [
   '#a855f7'
 ]
 
-const toFiniteNumber = (value: number | null | undefined): number => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+const toFiniteNumber = (value: unknown): number => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : 0
 }
 
 const displayModelStats = computed(() => {
@@ -501,14 +502,14 @@ const getRankingRowLabel = (item: RankingDisplayItem): string => {
 }
 
 const formatCost = (value: number | null | undefined): string => {
-  const normalized = toFiniteNumber(value)
-  if (normalized >= 1000) {
-    return (normalized / 1000).toFixed(2) + 'K'
-  } else if (normalized >= 1) {
-    return normalized.toFixed(2)
-  } else if (normalized >= 0.01) {
-    return normalized.toFixed(3)
+  const safeValue = toFiniteNumber(value)
+  if (safeValue >= 1000) {
+    return (safeValue / 1000).toFixed(2) + 'K'
+  } else if (safeValue >= 1) {
+    return safeValue.toFixed(2)
+  } else if (safeValue >= 0.01) {
+    return safeValue.toFixed(3)
   }
-  return normalized.toFixed(4)
+  return safeValue.toFixed(4)
 }
 </script>
