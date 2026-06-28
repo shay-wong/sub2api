@@ -292,7 +292,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, nil, req.ProxyID); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -347,9 +347,22 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 // CreateAccountFromCodexPAT creates an OpenAI OAuth account from a Codex at-* personal access token.
 // POST /api/v1/admin/openai/create-from-codex-pat
 func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req OpenAICodexPATCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureGroups(req.GroupIDs, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, nil, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	if req.Concurrency != nil && *req.Concurrency < 0 {
@@ -434,7 +447,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, dto.AccountFromService(scope.accountForResponse(account)))
 }
 
 func buildOpenAICodexPATAccountName(name string, tokenInfo *service.OpenAITokenInfo) string {

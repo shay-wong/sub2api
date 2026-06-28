@@ -16,6 +16,7 @@ const (
 	AdminPermissionAccountsWrite = "admin.accounts.write"
 	AdminPermissionUsersManage   = "admin.users.manage"
 	AdminPermissionGroupsManage  = "admin.groups.manage"
+	AdminPermissionProxiesManage = "admin.proxies.manage"
 	AdminPermissionSubsManage    = "admin.subscriptions.manage"
 	AdminPermissionUsageRead     = "admin.usage.read"
 )
@@ -27,6 +28,7 @@ var defaultProjectAdminPermissions = []string{
 	AdminPermissionOpsRead,
 	AdminPermissionUsersManage,
 	AdminPermissionGroupsManage,
+	AdminPermissionProxiesManage,
 	AdminPermissionSubsManage,
 	AdminPermissionAccountsWrite,
 	AdminPermissionUsageRead,

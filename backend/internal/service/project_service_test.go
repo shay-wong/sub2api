@@ -41,6 +41,7 @@ func TestProjectServiceCreateProjectKeepsDefaultProfileBindingsWhenScopeIsUnrest
 		Bindings: ProjectProfileBindingInput{
 			GroupIDs:        []int64{7, 6, 7},
 			AccountIDs:      []int64{5},
+			ProxyIDs:        []int64{11, 10, 11},
 			SubscriptionIDs: []int64{9},
 		},
 	})
@@ -51,6 +52,7 @@ func TestProjectServiceCreateProjectKeepsDefaultProfileBindingsWhenScopeIsUnrest
 	require.True(t, repo.validateBindingResourcesCalled)
 	require.Equal(t, []int64{6, 7}, repo.created.Bindings.GroupIDs)
 	require.Equal(t, []int64{5}, repo.created.Bindings.AccountIDs)
+	require.Equal(t, []int64{10, 11}, repo.created.Bindings.ProxyIDs)
 	require.Equal(t, []int64{9}, repo.created.Bindings.SubscriptionIDs)
 }
 
@@ -66,6 +68,7 @@ func TestProjectServiceCreateProjectValidatesRestrictedInitialBindings(t *testin
 		Bindings: ProjectProfileBindingInput{
 			GroupIDs:        []int64{7, -1, 6},
 			AccountIDs:      []int64{5, 5},
+			ProxyIDs:        []int64{12, 11, 12},
 			SubscriptionIDs: []int64{9, 8, 9},
 		},
 	})
@@ -75,6 +78,7 @@ func TestProjectServiceCreateProjectValidatesRestrictedInitialBindings(t *testin
 	require.True(t, repo.validateBindingResourcesCalled)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
+	require.Equal(t, []int64{11, 12}, repo.bindingInput.ProxyIDs)
 	require.Equal(t, []int64{8, 9}, repo.bindingInput.SubscriptionIDs)
 	require.Equal(t, repo.bindingInput, repo.created.Bindings)
 }
@@ -316,6 +320,7 @@ func TestProjectServiceSetProjectProfileBindingsNormalizesResourceIDs(t *testing
 	bindings, err := svc.SetProjectProfileBindings(context.Background(), 10, 20, ProjectProfileBindingInput{
 		GroupIDs:        []int64{7, -1, 6},
 		AccountIDs:      []int64{5, 5},
+		ProxyIDs:        []int64{12, 11, 12},
 		SubscriptionIDs: []int64{9, 8, 9},
 	})
 
@@ -323,6 +328,7 @@ func TestProjectServiceSetProjectProfileBindingsNormalizesResourceIDs(t *testing
 	require.NotNil(t, bindings)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
+	require.Equal(t, []int64{11, 12}, repo.bindingInput.ProxyIDs)
 	require.Equal(t, []int64{8, 9}, repo.bindingInput.SubscriptionIDs)
 }
 
@@ -342,6 +348,8 @@ func TestProjectServiceGetProjectProfileBindingsReturnsEmptySlices(t *testing.T)
 	require.Empty(t, bindings.GroupIDs)
 	require.NotNil(t, bindings.AccountIDs)
 	require.Empty(t, bindings.AccountIDs)
+	require.NotNil(t, bindings.ProxyIDs)
+	require.Empty(t, bindings.ProxyIDs)
 	require.NotNil(t, bindings.SubscriptionIDs)
 	require.Empty(t, bindings.SubscriptionIDs)
 }
@@ -362,6 +370,8 @@ func TestProjectServiceSetProjectProfileBindingsReturnsEmptySlices(t *testing.T)
 	require.Empty(t, bindings.GroupIDs)
 	require.NotNil(t, bindings.AccountIDs)
 	require.Empty(t, bindings.AccountIDs)
+	require.NotNil(t, bindings.ProxyIDs)
+	require.Empty(t, bindings.ProxyIDs)
 	require.NotNil(t, bindings.SubscriptionIDs)
 	require.Empty(t, bindings.SubscriptionIDs)
 }
@@ -454,12 +464,14 @@ func TestProjectServiceValidateProjectProfileBindingScopeNormalizesResourceIDs(t
 	err := svc.ValidateProjectProfileBindingScope(context.Background(), 10, ProjectProfileBindingInput{
 		GroupIDs:   []int64{7, -1, 6},
 		AccountIDs: []int64{5, 5},
+		ProxyIDs:   []int64{12, 11, 12},
 	})
 
 	require.NoError(t, err)
 	require.True(t, repo.validateBindingScopeCalled)
 	require.Equal(t, []int64{6, 7}, repo.bindingInput.GroupIDs)
 	require.Equal(t, []int64{5}, repo.bindingInput.AccountIDs)
+	require.Equal(t, []int64{11, 12}, repo.bindingInput.ProxyIDs)
 }
 
 type projectServiceRepoStub struct {
@@ -587,6 +599,7 @@ func (r *projectServiceRepoStub) SetProjectProfileBindings(_ context.Context, _ 
 		ProfileID:       profileID,
 		GroupIDs:        input.GroupIDs,
 		AccountIDs:      input.AccountIDs,
+		ProxyIDs:        input.ProxyIDs,
 		SubscriptionIDs: input.SubscriptionIDs,
 	}, nil
 }
@@ -638,6 +651,7 @@ func cloneTestProjectProfileBindings(value *ProjectProfileBindings) *ProjectProf
 		ProfileID:       value.ProfileID,
 		GroupIDs:        append([]int64(nil), value.GroupIDs...),
 		AccountIDs:      append([]int64(nil), value.AccountIDs...),
+		ProxyIDs:        append([]int64(nil), value.ProxyIDs...),
 		SubscriptionIDs: append([]int64(nil), value.SubscriptionIDs...),
 	}
 }

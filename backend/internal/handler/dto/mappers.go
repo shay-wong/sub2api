@@ -447,6 +447,26 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 	}
 }
 
+func ProxyOptionFromService(p *service.Proxy) *ProxyOption {
+	if p == nil {
+		return nil
+	}
+	return &ProxyOption{
+		ID:             p.ID,
+		Name:           p.Name,
+		Protocol:       p.Protocol,
+		Host:           p.Host,
+		Port:           p.Port,
+		Status:         p.Status,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
+		ExpiresAt:      p.ExpiresAt,
+		FallbackMode:   p.FallbackMode,
+		BackupProxyID:  p.BackupProxyID,
+		ExpiryWarnDays: p.ExpiryWarnDays,
+	}
+}
+
 func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWithAccountCount {
 	if p == nil {
 		return nil

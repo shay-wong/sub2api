@@ -75,6 +75,11 @@ func Name(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldName, v))
 }
 
+// ProjectID applies equality check predicate on the "project_id" field. It's identical to ProjectIDEQ.
+func ProjectID(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldProjectID, v))
+}
+
 // Protocol applies equality check predicate on the "protocol" field. It's identical to ProtocolEQ.
 func Protocol(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldProtocol, v))
@@ -318,6 +323,26 @@ func NameEqualFold(v string) predicate.Proxy {
 // NameContainsFold applies the ContainsFold predicate on the "name" field.
 func NameContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldName, v))
+}
+
+// ProjectIDEQ applies the EQ predicate on the "project_id" field.
+func ProjectIDEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldProjectID, v))
+}
+
+// ProjectIDNEQ applies the NEQ predicate on the "project_id" field.
+func ProjectIDNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldProjectID, v))
+}
+
+// ProjectIDIn applies the In predicate on the "project_id" field.
+func ProjectIDIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldProjectID, vs...))
+}
+
+// ProjectIDNotIn applies the NotIn predicate on the "project_id" field.
+func ProjectIDNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldProjectID, vs...))
 }
 
 // ProtocolEQ applies the EQ predicate on the "protocol" field.
@@ -888,6 +913,29 @@ func ExpiryWarnDaysLT(v int) predicate.Proxy {
 // ExpiryWarnDaysLTE applies the LTE predicate on the "expiry_warn_days" field.
 func ExpiryWarnDaysLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldExpiryWarnDays, v))
+}
+
+// HasProject applies the HasEdge predicate on the "project" edge.
+func HasProject() predicate.Proxy {
+	return predicate.Proxy(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, ProjectTable, ProjectColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasProjectWith applies the HasEdge predicate on the "project" edge with a given conditions (other predicates).
+func HasProjectWith(preds ...predicate.Project) predicate.Proxy {
+	return predicate.Proxy(func(s *sql.Selector) {
+		step := newProjectStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

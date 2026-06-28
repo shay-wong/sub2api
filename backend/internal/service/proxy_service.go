@@ -17,18 +17,28 @@ var (
 type ProxyRepository interface {
 	Create(ctx context.Context, proxy *Proxy) error
 	GetByID(ctx context.Context, id int64) (*Proxy, error)
+	// Management reads use the same project-profile visibility boundary as
+	// normal proxy reads. They are separated only to mark admin management
+	// call sites, not to enforce owner-project-only access.
+	GetByIDForManagement(ctx context.Context, id int64) (*Proxy, error)
 	ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error)
+	ListByIDsForManagement(ctx context.Context, ids []int64) ([]Proxy, error)
 	Update(ctx context.Context, proxy *Proxy) error
 	Delete(ctx context.Context, id int64) error
 
 	List(ctx context.Context, params pagination.PaginationParams) ([]Proxy, *pagination.PaginationResult, error)
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error)
+	ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error)
 	ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error)
+	ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error)
 	ListActive(ctx context.Context) ([]Proxy, error)
 	ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
+	ListActiveForManagement(ctx context.Context) ([]Proxy, error)
+	ListActiveWithAccountCountForManagement(ctx context.Context) ([]ProxyWithAccountCount, error)
 
 	ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error)
 	CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error)
+	CountAllAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error)
 	ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error)
 
 	SweepExpiredProxies(ctx context.Context, now time.Time) (changed int64, err error)
@@ -119,7 +129,7 @@ func (s *ProxyService) ListActive(ctx context.Context) ([]Proxy, error) {
 
 // Update 更新代理
 func (s *ProxyService) Update(ctx context.Context, id int64, req UpdateProxyRequest) (*Proxy, error) {
-	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get proxy: %w", err)
 	}
@@ -163,7 +173,7 @@ func (s *ProxyService) Update(ctx context.Context, id int64, req UpdateProxyRequ
 // Delete 删除代理
 func (s *ProxyService) Delete(ctx context.Context, id int64) error {
 	// 检查代理是否存在
-	_, err := s.proxyRepo.GetByID(ctx, id)
+	_, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get proxy: %w", err)
 	}
@@ -177,7 +187,7 @@ func (s *ProxyService) Delete(ctx context.Context, id int64) error {
 
 // TestConnection 测试代理连接（需要实现具体测试逻辑）
 func (s *ProxyService) TestConnection(ctx context.Context, id int64) error {
-	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get proxy: %w", err)
 	}

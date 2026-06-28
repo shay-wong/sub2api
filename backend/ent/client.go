@@ -3835,6 +3835,22 @@ func (c *ProjectClient) QueryGroups(_m *Project) *GroupQuery {
 	return query
 }
 
+// QueryProxies queries the proxies edge of a Project.
+func (c *ProjectClient) QueryProxies(_m *Project) *ProxyQuery {
+	query := (&ProxyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(project.Table, project.FieldID, id),
+			sqlgraph.To(proxy.Table, proxy.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, project.ProxiesTable, project.ProxiesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryUsageLogs queries the usage_logs edge of a Project.
 func (c *ProjectClient) QueryUsageLogs(_m *Project) *UsageLogQuery {
 	query := (&UsageLogClient{config: c.config}).Query()
@@ -4779,6 +4795,22 @@ func (c *ProxyClient) GetX(ctx context.Context, id int64) *Proxy {
 		panic(err)
 	}
 	return obj
+}
+
+// QueryProject queries the project edge of a Proxy.
+func (c *ProxyClient) QueryProject(_m *Proxy) *ProjectQuery {
+	query := (&ProjectClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(proxy.Table, proxy.FieldID, id),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, proxy.ProjectTable, proxy.ProjectColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
 }
 
 // QueryAccounts queries the accounts edge of a Proxy.

@@ -640,7 +640,7 @@
               {{ t('admin.projects.resourceBindingsLoadFailedHint') }}
             </p>
           </div>
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div
               v-for="type in resourceTypes"
               :key="type"
@@ -963,6 +963,7 @@ const showResourcePicker = ref(false)
 const bindingNames = reactive<Record<ProjectResourceType, Record<number, string>>>({
   groups: {},
   accounts: {},
+  proxies: {},
   subscriptions: {}
 })
 const profileBindingsByID = reactive<Record<number, ProjectProfileBindings>>({})
@@ -988,13 +989,14 @@ const pendingDeleteMember = ref<ProjectMember | null>(null)
 const showDeleteProfileConfirm = ref(false)
 const pendingDeleteProfile = ref<ProjectProfile | null>(null)
 
-const resourceTypes: ProjectResourceType[] = ['groups', 'accounts', 'subscriptions']
+const resourceTypes: ProjectResourceType[] = ['groups', 'accounts', 'proxies', 'subscriptions']
 
 const projectAdminPermissionOptions = computed(() => [
   { value: AdminPermissions.dashboard, label: t('admin.projects.permissions.dashboard') },
   { value: AdminPermissions.ops, label: t('admin.projects.permissions.ops') },
   { value: AdminPermissions.users, label: t('admin.projects.permissions.users') },
   { value: AdminPermissions.groups, label: t('admin.projects.permissions.groups') },
+  { value: AdminPermissions.proxies, label: t('admin.projects.permissions.proxies') },
   { value: AdminPermissions.subscriptions, label: t('admin.projects.permissions.subscriptions') },
   { value: AdminPermissions.accounts, label: t('admin.projects.permissions.accounts') },
   { value: AdminPermissions.usage, label: t('admin.projects.permissions.usage') }
@@ -1024,6 +1026,7 @@ const projectForm = reactive({
     profile_id: 0,
     group_ids: [] as number[],
     account_ids: [] as number[],
+    proxy_ids: [] as number[],
     subscription_ids: [] as number[]
   } satisfies ProjectProfileBindings
 })
@@ -1204,6 +1207,7 @@ async function submitProject() {
       profile_mode: projectForm.profileMode,
       group_ids: bindings.group_ids,
       account_ids: bindings.account_ids,
+      proxy_ids: bindings.proxy_ids,
       subscription_ids: bindings.subscription_ids
     })
     appStore.showSuccess(t('admin.projects.projectCreated'))
@@ -1813,6 +1817,7 @@ function cloneBindings(value: ProjectProfileBindings): ProjectProfileBindings {
     profile_id: value.profile_id,
     group_ids: [...(value.group_ids ?? [])],
     account_ids: [...(value.account_ids ?? [])],
+    proxy_ids: [...(value.proxy_ids ?? [])],
     subscription_ids: [...(value.subscription_ids ?? [])]
   }
 }
@@ -1826,6 +1831,7 @@ function emptyProjectBindingsFor(profileID: number): ProjectProfileBindings {
     profile_id: profileID,
     group_ids: [],
     account_ids: [],
+    proxy_ids: [],
     subscription_ids: []
   }
 }
@@ -1835,6 +1841,7 @@ function normalizeProfileBindings(value: Partial<ProjectProfileBindings> | null 
     profile_id: value?.profile_id ?? fallbackProfileID,
     group_ids: value?.group_ids ?? [],
     account_ids: value?.account_ids ?? [],
+    proxy_ids: value?.proxy_ids ?? [],
     subscription_ids: value?.subscription_ids ?? []
   })
 }
@@ -1844,6 +1851,7 @@ function normalizeBindings(value: Partial<ProjectProfileBindings>): ProjectProfi
     profile_id: value.profile_id ?? 0,
     group_ids: uniqueSorted(value.group_ids),
     account_ids: uniqueSorted(value.account_ids),
+    proxy_ids: uniqueSorted(value.proxy_ids),
     subscription_ids: uniqueSorted(value.subscription_ids)
   }
 }
@@ -1860,6 +1868,7 @@ function bindingIDsRef(value: ProjectProfileBindings, type: ProjectResourceType)
   switch (type) {
     case 'groups': return value.group_ids ?? []
     case 'accounts': return value.account_ids ?? []
+    case 'proxies': return value.proxy_ids ?? []
     case 'subscriptions': return value.subscription_ids ?? []
   }
 }
@@ -1911,6 +1920,14 @@ function candidatesForType(type: ProjectResourceType, result: ProjectResourceSea
         title: item.name || item.email || `#${item.id}`,
         subtitle: [item.platform, item.type, item.status, item.notes].filter(Boolean).join(' · ')
       }))
+    case 'proxies':
+      return result.proxies.map(item => ({
+        id: item.id,
+        key: `proxies-${item.id}`,
+        type,
+        title: item.name || `${item.host}:${item.port}`,
+        subtitle: [item.protocol, `${item.host}:${item.port}`, item.status].filter(Boolean).join(' · ')
+      }))
     case 'subscriptions':
       return result.subscriptions.map(item => ({
         id: item.id,
@@ -1936,6 +1953,7 @@ function indexBindingDetails(value: Partial<ProjectProfileBindings> | null | und
     users: [],
     groups: value.groups ?? [],
     accounts: value.accounts ?? [],
+    proxies: value.proxies ?? [],
     subscriptions: value.subscriptions ?? [],
     api_keys: []
   })

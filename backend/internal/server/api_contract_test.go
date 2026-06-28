@@ -1839,7 +1839,15 @@ func (stubProxyRepo) GetByID(ctx context.Context, id int64) (*service.Proxy, err
 	return nil, service.ErrProxyNotFound
 }
 
+func (stubProxyRepo) GetByIDForManagement(ctx context.Context, id int64) (*service.Proxy, error) {
+	return nil, service.ErrProxyNotFound
+}
+
 func (stubProxyRepo) ListByIDs(ctx context.Context, ids []int64) ([]service.Proxy, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stubProxyRepo) ListByIDsForManagement(ctx context.Context, ids []int64) ([]service.Proxy, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -1859,7 +1867,15 @@ func (stubProxyRepo) ListWithFilters(ctx context.Context, params pagination.Pagi
 	return nil, nil, errors.New("not implemented")
 }
 
+func (stubProxyRepo) ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.Proxy, *pagination.PaginationResult, error) {
+	return nil, nil, errors.New("not implemented")
+}
+
 func (stubProxyRepo) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	return nil, nil, errors.New("not implemented")
+}
+
+func (stubProxyRepo) ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -1867,7 +1883,15 @@ func (stubProxyRepo) ListActive(ctx context.Context) ([]service.Proxy, error) {
 	return nil, errors.New("not implemented")
 }
 
+func (stubProxyRepo) ListActiveForManagement(ctx context.Context) ([]service.Proxy, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (stubProxyRepo) ListActiveWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stubProxyRepo) ListActiveWithAccountCountForManagement(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -1876,6 +1900,10 @@ func (stubProxyRepo) ExistsByHostPortAuth(ctx context.Context, host string, port
 }
 
 func (stubProxyRepo) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
+	return 0, errors.New("not implemented")
+}
+
+func (stubProxyRepo) CountAllAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 

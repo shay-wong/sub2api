@@ -131,6 +131,7 @@ function simulateGuard(
       'admin.ops.read',
       'admin.users.manage',
       'admin.groups.manage',
+      'admin.proxies.manage',
       'admin.subscriptions.manage',
       'admin.accounts.write',
       'admin.usage.read',
@@ -298,6 +299,7 @@ describe('路由守卫逻辑', () => {
       expect(simulateGuard('/admin/ops', { requiresAdmin: true, adminPermission: 'admin.ops.read' }, authState)).toBeNull()
       expect(simulateGuard('/admin/users', { requiresAdmin: true, adminPermission: 'admin.users.manage' }, authState)).toBeNull()
       expect(simulateGuard('/admin/groups', { requiresAdmin: true, adminPermission: 'admin.groups.manage' }, authState)).toBeNull()
+      expect(simulateGuard('/admin/proxies', { requiresAdmin: true, adminPermission: 'admin.proxies.manage' }, authState)).toBeNull()
       expect(simulateGuard('/admin/subscriptions', { requiresAdmin: true, adminPermission: 'admin.subscriptions.manage' }, authState)).toBeNull()
       expect(simulateGuard('/admin/usage', { requiresAdmin: true, adminPermission: 'admin.usage.read' }, authState)).toBeNull()
     })

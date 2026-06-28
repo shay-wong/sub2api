@@ -26837,6 +26837,9 @@ type ProjectMutation struct {
 	groups              map[int64]struct{}
 	removedgroups       map[int64]struct{}
 	clearedgroups       bool
+	proxies             map[int64]struct{}
+	removedproxies      map[int64]struct{}
+	clearedproxies      bool
 	usage_logs          map[int64]struct{}
 	removedusage_logs   map[int64]struct{}
 	clearedusage_logs   bool
@@ -27527,6 +27530,60 @@ func (m *ProjectMutation) ResetGroups() {
 	m.removedgroups = nil
 }
 
+// AddProxyIDs adds the "proxies" edge to the Proxy entity by ids.
+func (m *ProjectMutation) AddProxyIDs(ids ...int64) {
+	if m.proxies == nil {
+		m.proxies = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.proxies[ids[i]] = struct{}{}
+	}
+}
+
+// ClearProxies clears the "proxies" edge to the Proxy entity.
+func (m *ProjectMutation) ClearProxies() {
+	m.clearedproxies = true
+}
+
+// ProxiesCleared reports if the "proxies" edge to the Proxy entity was cleared.
+func (m *ProjectMutation) ProxiesCleared() bool {
+	return m.clearedproxies
+}
+
+// RemoveProxyIDs removes the "proxies" edge to the Proxy entity by IDs.
+func (m *ProjectMutation) RemoveProxyIDs(ids ...int64) {
+	if m.removedproxies == nil {
+		m.removedproxies = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.proxies, ids[i])
+		m.removedproxies[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedProxies returns the removed IDs of the "proxies" edge to the Proxy entity.
+func (m *ProjectMutation) RemovedProxiesIDs() (ids []int64) {
+	for id := range m.removedproxies {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ProxiesIDs returns the "proxies" edge IDs in the mutation.
+func (m *ProjectMutation) ProxiesIDs() (ids []int64) {
+	for id := range m.proxies {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetProxies resets all changes to the "proxies" edge.
+func (m *ProjectMutation) ResetProxies() {
+	m.proxies = nil
+	m.clearedproxies = false
+	m.removedproxies = nil
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by ids.
 func (m *ProjectMutation) AddUsageLogIDs(ids ...int64) {
 	if m.usage_logs == nil {
@@ -27848,7 +27905,7 @@ func (m *ProjectMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *ProjectMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.members != nil {
 		edges = append(edges, project.EdgeMembers)
 	}
@@ -27863,6 +27920,9 @@ func (m *ProjectMutation) AddedEdges() []string {
 	}
 	if m.groups != nil {
 		edges = append(edges, project.EdgeGroups)
+	}
+	if m.proxies != nil {
+		edges = append(edges, project.EdgeProxies)
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, project.EdgeUsageLogs)
@@ -27904,6 +27964,12 @@ func (m *ProjectMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case project.EdgeProxies:
+		ids := make([]ent.Value, 0, len(m.proxies))
+		for id := range m.proxies {
+			ids = append(ids, id)
+		}
+		return ids
 	case project.EdgeUsageLogs:
 		ids := make([]ent.Value, 0, len(m.usage_logs))
 		for id := range m.usage_logs {
@@ -27916,7 +27982,7 @@ func (m *ProjectMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *ProjectMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.removedmembers != nil {
 		edges = append(edges, project.EdgeMembers)
 	}
@@ -27931,6 +27997,9 @@ func (m *ProjectMutation) RemovedEdges() []string {
 	}
 	if m.removedgroups != nil {
 		edges = append(edges, project.EdgeGroups)
+	}
+	if m.removedproxies != nil {
+		edges = append(edges, project.EdgeProxies)
 	}
 	if m.removedusage_logs != nil {
 		edges = append(edges, project.EdgeUsageLogs)
@@ -27972,6 +28041,12 @@ func (m *ProjectMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case project.EdgeProxies:
+		ids := make([]ent.Value, 0, len(m.removedproxies))
+		for id := range m.removedproxies {
+			ids = append(ids, id)
+		}
+		return ids
 	case project.EdgeUsageLogs:
 		ids := make([]ent.Value, 0, len(m.removedusage_logs))
 		for id := range m.removedusage_logs {
@@ -27984,7 +28059,7 @@ func (m *ProjectMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *ProjectMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.clearedmembers {
 		edges = append(edges, project.EdgeMembers)
 	}
@@ -27999,6 +28074,9 @@ func (m *ProjectMutation) ClearedEdges() []string {
 	}
 	if m.clearedgroups {
 		edges = append(edges, project.EdgeGroups)
+	}
+	if m.clearedproxies {
+		edges = append(edges, project.EdgeProxies)
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, project.EdgeUsageLogs)
@@ -28020,6 +28098,8 @@ func (m *ProjectMutation) EdgeCleared(name string) bool {
 		return m.clearedapi_keys
 	case project.EdgeGroups:
 		return m.clearedgroups
+	case project.EdgeProxies:
+		return m.clearedproxies
 	case project.EdgeUsageLogs:
 		return m.clearedusage_logs
 	}
@@ -28052,6 +28132,9 @@ func (m *ProjectMutation) ResetEdge(name string) error {
 		return nil
 	case project.EdgeGroups:
 		m.ResetGroups()
+		return nil
+	case project.EdgeProxies:
+		m.ResetProxies()
 		return nil
 	case project.EdgeUsageLogs:
 		m.ResetUsageLogs()
@@ -32055,6 +32138,8 @@ type ProxyMutation struct {
 	expiry_warn_days    *int
 	addexpiry_warn_days *int
 	clearedFields       map[string]struct{}
+	project             *int64
+	clearedproject      bool
 	accounts            map[int64]struct{}
 	removedaccounts     map[int64]struct{}
 	clearedaccounts     bool
@@ -32318,6 +32403,42 @@ func (m *ProxyMutation) OldName(ctx context.Context) (v string, err error) {
 // ResetName resets all changes to the "name" field.
 func (m *ProxyMutation) ResetName() {
 	m.name = nil
+}
+
+// SetProjectID sets the "project_id" field.
+func (m *ProxyMutation) SetProjectID(i int64) {
+	m.project = &i
+}
+
+// ProjectID returns the value of the "project_id" field in the mutation.
+func (m *ProxyMutation) ProjectID() (r int64, exists bool) {
+	v := m.project
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProjectID returns the old "project_id" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldProjectID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProjectID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProjectID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProjectID: %w", err)
+	}
+	return oldValue.ProjectID, nil
+}
+
+// ResetProjectID resets all changes to the "project_id" field.
+func (m *ProxyMutation) ResetProjectID() {
+	m.project = nil
 }
 
 // SetProtocol sets the "protocol" field.
@@ -32772,6 +32893,33 @@ func (m *ProxyMutation) ResetExpiryWarnDays() {
 	m.addexpiry_warn_days = nil
 }
 
+// ClearProject clears the "project" edge to the Project entity.
+func (m *ProxyMutation) ClearProject() {
+	m.clearedproject = true
+	m.clearedFields[proxy.FieldProjectID] = struct{}{}
+}
+
+// ProjectCleared reports if the "project" edge to the Project entity was cleared.
+func (m *ProxyMutation) ProjectCleared() bool {
+	return m.clearedproject
+}
+
+// ProjectIDs returns the "project" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// ProjectID instead. It exists only for internal usage by the builders.
+func (m *ProxyMutation) ProjectIDs() (ids []int64) {
+	if id := m.project; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetProject resets all changes to the "project" edge.
+func (m *ProxyMutation) ResetProject() {
+	m.project = nil
+	m.clearedproject = false
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *ProxyMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -32887,7 +33035,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -32899,6 +33047,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.name != nil {
 		fields = append(fields, proxy.FieldName)
+	}
+	if m.project != nil {
+		fields = append(fields, proxy.FieldProjectID)
 	}
 	if m.protocol != nil {
 		fields = append(fields, proxy.FieldProtocol)
@@ -32946,6 +33097,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.DeletedAt()
 	case proxy.FieldName:
 		return m.Name()
+	case proxy.FieldProjectID:
+		return m.ProjectID()
 	case proxy.FieldProtocol:
 		return m.Protocol()
 	case proxy.FieldHost:
@@ -32983,6 +33136,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldDeletedAt(ctx)
 	case proxy.FieldName:
 		return m.OldName(ctx)
+	case proxy.FieldProjectID:
+		return m.OldProjectID(ctx)
 	case proxy.FieldProtocol:
 		return m.OldProtocol(ctx)
 	case proxy.FieldHost:
@@ -33039,6 +33194,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetName(v)
+		return nil
+	case proxy.FieldProjectID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProjectID(v)
 		return nil
 	case proxy.FieldProtocol:
 		v, ok := value.(string)
@@ -33231,6 +33393,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 	case proxy.FieldName:
 		m.ResetName()
 		return nil
+	case proxy.FieldProjectID:
+		m.ResetProjectID()
+		return nil
 	case proxy.FieldProtocol:
 		m.ResetProtocol()
 		return nil
@@ -33267,7 +33432,10 @@ func (m *ProxyMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *ProxyMutation) AddedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
+	if m.project != nil {
+		edges = append(edges, proxy.EdgeProject)
+	}
 	if m.accounts != nil {
 		edges = append(edges, proxy.EdgeAccounts)
 	}
@@ -33281,6 +33449,10 @@ func (m *ProxyMutation) AddedEdges() []string {
 // name in this mutation.
 func (m *ProxyMutation) AddedIDs(name string) []ent.Value {
 	switch name {
+	case proxy.EdgeProject:
+		if id := m.project; id != nil {
+			return []ent.Value{*id}
+		}
 	case proxy.EdgeAccounts:
 		ids := make([]ent.Value, 0, len(m.accounts))
 		for id := range m.accounts {
@@ -33297,7 +33469,7 @@ func (m *ProxyMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *ProxyMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.removedaccounts != nil {
 		edges = append(edges, proxy.EdgeAccounts)
 	}
@@ -33320,7 +33492,10 @@ func (m *ProxyMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *ProxyMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
+	if m.clearedproject {
+		edges = append(edges, proxy.EdgeProject)
+	}
 	if m.clearedaccounts {
 		edges = append(edges, proxy.EdgeAccounts)
 	}
@@ -33334,6 +33509,8 @@ func (m *ProxyMutation) ClearedEdges() []string {
 // was cleared in this mutation.
 func (m *ProxyMutation) EdgeCleared(name string) bool {
 	switch name {
+	case proxy.EdgeProject:
+		return m.clearedproject
 	case proxy.EdgeAccounts:
 		return m.clearedaccounts
 	case proxy.EdgeBackupProxy:
@@ -33346,6 +33523,9 @@ func (m *ProxyMutation) EdgeCleared(name string) bool {
 // if that edge is not defined in the schema.
 func (m *ProxyMutation) ClearEdge(name string) error {
 	switch name {
+	case proxy.EdgeProject:
+		m.ClearProject()
+		return nil
 	case proxy.EdgeBackupProxy:
 		m.ClearBackupProxy()
 		return nil
@@ -33357,6 +33537,9 @@ func (m *ProxyMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *ProxyMutation) ResetEdge(name string) error {
 	switch name {
+	case proxy.EdgeProject:
+		m.ResetProject()
+		return nil
 	case proxy.EdgeAccounts:
 		m.ResetAccounts()
 		return nil

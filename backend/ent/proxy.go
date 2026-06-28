@@ -9,6 +9,7 @@ import (
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
@@ -25,6 +26,8 @@ type Proxy struct {
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	// Name holds the value of the "name" field.
 	Name string `json:"name,omitempty"`
+	// Origin/default project for the proxy; profile bindings control project-space visibility and management
+	ProjectID int64 `json:"project_id,omitempty"`
 	// Protocol holds the value of the "protocol" field.
 	Protocol string `json:"protocol,omitempty"`
 	// Host holds the value of the "host" field.
@@ -53,19 +56,32 @@ type Proxy struct {
 
 // ProxyEdges holds the relations/edges for other nodes in the graph.
 type ProxyEdges struct {
+	// Project holds the value of the project edge.
+	Project *Project `json:"project,omitempty"`
 	// Accounts holds the value of the accounts edge.
 	Accounts []*Account `json:"accounts,omitempty"`
 	// BackupProxy holds the value of the backup_proxy edge.
 	BackupProxy *Proxy `json:"backup_proxy,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [2]bool
+	loadedTypes [3]bool
+}
+
+// ProjectOrErr returns the Project value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e ProxyEdges) ProjectOrErr() (*Project, error) {
+	if e.Project != nil {
+		return e.Project, nil
+	} else if e.loadedTypes[0] {
+		return nil, &NotFoundError{label: project.Label}
+	}
+	return nil, &NotLoadedError{edge: "project"}
 }
 
 // AccountsOrErr returns the Accounts value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProxyEdges) AccountsOrErr() ([]*Account, error) {
-	if e.loadedTypes[0] {
+	if e.loadedTypes[1] {
 		return e.Accounts, nil
 	}
 	return nil, &NotLoadedError{edge: "accounts"}
@@ -76,7 +92,7 @@ func (e ProxyEdges) AccountsOrErr() ([]*Account, error) {
 func (e ProxyEdges) BackupProxyOrErr() (*Proxy, error) {
 	if e.BackupProxy != nil {
 		return e.BackupProxy, nil
-	} else if e.loadedTypes[1] {
+	} else if e.loadedTypes[2] {
 		return nil, &NotFoundError{label: proxy.Label}
 	}
 	return nil, &NotLoadedError{edge: "backup_proxy"}
@@ -87,7 +103,7 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
+		case proxy.FieldID, proxy.FieldProjectID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
 			values[i] = new(sql.NullInt64)
 		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
 			values[i] = new(sql.NullString)
@@ -138,6 +154,12 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field name", values[i])
 			} else if value.Valid {
 				_m.Name = value.String
+			}
+		case proxy.FieldProjectID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field project_id", values[i])
+			} else if value.Valid {
+				_m.ProjectID = value.Int64
 			}
 		case proxy.FieldProtocol:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -216,6 +238,11 @@ func (_m *Proxy) Value(name string) (ent.Value, error) {
 	return _m.selectValues.Get(name)
 }
 
+// QueryProject queries the "project" edge of the Proxy entity.
+func (_m *Proxy) QueryProject() *ProjectQuery {
+	return NewProxyClient(_m.config).QueryProject(_m)
+}
+
 // QueryAccounts queries the "accounts" edge of the Proxy entity.
 func (_m *Proxy) QueryAccounts() *AccountQuery {
 	return NewProxyClient(_m.config).QueryAccounts(_m)
@@ -262,6 +289,9 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("name=")
 	builder.WriteString(_m.Name)
+	builder.WriteString(", ")
+	builder.WriteString("project_id=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ProjectID))
 	builder.WriteString(", ")
 	builder.WriteString("protocol=")
 	builder.WriteString(_m.Protocol)

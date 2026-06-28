@@ -17,6 +17,7 @@ const (
 	projectResourceTypeUser         = "user"
 	projectResourceTypeGroup        = "group"
 	projectResourceTypeAccount      = "account"
+	projectResourceTypeProxy        = "proxy"
 	projectResourceTypeSubscription = "subscription"
 	projectResourceTypeAPIKey       = "api_key"
 )
@@ -46,6 +47,7 @@ func (ProjectProfileBinding) Fields() []ent.Field {
 				case projectResourceTypeUser,
 					projectResourceTypeGroup,
 					projectResourceTypeAccount,
+					projectResourceTypeProxy,
 					projectResourceTypeSubscription,
 					projectResourceTypeAPIKey:
 					return nil

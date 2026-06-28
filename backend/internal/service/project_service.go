@@ -22,6 +22,7 @@ const (
 	ProjectResourceTypeUser         = "user"
 	ProjectResourceTypeGroup        = "group"
 	ProjectResourceTypeAccount      = "account"
+	ProjectResourceTypeProxy        = "proxy"
 	ProjectResourceTypeSubscription = "subscription"
 	ProjectResourceTypeAPIKey       = "api_key"
 )
@@ -120,15 +121,18 @@ type ProjectProfileBindings struct {
 	ProfileID       int64                                  `json:"profile_id"`
 	GroupIDs        []int64                                `json:"group_ids"`
 	AccountIDs      []int64                                `json:"account_ids"`
+	ProxyIDs        []int64                                `json:"proxy_ids"`
 	SubscriptionIDs []int64                                `json:"subscription_ids"`
 	Groups          []ProjectResourceGroupCandidate        `json:"groups,omitempty"`
 	Accounts        []ProjectResourceAccountCandidate      `json:"accounts,omitempty"`
+	Proxies         []ProjectResourceProxyCandidate        `json:"proxies,omitempty"`
 	Subscriptions   []ProjectResourceSubscriptionCandidate `json:"subscriptions,omitempty"`
 }
 
 type ProjectProfileBindingInput struct {
 	GroupIDs        []int64 `json:"group_ids,omitempty"`
 	AccountIDs      []int64 `json:"account_ids,omitempty"`
+	ProxyIDs        []int64 `json:"proxy_ids,omitempty"`
 	SubscriptionIDs []int64 `json:"subscription_ids,omitempty"`
 }
 
@@ -136,6 +140,7 @@ type ProjectResourceSearchResult struct {
 	Users         []ProjectResourceUserCandidate         `json:"users"`
 	Groups        []ProjectResourceGroupCandidate        `json:"groups"`
 	Accounts      []ProjectResourceAccountCandidate      `json:"accounts"`
+	Proxies       []ProjectResourceProxyCandidate        `json:"proxies"`
 	Subscriptions []ProjectResourceSubscriptionCandidate `json:"subscriptions"`
 	APIKeys       []ProjectResourceAPIKeyCandidate       `json:"api_keys"`
 }
@@ -176,6 +181,16 @@ type ProjectResourceAccountCandidate struct {
 	Type      string `json:"type"`
 	Status    string `json:"status"`
 	Email     string `json:"email"`
+}
+
+type ProjectResourceProxyCandidate struct {
+	ID        int64  `json:"id"`
+	ProjectID int64  `json:"project_id"`
+	Name      string `json:"name"`
+	Protocol  string `json:"protocol"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Status    string `json:"status"`
 }
 
 type ProjectResourceSubscriptionCandidate struct {
@@ -745,6 +760,7 @@ func normalizeProjectResourceIDs(ids []int64) []int64 {
 func normalizeProjectProfileBindingInput(input ProjectProfileBindingInput) ProjectProfileBindingInput {
 	input.GroupIDs = normalizeProjectResourceIDs(input.GroupIDs)
 	input.AccountIDs = normalizeProjectResourceIDs(input.AccountIDs)
+	input.ProxyIDs = normalizeProjectResourceIDs(input.ProxyIDs)
 	input.SubscriptionIDs = normalizeProjectResourceIDs(input.SubscriptionIDs)
 	return input
 }
@@ -752,6 +768,7 @@ func normalizeProjectProfileBindingInput(input ProjectProfileBindingInput) Proje
 func projectProfileBindingsEmpty(input ProjectProfileBindingInput) bool {
 	return len(input.GroupIDs) == 0 &&
 		len(input.AccountIDs) == 0 &&
+		len(input.ProxyIDs) == 0 &&
 		len(input.SubscriptionIDs) == 0
 }
 
@@ -764,6 +781,9 @@ func normalizeProjectProfileBindings(bindings *ProjectProfileBindings) *ProjectP
 	}
 	if bindings.AccountIDs == nil {
 		bindings.AccountIDs = []int64{}
+	}
+	if bindings.ProxyIDs == nil {
+		bindings.ProxyIDs = []int64{}
 	}
 	if bindings.SubscriptionIDs == nil {
 		bindings.SubscriptionIDs = []int64{}

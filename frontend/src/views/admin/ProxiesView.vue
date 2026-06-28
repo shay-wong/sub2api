@@ -76,7 +76,7 @@
             <button @click="showImportData = true" class="btn btn-secondary">
               {{ t('admin.proxies.dataImport') }}
             </button>
-            <button @click="showExportDataDialog = true" class="btn btn-secondary">
+            <button v-if="authStore.isAdmin" @click="showExportDataDialog = true" class="btn btn-secondary">
               {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
             </button>
             <button @click="showCreateModal = true" class="btn btn-primary">
@@ -967,6 +967,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -991,6 +992,7 @@ import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const { copyToClipboard } = useClipboard()
 
 const columns = computed<Column[]>(() => [

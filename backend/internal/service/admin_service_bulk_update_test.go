@@ -52,6 +52,20 @@ type accountRepoStubForBulkUpdate struct {
 	}
 }
 
+type proxyRepoStubForAccountProxyScope struct {
+	proxyRepoStub
+	getErr error
+	gotIDs []int64
+}
+
+func (s *proxyRepoStubForAccountProxyScope) GetByID(_ context.Context, id int64) (*Proxy, error) {
+	s.gotIDs = append(s.gotIDs, id)
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return &Proxy{ID: id, Name: "project-proxy", Status: StatusActive}, nil
+}
+
 func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64, _ AccountBulkUpdate) (int64, error) {
 	s.bulkUpdateIDs = append([]int64{}, ids...)
 	if s.bulkUpdateErr != nil {
@@ -223,6 +237,50 @@ func TestAdminServiceCreateAccount_ProjectContextRejectsOutOfScopeGroupsBeforeCr
 	require.ErrorIs(t, err, ErrGroupNotFound)
 	require.Empty(t, repo.bulkUpdateIDs)
 	require.Empty(t, repo.bindGroupsCalls)
+}
+
+func TestAdminServiceCreateAccount_ProjectContextRejectsOutOfScopeProxyBeforeCreate(t *testing.T) {
+	proxyID := int64(99)
+	repo := &accountRepoStubForBulkUpdate{}
+	proxyRepo := &proxyRepoStubForAccountProxyScope{getErr: ErrProxyNotFound}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		proxyRepo:  proxyRepo,
+	}
+
+	_, err := svc.CreateAccount(WithProjectID(context.Background(), 7), &CreateAccountInput{
+		Name:                  "blocked",
+		Platform:              PlatformAnthropic,
+		Type:                  AccountTypeOAuth,
+		ProxyID:               &proxyID,
+		SkipMixedChannelCheck: true,
+		SkipDefaultGroupBind:  true,
+	})
+
+	require.ErrorIs(t, err, ErrProxyNotFound)
+	require.Equal(t, []int64{99}, proxyRepo.gotIDs)
+	require.Empty(t, repo.bulkUpdateIDs)
+	require.Empty(t, repo.bindGroupsCalls)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ProjectContextRejectsOutOfScopeProxyBeforeWrite(t *testing.T) {
+	proxyID := int64(99)
+	repo := &accountRepoStubForBulkUpdate{}
+	proxyRepo := &proxyRepoStubForAccountProxyScope{getErr: ErrProxyNotFound}
+	svc := &adminServiceImpl{
+		accountRepo: repo,
+		proxyRepo:  proxyRepo,
+	}
+
+	result, err := svc.BulkUpdateAccounts(WithProjectID(context.Background(), 7), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 2},
+		ProxyID:   &proxyID,
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrProxyNotFound)
+	require.Equal(t, []int64{99}, proxyRepo.gotIDs)
+	require.Empty(t, repo.bulkUpdateIDs)
 }
 
 func TestAdminServiceBulkUpdateAccounts_ProjectContextRequiresVisibleExplicitAccounts(t *testing.T) {

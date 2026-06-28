@@ -2527,7 +2527,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :allow-testing="false" />
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -3281,7 +3281,7 @@ import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
 import type {
-  Proxy,
+  ProxyOption,
   AdminGroup,
   AccountPlatform,
   AccountType,
@@ -3362,7 +3362,7 @@ const apiKeyHint = computed(() => {
 
 interface Props {
   show: boolean
-  proxies: Proxy[]
+  proxies: ProxyOption[]
   groups: AdminGroup[]
 }
 

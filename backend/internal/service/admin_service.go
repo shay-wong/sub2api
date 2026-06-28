@@ -114,6 +114,7 @@ type AdminService interface {
 	ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]ProxyWithAccountCount, int64, error)
 	GetAllProxies(ctx context.Context) ([]Proxy, error)
 	GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error)
+	GetAccountProxyOptions(ctx context.Context) ([]Proxy, error)
 	GetProxy(ctx context.Context, id int64) (*Proxy, error)
 	GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error)
 	CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error)
@@ -2898,6 +2899,9 @@ func normalizeAccountConcurrency(platform, accountType string, concurrency int) 
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := s.ensureProxyAvailable(ctx, input.ProxyID); err != nil {
+		return nil, err
+	}
 	// 绑定分组
 	groupIDs := input.GroupIDs
 	// 如果没有指定分组,自动绑定对应平台的默认分组
@@ -3013,6 +3017,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	if err := s.ensureProxyAvailable(ctx, input.ProxyID); err != nil {
+		return nil, err
+	}
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -3166,6 +3173,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	if len(input.AccountIDs) == 0 {
 		return result, nil
+	}
+	if err := s.ensureProxyAvailable(ctx, input.ProxyID); err != nil {
+		return nil, err
 	}
 	if input.GroupIDs != nil {
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
@@ -3503,7 +3513,7 @@ func (s *adminServiceImpl) RevertAccountProxyFallback(ctx context.Context, id in
 // Proxy management implementations
 func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]Proxy, int64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	proxies, result, err := s.proxyRepo.ListWithFilters(ctx, params, protocol, status, search)
+	proxies, result, err := s.proxyRepo.ListWithFiltersForManagement(ctx, params, protocol, status, search)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3512,7 +3522,7 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 
 func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]ProxyWithAccountCount, int64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	proxies, result, err := s.proxyRepo.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
+	proxies, result, err := s.proxyRepo.ListWithFiltersAndAccountCountForManagement(ctx, params, protocol, status, search)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3521,11 +3531,11 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 }
 
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
-	return s.proxyRepo.ListActive(ctx)
+	return s.proxyRepo.ListActiveForManagement(ctx)
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
-	proxies, err := s.proxyRepo.ListActiveWithAccountCount(ctx)
+	proxies, err := s.proxyRepo.ListActiveWithAccountCountForManagement(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -3533,12 +3543,24 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 	return proxies, nil
 }
 
+func (s *adminServiceImpl) GetAccountProxyOptions(ctx context.Context) ([]Proxy, error) {
+	return s.proxyRepo.ListActive(ctx)
+}
+
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
-	return s.proxyRepo.GetByID(ctx, id)
+	return s.proxyRepo.GetByIDForManagement(ctx, id)
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
-	return s.proxyRepo.ListByIDs(ctx, ids)
+	return s.proxyRepo.ListByIDsForManagement(ctx, ids)
+}
+
+func (s *adminServiceImpl) ensureProxyAvailable(ctx context.Context, proxyID *int64) error {
+	if proxyID == nil || *proxyID == 0 {
+		return nil
+	}
+	_, err := s.proxyRepo.GetByID(ctx, *proxyID)
+	return err
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
@@ -3557,6 +3579,9 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	}
 	if expiryWarnDays < 0 {
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
+	}
+	if err := s.ensureProxyAvailable(ctx, input.BackupProxyID); err != nil {
+		return nil, err
 	}
 
 	proxy := &Proxy{
@@ -3586,7 +3611,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 		return nil, infraerrors.BadRequest("PROXY_BACKUP_SELF", "backup proxy cannot be itself")
 	}
 
-	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -3609,6 +3634,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	}
 	if input.ExpiryWarnDaysProvided && input.ExpiryWarnDays != nil && *input.ExpiryWarnDays < 0 {
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
+	}
+	if err := s.ensureProxyAvailable(ctx, backupProxyID); err != nil {
+		return nil, err
 	}
 
 	if input.Name != "" {
@@ -3652,7 +3680,16 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
-	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
+	_, err := s.proxyRepo.GetByIDForManagement(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrProxyNotFound) {
+			if _, scoped := ProjectIDFromContext(ctx); !scoped {
+				return nil
+			}
+		}
+		return err
+	}
+	count, err := s.proxyRepo.CountAllAccountsByProxyID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -3669,7 +3706,15 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 	}
 
 	for _, id := range ids {
-		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
+		_, err := s.proxyRepo.GetByIDForManagement(ctx, id)
+		if err != nil {
+			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
+				ID:     id,
+				Reason: err.Error(),
+			})
+			continue
+		}
+		count, err := s.proxyRepo.CountAllAccountsByProxyID(ctx, id)
 		if err != nil {
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
 				ID:     id,
@@ -3698,6 +3743,9 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 }
 
 func (s *adminServiceImpl) GetProxyAccounts(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error) {
+	if _, err := s.proxyRepo.GetByIDForManagement(ctx, proxyID); err != nil {
+		return nil, err
+	}
 	return s.proxyRepo.ListAccountSummariesByProxyID(ctx, proxyID)
 }
 
@@ -3795,7 +3843,7 @@ func (s *adminServiceImpl) ExpireRedeemCode(ctx context.Context, id int64) (*Red
 }
 
 func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestResult, error) {
-	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -3839,7 +3887,7 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 }
 
 func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error) {
-	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByIDForManagement(ctx, id)
 	if err != nil {
 		return nil, err
 	}

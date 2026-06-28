@@ -30,6 +30,7 @@ type stubAdminService struct {
 	updateAccountErr      error
 	bulkUpdateAccountErr  error
 	checkMixedErr         error
+	hideMissingAccounts   bool
 	lastMixedCheck        struct {
 		accountID int64
 		platform  string
@@ -434,6 +435,9 @@ func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.A
 			return &s.accounts[i], nil
 		}
 	}
+	if s.hideMissingAccounts {
+		return nil, service.ErrAccountNotFound
+	}
 	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 	return &account, nil
 }
@@ -555,6 +559,10 @@ func (s *stubAdminService) GetAllProxies(ctx context.Context) ([]service.Proxy, 
 
 func (s *stubAdminService) GetAllProxiesWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
 	return s.proxyCounts, nil
+}
+
+func (s *stubAdminService) GetAccountProxyOptions(ctx context.Context) ([]service.Proxy, error) {
+	return s.proxies, nil
 }
 
 func (s *stubAdminService) GetProxy(ctx context.Context, id int64) (*service.Proxy, error) {

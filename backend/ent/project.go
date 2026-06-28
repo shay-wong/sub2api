@@ -52,11 +52,13 @@ type ProjectEdges struct {
 	APIKeys []*APIKey `json:"api_keys,omitempty"`
 	// Groups holds the value of the groups edge.
 	Groups []*Group `json:"groups,omitempty"`
+	// Proxies holds the value of the proxies edge.
+	Proxies []*Proxy `json:"proxies,omitempty"`
 	// UsageLogs holds the value of the usage_logs edge.
 	UsageLogs []*UsageLog `json:"usage_logs,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [6]bool
+	loadedTypes [7]bool
 }
 
 // MembersOrErr returns the Members value or an error if the edge
@@ -104,10 +106,19 @@ func (e ProjectEdges) GroupsOrErr() ([]*Group, error) {
 	return nil, &NotLoadedError{edge: "groups"}
 }
 
+// ProxiesOrErr returns the Proxies value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProjectEdges) ProxiesOrErr() ([]*Proxy, error) {
+	if e.loadedTypes[5] {
+		return e.Proxies, nil
+	}
+	return nil, &NotLoadedError{edge: "proxies"}
+}
+
 // UsageLogsOrErr returns the UsageLogs value or an error if the edge
 // was not loaded in eager-loading.
 func (e ProjectEdges) UsageLogsOrErr() ([]*UsageLog, error) {
-	if e.loadedTypes[5] {
+	if e.loadedTypes[6] {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
@@ -235,6 +246,11 @@ func (_m *Project) QueryAPIKeys() *APIKeyQuery {
 // QueryGroups queries the "groups" edge of the Project entity.
 func (_m *Project) QueryGroups() *GroupQuery {
 	return NewProjectClient(_m.config).QueryGroups(_m)
+}
+
+// QueryProxies queries the "proxies" edge of the Project entity.
+func (_m *Project) QueryProxies() *ProxyQuery {
+	return NewProjectClient(_m.config).QueryProxies(_m)
 }
 
 // QueryUsageLogs queries the "usage_logs" edge of the Project entity.

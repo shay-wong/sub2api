@@ -95,12 +95,58 @@ func TestAdminService_UpdateProxyExplicitlyClearsOrSetsOptionalFields(t *testing
 	require.Equal(t, 0, proxy.ExpiryWarnDays)
 }
 
+func TestAdminService_UpdateProxy_ProjectAdminCanUpdateVisibleSharedProxy(t *testing.T) {
+	repo := &proxyRepoStubForAdminProxy{
+		managementProxy: &Proxy{
+			ID:        1,
+			ProjectID: 1,
+			Name:      "shared",
+			Protocol:  "http",
+			Host:      "127.0.0.1",
+			Port:      8080,
+			Status:    StatusActive,
+		},
+	}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	proxy, err := svc.UpdateProxy(ctx, 1, &UpdateProxyInput{Status: StatusDisabled})
+	require.NoError(t, err)
+	require.Equal(t, StatusDisabled, proxy.Status)
+	require.Equal(t, repo.updated, proxy)
+}
+
+func TestAdminService_UpdateProxy_UsesProjectVisibleProxyLookup(t *testing.T) {
+	repo := &proxyRepoStubForAdminProxy{
+		managementProxy: &Proxy{
+			ID:        1,
+			ProjectID: 7,
+			Name:      "owned",
+			Protocol:  "http",
+			Host:      "127.0.0.1",
+			Port:      8080,
+			Status:    StatusActive,
+		},
+	}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	proxy, err := svc.UpdateProxy(ctx, 1, &UpdateProxyInput{Status: StatusDisabled})
+	require.NoError(t, err)
+	require.Equal(t, StatusDisabled, proxy.Status)
+	require.Equal(t, repo.updated, proxy)
+	require.Equal(t, []int64{1}, repo.managementLookupIDs)
+}
+
 type proxyRepoStubForAdminProxy struct {
 	proxyRepoStub
 
-	proxy   *Proxy
-	created *Proxy
-	updated *Proxy
+	proxy               *Proxy
+	managementProxy     *Proxy
+	created             *Proxy
+	updated             *Proxy
+	visibleLookupIDs    []int64
+	managementLookupIDs []int64
 }
 
 func (s *proxyRepoStubForAdminProxy) Create(_ context.Context, proxy *Proxy) error {
@@ -109,11 +155,21 @@ func (s *proxyRepoStubForAdminProxy) Create(_ context.Context, proxy *Proxy) err
 }
 
 func (s *proxyRepoStubForAdminProxy) GetByID(_ context.Context, _ int64) (*Proxy, error) {
+	s.visibleLookupIDs = append(s.visibleLookupIDs, 1)
 	if s.proxy == nil {
 		return nil, ErrProxyNotFound
 	}
 	copy := *s.proxy
 	return &copy, nil
+}
+
+func (s *proxyRepoStubForAdminProxy) GetByIDForManagement(_ context.Context, _ int64) (*Proxy, error) {
+	s.managementLookupIDs = append(s.managementLookupIDs, 1)
+	if s.managementProxy != nil {
+		copy := *s.managementProxy
+		return &copy, nil
+	}
+	return s.GetByID(context.Background(), 1)
 }
 
 func (s *proxyRepoStubForAdminProxy) Update(_ context.Context, proxy *Proxy) error {

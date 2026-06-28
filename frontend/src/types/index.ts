@@ -768,6 +768,22 @@ export interface Proxy {
   updated_at: string
 }
 
+export interface ProxyOption {
+  id: number
+  name: string
+  protocol: ProxyProtocol
+  host: string
+  port: number
+  status: 'active' | 'inactive' | 'expired'
+  expires_at: string | null
+  fallback_mode: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+  expiry_warn_days: number
+  created_at: string
+  updated_at: string
+  account_count?: number
+}
+
 export interface ProxyAccountSummary {
   id: number
   name: string

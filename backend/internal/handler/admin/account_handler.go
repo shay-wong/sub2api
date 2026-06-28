@@ -462,6 +462,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 	response.Paginated(c, result, total, page, pageSize)
 }
 
+// GetProxyOptions returns active proxies visible to the current account-management scope.
+// GET /api/v1/admin/accounts/proxy-options
+func (h *AccountHandler) GetProxyOptions(c *gin.Context) {
+	proxies, err := h.adminService.GetAccountProxyOptions(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	out := make([]dto.ProxyOption, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, *dto.ProxyOptionFromService(&proxies[i]))
+	}
+	response.Success(c, out)
+}
+
 func buildAccountsListETag(
 	items []AccountWithConcurrency,
 	total int64,

@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   Proxy,
+  ProxyOption,
   ProxyAccountSummary,
   ProxyQualityCheckResult,
   CreateProxyRequest,
@@ -64,6 +65,11 @@ export async function getAllWithCount(): Promise<Proxy[]> {
   const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all', {
     params: { with_count: 'true' }
   })
+  return data
+}
+
+export async function getAccountOptions(): Promise<ProxyOption[]> {
+  const { data } = await apiClient.get<ProxyOption[]>('/admin/accounts/proxy-options')
   return data
 }
 
@@ -259,6 +265,7 @@ export const proxiesAPI = {
   list,
   getAll,
   getAllWithCount,
+  getAccountOptions,
   getById,
   create,
   update,

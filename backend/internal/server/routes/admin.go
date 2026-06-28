@@ -56,7 +56,7 @@ func RegisterAdminRoutes(
 		registerAnnouncementRoutes(adminOnly, h)
 
 		// 代理管理
-		registerProxyRoutes(adminOnly, h)
+		registerProxyRoutes(admin, h)
 
 		// 卡密管理
 		registerRedeemCodeRoutes(adminOnly, h)
@@ -336,6 +336,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	accounts.Use(middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite))
 	{
 		accounts.GET("", h.Admin.Account.List)
+		accounts.GET("/proxy-options", h.Admin.Account.GetProxyOptions)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)
@@ -440,6 +441,7 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	grok := admin.Group("/grok")
 	{
 		accountWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
+		opsRead := middleware.RequireAdminPermission(service.AdminPermissionOpsRead)
 
 		grok.POST("/oauth/auth-url", accountWrite, h.Admin.GrokOAuth.GenerateAuthURL)
 		grok.POST("/oauth/exchange-code", accountWrite, h.Admin.GrokOAuth.ExchangeCode)
@@ -448,16 +450,18 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		grok.POST("/accounts/:id/refresh", accountWrite, h.Admin.GrokOAuth.RefreshAccountToken)
 		grok.GET("/accounts/:id/quota", accountWrite, h.Admin.GrokOAuth.QueryQuota)
 		grok.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.GrokOAuth.ResetQuota)
-		grok.GET("/runtime-sanity", accountWrite, h.Admin.GrokOAuth.RuntimeSanity)
+		grok.GET("/runtime-sanity", opsRead, h.Admin.GrokOAuth.RuntimeSanity)
 	}
 }
 
 func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	proxies := admin.Group("/proxies")
+	adminOnly := middleware.RequireAdminOnly()
+	proxies.Use(middleware.RequireAdminPermission(service.AdminPermissionProxiesManage))
 	{
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
-		proxies.GET("/data", h.Admin.Proxy.ExportData)
+		proxies.GET("/data", adminOnly, h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
 		proxies.GET("/:id", h.Admin.Proxy.GetByID)
 		proxies.POST("", h.Admin.Proxy.Create)

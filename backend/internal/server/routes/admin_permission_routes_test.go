@@ -265,6 +265,259 @@ func TestUserCannotUpdateAdminAPIKey(t *testing.T) {
 	require.Zero(t, adminSvc.updatedKeyID)
 }
 
+func TestProjectAdminWithOpsReadCanReadGrokRuntimeSanity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionOpsRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/grok/runtime-sanity", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "base_url")
+}
+
+func TestProjectAdminWithoutOpsReadCannotReadGrokRuntimeSanity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionDashboardRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/grok/runtime-sanity", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestProjectAdminCanManageProjectProxiesWithPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionProxiesManage}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, adminSvc.listCalls)
+}
+
+func TestProjectAdminProxyReadsDoNotExposePasswords(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionProxiesManage}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "paginated list", path: "/api/v1/admin/proxies"},
+		{name: "all", path: "/api/v1/admin/proxies/all"},
+		{name: "all with count", path: "/api/v1/admin/proxies/all?with_count=true"},
+		{name: "detail", path: "/api/v1/admin/proxies/10"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.NotContains(t, rec.Body.String(), `"password"`)
+			require.NotContains(t, rec.Body.String(), "secret-pass")
+		})
+	}
+}
+
+func TestSuperAdminProxyReadsCanExposePasswords(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 1})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/10", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"password":"secret-pass"`)
+}
+
+func TestProjectAdminCannotExportProxyData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionProxiesManage}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/data", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, adminSvc.exportListCalls)
+	require.NotContains(t, rec.Body.String(), "secret-pass")
+}
+
+func TestSuperAdminCanExportProxyData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 1})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/data", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, adminSvc.exportListCalls)
+	require.Contains(t, rec.Body.String(), "secret-pass")
+}
+
+func TestProjectAdminCannotManageProjectProxiesWithoutPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := newProxyRouteAdminServiceStub()
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionDashboardRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, adminSvc.listCalls)
+}
+
+func TestProjectAdminCanReadAccountProxyOptionsWithAccountsWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	adminSvc := &accountProxyOptionsAdminServiceStub{}
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Account: adminhandler.NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionAccountsWrite}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/proxy-options", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, adminSvc.proxyOptionCalls)
+	require.NotContains(t, rec.Body.String(), "password")
+	require.NotContains(t, rec.Body.String(), "username")
+}
+
 func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -1144,6 +1397,7 @@ func (r *projectRouteRepoStub) SearchProjectBindableResources(_ context.Context,
 		Users:         []service.ProjectResourceUserCandidate{},
 		Groups:        []service.ProjectResourceGroupCandidate{},
 		Accounts:      []service.ProjectResourceAccountCandidate{},
+		Proxies:       []service.ProjectResourceProxyCandidate{},
 		Subscriptions: []service.ProjectResourceSubscriptionCandidate{},
 		APIKeys:       []service.ProjectResourceAPIKeyCandidate{},
 	}, nil
@@ -1175,4 +1429,71 @@ func (s *apiKeyRouteAdminServiceStub) AdminTransferAPIKeyProject(_ context.Conte
 
 func (s *apiKeyRouteAdminServiceStub) AdminResetAPIKeyRateLimitUsage(_ context.Context, keyID int64) (*service.APIKey, error) {
 	return &service.APIKey{ID: keyID, UserID: 7, Key: "sk-test", Name: "test", Status: service.StatusAPIKeyActive}, nil
+}
+
+type proxyRouteAdminServiceStub struct {
+	service.AdminService
+	listCalls       int
+	exportListCalls int
+}
+
+func newProxyRouteAdminServiceStub() *proxyRouteAdminServiceStub {
+	return &proxyRouteAdminServiceStub{}
+}
+
+func (s *proxyRouteAdminServiceStub) ListProxiesWithAccountCount(context.Context, int, int, string, string, string, string, string) ([]service.ProxyWithAccountCount, int64, error) {
+	s.listCalls++
+	proxy := proxyRouteSecretProxy()
+	return []service.ProxyWithAccountCount{{Proxy: proxy, AccountCount: 2}}, 1, nil
+}
+
+func (s *proxyRouteAdminServiceStub) ListProxies(context.Context, int, int, string, string, string, string, string) ([]service.Proxy, int64, error) {
+	s.exportListCalls++
+	return []service.Proxy{proxyRouteSecretProxy()}, 1, nil
+}
+
+func (s *proxyRouteAdminServiceStub) GetAllProxies(context.Context) ([]service.Proxy, error) {
+	return []service.Proxy{proxyRouteSecretProxy()}, nil
+}
+
+func (s *proxyRouteAdminServiceStub) GetAllProxiesWithAccountCount(context.Context) ([]service.ProxyWithAccountCount, error) {
+	proxy := proxyRouteSecretProxy()
+	return []service.ProxyWithAccountCount{{Proxy: proxy, AccountCount: 2}}, nil
+}
+
+func (s *proxyRouteAdminServiceStub) GetProxy(context.Context, int64) (*service.Proxy, error) {
+	proxy := proxyRouteSecretProxy()
+	return &proxy, nil
+}
+
+func proxyRouteSecretProxy() service.Proxy {
+	return service.Proxy{
+		ID:       10,
+		Name:     "shared",
+		Protocol: "http",
+		Host:     "proxy.example.test",
+		Port:     8080,
+		Username: "secret-user",
+		Password: "secret-pass",
+		Status:   service.StatusActive,
+	}
+}
+
+type accountProxyOptionsAdminServiceStub struct {
+	service.AdminService
+	proxyOptionCalls int
+}
+
+func (s *accountProxyOptionsAdminServiceStub) GetAccountProxyOptions(context.Context) ([]service.Proxy, error) {
+	s.proxyOptionCalls++
+	return []service.Proxy{{
+		ID:       10,
+		Name:     "shared",
+		Protocol: "http",
+		Host:     "proxy.example.test",
+		Port:     8080,
+		Username: "secret-user",
+		Password: "secret-pass",
+		Status:   service.StatusActive,
+	}}, nil
 }

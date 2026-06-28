@@ -12,32 +12,45 @@ import (
 )
 
 type GrokOAuthHandler struct {
-	grokOAuthService *service.GrokOAuthService
-	adminService     service.AdminService
-	quotaService     *service.GrokQuotaService
+	grokOAuthService  *service.GrokOAuthService
+	adminService      service.AdminService
+	permissionService *service.PermissionService
+	quotaService      *service.GrokQuotaService
 }
 
 func NewGrokOAuthHandler(
 	grokOAuthService *service.GrokOAuthService,
 	adminService service.AdminService,
+	permissionService *service.PermissionService,
 	quotaService *service.GrokQuotaService,
 ) *GrokOAuthHandler {
 	return &GrokOAuthHandler{
-		grokOAuthService: grokOAuthService,
-		adminService:     adminService,
-		quotaService:     quotaService,
+		grokOAuthService:  grokOAuthService,
+		adminService:      adminService,
+		permissionService: permissionService,
+		quotaService:      quotaService,
 	}
 }
 
 type GrokGenerateAuthURLRequest struct {
 	ProxyID     *int64 `json:"proxy_id"`
+	AccountID   *int64 `json:"account_id"`
 	RedirectURI string `json:"redirect_uri"`
 }
 
 func (h *GrokOAuthHandler) GenerateAuthURL(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GrokGenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		req = GrokGenerateAuthURLRequest{}
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 	result, err := h.grokOAuthService.GenerateAuthURL(c.Request.Context(), req.ProxyID, req.RedirectURI)
 	if err != nil {
@@ -53,12 +66,22 @@ type GrokExchangeCodeRequest struct {
 	State       string `json:"state"`
 	RedirectURI string `json:"redirect_uri"`
 	ProxyID     *int64 `json:"proxy_id"`
+	AccountID   *int64 `json:"account_id"`
 }
 
 func (h *GrokOAuthHandler) ExchangeCode(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GrokExchangeCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	tokenInfo, err := h.grokOAuthService.ExchangeCode(c.Request.Context(), &service.GrokExchangeCodeInput{
@@ -80,9 +103,15 @@ type GrokRefreshTokenRequest struct {
 	RT           string `json:"rt"`
 	ClientID     string `json:"client_id"`
 	ProxyID      *int64 `json:"proxy_id"`
+	AccountID    *int64 `json:"account_id"`
 }
 
 func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req GrokRefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -94,6 +123,10 @@ func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
 	}
 	if refreshToken == "" {
 		response.BadRequest(c, "refresh_token is required")
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, req.AccountID, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -113,6 +146,11 @@ func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
 }
 
 func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
@@ -121,6 +159,10 @@ func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 	if account.Platform != service.PlatformGrok {
@@ -148,10 +190,15 @@ func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.AccountFromService(updatedAccount))
+	response.Success(c, dto.AccountFromService(scope.accountForResponse(updatedAccount)))
 }
 
 func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		SessionID   string  `json:"session_id" binding:"required"`
 		Code        string  `json:"code" binding:"required"`
@@ -165,6 +212,14 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureGroups(req.GroupIDs, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureOAuthProxyUse(c, h.adminService, nil, req.ProxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	tokenInfo, err := h.grokOAuthService.ExchangeCode(c.Request.Context(), &service.GrokExchangeCodeInput{
@@ -202,13 +257,27 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, dto.AccountFromService(account))
+	response.Success(c, dto.AccountFromService(scope.accountForResponse(account)))
 }
 
 func (h *GrokOAuthHandler) QueryQuota(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 	if h.quotaService == nil {
@@ -224,9 +293,23 @@ func (h *GrokOAuthHandler) QueryQuota(c *gin.Context) {
 }
 
 func (h *GrokOAuthHandler) ResetQuota(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(account) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 	if h.quotaService == nil {

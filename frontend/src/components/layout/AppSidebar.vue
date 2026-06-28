@@ -743,6 +743,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.groups },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.subscriptions },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts },
+    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, adminPermission: AdminPermissions.proxies },
     adminUsageItem
   ]
 
@@ -765,9 +766,8 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    ...projectItems.slice(4, 6),
+    ...projectItems.slice(4, 7),
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },

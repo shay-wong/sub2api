@@ -25,6 +25,7 @@ type createProjectRequest struct {
 	ProfileMode     string  `json:"profile_mode"`
 	GroupIDs        []int64 `json:"group_ids"`
 	AccountIDs      []int64 `json:"account_ids"`
+	ProxyIDs        []int64 `json:"proxy_ids"`
 	SubscriptionIDs []int64 `json:"subscription_ids"`
 }
 
@@ -50,6 +51,7 @@ type projectProfileRequest struct {
 type setProjectProfileBindingsRequest struct {
 	GroupIDs        []int64 `json:"group_ids"`
 	AccountIDs      []int64 `json:"account_ids"`
+	ProxyIDs        []int64 `json:"proxy_ids"`
 	SubscriptionIDs []int64 `json:"subscription_ids"`
 }
 
@@ -97,6 +99,7 @@ func (h *ProjectHandler) Create(c *gin.Context) {
 		Bindings: service.ProjectProfileBindingInput{
 			GroupIDs:        req.GroupIDs,
 			AccountIDs:      req.AccountIDs,
+			ProxyIDs:        req.ProxyIDs,
 			SubscriptionIDs: req.SubscriptionIDs,
 		},
 	})
@@ -414,6 +417,7 @@ func (h *ProjectHandler) SetProfileBindings(c *gin.Context) {
 		if err := h.projectService.ValidateProjectProfileBindingScope(c.Request.Context(), projectID, service.ProjectProfileBindingInput{
 			GroupIDs:        req.GroupIDs,
 			AccountIDs:      req.AccountIDs,
+			ProxyIDs:        req.ProxyIDs,
 			SubscriptionIDs: req.SubscriptionIDs,
 		}); err != nil {
 			response.ErrorFrom(c, err)
@@ -423,6 +427,7 @@ func (h *ProjectHandler) SetProfileBindings(c *gin.Context) {
 	bindings, err := h.projectService.SetProjectProfileBindings(c.Request.Context(), projectID, profileID, service.ProjectProfileBindingInput{
 		GroupIDs:        req.GroupIDs,
 		AccountIDs:      req.AccountIDs,
+		ProxyIDs:        req.ProxyIDs,
 		SubscriptionIDs: req.SubscriptionIDs,
 	})
 	if err != nil {

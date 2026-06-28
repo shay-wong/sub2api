@@ -34,6 +34,8 @@ func (Proxy) Fields() []ent.Field {
 		field.String("name").
 			MaxLen(100).
 			NotEmpty(),
+		field.Int64("project_id").
+			Comment("Origin/default project for the proxy; profile bindings control project-space visibility and management"),
 		field.String("protocol").
 			MaxLen(20).
 			NotEmpty(),
@@ -70,6 +72,11 @@ func (Proxy) Fields() []ent.Field {
 // Edges 定义代理实体的关联关系。
 func (Proxy) Edges() []ent.Edge {
 	return []ent.Edge{
+		edge.From("project", Project.Type).
+			Ref("proxies").
+			Field("project_id").
+			Unique().
+			Required(),
 		// accounts: 使用此代理的账户（反向边）
 		edge.From("accounts", Account.Type).
 			Ref("proxy"),
@@ -81,9 +88,11 @@ func (Proxy) Edges() []ent.Edge {
 
 func (Proxy) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("project_id"),
 		index.Fields("status"),
 		index.Fields("deleted_at"),
 		index.Fields("expires_at"),
 		index.Fields("backup_proxy_id"),
+		index.Fields("project_id", "status"),
 	}
 }

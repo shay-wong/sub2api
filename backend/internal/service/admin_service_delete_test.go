@@ -264,10 +264,15 @@ func (s *deleteGroupAPIKeyRepoStub) ListKeysByGroupID(ctx context.Context, group
 }
 
 type proxyRepoStub struct {
-	deleteErr    error
-	countErr     error
-	accountCount int64
-	deletedIDs   []int64
+	deleteErr       error
+	countErr        error
+	countAllErr     error
+	getErr          error
+	accountCount    int64
+	allAccountCount *int64
+	proxiesByID     map[int64]*Proxy
+	deletedIDs      []int64
+	gotIDs          []int64
 }
 
 func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
@@ -275,11 +280,27 @@ func (s *proxyRepoStub) Create(ctx context.Context, proxy *Proxy) error {
 }
 
 func (s *proxyRepoStub) GetByID(ctx context.Context, id int64) (*Proxy, error) {
-	panic("unexpected GetByID call")
+	s.gotIDs = append(s.gotIDs, id)
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if proxy, ok := s.proxiesByID[id]; ok {
+		copy := *proxy
+		return &copy, nil
+	}
+	return &Proxy{ID: id, Name: "proxy", Status: StatusActive}, nil
+}
+
+func (s *proxyRepoStub) GetByIDForManagement(ctx context.Context, id int64) (*Proxy, error) {
+	return s.GetByID(ctx, id)
 }
 
 func (s *proxyRepoStub) ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
 	panic("unexpected ListByIDs call")
+}
+
+func (s *proxyRepoStub) ListByIDsForManagement(ctx context.Context, ids []int64) ([]Proxy, error) {
+	return s.ListByIDs(ctx, ids)
 }
 
 func (s *proxyRepoStub) Update(ctx context.Context, proxy *Proxy) error {
@@ -299,16 +320,32 @@ func (s *proxyRepoStub) ListWithFilters(ctx context.Context, params pagination.P
 	panic("unexpected ListWithFilters call")
 }
 
+func (s *proxyRepoStub) ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error) {
+	return s.ListWithFilters(ctx, params, protocol, status, search)
+}
+
 func (s *proxyRepoStub) ListActive(ctx context.Context) ([]Proxy, error) {
 	panic("unexpected ListActive call")
+}
+
+func (s *proxyRepoStub) ListActiveForManagement(ctx context.Context) ([]Proxy, error) {
+	return s.ListActive(ctx)
 }
 
 func (s *proxyRepoStub) ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
 	panic("unexpected ListActiveWithAccountCount call")
 }
 
+func (s *proxyRepoStub) ListActiveWithAccountCountForManagement(ctx context.Context) ([]ProxyWithAccountCount, error) {
+	return s.ListActiveWithAccountCount(ctx)
+}
+
 func (s *proxyRepoStub) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	panic("unexpected ListWithFiltersAndAccountCount call")
+}
+
+func (s *proxyRepoStub) ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	return s.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
 }
 
 func (s *proxyRepoStub) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
@@ -318,6 +355,16 @@ func (s *proxyRepoStub) ExistsByHostPortAuth(ctx context.Context, host string, p
 func (s *proxyRepoStub) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	if s.countErr != nil {
 		return 0, s.countErr
+	}
+	return s.accountCount, nil
+}
+
+func (s *proxyRepoStub) CountAllAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
+	if s.countAllErr != nil {
+		return 0, s.countAllErr
+	}
+	if s.allAccountCount != nil {
+		return *s.allAccountCount, nil
 	}
 	return s.accountCount, nil
 }
@@ -647,16 +694,26 @@ func TestAdminService_DeleteProxy_Success(t *testing.T) {
 }
 
 func TestAdminService_DeleteProxy_Idempotent(t *testing.T) {
-	repo := &proxyRepoStub{}
+	repo := &proxyRepoStub{getErr: ErrProxyNotFound}
 	svc := &adminServiceImpl{proxyRepo: repo}
 
 	err := svc.DeleteProxy(context.Background(), 404)
 	require.NoError(t, err)
-	require.Equal(t, []int64{404}, repo.deletedIDs)
+	require.Empty(t, repo.deletedIDs)
 }
 
 func TestAdminService_DeleteProxy_InUse(t *testing.T) {
 	repo := &proxyRepoStub{accountCount: 2}
+	svc := &adminServiceImpl{proxyRepo: repo}
+
+	err := svc.DeleteProxy(context.Background(), 77)
+	require.ErrorIs(t, err, ErrProxyInUse)
+	require.Empty(t, repo.deletedIDs)
+}
+
+func TestAdminService_DeleteProxy_UsesGlobalAccountCount(t *testing.T) {
+	globalCount := int64(2)
+	repo := &proxyRepoStub{accountCount: 0, allAccountCount: &globalCount}
 	svc := &adminServiceImpl{proxyRepo: repo}
 
 	err := svc.DeleteProxy(context.Background(), 77)
@@ -671,6 +728,60 @@ func TestAdminService_DeleteProxy_Error(t *testing.T) {
 
 	err := svc.DeleteProxy(context.Background(), 33)
 	require.ErrorIs(t, err, deleteErr)
+}
+
+func TestAdminService_DeleteProxy_NotVisible(t *testing.T) {
+	repo := &proxyRepoStub{getErr: ErrProxyNotFound}
+	svc := &adminServiceImpl{proxyRepo: repo}
+
+	err := svc.DeleteProxy(WithProjectID(context.Background(), 7), 33)
+	require.ErrorIs(t, err, ErrProxyNotFound)
+	require.Empty(t, repo.deletedIDs)
+}
+
+func TestAdminService_DeleteProxy_ProjectAdminCanDeleteVisibleSharedProxyWhenUnused(t *testing.T) {
+	repo := &proxyRepoStub{
+		proxiesByID: map[int64]*Proxy{
+			33: {ID: 33, ProjectID: 1, Name: "shared", Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	err := svc.DeleteProxy(ctx, 33)
+	require.NoError(t, err)
+	require.Equal(t, []int64{33}, repo.deletedIDs)
+}
+
+func TestAdminService_DeleteProxy_ProjectAdminCanDeleteOwnerProxy(t *testing.T) {
+	repo := &proxyRepoStub{
+		proxiesByID: map[int64]*Proxy{
+			33: {ID: 33, ProjectID: 7, Name: "owned", Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	err := svc.DeleteProxy(ctx, 33)
+	require.NoError(t, err)
+	require.Equal(t, []int64{33}, repo.deletedIDs)
+}
+
+func TestAdminService_BatchDeleteProxies_ProjectAdminDeletesVisibleSharedProxyWhenUnused(t *testing.T) {
+	repo := &proxyRepoStub{
+		proxiesByID: map[int64]*Proxy{
+			11: {ID: 11, ProjectID: 7, Name: "owned", Status: StatusActive},
+			22: {ID: 22, ProjectID: 1, Name: "shared", Status: StatusActive},
+		},
+	}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	result, err := svc.BatchDeleteProxies(ctx, []int64{11, 22})
+	require.NoError(t, err)
+	require.Equal(t, []int64{11, 22}, result.DeletedIDs)
+	require.Empty(t, result.Skipped)
+	require.Equal(t, []int64{11, 22}, repo.deletedIDs)
 }
 
 func TestAdminService_DeleteRedeemCode_Success(t *testing.T) {

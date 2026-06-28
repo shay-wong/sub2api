@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
@@ -65,6 +66,20 @@ func (_u *ProxyUpdate) SetName(v string) *ProxyUpdate {
 func (_u *ProxyUpdate) SetNillableName(v *string) *ProxyUpdate {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *ProxyUpdate) SetProjectID(v int64) *ProxyUpdate {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableProjectID(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -247,6 +262,11 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *ProxyUpdate) SetProject(v *Project) *ProxyUpdate {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -270,6 +290,12 @@ func (_u *ProxyUpdate) SetBackupProxy(v *Proxy) *ProxyUpdate {
 // Mutation returns the ProxyMutation object of the builder.
 func (_u *ProxyUpdate) Mutation() *ProxyMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *ProxyUpdate) ClearProject() *ProxyUpdate {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -378,6 +404,9 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Proxy.project"`)
+	}
 	return nil
 }
 
@@ -446,6 +475,35 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.ProjectTable,
+			Columns: []string{proxy.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.ProjectTable,
+			Columns: []string{proxy.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -577,6 +635,20 @@ func (_u *ProxyUpdateOne) SetName(v string) *ProxyUpdateOne {
 func (_u *ProxyUpdateOne) SetNillableName(v *string) *ProxyUpdateOne {
 	if v != nil {
 		_u.SetName(*v)
+	}
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *ProxyUpdateOne) SetProjectID(v int64) *ProxyUpdateOne {
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableProjectID(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetProjectID(*v)
 	}
 	return _u
 }
@@ -759,6 +831,11 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetProject sets the "project" edge to the Project entity.
+func (_u *ProxyUpdateOne) SetProject(v *Project) *ProxyUpdateOne {
+	return _u.SetProjectID(v.ID)
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -782,6 +859,12 @@ func (_u *ProxyUpdateOne) SetBackupProxy(v *Proxy) *ProxyUpdateOne {
 // Mutation returns the ProxyMutation object of the builder.
 func (_u *ProxyUpdateOne) Mutation() *ProxyMutation {
 	return _u.mutation
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (_u *ProxyUpdateOne) ClearProject() *ProxyUpdateOne {
+	_u.mutation.ClearProject()
+	return _u
 }
 
 // ClearAccounts clears all "accounts" edges to the Account entity.
@@ -903,6 +986,9 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
+		return errors.New(`ent: clearing a required unique edge "Proxy.project"`)
+	}
 	return nil
 }
 
@@ -988,6 +1074,35 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if _u.mutation.ProjectCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.ProjectTable,
+			Columns: []string{proxy.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProjectIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   proxy.ProjectTable,
+			Columns: []string{proxy.ProjectColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(project.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

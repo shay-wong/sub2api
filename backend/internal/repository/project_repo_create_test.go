@@ -26,6 +26,7 @@ func TestProjectRepositoryCreateProjectKeepsRestrictedDefaultBindingsWhenScopeIs
 	}{
 		{service.ProjectResourceTypeGroup, []int64{20}},
 		{service.ProjectResourceTypeAccount, []int64{30}},
+		{service.ProjectResourceTypeProxy, []int64{35}},
 		{service.ProjectResourceTypeSubscription, []int64{40}},
 	} {
 		mock.ExpectExec(regexp.QuoteMeta(`
@@ -88,6 +89,7 @@ func TestProjectRepositoryCreateProjectKeepsRestrictedDefaultBindingsWhenScopeIs
 		Bindings: service.ProjectProfileBindingInput{
 			GroupIDs:        []int64{20},
 			AccountIDs:      []int64{30},
+			ProxyIDs:        []int64{35},
 			SubscriptionIDs: []int64{40},
 		},
 	})
@@ -200,6 +202,7 @@ func TestProjectRepositoryCreateProjectCreatesRestrictedDefaultProfileBindings(t
 	}{
 		{service.ProjectResourceTypeGroup, []int64{20}},
 		{service.ProjectResourceTypeAccount, []int64{30}},
+		{service.ProjectResourceTypeProxy, []int64{35}},
 		{service.ProjectResourceTypeSubscription, []int64{40}},
 	} {
 		mock.ExpectExec(regexp.QuoteMeta(`
@@ -221,6 +224,7 @@ func TestProjectRepositoryCreateProjectCreatesRestrictedDefaultProfileBindings(t
 		Bindings: service.ProjectProfileBindingInput{
 			GroupIDs:        []int64{20},
 			AccountIDs:      []int64{30},
+			ProxyIDs:        []int64{35},
 			SubscriptionIDs: []int64{40},
 		},
 	})
@@ -494,6 +498,9 @@ func TestProjectRepositorySetBindingsUpdatesRestrictedProfileBindings(t *testing
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM accounts WHERE id = ANY\\(\\$1\\) AND deleted_at IS NULL").
 		WithArgs(pq.Array([]int64{8})).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM proxies WHERE id = ANY\\(\\$1\\) AND deleted_at IS NULL").
+		WithArgs(pq.Array([]int64{10})).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM user_subscriptions WHERE id = ANY\\(\\$1\\) AND deleted_at IS NULL").
 		WithArgs(pq.Array([]int64{9})).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -509,6 +516,7 @@ func TestProjectRepositorySetBindingsUpdatesRestrictedProfileBindings(t *testing
 	}{
 		{service.ProjectResourceTypeGroup, []int64{7}},
 		{service.ProjectResourceTypeAccount, []int64{8}},
+		{service.ProjectResourceTypeProxy, []int64{10}},
 		{service.ProjectResourceTypeSubscription, []int64{9}},
 	} {
 		mock.ExpectExec(regexp.QuoteMeta(`
@@ -546,19 +554,22 @@ func TestProjectRepositorySetBindingsUpdatesRestrictedProfileBindings(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"resource_type", "resource_id"}).
 			AddRow(service.ProjectResourceTypeAccount, int64(8)).
 			AddRow(service.ProjectResourceTypeGroup, int64(7)).
+			AddRow(service.ProjectResourceTypeProxy, int64(10)).
 			AddRow(service.ProjectResourceTypeSubscription, int64(9)))
-	expectProjectBindingDetails(t, mock, int64(101), []int64{7}, []int64{8}, []int64{9})
+	expectProjectBindingDetails(t, mock, int64(101), []int64{7}, []int64{8}, []int64{10}, []int64{9})
 
 	repo := NewProjectRepository(db)
 	bindings, err := repo.SetProjectProfileBindings(context.Background(), 101, 202, service.ProjectProfileBindingInput{
 		GroupIDs:        []int64{7},
 		AccountIDs:      []int64{8},
+		ProxyIDs:        []int64{10},
 		SubscriptionIDs: []int64{9},
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(202), bindings.ProfileID)
 	require.Equal(t, []int64{7}, bindings.GroupIDs)
 	require.Equal(t, []int64{8}, bindings.AccountIDs)
+	require.Equal(t, []int64{10}, bindings.ProxyIDs)
 	require.Equal(t, []int64{9}, bindings.SubscriptionIDs)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -587,25 +598,29 @@ func TestProjectRepositoryGetProfileBindingsIncludesResourceDetails(t *testing.T
 		WillReturnRows(sqlmock.NewRows([]string{"resource_type", "resource_id"}).
 			AddRow(service.ProjectResourceTypeAccount, int64(8)).
 			AddRow(service.ProjectResourceTypeGroup, int64(7)).
+			AddRow(service.ProjectResourceTypeProxy, int64(10)).
 			AddRow(service.ProjectResourceTypeSubscription, int64(9)))
-	expectProjectBindingDetails(t, mock, int64(101), []int64{7}, []int64{8}, []int64{9})
+	expectProjectBindingDetails(t, mock, int64(101), []int64{7}, []int64{8}, []int64{10}, []int64{9})
 
 	repo := NewProjectRepository(db)
 	bindings, err := repo.GetProjectProfileBindings(context.Background(), 101, 202)
 	require.NoError(t, err)
 	require.Equal(t, []int64{7}, bindings.GroupIDs)
 	require.Equal(t, []int64{8}, bindings.AccountIDs)
+	require.Equal(t, []int64{10}, bindings.ProxyIDs)
 	require.Equal(t, []int64{9}, bindings.SubscriptionIDs)
 	require.Len(t, bindings.Groups, 1)
 	require.Equal(t, "共享分组", bindings.Groups[0].Name)
 	require.Len(t, bindings.Accounts, 1)
 	require.Equal(t, "主账号", bindings.Accounts[0].Name)
+	require.Len(t, bindings.Proxies, 1)
+	require.Equal(t, "主代理", bindings.Proxies[0].Name)
 	require.Len(t, bindings.Subscriptions, 1)
 	require.Equal(t, "user@example.test", bindings.Subscriptions[0].UserEmail)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func expectProjectBindingDetails(t *testing.T, mock sqlmock.Sqlmock, projectID int64, groupIDs, accountIDs, subscriptionIDs []int64) {
+func expectProjectBindingDetails(t *testing.T, mock sqlmock.Sqlmock, projectID int64, groupIDs, accountIDs, proxyIDs, subscriptionIDs []int64) {
 	t.Helper()
 	if len(groupIDs) > 0 {
 		mock.ExpectQuery(regexp.QuoteMeta(`
@@ -638,6 +653,18 @@ func expectProjectBindingDetails(t *testing.T, mock sqlmock.Sqlmock, projectID i
 			WithArgs(pq.Array(accountIDs)).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "name", "notes", "platform", "type", "status", "email"}).
 				AddRow(accountIDs[0], projectID, "主账号", "", "openai", "api_key", service.StatusActive, "owner@example.test"))
+	}
+	if len(proxyIDs) > 0 {
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, project_id, name, protocol, host, port, status
+		FROM proxies
+		WHERE id = ANY($1)
+		  AND deleted_at IS NULL
+		ORDER BY id ASC
+	`)).
+			WithArgs(pq.Array(proxyIDs)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "name", "protocol", "host", "port", "status"}).
+				AddRow(proxyIDs[0], projectID, "主代理", "http", "proxy.example.test", 8080, service.StatusActive))
 	}
 	if len(subscriptionIDs) > 0 {
 		mock.ExpectQuery(regexp.QuoteMeta(`

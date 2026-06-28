@@ -605,6 +605,29 @@ func HasGroupsWith(preds ...predicate.Group) predicate.Project {
 	})
 }
 
+// HasProxies applies the HasEdge predicate on the "proxies" edge.
+func HasProxies() predicate.Project {
+	return predicate.Project(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, ProxiesTable, ProxiesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasProxiesWith applies the HasEdge predicate on the "proxies" edge with a given conditions (other predicates).
+func HasProxiesWith(preds ...predicate.Proxy) predicate.Project {
+	return predicate.Project(func(s *sql.Selector) {
+		step := newProxiesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasUsageLogs applies the HasEdge predicate on the "usage_logs" edge.
 func HasUsageLogs() predicate.Project {
 	return predicate.Project(func(s *sql.Selector) {

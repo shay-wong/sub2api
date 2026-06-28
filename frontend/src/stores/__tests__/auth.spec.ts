@@ -374,6 +374,7 @@ describe('useAuthStore', () => {
       await store.login({ email: 'admin@example.com', password: '123456' })
 
       expect(store.hasAdminPermission('admin.accounts.write')).toBe(true)
+      expect(store.hasAdminPermission('admin.proxies.manage')).toBe(true)
       expect(store.hasAdminPermission('admin.usage.read')).toBe(true)
     })
 

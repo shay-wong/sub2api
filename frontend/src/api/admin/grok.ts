@@ -13,6 +13,7 @@ export interface GrokAuthUrlResponse {
 
 export interface GrokAuthUrlRequest {
   proxy_id?: number
+  account_id?: number
   redirect_uri?: string
 }
 
@@ -21,6 +22,7 @@ export interface GrokExchangeCodeRequest {
   state: string
   code: string
   proxy_id?: number
+  account_id?: number
   redirect_uri?: string
 }
 
@@ -96,10 +98,12 @@ export async function exchangeCode(payload: GrokExchangeCodeRequest): Promise<Gr
 
 export async function refreshGrokToken(
   refreshToken: string,
-  proxyId?: number | null
+  proxyId?: number | null,
+  accountId?: number | null
 ): Promise<GrokTokenInfo> {
   const payload: Record<string, unknown> = { refresh_token: refreshToken }
   if (proxyId) payload.proxy_id = proxyId
+  if (accountId) payload.account_id = accountId
 
   const { data } = await apiClient.post<GrokTokenInfo>(
     '/admin/grok/oauth/refresh-token',

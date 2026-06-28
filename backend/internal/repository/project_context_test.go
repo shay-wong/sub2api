@@ -107,6 +107,16 @@ func TestAccountProjectScopeDoesNotExpandFromConfiguredGroups(t *testing.T) {
 	require.NotContains(t, normalized, "ppb.resource_type = 'group'")
 }
 
+func TestProxyProjectScopeUsesProfileBindingWithoutHardProjectIDBoundary(t *testing.T) {
+	clause := projectProfileScopeSQL(7, projectSQLScopeResources{ProxyID: "proxies.id"})
+	normalized := normalizeSQLWhitespace(clause)
+
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'proxy'")
+	require.Contains(t, normalized, "ppb.resource_id = proxies.id")
+	require.NotContains(t, normalized, "proxies.project_id = 7")
+}
+
 func TestProjectUserGroupScopeRequiresMemberAndConfiguredGroup(t *testing.T) {
 	clause := projectUserGroupScopeSQL(7, "u.id", "g.id")
 	normalized := normalizeSQLWhitespace(clause)

@@ -531,7 +531,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      requiresAdminOnly: true,
+      adminPermission: AdminPermissions.proxies,
       title: 'Proxy Management',
       titleKey: 'admin.proxies.title',
       descriptionKey: 'admin.proxies.description'
@@ -741,6 +741,7 @@ const ADMIN_PERMISSION_FALLBACK_PATHS: Record<string, string> = {
   [AdminPermissions.ops]: '/admin/ops',
   [AdminPermissions.users]: '/admin/users',
   [AdminPermissions.groups]: '/admin/groups',
+  [AdminPermissions.proxies]: '/admin/proxies',
   [AdminPermissions.subscriptions]: '/admin/subscriptions',
   [AdminPermissions.accounts]: '/admin/accounts',
   [AdminPermissions.usage]: '/admin/usage',

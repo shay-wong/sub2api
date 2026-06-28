@@ -15,6 +15,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/account"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 )
 
@@ -25,6 +26,7 @@ type ProxyQuery struct {
 	order           []proxy.OrderOption
 	inters          []Interceptor
 	predicates      []predicate.Proxy
+	withProject     *ProjectQuery
 	withAccounts    *AccountQuery
 	withBackupProxy *ProxyQuery
 	modifiers       []func(*sql.Selector)
@@ -62,6 +64,28 @@ func (_q *ProxyQuery) Unique(unique bool) *ProxyQuery {
 func (_q *ProxyQuery) Order(o ...proxy.OrderOption) *ProxyQuery {
 	_q.order = append(_q.order, o...)
 	return _q
+}
+
+// QueryProject chains the current query on the "project" edge.
+func (_q *ProxyQuery) QueryProject() *ProjectQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(proxy.Table, proxy.FieldID, selector),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, proxy.ProjectTable, proxy.ProjectColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
 }
 
 // QueryAccounts chains the current query on the "accounts" edge.
@@ -300,12 +324,24 @@ func (_q *ProxyQuery) Clone() *ProxyQuery {
 		order:           append([]proxy.OrderOption{}, _q.order...),
 		inters:          append([]Interceptor{}, _q.inters...),
 		predicates:      append([]predicate.Proxy{}, _q.predicates...),
+		withProject:     _q.withProject.Clone(),
 		withAccounts:    _q.withAccounts.Clone(),
 		withBackupProxy: _q.withBackupProxy.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
 	}
+}
+
+// WithProject tells the query-builder to eager-load the nodes that are connected to
+// the "project" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProxyQuery) WithProject(opts ...func(*ProjectQuery)) *ProxyQuery {
+	query := (&ProjectClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProject = query
+	return _q
 }
 
 // WithAccounts tells the query-builder to eager-load the nodes that are connected to
@@ -408,7 +444,8 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	var (
 		nodes       = []*Proxy{}
 		_spec       = _q.querySpec()
-		loadedTypes = [2]bool{
+		loadedTypes = [3]bool{
+			_q.withProject != nil,
 			_q.withAccounts != nil,
 			_q.withBackupProxy != nil,
 		}
@@ -434,6 +471,12 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
+	if query := _q.withProject; query != nil {
+		if err := _q.loadProject(ctx, query, nodes, nil,
+			func(n *Proxy, e *Project) { n.Edges.Project = e }); err != nil {
+			return nil, err
+		}
+	}
 	if query := _q.withAccounts; query != nil {
 		if err := _q.loadAccounts(ctx, query, nodes,
 			func(n *Proxy) { n.Edges.Accounts = []*Account{} },
@@ -450,6 +493,35 @@ func (_q *ProxyQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proxy,
 	return nodes, nil
 }
 
+func (_q *ProxyQuery) loadProject(ctx context.Context, query *ProjectQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *Project)) error {
+	ids := make([]int64, 0, len(nodes))
+	nodeids := make(map[int64][]*Proxy)
+	for i := range nodes {
+		fk := nodes[i].ProjectID
+		if _, ok := nodeids[fk]; !ok {
+			ids = append(ids, fk)
+		}
+		nodeids[fk] = append(nodeids[fk], nodes[i])
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	query.Where(project.IDIn(ids...))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		nodes, ok := nodeids[n.ID]
+		if !ok {
+			return fmt.Errorf(`unexpected foreign-key "project_id" returned %v`, n.ID)
+		}
+		for i := range nodes {
+			assign(nodes[i], n)
+		}
+	}
+	return nil
+}
 func (_q *ProxyQuery) loadAccounts(ctx context.Context, query *AccountQuery, nodes []*Proxy, init func(*Proxy), assign func(*Proxy, *Account)) error {
 	fks := make([]driver.Value, 0, len(nodes))
 	nodeids := make(map[int64]*Proxy)
@@ -543,6 +615,9 @@ func (_q *ProxyQuery) querySpec() *sqlgraph.QuerySpec {
 			if fields[i] != proxy.FieldID {
 				_spec.Node.Columns = append(_spec.Node.Columns, fields[i])
 			}
+		}
+		if _q.withProject != nil {
+			_spec.Node.AddColumnOnce(proxy.FieldProjectID)
 		}
 		if _q.withBackupProxy != nil {
 			_spec.Node.AddColumnOnce(proxy.FieldBackupProxyID)

@@ -41,6 +41,8 @@ const (
 	EdgeAPIKeys = "api_keys"
 	// EdgeGroups holds the string denoting the groups edge name in mutations.
 	EdgeGroups = "groups"
+	// EdgeProxies holds the string denoting the proxies edge name in mutations.
+	EdgeProxies = "proxies"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
 	// Table holds the table name of the project in the database.
@@ -80,6 +82,13 @@ const (
 	GroupsInverseTable = "groups"
 	// GroupsColumn is the table column denoting the groups relation/edge.
 	GroupsColumn = "project_id"
+	// ProxiesTable is the table that holds the proxies relation/edge.
+	ProxiesTable = "proxies"
+	// ProxiesInverseTable is the table name for the Proxy entity.
+	// It exists in this package in order to avoid circular dependency with the "proxy" package.
+	ProxiesInverseTable = "proxies"
+	// ProxiesColumn is the table column denoting the proxies relation/edge.
+	ProxiesColumn = "project_id"
 	// UsageLogsTable is the table that holds the usage_logs relation/edge.
 	UsageLogsTable = "usage_logs"
 	// UsageLogsInverseTable is the table name for the UsageLog entity.
@@ -251,6 +260,20 @@ func ByGroups(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByProxiesCount orders the results by proxies count.
+func ByProxiesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newProxiesStep(), opts...)
+	}
+}
+
+// ByProxies orders the results by proxies terms.
+func ByProxies(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newProxiesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByUsageLogsCount orders the results by usage_logs count.
 func ByUsageLogsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -297,6 +320,13 @@ func newGroupsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(GroupsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, GroupsTable, GroupsColumn),
+	)
+}
+func newProxiesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(ProxiesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, ProxiesTable, ProxiesColumn),
 	)
 }
 func newUsageLogsStep() *sqlgraph.Step {

@@ -195,6 +195,9 @@ func (r *projectRepository) CreateProject(ctx context.Context, input service.Pro
 	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAccount, input.Bindings.AccountIDs); err != nil {
 		return nil, err
 	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeProxy, input.Bindings.ProxyIDs); err != nil {
+		return nil, err
+	}
 	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeSubscription, input.Bindings.SubscriptionIDs); err != nil {
 		return nil, err
 	}
@@ -767,6 +770,8 @@ func (r *projectRepository) GetProjectProfileBindings(ctx context.Context, proje
 			out.GroupIDs = append(out.GroupIDs, id)
 		case service.ProjectResourceTypeAccount:
 			out.AccountIDs = append(out.AccountIDs, id)
+		case service.ProjectResourceTypeProxy:
+			out.ProxyIDs = append(out.ProxyIDs, id)
 		case service.ProjectResourceTypeSubscription:
 			out.SubscriptionIDs = append(out.SubscriptionIDs, id)
 		}
@@ -797,6 +802,13 @@ func (r *projectRepository) fillProjectProfileBindingDetails(ctx context.Context
 			return err
 		}
 		bindings.Accounts = accounts
+	}
+	if len(bindings.ProxyIDs) > 0 {
+		proxies, err := r.projectBindingProxies(ctx, bindings.ProxyIDs)
+		if err != nil {
+			return err
+		}
+		bindings.Proxies = proxies
 	}
 	if len(bindings.SubscriptionIDs) > 0 {
 		subscriptions, err := r.projectBindingSubscriptions(ctx, bindings.SubscriptionIDs)
@@ -870,6 +882,33 @@ func (r *projectRepository) projectBindingAccounts(ctx context.Context, ids []in
 	return out, nil
 }
 
+func (r *projectRepository) projectBindingProxies(ctx context.Context, ids []int64) ([]service.ProjectResourceProxyCandidate, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id, project_id, name, protocol, host, port, status
+		FROM proxies
+		WHERE id = ANY($1)
+		  AND deleted_at IS NULL
+		ORDER BY id ASC
+	`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]service.ProjectResourceProxyCandidate, 0, len(ids))
+	for rows.Next() {
+		var item service.ProjectResourceProxyCandidate
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Name, &item.Protocol, &item.Host, &item.Port, &item.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *projectRepository) projectBindingSubscriptions(ctx context.Context, ids []int64) ([]service.ProjectResourceSubscriptionCandidate, error) {
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT us.id, us.user_id, us.group_id, u.email, g.name, us.status, COALESCE(us.notes, '')
@@ -929,6 +968,9 @@ func (r *projectRepository) SetProjectProfileBindings(ctx context.Context, proje
 	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeAccount, input.AccountIDs); err != nil {
 		return nil, err
 	}
+	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeProxy, input.ProxyIDs); err != nil {
+		return nil, err
+	}
 	if err := insertProjectProfileBindings(ctx, tx, profileID, service.ProjectResourceTypeSubscription, input.SubscriptionIDs); err != nil {
 		return nil, err
 	}
@@ -966,6 +1008,12 @@ func (r *projectRepository) ValidateProjectProfileBindingScope(ctx context.Conte
 			ids:       input.AccountIDs,
 			extra:     "deleted_at IS NULL",
 			resources: projectSQLScopeResources{AccountID: "accounts.id"},
+		},
+		{
+			table:     "proxies",
+			ids:       input.ProxyIDs,
+			extra:     "deleted_at IS NULL",
+			resources: projectSQLScopeResources{ProxyID: "proxies.id"},
 		},
 		{
 			table:     "user_subscriptions",
@@ -1010,6 +1058,7 @@ func (r *projectRepository) SearchProjectBindableResources(ctx context.Context, 
 		Users:         []service.ProjectResourceUserCandidate{},
 		Groups:        []service.ProjectResourceGroupCandidate{},
 		Accounts:      []service.ProjectResourceAccountCandidate{},
+		Proxies:       []service.ProjectResourceProxyCandidate{},
 		Subscriptions: []service.ProjectResourceSubscriptionCandidate{},
 		APIKeys:       []service.ProjectResourceAPIKeyCandidate{},
 	}
@@ -1120,6 +1169,38 @@ func (r *projectRepository) SearchProjectBindableResources(ctx context.Context, 
 		return nil, err
 	}
 
+	proxyRows, err := r.sql.QueryContext(ctx, `
+		SELECT id, project_id, name, protocol, host, port, status
+		FROM proxies
+		WHERE deleted_at IS NULL
+		  AND (
+			$1 = '%%'
+			OR LOWER(name) LIKE $1
+			OR LOWER(protocol) LIKE $1
+			OR LOWER(host) LIKE $1
+		  )
+		  `+projectSearchScopeCondition(projectID, projectSQLScopeResources{ProxyID: "proxies.id"})+`
+		ORDER BY id ASC
+		LIMIT $2
+	`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	for proxyRows.Next() {
+		var item service.ProjectResourceProxyCandidate
+		if err := proxyRows.Scan(&item.ID, &item.ProjectID, &item.Name, &item.Protocol, &item.Host, &item.Port, &item.Status); err != nil {
+			_ = proxyRows.Close()
+			return nil, err
+		}
+		out.Proxies = append(out.Proxies, item)
+	}
+	if err := proxyRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := proxyRows.Err(); err != nil {
+		return nil, err
+	}
+
 	subRows, err := r.sql.QueryContext(ctx, `
 		SELECT us.id, us.user_id, us.group_id, u.email, g.name, us.status, COALESCE(us.notes, '')
 		FROM user_subscriptions us
@@ -1215,6 +1296,7 @@ func validateProjectBindingIDs(ctx context.Context, q sqlQueryer, input service.
 	}{
 		{table: "groups", ids: input.GroupIDs, extra: "deleted_at IS NULL"},
 		{table: "accounts", ids: input.AccountIDs, extra: "deleted_at IS NULL"},
+		{table: "proxies", ids: input.ProxyIDs, extra: "deleted_at IS NULL"},
 		{table: "user_subscriptions", ids: input.SubscriptionIDs, extra: "deleted_at IS NULL"},
 	}
 	for _, check := range checks {

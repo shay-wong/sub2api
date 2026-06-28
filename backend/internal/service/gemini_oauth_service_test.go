@@ -778,7 +778,13 @@ func (m *mockGeminiProxyRepo) GetByID(ctx context.Context, id int64) (*Proxy, er
 	}
 	return nil, fmt.Errorf("proxy not found")
 }
+func (m *mockGeminiProxyRepo) GetByIDForManagement(ctx context.Context, id int64) (*Proxy, error) {
+	panic("not impl")
+}
 func (m *mockGeminiProxyRepo) ListByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
+	panic("not impl")
+}
+func (m *mockGeminiProxyRepo) ListByIDsForManagement(ctx context.Context, ids []int64) ([]Proxy, error) {
 	panic("not impl")
 }
 func (m *mockGeminiProxyRepo) Update(ctx context.Context, proxy *Proxy) error { panic("not impl") }
@@ -789,17 +795,32 @@ func (m *mockGeminiProxyRepo) List(ctx context.Context, params pagination.Pagina
 func (m *mockGeminiProxyRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error) {
 	panic("not impl")
 }
+func (m *mockGeminiProxyRepo) ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error) {
+	panic("not impl")
+}
 func (m *mockGeminiProxyRepo) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	panic("not impl")
 }
+func (m *mockGeminiProxyRepo) ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	panic("not impl")
+}
 func (m *mockGeminiProxyRepo) ListActive(ctx context.Context) ([]Proxy, error) { panic("not impl") }
+func (m *mockGeminiProxyRepo) ListActiveForManagement(ctx context.Context) ([]Proxy, error) {
+	panic("not impl")
+}
 func (m *mockGeminiProxyRepo) ListActiveWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
+	panic("not impl")
+}
+func (m *mockGeminiProxyRepo) ListActiveWithAccountCountForManagement(ctx context.Context) ([]ProxyWithAccountCount, error) {
 	panic("not impl")
 }
 func (m *mockGeminiProxyRepo) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
 	panic("not impl")
 }
 func (m *mockGeminiProxyRepo) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
+	panic("not impl")
+}
+func (m *mockGeminiProxyRepo) CountAllAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	panic("not impl")
 }
 func (m *mockGeminiProxyRepo) ListAccountSummariesByProxyID(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error) {

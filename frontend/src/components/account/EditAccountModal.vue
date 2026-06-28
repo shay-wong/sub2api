@@ -1301,7 +1301,7 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+        <ProxySelector v-model="form.proxy_id" :proxies="proxies" :allow-testing="false" />
       </div>
 
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -2397,7 +2397,7 @@ import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import type {
   Account,
-  Proxy,
+  ProxyOption,
   AdminGroup,
   CheckMixedChannelResponse,
   OpenAICompactMode,
@@ -2440,7 +2440,7 @@ import {
 interface Props {
   show: boolean
   account: Account | null
-  proxies: Proxy[]
+  proxies: ProxyOption[]
   groups: AdminGroup[]
 }
 

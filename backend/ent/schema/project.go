@@ -60,6 +60,7 @@ func (Project) Edges() []ent.Edge {
 		edge.To("accounts", Account.Type),
 		edge.To("api_keys", APIKey.Type),
 		edge.To("groups", Group.Type),
+		edge.To("proxies", Proxy.Type),
 		edge.To("usage_logs", UsageLog.Type),
 	}
 }

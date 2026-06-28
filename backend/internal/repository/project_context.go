@@ -10,6 +10,7 @@ import (
 	dbapikey "github.com/Wei-Shaw/sub2api/ent/apikey"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
+	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	dbusersubscription "github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -76,6 +77,16 @@ func projectScopedGroupPredicate(ctx context.Context) []dbpredicate.Group {
 		return []dbpredicate.Group{dbgroup.Or(
 			dbpredicate.Group(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeGroup, dbgroup.FieldID)),
 			dbpredicate.Group(projectProfileUnrestrictedGroupPredicate(projectID)),
+		)}
+	}
+	return nil
+}
+
+func projectScopedProxyPredicate(ctx context.Context) []dbpredicate.Proxy {
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		return []dbpredicate.Proxy{dbproxy.Or(
+			dbpredicate.Proxy(projectProfileBindingPredicate(projectID, service.ProjectResourceTypeProxy, dbproxy.FieldID)),
+			dbpredicate.Proxy(projectProfileUnrestrictedProxyPredicate(projectID)),
 		)}
 	}
 	return nil
@@ -208,6 +219,7 @@ type projectSQLScopeResources struct {
 	UserID           string
 	GroupID          string
 	AccountID        string
+	ProxyID          string
 	SubscriptionID   string
 	APIKeyID         string
 }
@@ -289,7 +301,7 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 	if resources.APIKeyResource {
 		return apiKeyProjectScopeSQL(projectID, resources)
 	}
-	if resources.UserID != "" && resources.GroupID == "" && resources.AccountID == "" && resources.SubscriptionID == "" && resources.APIKeyID == "" {
+	if resources.UserID != "" && resources.GroupID == "" && resources.AccountID == "" && resources.ProxyID == "" && resources.SubscriptionID == "" && resources.APIKeyID == "" {
 		return projectUserScopeSQL(projectID, resources.UserID)
 	}
 	clauses := []string{
@@ -308,6 +320,9 @@ func projectProfileScopeSQL(projectID int64, resources projectSQLScopeResources)
 		clauses = append(clauses, c)
 	}
 	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeAccount, resources.AccountID); c != "" {
+		clauses = append(clauses, c)
+	}
+	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeProxy, resources.ProxyID); c != "" {
 		clauses = append(clauses, c)
 	}
 	if c := bindingExistsSQL(projectID, service.ProjectResourceTypeSubscription, resources.SubscriptionID); c != "" {
@@ -467,6 +482,12 @@ func projectProfileUnrestrictedGroupPredicate(projectID int64) func(*entsql.Sele
 }
 
 func projectProfileUnrestrictedAccountPredicate(projectID int64) func(*entsql.Selector) {
+	return func(s *entsql.Selector) {
+		s.Where(projectProfileUnrestrictedExists(projectID))
+	}
+}
+
+func projectProfileUnrestrictedProxyPredicate(projectID int64) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
 		s.Where(projectProfileUnrestrictedExists(projectID))
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -203,6 +204,21 @@ func (_u *ProjectUpdate) AddGroups(v ...*Group) *ProjectUpdate {
 	return _u.AddGroupIDs(ids...)
 }
 
+// AddProxyIDs adds the "proxies" edge to the Proxy entity by IDs.
+func (_u *ProjectUpdate) AddProxyIDs(ids ...int64) *ProjectUpdate {
+	_u.mutation.AddProxyIDs(ids...)
+	return _u
+}
+
+// AddProxies adds the "proxies" edges to the Proxy entity.
+func (_u *ProjectUpdate) AddProxies(v ...*Proxy) *ProjectUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddProxyIDs(ids...)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *ProjectUpdate) AddUsageLogIDs(ids ...int64) *ProjectUpdate {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -326,6 +342,27 @@ func (_u *ProjectUpdate) RemoveGroups(v ...*Group) *ProjectUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveGroupIDs(ids...)
+}
+
+// ClearProxies clears all "proxies" edges to the Proxy entity.
+func (_u *ProjectUpdate) ClearProxies() *ProjectUpdate {
+	_u.mutation.ClearProxies()
+	return _u
+}
+
+// RemoveProxyIDs removes the "proxies" edge to Proxy entities by IDs.
+func (_u *ProjectUpdate) RemoveProxyIDs(ids ...int64) *ProjectUpdate {
+	_u.mutation.RemoveProxyIDs(ids...)
+	return _u
+}
+
+// RemoveProxies removes "proxies" edges to Proxy entities.
+func (_u *ProjectUpdate) RemoveProxies(v ...*Proxy) *ProjectUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveProxyIDs(ids...)
 }
 
 // ClearUsageLogs clears all "usage_logs" edges to the UsageLog entity.
@@ -675,6 +712,51 @@ func (_u *ProjectUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.ProxiesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedProxiesIDs(); len(nodes) > 0 && !_u.mutation.ProxiesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProxiesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.UsageLogsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -909,6 +991,21 @@ func (_u *ProjectUpdateOne) AddGroups(v ...*Group) *ProjectUpdateOne {
 	return _u.AddGroupIDs(ids...)
 }
 
+// AddProxyIDs adds the "proxies" edge to the Proxy entity by IDs.
+func (_u *ProjectUpdateOne) AddProxyIDs(ids ...int64) *ProjectUpdateOne {
+	_u.mutation.AddProxyIDs(ids...)
+	return _u
+}
+
+// AddProxies adds the "proxies" edges to the Proxy entity.
+func (_u *ProjectUpdateOne) AddProxies(v ...*Proxy) *ProjectUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddProxyIDs(ids...)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *ProjectUpdateOne) AddUsageLogIDs(ids ...int64) *ProjectUpdateOne {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -1032,6 +1129,27 @@ func (_u *ProjectUpdateOne) RemoveGroups(v ...*Group) *ProjectUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveGroupIDs(ids...)
+}
+
+// ClearProxies clears all "proxies" edges to the Proxy entity.
+func (_u *ProjectUpdateOne) ClearProxies() *ProjectUpdateOne {
+	_u.mutation.ClearProxies()
+	return _u
+}
+
+// RemoveProxyIDs removes the "proxies" edge to Proxy entities by IDs.
+func (_u *ProjectUpdateOne) RemoveProxyIDs(ids ...int64) *ProjectUpdateOne {
+	_u.mutation.RemoveProxyIDs(ids...)
+	return _u
+}
+
+// RemoveProxies removes "proxies" edges to Proxy entities.
+func (_u *ProjectUpdateOne) RemoveProxies(v ...*Proxy) *ProjectUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveProxyIDs(ids...)
 }
 
 // ClearUsageLogs clears all "usage_logs" edges to the UsageLog entity.
@@ -1404,6 +1522,51 @@ func (_u *ProjectUpdateOne) sqlSave(ctx context.Context) (_node *Project, err er
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ProxiesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedProxiesIDs(); len(nodes) > 0 && !_u.mutation.ProxiesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ProxiesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

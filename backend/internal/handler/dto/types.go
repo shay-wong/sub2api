@@ -303,6 +303,21 @@ type Proxy struct {
 	ExpiryWarnDays int        `json:"expiry_warn_days"`
 }
 
+type ProxyOption struct {
+	ID             int64      `json:"id"`
+	Name           string     `json:"name"`
+	Protocol       string     `json:"protocol"`
+	Host           string     `json:"host"`
+	Port           int        `json:"port"`
+	Status         string     `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	FallbackMode   string     `json:"fallback_mode"`
+	BackupProxyID  *int64     `json:"backup_proxy_id"`
+	ExpiryWarnDays int        `json:"expiry_warn_days"`
+}
+
 type ProxyWithAccountCount struct {
 	Proxy
 	AccountCount   int64  `json:"account_count"`

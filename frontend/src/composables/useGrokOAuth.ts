@@ -22,7 +22,10 @@ export function useGrokOAuth() {
     error.value = ''
   }
 
-  const generateAuthUrl = async (proxyId: number | null | undefined): Promise<boolean> => {
+  const generateAuthUrl = async (
+    proxyId: number | null | undefined,
+    accountId?: number | null
+  ): Promise<boolean> => {
     loading.value = true
     authUrl.value = ''
     sessionId.value = ''
@@ -32,6 +35,7 @@ export function useGrokOAuth() {
     try {
       const payload: Record<string, unknown> = {}
       if (proxyId) payload.proxy_id = proxyId
+      if (accountId) payload.account_id = accountId
 
       const response = await adminAPI.grok.generateAuthUrl(payload)
       authUrl.value = response.auth_url
@@ -52,6 +56,7 @@ export function useGrokOAuth() {
     sessionId: string
     state: string
     proxyId?: number | null
+    accountId?: number | null
   }): Promise<GrokTokenInfo | null> => {
     const code = params.code?.trim()
     if (!code || !params.sessionId || !params.state) {
@@ -69,6 +74,7 @@ export function useGrokOAuth() {
         code
       }
       if (params.proxyId) payload.proxy_id = params.proxyId
+      if (params.accountId) payload.account_id = params.accountId
 
       return await adminAPI.grok.exchangeCode(payload as any)
     } catch (err: any) {
@@ -82,7 +88,8 @@ export function useGrokOAuth() {
 
   const validateRefreshToken = async (
     refreshToken: string,
-    proxyId?: number | null
+    proxyId?: number | null,
+    accountId?: number | null
   ): Promise<GrokTokenInfo | null> => {
     if (!refreshToken.trim()) {
       error.value = t('admin.accounts.oauth.grok.pleaseEnterRefreshToken')
@@ -93,7 +100,7 @@ export function useGrokOAuth() {
     error.value = ''
 
     try {
-      return await adminAPI.grok.refreshGrokToken(refreshToken.trim(), proxyId)
+      return await adminAPI.grok.refreshGrokToken(refreshToken.trim(), proxyId, accountId)
     } catch (err: any) {
       error.value = err.response?.data?.detail || t('admin.accounts.oauth.grok.failedToValidateRT')
       return null

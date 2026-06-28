@@ -239,14 +239,29 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 
 	if len(latencyProbeIDs) > 0 {
 		ids := append([]int64(nil), latencyProbeIDs...)
+		probeCtx := proxyBackgroundContext(ctx)
 		go func() {
 			for _, id := range ids {
-				_, _ = h.adminService.TestProxy(context.Background(), id)
+				_, _ = h.adminService.TestProxy(probeCtx, id)
 			}
 		}()
 	}
 
 	response.Success(c, result)
+}
+
+func proxyBackgroundContext(ctx context.Context) context.Context {
+	bg := context.Background()
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		bg = service.WithProjectID(bg, projectID)
+	}
+	if role, ok := service.AdminRoleFromContext(ctx); ok {
+		bg = service.WithAdminRole(bg, role)
+	}
+	if permissions, ok := service.AdminPermissionsFromContext(ctx); ok {
+		bg = service.WithAdminPermissions(bg, permissions)
+	}
+	return bg
 }
 
 func (h *ProxyHandler) getProxiesByIDs(ctx context.Context, ids []int64) ([]service.Proxy, error) {

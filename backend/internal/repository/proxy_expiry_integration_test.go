@@ -35,13 +35,17 @@ func (s *ProxyExpirySuite) mkProxy(name, mode string, expiresAt *time.Time, back
 }
 
 func (s *ProxyExpirySuite) mkAccountWithProxy(proxyID int64) int64 {
+	return s.mkAccountWithProxyInProject(mustDefaultProjectID(s.T(), s.tx.Client()), proxyID)
+}
+
+func (s *ProxyExpirySuite) mkAccountWithProxyInProject(projectID int64, proxyID int64) int64 {
 	var id int64
-	projectID := mustDefaultProjectID(s.T(), s.tx.Client())
 	err := scanSingleRow(s.ctx, s.tx, `
 		INSERT INTO accounts (project_id, name, platform, type, credentials, extra, status, proxy_id, created_at, updated_at)
 		VALUES ($1,$2,'claude','api','{}','{}','active',$3,NOW(),NOW()) RETURNING id`,
 		[]any{projectID, "acc-" + time.Now().Format("150405.000000"), proxyID}, &id)
 	s.Require().NoError(err)
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, projectID, service.ProjectResourceTypeAccount, id))
 	return id
 }
 
@@ -88,6 +92,41 @@ func (s *ProxyExpirySuite) TestSweep_ProxyMode_Healthy() {
 	s.Require().Equal(pid, *origin)
 }
 
+func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyOnlyUsesProjectVisibleBackup() {
+	future := time.Now().Add(24 * time.Hour)
+	past := time.Now().Add(-time.Hour)
+	backup := s.mkProxy("p-shared-backup", service.FallbackModeNone, &future, nil)
+	pid := s.mkProxy("p-shared-main", service.FallbackModeProxy, &past, &backup)
+	workspace := s.mkProject("proxy-expiry-workspace")
+	aidDefault := s.mkAccountWithProxy(pid)
+	aidWorkspace := s.mkAccountWithProxyInProject(workspace.ID, pid)
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, pid))
+
+	changed, err := s.repo.SweepExpiredProxies(s.ctx, time.Now())
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), changed)
+	s.Require().Equal(backup, *s.accountProxyID(aidDefault))
+	s.Require().Equal(pid, *s.accountProxyID(aidWorkspace), "workspace account must not move to an unbound backup proxy")
+}
+
+func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyUpdatesAccountsWhenBackupIsVisible() {
+	future := time.Now().Add(24 * time.Hour)
+	past := time.Now().Add(-time.Hour)
+	backup := s.mkProxy("p-shared-visible-backup", service.FallbackModeNone, &future, nil)
+	pid := s.mkProxy("p-shared-visible-main", service.FallbackModeProxy, &past, &backup)
+	workspace := s.mkProject("proxy-expiry-visible-backup-workspace")
+	aidDefault := s.mkAccountWithProxy(pid)
+	aidWorkspace := s.mkAccountWithProxyInProject(workspace.ID, pid)
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, pid))
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, backup))
+
+	changed, err := s.repo.SweepExpiredProxies(s.ctx, time.Now())
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), changed)
+	s.Require().Equal(backup, *s.accountProxyID(aidDefault))
+	s.Require().Equal(backup, *s.accountProxyID(aidWorkspace))
+}
+
 func (s *ProxyExpirySuite) TestSweep_NoneMode_KeepsAccount() {
 	past := time.Now().Add(-time.Hour)
 	pid := s.mkProxy("p-none", service.FallbackModeNone, &past, nil)
@@ -102,4 +141,14 @@ func (s *ProxyExpirySuite) TestSweep_NoneMode_KeepsAccount() {
 	err = scanSingleRow(s.ctx, s.tx, `SELECT proxy_fallback_origin_id FROM accounts WHERE id=$1`, []any{aid}, &origin)
 	s.Require().NoError(err)
 	s.Require().Nil(origin)
+}
+
+func (s *ProxyExpirySuite) mkProject(slug string) *dbent.Project {
+	project, err := s.tx.Client().Project.Create().
+		SetName(slug).
+		SetSlug(slug).
+		SetDescription("proxy expiry test project").
+		Save(s.ctx)
+	s.Require().NoError(err)
+	return project
 }

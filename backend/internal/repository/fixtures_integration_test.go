@@ -160,8 +160,12 @@ func mustCreateProxy(t *testing.T, client *dbent.Client, p *service.Proxy) *serv
 	if p.Status == "" {
 		p.Status = service.StatusActive
 	}
+	if p.ProjectID <= 0 {
+		p.ProjectID = mustDefaultProjectID(t, client)
+	}
 
 	create := client.Proxy.Create().
+		SetProjectID(p.ProjectID).
 		SetName(p.Name).
 		SetProtocol(p.Protocol).
 		SetHost(p.Host).

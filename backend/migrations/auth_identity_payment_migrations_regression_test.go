@@ -250,3 +250,22 @@ func TestMigration158BackfillsSystemLogsOnlyFromUnambiguousProjectMatches(t *tes
 	require.Contains(t, sql, "JOIN ops_error_logs oel\n      ON oel.client_request_id = sl.client_request_id")
 	require.Contains(t, sql, "NOT EXISTS (\n      SELECT 1\n      FROM usage_logs ul")
 }
+
+func TestMigration159ScopesProxiesToProjectsAndProfiles(t *testing.T) {
+	content, err := FS.ReadFile("159_project_scoped_proxies.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ALTER TABLE proxies\n    ADD COLUMN IF NOT EXISTS project_id BIGINT")
+	require.Contains(t, sql, "WHERE slug = 'default'")
+	require.Contains(t, sql, "ALTER TABLE proxies\n    ALTER COLUMN project_id SET NOT NULL")
+	require.Contains(t, sql, "ADD CONSTRAINT proxies_projects_proxies")
+	require.Contains(t, sql, "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT")
+	require.Contains(t, sql, "CHECK (resource_type IN ('user', 'group', 'account', 'proxy', 'subscription', 'api_key'))")
+	require.Contains(t, sql, "SELECT DISTINCT pp.id, 'proxy', p.id")
+	require.Contains(t, sql, "JOIN proxies p ON p.project_id = pp.project_id")
+	require.Contains(t, sql, "JOIN accounts a ON a.proxy_id = p.id")
+	require.Contains(t, sql, "SELECT DISTINCT pp.id, 'proxy', bp.id")
+	require.Contains(t, sql, "JOIN proxies bp ON bp.id = p.backup_proxy_id")
+	require.Contains(t, sql, "ON CONFLICT (project_profile_id, resource_type, resource_id) DO NOTHING")
+}

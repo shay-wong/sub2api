@@ -3,6 +3,7 @@ export const AdminPermissions = {
   ops: 'admin.ops.read',
   users: 'admin.users.manage',
   groups: 'admin.groups.manage',
+  proxies: 'admin.proxies.manage',
   subscriptions: 'admin.subscriptions.manage',
   accounts: 'admin.accounts.write',
   usage: 'admin.usage.read'
@@ -15,6 +16,7 @@ export const defaultProjectAdminPermissions: AdminPermission[] = [
   AdminPermissions.ops,
   AdminPermissions.users,
   AdminPermissions.groups,
+  AdminPermissions.proxies,
   AdminPermissions.subscriptions,
   AdminPermissions.accounts,
   AdminPermissions.usage

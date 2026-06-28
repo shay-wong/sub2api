@@ -10,13 +10,16 @@ import (
 )
 
 type adminAccessScope struct {
-	Unrestricted bool
-	GroupIDs     []int64
-	groupSet     map[int64]struct{}
+	Unrestricted  bool
+	ProjectScoped bool
+	ProjectID     int64
+	GroupIDs      []int64
+	groupSet      map[int64]struct{}
 }
 
 type accountScopedProxyLookup interface {
 	GetAccount(context.Context, int64) (*service.Account, error)
+	GetProxy(context.Context, int64) (*service.Proxy, error)
 }
 
 func resolveAdminAccessScope(c *gin.Context, permissionService *service.PermissionService) (*adminAccessScope, error) {
@@ -24,7 +27,13 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 	if !hasRole && permissionService == nil {
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
-	if service.RoleIsAdmin(role) {
+	if service.RoleIsSuperAdmin(role) {
+		return &adminAccessScope{Unrestricted: true}, nil
+	}
+	if role == service.RoleAdmin {
+		if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
+			return &adminAccessScope{ProjectScoped: true, ProjectID: projectID}, nil
+		}
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
 	if service.RoleIsOperator(role) {
@@ -34,11 +43,11 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 }
 
 func (s *adminAccessScope) isScoped() bool {
-	return s != nil && !s.Unrestricted
+	return s != nil && !s.Unrestricted && !s.ProjectScoped
 }
 
 func (s *adminAccessScope) containsGroup(id int64) bool {
-	if s == nil || s.Unrestricted {
+	if s == nil || s.Unrestricted || s.ProjectScoped {
 		return true
 	}
 	_, ok := s.groupSet[id]
@@ -46,7 +55,7 @@ func (s *adminAccessScope) containsGroup(id int64) bool {
 }
 
 func (s *adminAccessScope) ensureGroup(id int64) error {
-	if s == nil || s.Unrestricted {
+	if s == nil || s.Unrestricted || s.ProjectScoped {
 		return nil
 	}
 	if id <= 0 {
@@ -59,7 +68,7 @@ func (s *adminAccessScope) ensureGroup(id int64) error {
 }
 
 func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) error {
-	if s == nil || s.Unrestricted {
+	if s == nil || s.Unrestricted || s.ProjectScoped {
 		return nil
 	}
 	if len(groupIDs) == 0 {
@@ -77,7 +86,7 @@ func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) 
 }
 
 func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
-	if s == nil || s.Unrestricted || proxyID == nil {
+	if s == nil || s.Unrestricted || s.ProjectScoped || proxyID == nil {
 		return nil
 	}
 	return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
@@ -86,6 +95,13 @@ func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
 func (s *adminAccessScope) ensureOAuthProxyUse(c *gin.Context, adminService accountScopedProxyLookup, accountID *int64, proxyID *int64) error {
 	if s == nil || s.Unrestricted || proxyID == nil || *proxyID == 0 {
 		return nil
+	}
+	if s.ProjectScoped {
+		if adminService == nil {
+			return errors.Forbidden("PROXY_NOT_FOUND", "proxy not found")
+		}
+		_, err := adminService.GetProxy(c.Request.Context(), *proxyID)
+		return err
 	}
 	if accountID == nil || *accountID <= 0 || adminService == nil {
 		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
@@ -110,6 +126,9 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 	if account == nil {
 		return false
 	}
+	if s.ProjectScoped {
+		return true
+	}
 	for _, id := range account.GroupIDs {
 		if s.containsGroup(id) {
 			return true
@@ -129,7 +148,7 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 }
 
 func (s *adminAccessScope) accountForResponse(account *service.Account) *service.Account {
-	if account == nil || s == nil || s.Unrestricted {
+	if account == nil || s == nil || s.Unrestricted || s.ProjectScoped {
 		return account
 	}
 	out := *account

@@ -104,6 +104,53 @@ func (s *ProxyRepoSuite) TestList() {
 	s.Require().Equal(int64(2), page.Total)
 }
 
+func (s *ProxyRepoSuite) TestProjectScopeListUsesProjectProfileBindingsLikeGroups() {
+	defaultProjectID := mustDefaultProjectID(s.T(), s.tx.Client())
+	workspace := s.mustCreateProject("proxy-scope-workspace")
+	sharedProxy := s.mustCreateProxy(&service.Proxy{Name: "shared-proxy", ProjectID: defaultProjectID, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
+	unboundDefaultProxy := s.mustCreateProxy(&service.Proxy{Name: "unbound-default-proxy", ProjectID: defaultProjectID, Protocol: "http", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive})
+	workspaceProxy := s.mustCreateProxy(&service.Proxy{Name: "workspace-proxy", ProjectID: workspace.ID, Protocol: "http", Host: "127.0.0.1", Port: 8082, Status: service.StatusActive})
+	s.mustInsertAccountInProject("default-account", defaultProjectID, &sharedProxy.ID)
+	s.mustInsertAccountInProject("workspace-account", workspace.ID, &sharedProxy.ID)
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
+
+	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
+	proxies, page, err := s.repo.ListWithFilters(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "shared")
+	s.Require().NoError(err)
+	s.Require().Len(proxies, 1)
+	s.Require().Equal(sharedProxy.ID, proxies[0].ID)
+	s.Require().Equal(defaultProjectID, proxies[0].ProjectID)
+	s.Require().Equal(int64(1), page.Total)
+
+	withCounts, _, err := s.repo.ListWithFiltersAndAccountCount(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "shared")
+	s.Require().NoError(err)
+	s.Require().Len(withCounts, 1)
+	s.Require().Equal(sharedProxy.ID, withCounts[0].ID)
+	s.Require().Equal(int64(1), withCounts[0].AccountCount)
+
+	got, err := s.repo.GetByID(projectCtx, sharedProxy.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(sharedProxy.ID, got.ID)
+	s.Require().Equal(defaultProjectID, got.ProjectID)
+
+	_, err = s.repo.GetByID(projectCtx, unboundDefaultProxy.ID)
+	s.Require().ErrorIs(err, service.ErrProxyNotFound)
+	_, err = s.repo.GetByID(service.WithProjectID(s.ctx, defaultProjectID), workspaceProxy.ID)
+	s.Require().ErrorIs(err, service.ErrProxyNotFound)
+
+	managedShared, err := s.repo.GetByIDForManagement(projectCtx, sharedProxy.ID)
+	s.Require().NoError(err, "project-visible proxy should be manageable like a project-visible group")
+	s.Require().Equal(sharedProxy.ID, managedShared.ID)
+	owned, err := s.repo.GetByIDForManagement(projectCtx, workspaceProxy.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(workspaceProxy.ID, owned.ID)
+
+	workspaceProxy.Name = "workspace-proxy-updated"
+	s.Require().NoError(s.repo.Update(projectCtx, workspaceProxy), "project-visible proxy can be updated")
+	sharedProxy.Name = "shared-proxy-updated"
+	s.Require().NoError(s.repo.Update(projectCtx, sharedProxy), "shared visible proxy can be updated like a shared visible group")
+}
+
 func (s *ProxyRepoSuite) TestListWithFilters_Protocol() {
 	s.mustCreateProxy(&service.Proxy{Name: "p1", Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
 	s.mustCreateProxy(&service.Proxy{Name: "p2", Protocol: "socks5", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive})
@@ -184,6 +231,41 @@ func (s *ProxyRepoSuite) TestExistsByHostPortAuth_NoAuth() {
 	s.Require().True(exists)
 }
 
+func (s *ProxyRepoSuite) TestExistsByHostPortAuthUsesProjectProfileVisibility() {
+	defaultProjectID := mustDefaultProjectID(s.T(), s.tx.Client())
+	workspace := s.mustCreateProject("proxy-exists-owner-workspace")
+	shared := s.mustCreateProxy(&service.Proxy{
+		Name:      "shared-duplicate-candidate",
+		ProjectID: defaultProjectID,
+		Protocol:  "http",
+		Host:      "9.9.9.9",
+		Port:      8080,
+		Username:  "user",
+		Password:  "pass",
+		Status:    service.StatusActive,
+	})
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, shared.ID))
+
+	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
+	exists, err := s.repo.ExistsByHostPortAuth(projectCtx, "9.9.9.9", 8080, "user", "pass")
+	s.Require().NoError(err)
+	s.Require().True(exists, "shared visible proxy should be considered present in the project space")
+
+	s.mustCreateProxy(&service.Proxy{
+		Name:      "owned-duplicate",
+		ProjectID: workspace.ID,
+		Protocol:  "http",
+		Host:      "9.9.9.9",
+		Port:      8080,
+		Username:  "user",
+		Password:  "pass",
+		Status:    service.StatusActive,
+	})
+	exists, err = s.repo.ExistsByHostPortAuth(projectCtx, "9.9.9.9", 8080, "user", "pass")
+	s.Require().NoError(err)
+	s.Require().True(exists)
+}
+
 // --- CountAccountsByProxyID ---
 
 func (s *ProxyRepoSuite) TestCountAccountsByProxyID() {
@@ -203,6 +285,24 @@ func (s *ProxyRepoSuite) TestCountAccountsByProxyID_Zero() {
 	count, err := s.repo.CountAccountsByProxyID(s.ctx, proxy.ID)
 	s.Require().NoError(err)
 	s.Require().Zero(count)
+}
+
+func (s *ProxyRepoSuite) TestCountAllAccountsByProxyIDIgnoresProjectScope() {
+	defaultProjectID := mustDefaultProjectID(s.T(), s.tx.Client())
+	workspace := s.mustCreateProject("proxy-global-count-workspace")
+	sharedProxy := s.mustCreateProxy(&service.Proxy{Name: "shared-count-proxy", ProjectID: defaultProjectID, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
+	s.mustInsertAccountInProject("default-account", defaultProjectID, &sharedProxy.ID)
+	s.mustInsertAccountInProject("workspace-account", workspace.ID, &sharedProxy.ID)
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
+
+	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
+	scopedCount, err := s.repo.CountAccountsByProxyID(projectCtx, sharedProxy.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), scopedCount)
+
+	globalCount, err := s.repo.CountAllAccountsByProxyID(projectCtx, sharedProxy.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), globalCount)
 }
 
 // --- GetAccountCountsForProxies ---
@@ -313,19 +413,40 @@ func (s *ProxyRepoSuite) mustCreateProxyWithTimes(name, status string, createdAt
 
 func (s *ProxyRepoSuite) mustInsertAccount(name string, proxyID *int64) {
 	s.T().Helper()
+	s.mustInsertAccountInProject(name, mustDefaultProjectID(s.T(), s.tx.Client()), proxyID)
+}
+
+func (s *ProxyRepoSuite) mustInsertAccountInProject(name string, projectID int64, proxyID *int64) {
+	s.T().Helper()
 	var pid any
 	if proxyID != nil {
 		pid = *proxyID
 	}
-	projectID := mustDefaultProjectID(s.T(), s.tx.Client())
-	_, err := s.tx.ExecContext(
+	var accountID int64
+	err := scanSingleRow(
 		s.ctx,
-		"INSERT INTO accounts (project_id, name, platform, type, proxy_id) VALUES ($1, $2, $3, $4, $5)",
-		projectID,
-		name,
-		service.PlatformAnthropic,
-		service.AccountTypeOAuth,
-		pid,
+		s.tx,
+		"INSERT INTO accounts (project_id, name, platform, type, proxy_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		[]any{
+			projectID,
+			name,
+			service.PlatformAnthropic,
+			service.AccountTypeOAuth,
+			pid,
+		},
+		&accountID,
 	)
 	s.Require().NoError(err, "insert account")
+	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, projectID, service.ProjectResourceTypeAccount, accountID), "bind account to active profile")
+}
+
+func (s *ProxyRepoSuite) mustCreateProject(slug string) *dbent.Project {
+	s.T().Helper()
+	project, err := s.tx.Client().Project.Create().
+		SetName(slug).
+		SetSlug(slug).
+		SetDescription("proxy scope test project").
+		Save(s.ctx)
+	s.Require().NoError(err, "create project")
+	return project
 }

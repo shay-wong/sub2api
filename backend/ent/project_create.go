@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -189,6 +190,21 @@ func (_c *ProjectCreate) AddGroups(v ...*Group) *ProjectCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddGroupIDs(ids...)
+}
+
+// AddProxyIDs adds the "proxies" edge to the Proxy entity by IDs.
+func (_c *ProjectCreate) AddProxyIDs(ids ...int64) *ProjectCreate {
+	_c.mutation.AddProxyIDs(ids...)
+	return _c
+}
+
+// AddProxies adds the "proxies" edges to the Proxy entity.
+func (_c *ProjectCreate) AddProxies(v ...*Proxy) *ProjectCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddProxyIDs(ids...)
 }
 
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
@@ -438,6 +454,22 @@ func (_c *ProjectCreate) createSpec() (*Project, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.ProxiesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   project.ProxiesTable,
+			Columns: []string{project.ProxiesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(proxy.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

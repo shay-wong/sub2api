@@ -15,6 +15,7 @@ const (
 
 type Proxy struct {
 	ID             int64
+	ProjectID      int64
 	Name           string
 	Protocol       string
 	Host           string

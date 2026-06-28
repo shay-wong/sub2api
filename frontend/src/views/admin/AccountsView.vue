@@ -502,7 +502,7 @@ import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfil
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
-import type { Account, AccountPlatform, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, AdminAccountDataFormat } from '@/types'
+import type { Account, AccountPlatform, AccountType, ProxyOption as AccountProxy, AdminGroup, WindowStats, ClaudeModel, AdminAccountDataFormat } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1880,7 +1880,7 @@ onMounted(async () => {
   load()
   try {
     const [p, g] = await Promise.all([
-      isFullAdmin.value ? adminAPI.proxies.getAll() : Promise.resolve<AccountProxy[]>([]),
+      adminAPI.proxies.getAccountOptions(),
       adminAPI.groups.getAll()
     ])
     proxies.value = p

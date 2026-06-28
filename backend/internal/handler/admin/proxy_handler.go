@@ -27,6 +27,43 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 	}
 }
 
+func proxyResponseForCurrentAdmin(c *gin.Context, proxy *service.Proxy) any {
+	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		return dto.ProxyFromServiceAdmin(proxy)
+	}
+	return dto.ProxyFromService(proxy)
+}
+
+func proxyListResponseForCurrentAdmin(c *gin.Context, proxies []service.Proxy) any {
+	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		out := make([]dto.AdminProxy, 0, len(proxies))
+		for i := range proxies {
+			out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
+		}
+		return out
+	}
+	out := make([]dto.Proxy, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, *dto.ProxyFromService(&proxies[i]))
+	}
+	return out
+}
+
+func proxyWithCountListResponseForCurrentAdmin(c *gin.Context, proxies []service.ProxyWithAccountCount) any {
+	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
+		for i := range proxies {
+			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
+		}
+		return out
+	}
+	out := make([]dto.ProxyWithAccountCount, 0, len(proxies))
+	for i := range proxies {
+		out = append(out, *dto.ProxyWithAccountCountFromService(&proxies[i]))
+	}
+	return out
+}
+
 // CreateProxyRequest represents create proxy request
 type CreateProxyRequest struct {
 	Name           string `json:"name" binding:"required"`
@@ -77,11 +114,7 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
-	for i := range proxies {
-		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
-	}
-	response.Paginated(c, out, total, page, pageSize)
+	response.Paginated(c, proxyWithCountListResponseForCurrentAdmin(c, proxies), total, page, pageSize)
 }
 
 // GetAll handles getting all active proxies without pagination
@@ -96,11 +129,7 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
-		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
-		for i := range proxies {
-			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
-		}
-		response.Success(c, out)
+		response.Success(c, proxyWithCountListResponseForCurrentAdmin(c, proxies))
 		return
 	}
 
@@ -110,11 +139,7 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	out := make([]dto.AdminProxy, 0, len(proxies))
-	for i := range proxies {
-		out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
-	}
-	response.Success(c, out)
+	response.Success(c, proxyListResponseForCurrentAdmin(c, proxies))
 }
 
 // GetByID handles getting a proxy by ID
@@ -132,7 +157,7 @@ func (h *ProxyHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.ProxyFromServiceAdmin(proxy))
+	response.Success(c, proxyResponseForCurrentAdmin(c, proxy))
 }
 
 // Create handles creating a new proxy
@@ -165,7 +190,7 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		return dto.ProxyFromServiceAdmin(proxy), nil
+		return proxyResponseForCurrentAdmin(c, proxy), nil
 	})
 }
 
@@ -221,7 +246,7 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.ProxyFromServiceAdmin(proxy))
+	response.Success(c, proxyResponseForCurrentAdmin(c, proxy))
 }
 
 // Delete handles deleting a proxy
@@ -309,8 +334,12 @@ func (h *ProxyHandler) GetStats(c *gin.Context) {
 		return
 	}
 
+	if _, err := h.adminService.GetProxy(c.Request.Context(), proxyID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	// Return mock data for now
-	_ = proxyID
 	response.Success(c, gin.H{
 		"total_accounts":  0,
 		"active_accounts": 0,

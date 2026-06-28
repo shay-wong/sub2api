@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/project"
 	"github.com/Wei-Shaw/sub2api/ent/projectmember"
 	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
+	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 )
 
@@ -35,6 +36,7 @@ type ProjectQuery struct {
 	withAccounts    *AccountQuery
 	withAPIKeys     *APIKeyQuery
 	withGroups      *GroupQuery
+	withProxies     *ProxyQuery
 	withUsageLogs   *UsageLogQuery
 	modifiers       []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
@@ -176,6 +178,28 @@ func (_q *ProjectQuery) QueryGroups() *GroupQuery {
 			sqlgraph.From(project.Table, project.FieldID, selector),
 			sqlgraph.To(group.Table, group.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, project.GroupsTable, project.GroupsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryProxies chains the current query on the "proxies" edge.
+func (_q *ProjectQuery) QueryProxies() *ProxyQuery {
+	query := (&ProxyClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(project.Table, project.FieldID, selector),
+			sqlgraph.To(proxy.Table, proxy.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, project.ProxiesTable, project.ProxiesColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -402,6 +426,7 @@ func (_q *ProjectQuery) Clone() *ProjectQuery {
 		withAccounts:    _q.withAccounts.Clone(),
 		withAPIKeys:     _q.withAPIKeys.Clone(),
 		withGroups:      _q.withGroups.Clone(),
+		withProxies:     _q.withProxies.Clone(),
 		withUsageLogs:   _q.withUsageLogs.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -461,6 +486,17 @@ func (_q *ProjectQuery) WithGroups(opts ...func(*GroupQuery)) *ProjectQuery {
 		opt(query)
 	}
 	_q.withGroups = query
+	return _q
+}
+
+// WithProxies tells the query-builder to eager-load the nodes that are connected to
+// the "proxies" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *ProjectQuery) WithProxies(opts ...func(*ProxyQuery)) *ProjectQuery {
+	query := (&ProxyClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withProxies = query
 	return _q
 }
 
@@ -553,12 +589,13 @@ func (_q *ProjectQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proj
 	var (
 		nodes       = []*Project{}
 		_spec       = _q.querySpec()
-		loadedTypes = [6]bool{
+		loadedTypes = [7]bool{
 			_q.withMembers != nil,
 			_q.withAppProfiles != nil,
 			_q.withAccounts != nil,
 			_q.withAPIKeys != nil,
 			_q.withGroups != nil,
+			_q.withProxies != nil,
 			_q.withUsageLogs != nil,
 		}
 	)
@@ -615,6 +652,13 @@ func (_q *ProjectQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Proj
 		if err := _q.loadGroups(ctx, query, nodes,
 			func(n *Project) { n.Edges.Groups = []*Group{} },
 			func(n *Project, e *Group) { n.Edges.Groups = append(n.Edges.Groups, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withProxies; query != nil {
+		if err := _q.loadProxies(ctx, query, nodes,
+			func(n *Project) { n.Edges.Proxies = []*Proxy{} },
+			func(n *Project, e *Proxy) { n.Edges.Proxies = append(n.Edges.Proxies, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -763,6 +807,36 @@ func (_q *ProjectQuery) loadGroups(ctx context.Context, query *GroupQuery, nodes
 	}
 	query.Where(predicate.Group(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(project.GroupsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.ProjectID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "project_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *ProjectQuery) loadProxies(ctx context.Context, query *ProxyQuery, nodes []*Project, init func(*Project), assign func(*Project, *Proxy)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*Project)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(proxy.FieldProjectID)
+	}
+	query.Where(predicate.Proxy(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(project.ProxiesColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

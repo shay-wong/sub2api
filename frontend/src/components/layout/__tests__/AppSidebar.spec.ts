@@ -62,13 +62,16 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(projectItemsSource).toContain("path: '/admin/groups'")
     expect(projectItemsSource).toContain("path: '/admin/subscriptions'")
     expect(projectItemsSource).toContain("path: '/admin/accounts'")
-    expect(projectItemsSource).toContain("path: '/admin/usage'")
+    expect(projectItemsSource).toContain("path: '/admin/proxies'")
+    expect(projectItemsSource).toContain('adminUsageItem')
+    expect(componentSource).toContain("const adminUsageItem: NavItem = { path: '/admin/usage'")
 
     const projectAdminBranchMatch = componentSource.match(/if \(!authStore\.isAdmin\) \{[\s\S]*?\n {2}\}/)
     const projectAdminBranchSource = projectAdminBranchMatch?.[0] ?? ''
     expect(projectAdminBranchSource).toContain('return applyAdminPermissions(applyFeatureFlags(projectItems))')
     expect(componentSource).toContain('function applyAdminPermissions')
     expect(componentSource).toContain('authStore.hasAdminPermission(item.adminPermission)')
+    expect(componentSource).toContain('AdminPermissions.proxies')
     expect(projectAdminBranchSource).not.toContain('/admin/settings')
     expect(projectAdminBranchSource).not.toContain('/admin/channels')
     expect(projectAdminBranchSource).not.toContain('/admin/projects')

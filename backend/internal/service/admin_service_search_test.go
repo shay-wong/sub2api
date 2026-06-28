@@ -95,6 +95,10 @@ func (s *proxyRepoStubForAdminList) ListWithFilters(_ context.Context, params pa
 	return s.listWithFiltersProxies, result, nil
 }
 
+func (s *proxyRepoStubForAdminList) ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]Proxy, *pagination.PaginationResult, error) {
+	return s.ListWithFilters(ctx, params, protocol, status, search)
+}
+
 func (s *proxyRepoStubForAdminList) ListWithFiltersAndAccountCount(_ context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	s.listWithFiltersAndAccountCountCalls++
 	s.listWithFiltersAndAccountCountParams = params
@@ -116,6 +120,10 @@ func (s *proxyRepoStubForAdminList) ListWithFiltersAndAccountCount(_ context.Con
 	}
 
 	return s.listWithFiltersAndAccountCountProxies, result, nil
+}
+
+func (s *proxyRepoStubForAdminList) ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	return s.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
 }
 
 type redeemRepoStubForAdminList struct {

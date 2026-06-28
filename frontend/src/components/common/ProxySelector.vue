@@ -38,7 +38,7 @@
             />
           </div>
           <button
-            v-if="proxies.length > 0"
+            v-if="allowTesting && proxies.length > 0"
             type="button"
             @click.stop="handleBatchTest"
             :disabled="batchTesting"
@@ -120,6 +120,7 @@
 
             <!-- Individual test button -->
             <button
+              v-if="allowTesting"
               type="button"
               @click.stop="handleTestProxy(proxy)"
               :disabled="testingProxyIds.has(proxy.id)"
@@ -172,7 +173,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
-import type { Proxy } from '@/types'
+import type { ProxyOption } from '@/types'
 
 const { t } = useI18n()
 
@@ -188,12 +189,14 @@ interface ProxyTestResult {
 
 interface Props {
   modelValue: number | null
-  proxies: Proxy[]
+  proxies: ProxyOption[]
   disabled?: boolean
+  allowTesting?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  disabled: false
+  disabled: false,
+  allowTesting: true
 })
 
 const emit = defineEmits<{
@@ -251,7 +254,8 @@ const selectOption = (value: number | null) => {
   searchQuery.value = ''
 }
 
-const handleTestProxy = async (proxy: Proxy) => {
+const handleTestProxy = async (proxy: ProxyOption) => {
+  if (!props.allowTesting) return
   if (testingProxyIds.has(proxy.id)) return
 
   testingProxyIds.add(proxy.id)
@@ -269,6 +273,7 @@ const handleTestProxy = async (proxy: Proxy) => {
 }
 
 const handleBatchTest = async () => {
+  if (!props.allowTesting) return
   if (batchTesting.value || props.proxies.length === 0) return
 
   batchTesting.value = true

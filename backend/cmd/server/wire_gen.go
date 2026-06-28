@@ -205,7 +205,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	geminiOAuthHandler := admin.NewGeminiOAuthHandler(geminiOAuthService, adminService, permissionService)
 	antigravityOAuthHandler := admin.NewAntigravityOAuthHandler(antigravityOAuthService, adminService, permissionService)
 	grokQuotaService := service.ProvideGrokQuotaService(accountRepository, proxyRepository, grokTokenProvider, httpUpstream)
-	grokOAuthHandler := admin.NewGrokOAuthHandler(grokOAuthService, adminService, grokQuotaService)
+	grokOAuthHandler := admin.NewGrokOAuthHandler(grokOAuthService, adminService, permissionService, grokQuotaService)
 	proxyHandler := admin.NewProxyHandler(adminService)
 	adminRedeemHandler := admin.NewRedeemHandler(adminService, redeemService)
 	promoHandler := admin.NewPromoHandler(promoService)

@@ -5,7 +5,7 @@ export type AssignableProjectRole = 'admin' | 'user'
 export type ProjectStatus = 'active' | 'disabled'
 export type ProjectMemberStatus = 'active' | 'disabled'
 export type ProjectProfileMode = 'restricted' | 'unrestricted'
-export type ProjectResourceType = 'groups' | 'accounts' | 'subscriptions'
+export type ProjectResourceType = 'groups' | 'accounts' | 'proxies' | 'subscriptions'
 
 export interface AdminProject {
   id: number
@@ -47,9 +47,11 @@ export interface ProjectProfileBindings {
   profile_id: number
   group_ids: number[]
   account_ids: number[]
+  proxy_ids: number[]
   subscription_ids: number[]
   groups?: ProjectResourceGroupCandidate[]
   accounts?: ProjectResourceAccountCandidate[]
+  proxies?: ProjectResourceProxyCandidate[]
   subscriptions?: ProjectResourceSubscriptionCandidate[]
 }
 
@@ -81,6 +83,16 @@ export interface ProjectResourceAccountCandidate {
   email: string
 }
 
+export interface ProjectResourceProxyCandidate {
+  id: number
+  project_id: number
+  name: string
+  protocol: string
+  host: string
+  port: number
+  status: string
+}
+
 export interface ProjectResourceSubscriptionCandidate {
   id: number
   user_id: number
@@ -105,6 +117,7 @@ export interface ProjectResourceSearchResult {
   users: ProjectResourceUserCandidate[]
   groups: ProjectResourceGroupCandidate[]
   accounts: ProjectResourceAccountCandidate[]
+  proxies: ProjectResourceProxyCandidate[]
   subscriptions: ProjectResourceSubscriptionCandidate[]
   api_keys: ProjectResourceAPIKeyCandidate[]
 }
@@ -116,6 +129,7 @@ export interface CreateProjectRequest {
   profile_mode?: ProjectProfileMode
   group_ids?: number[]
   account_ids?: number[]
+  proxy_ids?: number[]
   subscription_ids?: number[]
 }
 

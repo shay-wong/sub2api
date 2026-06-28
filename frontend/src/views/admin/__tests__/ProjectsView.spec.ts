@@ -147,6 +147,7 @@ const emptySearchResult = () => ({
   users: [],
   groups: [],
   accounts: [],
+  proxies: [],
   subscriptions: [],
   api_keys: []
 })
@@ -180,6 +181,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 2,
       group_ids: [],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     })
     createProject.mockResolvedValue({
@@ -382,6 +384,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_mode: 'unrestricted',
       group_ids: [7],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     }))
   })
@@ -401,6 +404,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 2,
       group_ids: [8],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     })
 
@@ -435,6 +439,7 @@ describe('admin ProjectsView project resource scope', () => {
     expect(setProfileBindings).toHaveBeenCalledWith(1, 2, expect.objectContaining({
       group_ids: [8],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     }))
   })
@@ -445,9 +450,11 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 2,
       group_ids: [7],
       account_ids: [8],
+      proxy_ids: [10],
       subscription_ids: [9],
       groups: [{ id: 7, project_id: 1, name: '共享分组', description: '', platform: 'openai', status: 'active' }],
       accounts: [{ id: 8, project_id: 1, name: '主账号', notes: '', platform: 'openai', type: 'api_key', status: 'active', email: 'owner@example.test' }],
+      proxies: [{ id: 10, project_id: 1, name: '主代理', protocol: 'http', host: 'proxy.example.test', port: 8080, status: 'active' }],
       subscriptions: [{ id: 9, user_id: 42, group_id: 7, user_email: 'user@example.test', group_name: '共享分组', status: 'active', notes: '包月' }]
     })
 
@@ -462,9 +469,11 @@ describe('admin ProjectsView project resource scope', () => {
 
     expect(wrapper.text()).toContain('共享分组')
     expect(wrapper.text()).toContain('主账号')
+    expect(wrapper.text()).toContain('主代理')
     expect(wrapper.text()).toContain('user@example.test / 共享分组')
     expect(wrapper.text()).not.toContain('admin.projects.resourceTypes.groups #7')
     expect(wrapper.text()).not.toContain('admin.projects.resourceTypes.accounts #8')
+    expect(wrapper.text()).not.toContain('admin.projects.resourceTypes.proxies #10')
     expect(wrapper.text()).not.toContain('admin.projects.resourceTypes.subscriptions #9')
   })
 
@@ -474,6 +483,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 2,
       group_ids: [7],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: [],
       groups: [{ id: 7, project_id: 1, name: '共享分组', description: '', platform: 'openai', status: 'active' }]
     })
@@ -485,6 +495,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 2,
       group_ids: [],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     })
 
@@ -517,6 +528,7 @@ describe('admin ProjectsView project resource scope', () => {
     expect(setProfileBindings).toHaveBeenCalledWith(1, 2, expect.objectContaining({
       group_ids: [],
       account_ids: [],
+      proxy_ids: [],
       subscription_ids: []
     }))
   })
@@ -538,6 +550,7 @@ describe('admin ProjectsView project resource scope', () => {
       profile_id: 7,
       group_ids: [],
       account_ids: [88],
+      proxy_ids: [],
       subscription_ids: []
     })
 
@@ -574,6 +587,7 @@ describe('admin ProjectsView project resource scope', () => {
     expect(setProfileBindings).toHaveBeenCalledWith(1, 7, expect.objectContaining({
       group_ids: [],
       account_ids: [88],
+      proxy_ids: [],
       subscription_ids: []
     }))
   })
@@ -600,6 +614,7 @@ describe('admin ProjectsView project resource scope', () => {
         profile_id: 2,
         group_ids: [7],
         account_ids: [],
+        proxy_ids: [],
         subscription_ids: [],
         groups: [{ id: 7, project_id: 1, name: '共享分组', description: '', platform: 'openai', status: 'active' }]
       })
@@ -727,6 +742,7 @@ describe('admin ProjectsView project resource scope', () => {
         'admin.ops.read',
         'admin.users.manage',
         'admin.groups.manage',
+        'admin.proxies.manage',
         'admin.subscriptions.manage',
         'admin.accounts.write',
         'admin.usage.read'
@@ -858,6 +874,7 @@ describe('admin ProjectsView project resource scope', () => {
         'admin.ops.read',
         'admin.users.manage',
         'admin.groups.manage',
+        'admin.proxies.manage',
         'admin.subscriptions.manage',
         'admin.accounts.write',
         'admin.usage.read'
