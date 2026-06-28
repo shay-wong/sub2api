@@ -24,6 +24,7 @@ function createStreamResponse(lines: string[]) {
 describe('runAccountConnectionTest', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    localStorage.clear()
   })
 
   it('posts to the account test SSE endpoint and reports completion', async () => {
@@ -67,5 +68,25 @@ describe('runAccountConnectionTest', () => {
     })
 
     expect(result).toEqual({ success: false, error: 'token expired' })
+  })
+
+  it('preserves the selected project context for raw fetch streaming requests', async () => {
+    localStorage.setItem('sub2api_selected_project_id', '169')
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    await runAccountConnectionTest({
+      accountId: 5837,
+      authToken: 'admin-token'
+    })
+
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/admin/accounts/5837/test', expect.objectContaining({
+      headers: expect.objectContaining({
+        'X-Project-ID': '169'
+      })
+    }))
   })
 })
