@@ -19,14 +19,22 @@ export function buildApiUrl(path: string): string {
   return `${base}${suffix}`
 }
 
-export function buildGatewayUrl(path: string): string {
+interface BuildGatewayUrlOptions {
+  origin?: string
+}
+
+export function buildGatewayUrl(path: string, options: BuildGatewayUrlOptions = {}): string {
   const suffix = normalizePath(path)
+  const apiBaseURL = getAPIBaseURL()
+  const baseOrigin =
+    typeof window === 'undefined'
+      ? options.origin || 'http://localhost'
+      : window.location.origin
+
   try {
-    const origin =
-      typeof window === 'undefined'
-        ? new URL(getAPIBaseURL()).origin
-        : new URL(getAPIBaseURL(), window.location.origin).origin
-    return `${origin}${suffix}`
+    const apiBase = new URL(apiBaseURL, baseOrigin)
+    const gatewayBasePath = apiBase.pathname.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '')
+    return `${apiBase.origin}${gatewayBasePath}${suffix}`
   } catch {
     return suffix
   }
