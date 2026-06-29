@@ -430,7 +430,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockKeyHTTP = service.CyberSessionBlockKey(apiKey.ID, c, sessionHashBody)
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyHTTP, channelMapping.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, selection, account, subscription, reqModel, err != nil, cyberBlockKeyHTTP, channelMapping.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -868,7 +868,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockKeyMsg = service.CyberSessionBlockKey(apiKey.ID, c, body)
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, channelMappingMsg.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, selection, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, channelMappingMsg.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -1540,7 +1540,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 届时 defer 已清除标记）。
 				defer clearCyberPolicyTurnState(c)
 				releaseTurnSlots()
-				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, turnErr != nil, cyberBlockKey, channelMappingWS.ToUsageFields(reqModel, ""), requestPayloadHash)
+				h.recordCyberPolicyIfMarked(c, apiKey, selection, account, subscription, reqModel, turnErr != nil, cyberBlockKey, channelMappingWS.ToUsageFields(reqModel, ""), requestPayloadHash)
 				if service.GetOpsCyberPolicy(c) != nil {
 					cyberBlockedThisConn = true
 				}
@@ -2345,7 +2345,7 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 // 并在 forward 返回错误时写一条 tokens=0 用量行。标记由 gateway 服务层在透传 cyber 后设置；
 // 当前请求已发给用户，本方法只做事后记录，不影响响应。forwardErrored 为 true 时才写用量行，
 // 避免与正常 RecordUsage(forward 成功路径)重复。每请求至多记录一次。
-func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string) {
+func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string) {
 	mark := service.GetOpsCyberPolicy(c)
 	if mark == nil {
 		return
@@ -2357,18 +2357,13 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 
 	requestID := c.Writer.Header().Get("X-Request-Id")
 	var userID, apiKeyID int64
-	var userEmail, apiKeyName, groupName string
-	var groupID *int64
+	var userEmail, apiKeyName string
 	if apiKey != nil {
 		apiKeyID = apiKey.ID
 		apiKeyName = apiKey.Name
-		groupID = apiKey.GroupID
 		if apiKey.User != nil {
 			userID = apiKey.User.ID
 			userEmail = apiKey.User.Email
-		}
-		if apiKey.Group != nil {
-			groupName = apiKey.Group.Name
 		}
 	}
 	inboundEndpoint := GetInboundEndpoint(c)
@@ -2394,8 +2389,10 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	}
 	platform := resolveOpsPlatform(apiKey, guessPlatformFromPath(requestPath))
 	var clientRequestID, userAgent, clientIPStr string
+	requestCtx := context.Background()
 	if c.Request != nil {
-		clientRequestID, _ = c.Request.Context().Value(ctxkey.ClientRequestID).(string)
+		requestCtx = c.Request.Context()
+		clientRequestID, _ = requestCtx.Value(ctxkey.ClientRequestID).(string)
 		userAgent = c.GetHeader("User-Agent")
 		clientIPStr = strings.TrimSpace(ip.GetClientIP(c))
 	}
@@ -2403,6 +2400,9 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if apiKey != nil {
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
+	usageAttribution := cyberPolicyUsageAttribution(requestCtx, apiKey, selection)
+	actualGroupID := usageAttribution.GroupRateLimitGroupID
+	actualGroupName := selectedGroupName(selection, apiKey, actualGroupID)
 	opsMeta := cyberPolicyOpsErrorMeta{
 		RequestID:       requestID,
 		ClientRequestID: clientRequestID,
@@ -2417,7 +2417,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		UserID:          userID,
 		APIKeyID:        apiKeyID,
 		AccountID:       accountID,
-		GroupID:         groupID,
+		GroupID:         actualGroupID,
 		ClientIP:        clientIPStr,
 		CreatedAt:       time.Now(),
 	}
@@ -2431,8 +2431,8 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 				UserEmail:       userEmail,
 				APIKeyID:        apiKeyID,
 				APIKeyName:      apiKeyName,
-				GroupID:         groupID,
-				GroupName:       groupName,
+				GroupID:         actualGroupID,
+				GroupName:       actualGroupName,
 				Endpoint:        inboundEndpoint,
 				Model:           model,
 				UpstreamMessage: mark.Message,
@@ -2444,21 +2444,23 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if forwardErrored && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
-				APIKey:             apiKey,
-				Account:            account,
-				Subscription:       subscription,
-				RequestID:          requestID,
-				Model:              model,
-				Stream:             stream,
-				InputTokens:        mark.UpstreamInTok,
-				OutputTokens:       mark.UpstreamOutTok,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIPStr,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      apiKeySvc,
-				ChannelUsageFields: channelFields,
+				APIKey:                apiKey,
+				Account:               account,
+				Subscription:          subscription,
+				RequestID:             requestID,
+				Model:                 model,
+				Stream:                stream,
+				InputTokens:           mark.UpstreamInTok,
+				OutputTokens:          mark.UpstreamOutTok,
+				InboundEndpoint:       inboundEndpoint,
+				UpstreamEndpoint:      upstreamEndpoint,
+				UserAgent:             userAgent,
+				IPAddress:             clientIPStr,
+				RequestPayloadHash:    requestPayloadHash,
+				APIKeyService:         apiKeySvc,
+				QuotaPlatform:         usageAttribution.QuotaPlatform,
+				GroupRateLimitGroupID: usageAttribution.GroupRateLimitGroupID,
+				ChannelUsageFields:    channelFields,
 			})
 		}
 		if gwSvc != nil && cyberBlockKey != "" {
@@ -2468,6 +2470,31 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 			enqueueOpsErrorLog(opsSvc, buildCyberPolicyOpsErrorEntry(opsMeta, mark))
 		}
 	}()
+}
+
+type cyberPolicyUsageAttributionResult struct {
+	QuotaPlatform         string
+	GroupRateLimitGroupID *int64
+}
+
+func cyberPolicyUsageAttribution(ctx context.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult) cyberPolicyUsageAttributionResult {
+	return cyberPolicyUsageAttributionResult{
+		QuotaPlatform:         service.QuotaPlatform(ctx, apiKey),
+		GroupRateLimitGroupID: EffectiveGroupRateLimitGroupID(selection, apiKey),
+	}
+}
+
+func selectedGroupName(selection *service.AccountSelectionResult, apiKey *service.APIKey, groupID *int64) string {
+	if groupID == nil || *groupID <= 0 {
+		return ""
+	}
+	if selection != nil && selection.Group != nil && selection.Group.ID == *groupID {
+		return selection.Group.Name
+	}
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ID == *groupID {
+		return apiKey.Group.Name
+	}
+	return ""
 }
 
 // clearCyberPolicyTurnState resets the cyber mark and the per-request recorded

@@ -52,6 +52,51 @@ func (s *openAIRecordUsageBillingRepoStub) Apply(ctx context.Context, cmd *Usage
 	return &UsageBillingApplyResult{Applied: true}, nil
 }
 
+type openAIRecordUsageQuotaCacheStub struct {
+	BillingCache
+
+	quotaEntry          *UserPlatformQuotaCacheEntry
+	incrCalls           int
+	lastIncrUserID      int64
+	lastIncrPlatform    string
+	lastIncrCost        float64
+	lastIncrMarkDirty   bool
+	deductBalanceCalls  int
+	lastDeductBalanceID int64
+	lastDeductAmount    float64
+}
+
+func (s *openAIRecordUsageQuotaCacheStub) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
+	s.deductBalanceCalls++
+	s.lastDeductBalanceID = userID
+	s.lastDeductAmount = amount
+	return nil
+}
+
+func (s *openAIRecordUsageQuotaCacheStub) GetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error) {
+	if s.quotaEntry == nil {
+		return nil, false, nil
+	}
+	return s.quotaEntry, true, nil
+}
+
+func (s *openAIRecordUsageQuotaCacheStub) IncrUserPlatformQuotaUsageCache(ctx context.Context, userID int64, platform string, cost float64, ttl time.Duration, markDirty bool) error {
+	s.incrCalls++
+	s.lastIncrUserID = userID
+	s.lastIncrPlatform = platform
+	s.lastIncrCost = cost
+	s.lastIncrMarkDirty = markDirty
+	return nil
+}
+
+type openAIRecordUsageUserPlatformQuotaRepoStub struct {
+	UserPlatformQuotaRepository
+}
+
+func (s *openAIRecordUsageUserPlatformQuotaRepoStub) IncrementUsageWithReset(ctx context.Context, userID int64, platform string, cost float64, now time.Time) error {
+	return nil
+}
+
 func TestOpenAIGatewayServiceRecordUsage_RejectsNilInput(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	require.Error(t, svc.RecordUsage(context.Background(), nil))
@@ -90,6 +135,38 @@ func TestRecordCyberPolicyUsageLog_BillsRealUpstreamTokens(t *testing.T) {
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.Equal(t, 1, userRepo.deductCalls, "按真实 token 扣费，与 WS/正常请求一致")
 	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestRecordCyberPolicyUsageLog_PreservesExplicitQuotaPlatformAndGroup(t *testing.T) {
+	apiKeyGroupID := int64(30)
+	actualGroupID := int64(40)
+	dailyLimit := 1.0
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	quotaCache := &openAIRecordUsageQuotaCacheStub{quotaEntry: &UserPlatformQuotaCacheEntry{DailyLimitUSD: &dailyLimit}}
+	svc.billingCacheService = &BillingCacheService{cache: quotaCache, cfg: svc.cfg}
+	svc.userPlatformQuotaRepo = &openAIRecordUsageUserPlatformQuotaRepoStub{}
+
+	svc.RecordCyberPolicyUsageLog(context.Background(), CyberPolicyUsageInput{
+		APIKey:                &APIKey{ID: 2, User: &User{ID: 1}, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1}},
+		Account:               &Account{ID: 3},
+		RequestID:             "rid-cyber-explicit-platform-group",
+		Model:                 "gpt-5.1",
+		InputTokens:           1200,
+		OutputTokens:          300,
+		QuotaPlatform:         PlatformAntigravity,
+		GroupRateLimitGroupID: &actualGroupID,
+	})
+
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, 1, quotaCache.incrCalls)
+	require.Equal(t, int64(1), quotaCache.lastIncrUserID)
+	require.Equal(t, PlatformAntigravity, quotaCache.lastIncrPlatform)
+	require.Greater(t, quotaCache.lastIncrCost, 0.0)
+	require.False(t, quotaCache.lastIncrMarkDirty)
 }
 
 func TestRecordCyberPolicyUsageLog_NonStreamZeroTokensZeroCost(t *testing.T) {
