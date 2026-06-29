@@ -126,27 +126,53 @@ func TestCalculateCreateOrderPayAmountUsesCurrencyPrecision(t *testing.T) {
 	}
 }
 
-func TestCalculateCreateOrderPayAmountForSubscriptionKeepsDirectPrice(t *testing.T) {
+func TestCalculateCreateOrderPayAmountForSubscriptionAppliesCNYMultiplier(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmount(5, 0, "CNY")
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrder(payment.OrderTypeSubscription, 7.99, 0, 0.14, "CNY")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if amountStr != "5.00" || amount != 5 {
-		t.Fatalf("subscription CNY pay amount = (%q, %v), want (5.00, 5)", amountStr, amount)
+	if amountStr != "57.07" || amount != 57.07 {
+		t.Fatalf("subscription CNY pay amount = (%q, %v), want (57.07, 57.07)", amountStr, amount)
 	}
 }
 
-func TestCalculateCreateOrderPayAmountForSubscriptionAppliesFeeToDirectPrice(t *testing.T) {
+func TestCalculateCreateOrderPayAmountForSubscriptionDefaultMultiplierKeepsPrice(t *testing.T) {
 	t.Parallel()
 
-	amountStr, amount, err := calculateCreateOrderPayAmount(5, 2.5, "CNY")
+	for _, multiplier := range []float64{0, 1} {
+		amountStr, amount, err := calculateCreateOrderPayAmountForOrder(payment.OrderTypeSubscription, 7.99, 0, multiplier, "CNY")
+		if err != nil {
+			t.Fatalf("unexpected error for multiplier %v: %v", multiplier, err)
+		}
+		if amountStr != "7.99" || amount != 7.99 {
+			t.Fatalf("multiplier %v pay amount = (%q, %v), want (7.99, 7.99)", multiplier, amountStr, amount)
+		}
+	}
+}
+
+func TestCalculateCreateOrderPayAmountForSubscriptionDoesNotConvertNonCNY(t *testing.T) {
+	t.Parallel()
+
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrder(payment.OrderTypeSubscription, 7.99, 2.5, 0.14, "USD")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if amountStr != "5.13" || amount != 5.13 {
-		t.Fatalf("subscription CNY pay amount with fee = (%q, %v), want (5.13, 5.13)", amountStr, amount)
+	if amountStr != "8.19" || amount != 8.19 {
+		t.Fatalf("subscription USD pay amount = (%q, %v), want (8.19, 8.19)", amountStr, amount)
+	}
+}
+
+func TestCalculateCreateOrderPayAmountForBalanceDoesNotConvertGatewayAmount(t *testing.T) {
+	t.Parallel()
+
+	amountStr, amount, err := calculateCreateOrderPayAmountForOrder(payment.OrderTypeBalance, 10, 2.5, 0.14, "CNY")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if amountStr != "10.25" || amount != 10.25 {
+		t.Fatalf("balance CNY pay amount = (%q, %v), want (10.25, 10.25)", amountStr, amount)
 	}
 }
 
@@ -282,6 +308,67 @@ func TestMaybeBuildWeChatOAuthRequiredResponse(t *testing.T) {
 	}
 	if resp.OAuth.AuthorizeURL != "/api/v1/auth/oauth/wechat/payment/start?amount=12.5&order_type=balance&payment_type=wxpay&redirect=%2Fpurchase%3Ffrom%3Dwechat&scope=snsapi_base" {
 		t.Fatalf("authorize_url = %q", resp.OAuth.AuthorizeURL)
+	}
+}
+
+func TestMaybeBuildWeChatOAuthRequiredResponseForSubscriptionUsesConvertedCNYPayAmount(t *testing.T) {
+	t.Setenv("PAYMENT_RESUME_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
+
+	svc := newWeChatPaymentOAuthTestService(map[string]string{
+		SettingKeyWeChatConnectEnabled:             "true",
+		SettingKeyWeChatConnectAppID:               "wx123456",
+		SettingKeyWeChatConnectAppSecret:           "wechat-secret",
+		SettingKeyWeChatConnectMode:                "mp",
+		SettingKeyWeChatConnectScopes:              "snsapi_base",
+		SettingKeyWeChatConnectRedirectURL:         "https://api.example.com/api/v1/auth/oauth/wechat/callback",
+		SettingKeyWeChatConnectFrontendRedirectURL: "/auth/wechat/callback",
+	})
+	payAmountStr, payAmount, err := calculateCreateOrderPayAmountForOrder(payment.OrderTypeSubscription, 7.99, 2.5, 0.14, "CNY")
+	if err != nil {
+		t.Fatalf("unexpected pay amount error: %v", err)
+	}
+	if payAmountStr != "58.50" || payAmount != 58.5 {
+		t.Fatalf("subscription CNY pay amount = (%q, %v), want (58.50, 58.5)", payAmountStr, payAmount)
+	}
+
+	resp, err := svc.maybeBuildWeChatOAuthRequiredResponseForSelection(context.Background(), CreateOrderRequest{
+		Amount:          7.99,
+		PaymentType:     payment.TypeWxpay,
+		IsWeChatBrowser: true,
+		SrcURL:          "https://merchant.example/payment?from=wechat",
+		OrderType:       payment.OrderTypeSubscription,
+		PlanID:          7,
+	}, 7.99, payAmount, 2.5, &payment.InstanceSelection{ProviderKey: payment.TypeWxpay})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected oauth_required response, got nil")
+	}
+	if resp.Amount != 7.99 {
+		t.Fatalf("amount = %v, want 7.99", resp.Amount)
+	}
+	if resp.PayAmount != 58.5 {
+		t.Fatalf("pay_amount = %v, want 58.5", resp.PayAmount)
+	}
+	if resp.FeeRate != 2.5 {
+		t.Fatalf("fee_rate = %v, want 2.5", resp.FeeRate)
+	}
+	if resp.OAuth == nil {
+		t.Fatal("expected oauth payload, got nil")
+	}
+	authorizeURL := resp.OAuth.AuthorizeURL
+	for _, want := range []string{
+		"amount=7.99",
+		"order_type=subscription",
+		"payment_type=wxpay",
+		"plan_id=7",
+		"scope=snsapi_base",
+		"redirect=%2Fpurchase%3Ffrom%3Dwechat",
+	} {
+		if !strings.Contains(authorizeURL, want) {
+			t.Fatalf("authorize_url = %q, missing %q", authorizeURL, want)
+		}
 	}
 }
 

@@ -105,6 +105,7 @@ function checkoutInfoFixture(overrides: Partial<CheckoutInfoResponse> = {}) {
     plans: [],
     balance_disabled: false,
     balance_recharge_multiplier: 1,
+    subscription_cny_payment_multiplier: 1,
     recharge_fee_rate: 0,
     help_text: '',
     help_image_url: '',
@@ -239,7 +240,7 @@ describe('PaymentView subscription confirmation amounts', () => {
   it('shows converted CNY pay amount for plan price, original price, and create button', async () => {
     const wrapper = await mountSubscriptionConfirm({
       checkout: {
-        balance_recharge_multiplier: 0.14,
+        subscription_cny_payment_multiplier: 0.14,
       },
       method: {
         currency: 'CNY',
@@ -263,7 +264,7 @@ describe('PaymentView subscription confirmation amounts', () => {
   it('keeps plan price when multiplier is not configured or payment currency is not CNY', async () => {
     const cnyWrapper = await mountSubscriptionConfirm({
       checkout: {
-        balance_recharge_multiplier: 0,
+        subscription_cny_payment_multiplier: 0,
       },
       method: {
         currency: 'CNY',
@@ -278,7 +279,7 @@ describe('PaymentView subscription confirmation amounts', () => {
 
     const usdWrapper = await mountSubscriptionConfirm({
       checkout: {
-        balance_recharge_multiplier: 0.14,
+        subscription_cny_payment_multiplier: 0.14,
       },
       method: {
         currency: 'USD',
@@ -296,7 +297,7 @@ describe('PaymentView subscription confirmation amounts', () => {
   it('adds fee rate after CNY multiplier conversion to match backend pay_amount', async () => {
     const wrapper = await mountSubscriptionConfirm({
       checkout: {
-        balance_recharge_multiplier: 0.14,
+        subscription_cny_payment_multiplier: 0.14,
         recharge_fee_rate: 2.5,
       },
       method: {
@@ -316,6 +317,41 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(text).toContain(fee)
     expect(text).toContain(total)
     expect(wrapper.findAll('button').some(button => button.text().includes(total))).toBe(true)
+  })
+
+  it('keeps subscription CNY conversion independent from balance credit multiplier', async () => {
+    const wrapper = await mountSubscriptionConfirm({
+      checkout: {
+        balance_recharge_multiplier: 2,
+        subscription_cny_payment_multiplier: 0.14,
+      },
+      method: {
+        currency: 'CNY',
+      },
+      plan: {
+        price: 7.99,
+      },
+    })
+
+    expect(wrapper.text()).toContain(formatPaymentAmount(57.07, 'CNY'))
+    expect(wrapper.text()).not.toContain(formatPaymentAmount(4, 'CNY'))
+  })
+
+  it('falls back to legacy balance multiplier when subscription multiplier is absent', async () => {
+    const wrapper = await mountSubscriptionConfirm({
+      checkout: {
+        balance_recharge_multiplier: 0.14,
+        subscription_cny_payment_multiplier: undefined,
+      },
+      method: {
+        currency: 'CNY',
+      },
+      plan: {
+        price: 7.99,
+      },
+    })
+
+    expect(wrapper.text()).toContain(formatPaymentAmount(57.07, 'CNY'))
   })
 })
 

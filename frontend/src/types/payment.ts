@@ -33,6 +33,7 @@ export interface PaymentConfig {
   order_timeout_minutes: number
   balance_disabled: boolean
   balance_recharge_multiplier: number
+  subscription_cny_payment_multiplier?: number
   enabled_payment_types: PaymentType[]
   help_image_url: string
   help_text: string
@@ -65,6 +66,7 @@ export interface CheckoutInfoResponse {
   plans: SubscriptionPlan[]
   balance_disabled: boolean
   balance_recharge_multiplier: number
+  subscription_cny_payment_multiplier?: number
   recharge_fee_rate: number
   help_text: string
   help_image_url: string

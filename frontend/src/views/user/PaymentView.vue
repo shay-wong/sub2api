@@ -478,7 +478,7 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_cny_payment_multiplier: 1, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -493,6 +493,10 @@ const enabledMethods = computed(() => Object.keys(visibleMethods.value))
 const validAmount = computed(() => amount.value ?? 0)
 const balanceRechargeMultiplier = computed(() => {
   const multiplier = checkout.value.balance_recharge_multiplier
+  return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
+})
+const subscriptionCNYPaymentMultiplier = computed(() => {
+  const multiplier = checkout.value.subscription_cny_payment_multiplier ?? checkout.value.balance_recharge_multiplier
   return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
 })
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
@@ -569,7 +573,7 @@ function ceilPaymentAmount(value: number, currency: string): number {
 
 function subscriptionPaymentAmountForCurrency(value: number, currency: string): number {
   if (currency !== DEFAULT_PAYMENT_CURRENCY) return value
-  return roundPaymentAmount(value / balanceRechargeMultiplier.value, currency)
+  return roundPaymentAmount(value / subscriptionCNYPaymentMultiplier.value, currency)
 }
 
 function subscriptionPaymentAmount(value: number): number {

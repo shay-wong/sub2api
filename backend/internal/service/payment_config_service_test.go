@@ -102,6 +102,9 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
+		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
+			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
+		}
 	})
 
 	t.Run("all values populated", func(t *testing.T) {
@@ -115,6 +118,8 @@ func TestParsePaymentConfig(t *testing.T) {
 			SettingMaxPendingOrders:    "5",
 			SettingEnabledPaymentTypes: "alipay,wxpay,stripe",
 			SettingBalancePayDisabled:  "true",
+			SettingBalanceRechargeMult: "0.14",
+			SettingSubscriptionCNYMult: "0.20",
 			SettingLoadBalanceStrategy: "least_amount",
 			SettingProductNamePrefix:   "PRE",
 			SettingProductNameSuffix:   "SUF",
@@ -147,6 +152,12 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 		if !cfg.BalanceDisabled {
 			t.Fatal("expected BalanceDisabled=true")
+		}
+		if cfg.BalanceRechargeMultiplier != 0.14 {
+			t.Fatalf("BalanceRechargeMultiplier = %v, want 0.14", cfg.BalanceRechargeMultiplier)
+		}
+		if cfg.SubscriptionCNYPaymentMultiplier != 0.20 {
+			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.20", cfg.SubscriptionCNYPaymentMultiplier)
 		}
 		if cfg.LoadBalanceStrategy != "least_amount" {
 			t.Fatalf("LoadBalanceStrategy = %q, want %q", cfg.LoadBalanceStrategy, "least_amount")
@@ -195,6 +206,16 @@ func TestParsePaymentConfig(t *testing.T) {
 		cfg := svc.parsePaymentConfig(vals)
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes for empty string, got %v", cfg.EnabledTypes)
+		}
+	})
+
+	t.Run("subscription CNY multiplier falls back to legacy balance multiplier", func(t *testing.T) {
+		t.Parallel()
+		cfg := svc.parsePaymentConfig(map[string]string{
+			SettingBalanceRechargeMult: "0.14",
+		})
+		if cfg.SubscriptionCNYPaymentMultiplier != 0.14 {
+			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.14", cfg.SubscriptionCNYPaymentMultiplier)
 		}
 	})
 }
