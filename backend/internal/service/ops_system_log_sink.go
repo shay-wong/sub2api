@@ -206,6 +206,7 @@ func (s *OpsSystemLogSink) flushBatch(baseCtx context.Context, batch []*logger.L
 		}
 
 		userID := asInt64Ptr(fields["user_id"])
+		apiKeyID := asInt64Ptr(fields["api_key_id"])
 		accountID := asInt64Ptr(fields["account_id"])
 		projectID := asInt64(fields["project_id"])
 
@@ -227,6 +228,7 @@ func (s *OpsSystemLogSink) flushBatch(baseCtx context.Context, batch []*logger.L
 			RequestID:       requestID,
 			ClientRequestID: clientRequestID,
 			UserID:          userID,
+			APIKeyID:        apiKeyID,
 			AccountID:       accountID,
 			Platform:        platform,
 			Model:           model,

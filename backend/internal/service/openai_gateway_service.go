@@ -41,8 +41,9 @@ const (
 	// ChatGPT internal API for OAuth accounts
 	chatgptCodexURL = "https://chatgpt.com/backend-api/codex/responses"
 	// OpenAI Platform API for API Key accounts (fallback)
-	openaiPlatformAPIURL   = "https://api.openai.com/v1/responses"
-	openaiStickySessionTTL = time.Hour // 粘性会话TTL
+	openaiPlatformAPIURL            = "https://api.openai.com/v1/responses"
+	openaiPlatformAPIInputTokensURL = "https://api.openai.com/v1/responses/input_tokens"
+	openaiStickySessionTTL          = time.Hour // 粘性会话TTL
 	// 与真实 Codex CLI 的 User-Agent 结构对齐：
 	// {originator}/{version} ({OS} {OS_version}; {arch}) {terminal}
 	// 旧值 "codex_cli_rs/0.125.0" 缺少 OS/架构/终端后缀，易被上游指纹识别为非官方客户端。
@@ -2721,6 +2722,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected /responses image_generation tool for Codex client")
+		}
+		if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationToolChoiceAuto(decoded) {
+			markDecodedModified()
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Set /responses image_generation tool_choice=auto for Codex client")
 		}
 		if normalizeOpenAIResponsesImageGenerationTools(decoded) {
 			markDecodedModified()
@@ -6119,6 +6124,7 @@ type OpenAIRecordUsageInput struct {
 	RequestPayloadHash    string
 	APIKeyService         APIKeyQuotaUpdater
 	GroupRateLimitGroupID *int64
+	QuotaPlatform         string // user×platform quota platform resolved by the handler before async billing.
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
 	ChannelUsageFields
@@ -6394,6 +6400,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return nil
 	}
 
+	// Async usage billing runs outside the original request context, so it
+	// cannot recover ForcePlatform there. Fall back for internal/test callers.
+	quotaPlatform := input.QuotaPlatform
+	if quotaPlatform == "" {
+		quotaPlatform = PlatformFromAPIKey(apiKey)
+	}
+
 	billingErr := func() error {
 		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 			Cost:                  cost,
@@ -6405,7 +6418,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			IsSubscriptionBill:    isSubscriptionBilling,
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
-			Platform:              PlatformFromAPIKey(apiKey),
+			Platform:              quotaPlatform,
 			GroupRateLimitGroupID: input.GroupRateLimitGroupID,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err

@@ -1,3 +1,5 @@
+import { buildApiUrl } from '@/api/url'
+
 export interface AccountTestEvent {
   type: string
   text?: string
@@ -55,7 +57,7 @@ export async function runAccountConnectionTest(
     headers['X-Project-ID'] = projectID
   }
 
-  const response = await fetch(`/api/v1/admin/accounts/${options.accountId}/test`, {
+  const response = await fetch(buildApiUrl(`/admin/accounts/${options.accountId}/test`), {
     method: 'POST',
     headers,
     body: buildRequestBody(options),

@@ -355,6 +355,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		upstreamModel := ""
 		if result != nil {
@@ -375,6 +376,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMapping.ToUsageFields(requestModel, upstreamModel),
 			}); err != nil {
 				logger.L().With(

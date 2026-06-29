@@ -236,6 +236,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -250,6 +251,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				IPAddress:             clientIP,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
