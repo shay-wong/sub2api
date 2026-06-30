@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
@@ -67,9 +68,11 @@ var codexVersionModelPrefixes = []struct {
 }
 
 type codexTransformResult struct {
-	Modified        bool
-	NormalizedModel string
-	PromptCacheKey  string
+	Modified                              bool
+	NormalizedModel                       string
+	PromptCacheKey                        string
+	DroppedReasoningWithoutEncryptedCount int
+	PreservedEncryptedReasoningCount      int
 }
 
 type codexOAuthTransformOptions struct {
@@ -232,7 +235,8 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.Modified = true
 	}
 
-	// 续链场景保留 item_reference 与 id，避免 call_id 上下文丢失。
+	// 续链场景保留 item_reference 与 id，避免工具调用上下文丢失；
+	// reasoning 另按 encrypted_content 可用性过滤，不能只跟随 preserveReferences。
 	if input, ok := reqBody["input"].([]any); ok {
 		if normalizedInput, modified := normalizeCodexToolRoleMessages(input); modified {
 			input = normalizedInput
@@ -242,10 +246,22 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			input = normalizedInput
 			result.Modified = true
 		}
-		input = filterCodexInputWithOptions(input, codexInputFilterOptions{
+		var filterStats codexInputFilterStats
+		input, filterStats = filterCodexInputWithOptions(input, codexInputFilterOptions{
 			PreserveReferences: needsToolContinuation,
 			PreserveCallIDs:    opts.PreserveToolCallIDs,
 		})
+		result.DroppedReasoningWithoutEncryptedCount = filterStats.DroppedReasoningWithoutEncryptedCount
+		result.PreservedEncryptedReasoningCount = filterStats.PreservedEncryptedReasoningCount
+		if filterStats.hasReasoningActivity() {
+			logger.LegacyPrintf(
+				"service.openai_codex_transform",
+				"[CodexOAuthTransform] input reasoning filter summary: dropped_without_encrypted_content=%d preserved_with_encrypted_content=%d preserve_references=%v",
+				filterStats.DroppedReasoningWithoutEncryptedCount,
+				filterStats.PreservedEncryptedReasoningCount,
+				needsToolContinuation,
+			)
+		}
 		reqBody["input"] = input
 		result.Modified = true
 	} else if inputStr, ok := reqBody["input"].(string); ok {
@@ -1139,16 +1155,28 @@ type codexInputFilterOptions struct {
 	PreserveCallIDs    bool
 }
 
-// filterCodexInput 按需过滤 item_reference 与 id。
-// preserveReferences 为 true 时保持引用与 id，以满足续链请求对上下文的依赖。
-func filterCodexInput(input []any, preserveReferences bool) []any {
-	return filterCodexInputWithOptions(input, codexInputFilterOptions{
-		PreserveReferences: preserveReferences,
-	})
+type codexInputFilterStats struct {
+	DroppedReasoningWithoutEncryptedCount int
+	PreservedEncryptedReasoningCount      int
 }
 
-func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []any {
+func (s codexInputFilterStats) hasReasoningActivity() bool {
+	return s.DroppedReasoningWithoutEncryptedCount > 0 || s.PreservedEncryptedReasoningCount > 0
+}
+
+// filterCodexInput 按需过滤 item_reference、id 与不可用的空 reasoning 引用。
+// preserveReferences 只控制普通引用/id 的保留；reasoning 是否保留取决于是否携带
+// encrypted_content，因为 OAuth store=false 不能回查空 rs_* 引用。
+func filterCodexInput(input []any, preserveReferences bool) []any {
+	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
+		PreserveReferences: preserveReferences,
+	})
+	return filtered
+}
+
+func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]any, codexInputFilterStats) {
 	filtered := make([]any, 0, len(input))
+	stats := codexInputFilterStats{}
 	for _, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -1157,11 +1185,16 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		}
 		typ, _ := m["type"].(string)
 
-		// chatgpt.com codex backend (OAuth path) does not persist reasoning
-		// items because applyCodexOAuthTransform forces store=false. Any rs_*
-		// reference replayed in input is guaranteed to 404 upstream
-		// ("Item with id 'rs_...' not found"). Drop reasoning items entirely.
 		if typ == "reasoning" {
+			// 空 rs_* reasoning 引用在 OAuth store=false 下会 404；带 encrypted_content
+			// 的内容是客户端回传的 opaque 推理状态，默认整体保留。以后只有遇到
+			// 上游明确报错的具体字段时，才在这里加窄范围黑名单。
+			if hasNonEmptyString(m["encrypted_content"]) {
+				filtered = append(filtered, m)
+				stats.PreservedEncryptedReasoningCount++
+			} else {
+				stats.DroppedReasoningWithoutEncryptedCount++
+			}
 			continue
 		}
 
@@ -1256,7 +1289,7 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 
 		filtered = append(filtered, newItem)
 	}
-	return filtered
+	return filtered, stats
 }
 
 func isCodexToolCallItemType(typ string) bool {
