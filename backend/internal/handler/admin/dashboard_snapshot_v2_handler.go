@@ -37,20 +37,42 @@ type dashboardSnapshotV2Response struct {
 }
 
 type dashboardSnapshotV2Filters struct {
-	UserID      int64
-	APIKeyID    int64
-	AccountID   int64
-	GroupID     int64
-	Model       string
-	RequestType *int16
-	Stream      *bool
-	BillingType *int8
+	UserID            int64
+	APIKeyID          int64
+	AccountID         int64
+	GroupID           int64
+	Model             string
+	ModelSource       string
+	ModelFilterSource string
+	RequestType       *int16
+	Stream            *bool
+	BillingType       *int8
+	BillingMode       string
+}
+
+func (f *dashboardSnapshotV2Filters) usageLogFilters() usagestats.UsageLogFilters {
+	if f == nil {
+		return usagestats.UsageLogFilters{}
+	}
+	return usagestats.UsageLogFilters{
+		UserID:            f.UserID,
+		APIKeyID:          f.APIKeyID,
+		AccountID:         f.AccountID,
+		GroupID:           f.GroupID,
+		Model:             f.Model,
+		ModelFilterSource: f.ModelFilterSource,
+		RequestType:       f.RequestType,
+		Stream:            f.Stream,
+		BillingType:       f.BillingType,
+		BillingMode:       f.BillingMode,
+	}
 }
 
 type dashboardSnapshotV2CacheKey struct {
 	ProjectID         int64   `json:"project_id,omitempty"`
 	StartTime         string  `json:"start_time"`
 	EndTime           string  `json:"end_time"`
+	ResponseEndDate   string  `json:"response_end_date"`
 	Granularity       string  `json:"granularity"`
 	Scoped            bool    `json:"scoped"`
 	ScopeEmpty        bool    `json:"scope_empty"`
@@ -60,9 +82,12 @@ type dashboardSnapshotV2CacheKey struct {
 	AccountID         int64   `json:"account_id"`
 	GroupID           int64   `json:"group_id"`
 	Model             string  `json:"model"`
+	ModelFilterSource string  `json:"model_filter_source,omitempty"`
+	ModelSource       string  `json:"model_source,omitempty"`
 	RequestType       *int16  `json:"request_type"`
 	Stream            *bool   `json:"stream"`
 	BillingType       *int8   `json:"billing_type"`
+	BillingMode       string  `json:"billing_mode,omitempty"`
 	IncludeStats      bool    `json:"include_stats"`
 	IncludeTrend      bool    `json:"include_trend"`
 	IncludeModels     bool    `json:"include_models"`
@@ -100,6 +125,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	responseEndDate := dashboardResponseEndDate(c, endTime)
 	scopeGroupIDs, err := scope.dashboardGroupIDs(filters.GroupID)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -113,6 +139,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		ProjectID:         dashboardCacheProjectID(c.Request.Context()),
 		StartTime:         startTime.UTC().Format(time.RFC3339),
 		EndTime:           endTime.UTC().Format(time.RFC3339),
+		ResponseEndDate:   responseEndDate,
 		Granularity:       granularity,
 		Scoped:            scope.isScoped(),
 		ScopeEmpty:        scope.isScoped() && len(scopeGroupIDs) == 0,
@@ -122,9 +149,12 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		AccountID:         filters.AccountID,
 		GroupID:           filters.GroupID,
 		Model:             filters.Model,
+		ModelFilterSource: usagestats.NormalizeModelSource(filters.ModelFilterSource),
+		ModelSource:       usagestats.NormalizeModelSource(filters.ModelSource),
 		RequestType:       filters.RequestType,
 		Stream:            filters.Stream,
 		BillingType:       filters.BillingType,
+		BillingMode:       filters.BillingMode,
 		IncludeStats:      includeStats,
 		IncludeTrend:      includeTrend,
 		IncludeModels:     includeModels,
@@ -139,6 +169,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 			c.Request.Context(),
 			startTime,
 			endTime,
+			responseEndDate,
 			granularity,
 			scope,
 			filters,
@@ -169,6 +200,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 func (h *DashboardHandler) buildSnapshotV2Response(
 	ctx context.Context,
 	startTime, endTime time.Time,
+	responseEndDate string,
 	granularity string,
 	scope *adminAccessScope,
 	filters *dashboardSnapshotV2Filters,
@@ -178,7 +210,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	resp := &dashboardSnapshotV2Response{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		StartDate:   startTime.Format("2006-01-02"),
-		EndDate:     endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		EndDate:     responseEndDate,
 		Granularity: granularity,
 	}
 
@@ -200,7 +232,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeTrend {
-		trend, _, err := h.getUsageTrendForScope(ctx, scope, startTime, endTime, granularity, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
+		trend, _, err := h.getUsageTrendForScope(ctx, scope, startTime, endTime, granularity, filters.usageLogFilters())
 		if err != nil {
 			return nil, errors.New("failed to get usage trend")
 		}
@@ -208,7 +240,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeModels {
-		models, _, err := h.getModelStatsForScope(ctx, scope, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, usagestats.ModelSourceRequested, filters.RequestType, filters.Stream, filters.BillingType)
+		models, _, err := h.getModelStatsForScope(ctx, scope, startTime, endTime, filters.usageLogFilters(), filters.ModelSource)
 		if err != nil {
 			return nil, errors.New("failed to get model statistics")
 		}
@@ -216,7 +248,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 	}
 
 	if includeGroups {
-		groups, _, err := h.getGroupStatsForScope(ctx, scope, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.RequestType, filters.Stream, filters.BillingType)
+		groups, _, err := h.getGroupStatsForScope(ctx, scope, startTime, endTime, filters.usageLogFilters())
 		if err != nil {
 			return nil, errors.New("failed to get group statistics")
 		}
@@ -236,7 +268,25 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 
 func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filters, error) {
 	filters := &dashboardSnapshotV2Filters{
-		Model: strings.TrimSpace(c.Query("model")),
+		Model:             strings.TrimSpace(c.Query("model")),
+		ModelSource:       usagestats.ModelSourceRequested,
+		ModelFilterSource: usagestats.ModelSourceRequested,
+		BillingMode:       strings.TrimSpace(c.Query("billing_mode")),
+	}
+	if rawModelFilterSource := strings.TrimSpace(c.Query("model_filter_source")); rawModelFilterSource != "" {
+		if !usagestats.IsValidModelSource(rawModelFilterSource) {
+			return nil, errors.New("invalid model_filter_source, use requested/upstream/mapping")
+		}
+		filters.ModelFilterSource = rawModelFilterSource
+	}
+	if rawModelSource := strings.TrimSpace(c.Query("model_source")); rawModelSource != "" {
+		if !usagestats.IsValidModelSource(rawModelSource) {
+			return nil, errors.New("invalid model_source, use requested/upstream/mapping")
+		}
+		filters.ModelSource = rawModelSource
+	}
+	if filters.BillingMode != "" && !service.BillingMode(filters.BillingMode).IsValid() {
+		return nil, errors.New("invalid billing_mode")
 	}
 
 	if userIDStr := strings.TrimSpace(c.Query("user_id")); userIDStr != "" {

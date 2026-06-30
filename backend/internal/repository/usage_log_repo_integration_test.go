@@ -650,6 +650,58 @@ func (s *UsageLogRepoSuite) TestListWithFilters() {
 	s.Require().Equal(int64(1), page.Total)
 }
 
+func (s *UsageLogRepoSuite) TestRequestedModelCandidateRoundTripsThroughUsageFilters() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "model-roundtrip@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-model-roundtrip", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-model-roundtrip"})
+
+	base := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	upstreamModel := "gpt-5-upstream"
+	log := &service.UsageLog{
+		UserID:         user.ID,
+		APIKeyID:       apiKey.ID,
+		AccountID:      account.ID,
+		RequestID:      uuid.NewString(),
+		Model:          "gpt-5-upstream",
+		RequestedModel: "gpt-5-requested",
+		UpstreamModel:  &upstreamModel,
+		InputTokens:    10,
+		OutputTokens:   20,
+		TotalCost:      0.5,
+		ActualCost:     0.4,
+		CreatedAt:      base,
+	}
+	_, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+
+	start := base.Add(-time.Hour)
+	end := base.Add(time.Hour)
+	scope := usagestats.UsageLogFilters{
+		UserID:            user.ID,
+		ModelFilterSource: usagestats.ModelSourceRequested,
+		StartTime:         &start,
+		EndTime:           &end,
+	}
+	models, err := s.repo.ListModelCandidates(s.ctx, scope, 50)
+	s.Require().NoError(err)
+	s.Require().Equal([]string{"gpt-5-requested"}, models)
+
+	filtered := scope
+	filtered.Model = models[0]
+	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filtered)
+	s.Require().NoError(err)
+	s.Require().Len(logs, 1)
+	s.Require().Equal(int64(1), page.Total)
+
+	count, err := s.repo.CountWithFilters(s.ctx, filtered)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), count)
+
+	stats, err := s.repo.GetStatsWithFilters(s.ctx, filtered)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), stats.TotalRequests)
+}
+
 // --- GetDashboardStats ---
 
 func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
@@ -1375,9 +1427,9 @@ func (s *UsageLogRepoSuite) TestGetUserModelStats() {
 	s.Require().Equal(int64(300), stats[0].TotalTokens)
 }
 
-// --- GetUsageTrendWithFilters ---
+// --- GetUsageTrendWithUsageFilters ---
 
-func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters() {
+func (s *UsageLogRepoSuite) TestGetUsageTrendWithUsageFilters() {
 	user := mustCreateUser(s.T(), s.client, &service.User{Email: "trendfilters@test.com"})
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-trendfilters", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-trendfilters"})
@@ -1390,22 +1442,22 @@ func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters() {
 	endTime := base.Add(48 * time.Hour)
 
 	// Test with user filter
-	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, 0, 0, 0, "", nil, nil, nil)
-	s.Require().NoError(err, "GetUsageTrendWithFilters user filter")
+	trend, err := s.repo.GetUsageTrendWithUsageFilters(s.ctx, startTime, endTime, "day", usagestats.UsageLogFilters{UserID: user.ID})
+	s.Require().NoError(err, "GetUsageTrendWithUsageFilters user filter")
 	s.Require().Len(trend, 2)
 
 	// Test with apiKey filter
-	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", 0, apiKey.ID, 0, 0, "", nil, nil, nil)
-	s.Require().NoError(err, "GetUsageTrendWithFilters apiKey filter")
+	trend, err = s.repo.GetUsageTrendWithUsageFilters(s.ctx, startTime, endTime, "day", usagestats.UsageLogFilters{APIKeyID: apiKey.ID})
+	s.Require().NoError(err, "GetUsageTrendWithUsageFilters apiKey filter")
 	s.Require().Len(trend, 2)
 
 	// Test with both filters
-	trend, err = s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "day", user.ID, apiKey.ID, 0, 0, "", nil, nil, nil)
-	s.Require().NoError(err, "GetUsageTrendWithFilters both filters")
+	trend, err = s.repo.GetUsageTrendWithUsageFilters(s.ctx, startTime, endTime, "day", usagestats.UsageLogFilters{UserID: user.ID, APIKeyID: apiKey.ID})
+	s.Require().NoError(err, "GetUsageTrendWithUsageFilters both filters")
 	s.Require().Len(trend, 2)
 }
 
-func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters_HourlyGranularity() {
+func (s *UsageLogRepoSuite) TestGetUsageTrendWithUsageFilters_HourlyGranularity() {
 	user := mustCreateUser(s.T(), s.client, &service.User{Email: "trendfilters-h@test.com"})
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-trendfilters-h", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-trendfilters-h"})
@@ -1417,14 +1469,14 @@ func (s *UsageLogRepoSuite) TestGetUsageTrendWithFilters_HourlyGranularity() {
 	startTime := base.Add(-1 * time.Hour)
 	endTime := base.Add(3 * time.Hour)
 
-	trend, err := s.repo.GetUsageTrendWithFilters(s.ctx, startTime, endTime, "hour", user.ID, 0, 0, 0, "", nil, nil, nil)
-	s.Require().NoError(err, "GetUsageTrendWithFilters hourly")
+	trend, err := s.repo.GetUsageTrendWithUsageFilters(s.ctx, startTime, endTime, "hour", usagestats.UsageLogFilters{UserID: user.ID})
+	s.Require().NoError(err, "GetUsageTrendWithUsageFilters hourly")
 	s.Require().Len(trend, 2)
 }
 
-// --- GetModelStatsWithFilters ---
+// --- GetModelStatsWithUsageFilters ---
 
-func (s *UsageLogRepoSuite) TestGetModelStatsWithFilters() {
+func (s *UsageLogRepoSuite) TestGetModelStatsWithUsageFilters() {
 	user := mustCreateUser(s.T(), s.client, &service.User{Email: "modelfilters@test.com"})
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-modelfilters", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-modelfilters"})
@@ -1463,18 +1515,18 @@ func (s *UsageLogRepoSuite) TestGetModelStatsWithFilters() {
 	endTime := base.Add(2 * time.Hour)
 
 	// Test with user filter
-	stats, err := s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, user.ID, 0, 0, 0, nil, nil, nil)
-	s.Require().NoError(err, "GetModelStatsWithFilters user filter")
+	stats, err := s.repo.GetModelStatsWithUsageFiltersBySource(s.ctx, startTime, endTime, usagestats.UsageLogFilters{UserID: user.ID}, usagestats.ModelSourceRequested)
+	s.Require().NoError(err, "GetModelStatsWithUsageFilters user filter")
 	s.Require().Len(stats, 2)
 
 	// Test with apiKey filter
-	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, apiKey.ID, 0, 0, nil, nil, nil)
-	s.Require().NoError(err, "GetModelStatsWithFilters apiKey filter")
+	stats, err = s.repo.GetModelStatsWithUsageFiltersBySource(s.ctx, startTime, endTime, usagestats.UsageLogFilters{APIKeyID: apiKey.ID}, usagestats.ModelSourceRequested)
+	s.Require().NoError(err, "GetModelStatsWithUsageFilters apiKey filter")
 	s.Require().Len(stats, 2)
 
 	// Test with account filter
-	stats, err = s.repo.GetModelStatsWithFilters(s.ctx, startTime, endTime, 0, 0, account.ID, 0, nil, nil, nil)
-	s.Require().NoError(err, "GetModelStatsWithFilters account filter")
+	stats, err = s.repo.GetModelStatsWithUsageFiltersBySource(s.ctx, startTime, endTime, usagestats.UsageLogFilters{AccountID: account.ID}, usagestats.ModelSourceRequested)
+	s.Require().NoError(err, "GetModelStatsWithUsageFilters account filter")
 	s.Require().Len(stats, 2)
 }
 

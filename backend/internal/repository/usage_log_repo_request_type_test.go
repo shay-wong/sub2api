@@ -517,7 +517,7 @@ func TestUsageLogRepositoryListWithFiltersRequestedModelSource(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUsageLogRepositoryGetUsageTrendWithFiltersRequestTypePriority(t *testing.T) {
+func TestUsageLogRepositoryGetUsageTrendWithUsageFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
@@ -530,7 +530,10 @@ func TestUsageLogRepositoryGetUsageTrendWithFiltersRequestTypePriority(t *testin
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost"}))
 
-	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", &requestType, &stream, nil)
+	trend, err := repo.GetUsageTrendWithUsageFilters(context.Background(), start, end, "day", usagestats.UsageLogFilters{
+		RequestType: &requestType,
+		Stream:      &stream,
+	})
 	require.NoError(t, err)
 	require.Empty(t, trend)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -557,7 +560,7 @@ func TestUsageLogRepositoryGetUsageTrendWithUsageFiltersRequestedModelSource(t *
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testing.T) {
+func TestUsageLogRepositoryGetModelStatsWithUsageFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
@@ -570,7 +573,10 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost", "account_cost"}))
 
-	stats, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, &requestType, &stream, nil)
+	stats, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, usagestats.UsageLogFilters{
+		RequestType: &requestType,
+		Stream:      &stream,
+	}, usagestats.ModelSourceRequested)
 	require.NoError(t, err)
 	require.Empty(t, stats)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -585,18 +591,19 @@ func TestUsageLogRepositoryListModelCandidatesUsesUsageFilters(t *testing.T) {
 	requestType := int16(service.RequestTypeWSV2)
 	billingType := int8(1)
 	filters := usagestats.UsageLogFilters{
-		UserID:      11,
-		APIKeyID:    22,
-		AccountID:   33,
-		GroupID:     44,
-		RequestType: &requestType,
-		BillingType: &billingType,
-		BillingMode: string(service.BillingModeImage),
-		StartTime:   &start,
-		EndTime:     &end,
+		UserID:            11,
+		APIKeyID:          22,
+		AccountID:         33,
+		GroupID:           44,
+		ModelFilterSource: usagestats.ModelSourceRequested,
+		RequestType:       &requestType,
+		BillingType:       &billingType,
+		BillingMode:       string(service.BillingModeImage),
+		StartTime:         &start,
+		EndTime:           &end,
 	}
 
-	mock.ExpectQuery("SELECT model\\s+FROM usage_logs\\s+WHERE user_id = \\$1 AND api_key_id = \\$2 AND account_id = \\$3 AND group_id = \\$4 AND \\(request_type = \\$5 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\) AND billing_type = \\$6 AND \\(billing_mode = \\$7 OR COALESCE\\(image_count, 0\\) > 0\\) AND created_at >= \\$8 AND created_at < \\$9\\s+GROUP BY model\\s+HAVING COALESCE\\(model, ''\\) <> ''\\s+ORDER BY .*\\s+LIMIT \\$10").
+	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) AS model\\s+FROM usage_logs\\s+WHERE user_id = \\$1 AND api_key_id = \\$2 AND account_id = \\$3 AND group_id = \\$4 AND \\(request_type = \\$5 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\) AND billing_type = \\$6 AND \\(billing_mode = \\$7 OR COALESCE\\(image_count, 0\\) > 0\\) AND created_at >= \\$8 AND created_at < \\$9\\s+GROUP BY COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\s+HAVING COALESCE\\(COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\), ''\\) <> ''\\s+ORDER BY .*\\s+LIMIT \\$10").
 		WithArgs(filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, requestType, int16(billingType), string(service.BillingModeImage), start, end, 50).
 		WillReturnRows(sqlmock.NewRows([]string{"model"}).AddRow("claude-3").AddRow("gpt-4o"))
 
@@ -706,7 +713,7 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(308), 2.5, 2.0, 1.8).
 			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(150), 1.0, 0.8, 0.7))
 
-	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
+	results, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, usagestats.UsageLogFilters{}, usagestats.ModelSourceRequested)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, "claude-opus-4-6", results[0].Model)
@@ -741,6 +748,32 @@ func TestUsageLogRepositoryGetModelStatsWithUsageFiltersAppliesRequestedModelFil
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetModelStatsSeparatesFilterSourceFromGroupSource(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	filters := usagestats.UsageLogFilters{
+		Model:             "gpt-5",
+		ModelFilterSource: usagestats.ModelSourceRequested,
+	}
+
+	mock.ExpectQuery("SELECT\\s+COALESCE\\(NULLIF\\(TRIM\\(upstream_model\\), ''\\), COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\) as model,.*AND COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$3.*GROUP BY COALESCE\\(NULLIF\\(TRIM\\(upstream_model\\), ''\\), COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\)").
+		WithArgs(start, end, "gpt-5").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"model", "requests", "input_tokens", "output_tokens",
+			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
+			"cost", "actual_cost", "account_cost",
+		}).AddRow("gpt-5-upstream", int64(1), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07))
+
+	results, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceUpstream)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "gpt-5-upstream", results[0].Model)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestUsageLogRepositoryGetGroupStatsAccountCostColumn(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -757,7 +790,7 @@ func TestUsageLogRepositoryGetGroupStatsAccountCostColumn(t *testing.T) {
 			AddRow(int64(1), "azure-cc", int64(100), int64(5000), 10.0, 8.5, 7.2).
 			AddRow(int64(2), "max", int64(50), int64(2000), 5.0, 4.0, 3.5))
 
-	results, err := repo.GetGroupStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
+	results, err := repo.GetGroupStatsWithUsageFilters(context.Background(), start, end, usagestats.UsageLogFilters{})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, int64(1), results[0].GroupID)
@@ -776,7 +809,10 @@ func TestUsageLogRepositoryGetGroupStatsWithUsageFiltersAppliesRequestedModelFil
 
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	filters := usagestats.UsageLogFilters{Model: "gpt-5"}
+	filters := usagestats.UsageLogFilters{
+		Model:             "gpt-5",
+		ModelFilterSource: usagestats.ModelSourceRequested,
+	}
 
 	mock.ExpectQuery("AND COALESCE\\(NULLIF\\(TRIM\\(ul.requested_model\\), ''\\), ul.model\\) = \\$3").
 		WithArgs(start, end, "gpt-5").
@@ -789,6 +825,57 @@ func TestUsageLogRepositoryGetGroupStatsWithUsageFiltersAppliesRequestedModelFil
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, int64(1), results[0].GroupID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageLogRepositoryGetGroupStatsWithUsageFiltersAppliesUpstreamModelFilter(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	filters := usagestats.UsageLogFilters{
+		Model:             "gpt-5-upstream",
+		ModelFilterSource: usagestats.ModelSourceUpstream,
+	}
+
+	mock.ExpectQuery("AND COALESCE\\(NULLIF\\(TRIM\\(ul.upstream_model\\), ''\\), COALESCE\\(NULLIF\\(TRIM\\(ul.requested_model\\), ''\\), ul.model\\)\\) = \\$3").
+		WithArgs(start, end, "gpt-5-upstream").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_id", "group_name", "requests", "total_tokens",
+			"cost", "actual_cost", "account_cost",
+		}).AddRow(int64(1), "default", int64(1), int64(30), 0.1, 0.08, 0.07))
+
+	results, err := repo.GetGroupStatsWithUsageFilters(context.Background(), start, end, filters)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, int64(1), results[0].GroupID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageLogRepositoryGetGeminiUsageTotalsBatchUsesUpstreamModel(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+
+	mock.ExpectQuery("COALESCE\\(NULLIF\\(TRIM\\(upstream_model\\), ''\\), COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\).*LIKE '%flash%'").
+		WithArgs(sqlmock.AnyArg(), start, end).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"account_id",
+			"flash_requests",
+			"pro_requests",
+			"flash_tokens",
+			"pro_tokens",
+			"flash_cost",
+			"pro_cost",
+		}).AddRow(int64(11), int64(2), int64(3), int64(20), int64(30), 0.2, 0.3))
+
+	totals, err := repo.GetGeminiUsageTotalsBatch(context.Background(), []int64{11}, start, end)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), totals[11].FlashRequests)
+	require.Equal(t, int64(3), totals[11].ProRequests)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

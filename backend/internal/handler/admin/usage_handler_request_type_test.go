@@ -159,6 +159,8 @@ func TestAdminUsageListAndCountShareFilterParsing(t *testing.T) {
 	countFilters := repo.countFilters
 	listFilters.ExactTotal = false
 	require.Equal(t, listFilters, countFilters)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.listFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.countFilters.ModelFilterSource)
 }
 
 func TestAdminUsageCountTimeout(t *testing.T) {
@@ -184,6 +186,7 @@ func TestAdminUsageStatsRequestTypePriority(t *testing.T) {
 	require.NotNil(t, repo.statsFilters.RequestType)
 	require.Equal(t, int16(service.RequestTypeStream), *repo.statsFilters.RequestType)
 	require.Nil(t, repo.statsFilters.Stream)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.statsFilters.ModelFilterSource)
 }
 
 func TestAdminUsageStatsInvalidRequestType(t *testing.T) {
@@ -222,6 +225,7 @@ func TestAdminUsageSearchModelsUsesUsageScopedFilters(t *testing.T) {
 	require.Equal(t, int64(33), repo.modelFilters.AccountID)
 	require.Equal(t, int64(44), repo.modelFilters.GroupID)
 	require.Empty(t, repo.modelFilters.Model)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelFilters.ModelFilterSource)
 	require.NotNil(t, repo.modelFilters.RequestType)
 	require.Equal(t, int16(service.RequestTypeWSV2), *repo.modelFilters.RequestType)
 	require.NotNil(t, repo.modelFilters.BillingType)

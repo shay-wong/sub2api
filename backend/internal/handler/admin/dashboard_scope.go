@@ -18,25 +18,23 @@ func (h *DashboardHandler) getUsageTrendForScope(
 	scope *adminAccessScope,
 	startTime, endTime time.Time,
 	granularity string,
-	userID, apiKeyID, accountID, groupID int64,
-	model string,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
+	filters usagestats.UsageLogFilters,
 ) ([]usagestats.TrendDataPoint, bool, error) {
-	groupIDs, err := h.scopedDashboardGroupIDs(scope, groupID)
+	groupIDs, err := h.scopedDashboardGroupIDs(scope, filters.GroupID)
 	if err != nil {
 		return nil, false, err
 	}
 	if !scope.isScoped() {
-		return h.getUsageTrendCached(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType)
+		return h.getUsageTrendCached(ctx, startTime, endTime, granularity, filters)
 	}
 	if len(groupIDs) == 0 {
 		return []usagestats.TrendDataPoint{}, false, nil
 	}
 	byDate := map[string]*usagestats.TrendDataPoint{}
 	for _, scopedGroupID := range groupIDs {
-		points, err := h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, scopedGroupID, model, requestType, stream, billingType)
+		scopedFilters := filters
+		scopedFilters.GroupID = scopedGroupID
+		points, err := h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, scopedFilters)
 		if err != nil {
 			return nil, false, err
 		}
@@ -64,25 +62,24 @@ func (h *DashboardHandler) getModelStatsForScope(
 	ctx context.Context,
 	scope *adminAccessScope,
 	startTime, endTime time.Time,
-	userID, apiKeyID, accountID, groupID int64,
+	filters usagestats.UsageLogFilters,
 	modelSource string,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
 ) ([]usagestats.ModelStat, bool, error) {
-	groupIDs, err := h.scopedDashboardGroupIDs(scope, groupID)
+	groupIDs, err := h.scopedDashboardGroupIDs(scope, filters.GroupID)
 	if err != nil {
 		return nil, false, err
 	}
 	if !scope.isScoped() {
-		return h.getModelStatsCached(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, billingType)
+		return h.getModelStatsCached(ctx, startTime, endTime, filters, modelSource)
 	}
 	if len(groupIDs) == 0 {
 		return []usagestats.ModelStat{}, false, nil
 	}
 	byModel := map[string]*usagestats.ModelStat{}
 	for _, scopedGroupID := range groupIDs {
-		rows, err := h.dashboardService.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, scopedGroupID, requestType, stream, billingType, modelSource)
+		scopedFilters := filters
+		scopedFilters.GroupID = scopedGroupID
+		rows, err := h.dashboardService.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, scopedFilters, modelSource)
 		if err != nil {
 			return nil, false, err
 		}
@@ -111,24 +108,23 @@ func (h *DashboardHandler) getGroupStatsForScope(
 	ctx context.Context,
 	scope *adminAccessScope,
 	startTime, endTime time.Time,
-	userID, apiKeyID, accountID, groupID int64,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
+	filters usagestats.UsageLogFilters,
 ) ([]usagestats.GroupStat, bool, error) {
-	groupIDs, err := h.scopedDashboardGroupIDs(scope, groupID)
+	groupIDs, err := h.scopedDashboardGroupIDs(scope, filters.GroupID)
 	if err != nil {
 		return nil, false, err
 	}
 	if !scope.isScoped() {
-		return h.getGroupStatsCached(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType)
+		return h.getGroupStatsCached(ctx, startTime, endTime, filters)
 	}
 	if len(groupIDs) == 0 {
 		return []usagestats.GroupStat{}, false, nil
 	}
 	out := make([]usagestats.GroupStat, 0, len(groupIDs))
 	for _, scopedGroupID := range groupIDs {
-		rows, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, scopedGroupID, requestType, stream, billingType)
+		scopedFilters := filters
+		scopedFilters.GroupID = scopedGroupID
+		rows, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, scopedFilters)
 		if err != nil {
 			return nil, false, err
 		}
@@ -161,7 +157,7 @@ func (h *DashboardHandler) getDashboardStatsForScope(ctx context.Context, scope 
 		}
 	}
 	for _, groupID := range scope.GroupIDs {
-		stats, err := h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, "day", 0, 0, 0, groupID, "", nil, nil, nil)
+		stats, err := h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, "day", usagestats.UsageLogFilters{GroupID: groupID})
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +171,7 @@ func (h *DashboardHandler) getDashboardStatsForScope(ctx context.Context, scope 
 			merged.TotalActualCost += point.ActualCost
 		}
 		todayStart := timezone.Today()
-		todayTrend, err := h.dashboardService.GetUsageTrendWithFilters(ctx, todayStart, todayStart.Add(24*time.Hour), "day", 0, 0, 0, groupID, "", nil, nil, nil)
+		todayTrend, err := h.dashboardService.GetUsageTrendWithFilters(ctx, todayStart, todayStart.AddDate(0, 0, 1), "day", usagestats.UsageLogFilters{GroupID: groupID})
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +185,7 @@ func (h *DashboardHandler) getDashboardStatsForScope(ctx context.Context, scope 
 			merged.TodayActualCost += point.ActualCost
 		}
 		if !useAccountStats {
-			groupStats, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, 0, 0, 0, groupID, nil, nil, nil)
+			groupStats, err := h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, usagestats.UsageLogFilters{GroupID: groupID})
 			if err != nil {
 				return nil, err
 			}

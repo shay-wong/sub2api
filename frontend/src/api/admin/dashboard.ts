@@ -51,11 +51,13 @@ export interface TrendParams {
   user_id?: number
   api_key_id?: number
   model?: string
+  model_filter_source?: 'requested' | 'upstream' | 'mapping'
   account_id?: number
   group_id?: number
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
+  billing_mode?: string | null
 }
 
 export interface TrendResponse {
@@ -82,11 +84,13 @@ export interface ModelStatsParams {
   api_key_id?: number
   model?: string
   model_source?: 'requested' | 'upstream' | 'mapping'
+  model_filter_source?: 'requested' | 'upstream' | 'mapping'
   account_id?: number
   group_id?: number
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
+  billing_mode?: string | null
 }
 
 export interface ModelStatsResponse {
@@ -112,9 +116,12 @@ export interface GroupStatsParams {
   api_key_id?: number
   account_id?: number
   group_id?: number
+  model?: string
+  model_filter_source?: 'requested' | 'upstream' | 'mapping'
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null
+  billing_mode?: string | null
 }
 
 export interface GroupStatsResponse {

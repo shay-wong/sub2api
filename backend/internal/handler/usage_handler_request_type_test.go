@@ -21,6 +21,8 @@ type userUsageRepoCapture struct {
 	listFilters  usagestats.UsageLogFilters
 	statsFilters usagestats.UsageLogFilters
 	trendFilters usagestats.UsageLogFilters
+	modelFilters usagestats.UsageLogFilters
+	modelSource  string
 	groupFilters usagestats.UsageLogFilters
 	listRows     []service.UsageLog
 	stats        *usagestats.UsageStats
@@ -47,34 +49,19 @@ func (s *userUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters 
 	return &usagestats.UsageStats{}, nil
 }
 
-func (s *userUsageRepoCapture) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {
-	s.trendFilters = usagestats.UsageLogFilters{
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Model:       model,
-		RequestType: requestType,
-		Stream:      stream,
-		BillingType: billingType,
-	}
+func (s *userUsageRepoCapture) GetUsageTrendWithUsageFilters(ctx context.Context, startTime, endTime time.Time, granularity string, filters usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error) {
+	s.trendFilters = filters
 	return []usagestats.TrendDataPoint{}, nil
 }
 
-func (s *userUsageRepoCapture) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) ([]usagestats.ModelStat, error) {
+func (s *userUsageRepoCapture) GetModelStatsWithUsageFiltersBySource(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters, source string) ([]usagestats.ModelStat, error) {
+	s.modelFilters = filters
+	s.modelSource = source
 	return s.modelStats, nil
 }
 
-func (s *userUsageRepoCapture) GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) ([]usagestats.GroupStat, error) {
-	s.groupFilters = usagestats.UsageLogFilters{
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		RequestType: requestType,
-		Stream:      stream,
-		BillingType: billingType,
-	}
+func (s *userUsageRepoCapture) GetGroupStatsWithUsageFilters(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters) ([]usagestats.GroupStat, error) {
+	s.groupFilters = filters
 	return s.groupStats, nil
 }
 
@@ -89,6 +76,7 @@ func newUserUsageRequestTypeTestRouter(repo *userUsageRepoCapture) *gin.Engine {
 	})
 	router.GET("/usage", handler.List)
 	router.GET("/usage/stats", handler.Stats)
+	router.GET("/usage/dashboard/trend", handler.DashboardTrend)
 	router.GET("/usage/dashboard/models", handler.DashboardModels)
 	router.GET("/usage/dashboard/snapshot-v2", handler.DashboardSnapshotV2)
 	return router
@@ -252,6 +240,68 @@ func TestUserUsageStatsUsesScopedFilters(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "endpoint_paths")
 }
 
+func TestUserUsageStatsDefaultsToTodayWhenRangeIsOmitted(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/stats?timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.statsFilters.StartTime)
+	require.NotNil(t, repo.statsFilters.EndTime)
+
+	now := time.Now().UTC()
+	require.Equal(t, now.Format("2006-01-02"), repo.statsFilters.StartTime.UTC().Format("2006-01-02"))
+	require.Equal(t, 0, repo.statsFilters.StartTime.UTC().Hour())
+	require.Equal(t, now.Format("2006-01-02"), repo.statsFilters.EndTime.UTC().Format("2006-01-02"))
+}
+
+func TestUserUsageDashboardTrendPeriodTodayReturnsCurrentEndDate(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/trend?period=today&timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"end_date":"`+time.Now().UTC().Format("2006-01-02")+`"`)
+}
+
+func TestUserUsageDashboardTrendDefaultsToLastSevenDaysWhenRangeIsOmitted(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/trend?timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.trendFilters.StartTime)
+	require.NotNil(t, repo.trendFilters.EndTime)
+
+	now := time.Now().UTC()
+	require.Equal(t, now.AddDate(0, 0, -7).Format("2006-01-02"), repo.trendFilters.StartTime.UTC().Format("2006-01-02"))
+	require.Equal(t, 0, repo.trendFilters.StartTime.UTC().Hour())
+	require.Equal(t, now.AddDate(0, 0, 1).Format("2006-01-02"), repo.trendFilters.EndTime.UTC().Format("2006-01-02"))
+	require.Equal(t, 0, repo.trendFilters.EndTime.UTC().Hour())
+}
+
+func TestUserUsageDashboardSnapshotExplicitEndDateKeepsRequestedEndDate(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/snapshot-v2?include_trend=false&include_model_stats=false&include_group_stats=false&start_date=2026-03-01&end_date=2026-03-02&timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"start_date":"2026-03-01"`)
+	require.Contains(t, rec.Body.String(), `"end_date":"2026-03-02"`)
+}
+
 func TestUserUsageDashboardModelsOmitsAccountCost(t *testing.T) {
 	repo := &userUsageRepoCapture{
 		modelStats: []usagestats.ModelStat{{
@@ -294,17 +344,26 @@ func TestUserUsageSnapshotUsesScopedFilters(t *testing.T) {
 	}
 	router := newUserUsageRequestTypeTestRouter(repo)
 
-	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/snapshot-v2?include_trend=true&include_model_stats=true&include_group_stats=true&group_id=11&request_type=stream&start_date=2026-03-01&end_date=2026-03-02", nil)
+	req := httptest.NewRequest(http.MethodGet, "/usage/dashboard/snapshot-v2?include_trend=true&include_model_stats=true&include_group_stats=true&group_id=11&model=gpt-5&request_type=stream&billing_mode=token&start_date=2026-03-01&end_date=2026-03-02", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(42), repo.trendFilters.UserID)
 	require.Equal(t, int64(11), repo.trendFilters.GroupID)
+	require.Equal(t, "gpt-5", repo.trendFilters.Model)
 	require.NotNil(t, repo.trendFilters.RequestType)
 	require.Equal(t, int16(service.RequestTypeStream), *repo.trendFilters.RequestType)
+	require.Equal(t, "token", repo.trendFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelSource)
+	require.Equal(t, int64(42), repo.modelFilters.UserID)
+	require.Equal(t, int64(11), repo.modelFilters.GroupID)
+	require.Equal(t, "gpt-5", repo.modelFilters.Model)
+	require.Equal(t, "token", repo.modelFilters.BillingMode)
 	require.Equal(t, int64(42), repo.groupFilters.UserID)
 	require.Equal(t, int64(11), repo.groupFilters.GroupID)
+	require.Equal(t, "gpt-5", repo.groupFilters.Model)
+	require.Equal(t, "token", repo.groupFilters.BillingMode)
 	require.NotContains(t, rec.Body.String(), "account_cost")
 }
 

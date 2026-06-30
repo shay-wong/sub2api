@@ -131,12 +131,14 @@ const OpsErrorDetailModalStub = {
   template: '<div v-if="show" data-test="ops-error-detail">{{ errorId }}</div>',
 }
 const ModelDistributionChartStub = {
-  props: ['metric'],
-  emits: ['update:metric'],
+  props: ['metric', 'source'],
+  emits: ['update:metric', 'update:source'],
   template: `
     <div data-test="model-chart">
       <span class="metric">{{ metric }}</span>
+      <span class="source">{{ source }}</span>
       <button class="switch-metric" @click="$emit('update:metric', 'actual_cost')">switch</button>
+      <button class="switch-source" @click="$emit('update:source', 'upstream')">source</button>
     </div>
   `,
 }
@@ -405,6 +407,89 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards billing mode to dashboard chart requests', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    ;(wrapper.vm as any).filters.billing_mode = 'image'
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+
+    expect(getModelStats).toHaveBeenLastCalledWith(expect.objectContaining({
+      billing_mode: 'image',
+      model_source: 'requested',
+    }))
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
+      billing_mode: 'image',
+    }))
+
+    wrapper.unmount()
+  })
+
+  it('keeps model source scoped to model stats when source changes', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+    expect(getSnapshotV2).not.toHaveBeenLastCalledWith(expect.objectContaining({
+      model_source: expect.any(String),
+    }))
+
+    await wrapper.get('[data-test="model-chart"] .switch-source').trigger('click')
+    await flushPromises()
+
+    expect(getModelStats).toHaveBeenLastCalledWith(expect.objectContaining({
+      model_source: 'upstream',
+    }))
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
   })
 })
 

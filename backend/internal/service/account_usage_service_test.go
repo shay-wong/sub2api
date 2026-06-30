@@ -5,12 +5,27 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
 
 type accountUsageCodexProbeRepo struct {
 	stubOpenAIAccountRepo
 	updateExtraCh chan map[string]any
 	rateLimitCh   chan time.Time
+}
+
+type accountUsageGeminiUsageRepo struct {
+	UsageLogRepository
+	calls   []usagestats.UsageLogFilters
+	sources []string
+	stats   []usagestats.ModelStat
+}
+
+func (r *accountUsageGeminiUsageRepo) GetModelStatsWithUsageFiltersBySource(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters, source string) ([]usagestats.ModelStat, error) {
+	r.calls = append(r.calls, filters)
+	r.sources = append(r.sources, source)
+	return r.stats, nil
 }
 
 func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -154,6 +169,52 @@ func TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit(
 	case got := <-repo.rateLimitCh:
 		t.Fatalf("不应将已耗尽的 codex extra 持久化为运行时限流状态: %v", got)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestAccountUsageService_GetGeminiUsageUsesUpstreamModelStatsForAccount(t *testing.T) {
+	t.Parallel()
+
+	repo := &accountUsageGeminiUsageRepo{
+		stats: []usagestats.ModelStat{
+			{Model: "gemini-2.5-pro", Requests: 3, TotalTokens: 30, ActualCost: 0.03},
+			{Model: "gemini-2.5-flash", Requests: 4, TotalTokens: 40, ActualCost: 0.04},
+		},
+	}
+	svc := &AccountUsageService{
+		usageLogRepo:       repo,
+		geminiQuotaService: NewGeminiQuotaService(nil, nil),
+	}
+	account := &Account{
+		ID:       77,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_type": "google_one",
+			"tier_id":    GeminiTierGoogleOneFree,
+		},
+	}
+
+	usage, err := svc.getGeminiUsage(context.Background(), account)
+	if err != nil {
+		t.Fatalf("getGeminiUsage() error = %v", err)
+	}
+	if len(repo.calls) != 2 {
+		t.Fatalf("expected daily and minute stats calls, got %d", len(repo.calls))
+	}
+	for i, filters := range repo.calls {
+		if filters.AccountID != account.ID {
+			t.Fatalf("call %d AccountID = %d, want %d", i, filters.AccountID, account.ID)
+		}
+		if repo.sources[i] != usagestats.ModelSourceUpstream {
+			t.Fatalf("call %d source = %q, want upstream", i, repo.sources[i])
+		}
+	}
+	if usage.GeminiSharedDaily == nil || usage.GeminiSharedDaily.UsedRequests != 7 {
+		t.Fatalf("expected shared daily usage to include pro+flash requests, got %#v", usage.GeminiSharedDaily)
+	}
+	if usage.GeminiSharedMinute == nil || usage.GeminiSharedMinute.UsedRequests != 7 {
+		t.Fatalf("expected shared minute usage to include pro+flash requests, got %#v", usage.GeminiSharedMinute)
 	}
 }
 

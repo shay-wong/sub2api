@@ -32,6 +32,21 @@ func TestParseTimeRange(t *testing.T) {
 	require.False(t, end.IsZero())
 }
 
+func TestParseTimeRangeUsesCalendarDayAcrossDST(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?start_date=2024-03-10&end_date=2024-03-10&timezone=America/New_York", nil)
+
+	loc, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	start, end := parseTimeRange(c)
+
+	require.Equal(t, time.Date(2024, 3, 10, 0, 0, 0, 0, loc), start)
+	require.Equal(t, time.Date(2024, 3, 11, 0, 0, 0, 0, loc), end)
+	require.Equal(t, 23*time.Hour, end.Sub(start))
+}
+
 func TestParseOpsViewParam(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

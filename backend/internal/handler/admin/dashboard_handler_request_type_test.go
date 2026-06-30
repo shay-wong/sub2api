@@ -17,39 +17,49 @@ type dashboardUsageRepoCapture struct {
 	service.UsageLogRepository
 	trendRequestType *int16
 	trendStream      *bool
+	trendFilters     usagestats.UsageLogFilters
 	modelRequestType *int16
 	modelStream      *bool
+	modelFilters     usagestats.UsageLogFilters
+	modelSource      string
+	groupFilters     usagestats.UsageLogFilters
 	rankingLimit     int
 	ranking          []usagestats.UserSpendingRankingItem
 	rankingTotal     float64
 }
 
-func (s *dashboardUsageRepoCapture) GetUsageTrendWithFilters(
+func (s *dashboardUsageRepoCapture) GetUsageTrendWithUsageFilters(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	granularity string,
-	userID, apiKeyID, accountID, groupID int64,
-	model string,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
+	filters usagestats.UsageLogFilters,
 ) ([]usagestats.TrendDataPoint, error) {
-	s.trendRequestType = requestType
-	s.trendStream = stream
+	s.trendRequestType = filters.RequestType
+	s.trendStream = filters.Stream
+	s.trendFilters = filters
 	return []usagestats.TrendDataPoint{}, nil
 }
 
-func (s *dashboardUsageRepoCapture) GetModelStatsWithFilters(
+func (s *dashboardUsageRepoCapture) GetModelStatsWithUsageFiltersBySource(
 	ctx context.Context,
 	startTime, endTime time.Time,
-	userID, apiKeyID, accountID, groupID int64,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
+	filters usagestats.UsageLogFilters,
+	source string,
 ) ([]usagestats.ModelStat, error) {
-	s.modelRequestType = requestType
-	s.modelStream = stream
+	s.modelRequestType = filters.RequestType
+	s.modelStream = filters.Stream
+	s.modelFilters = filters
+	s.modelSource = source
 	return []usagestats.ModelStat{}, nil
+}
+
+func (s *dashboardUsageRepoCapture) GetGroupStatsWithUsageFilters(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	filters usagestats.UsageLogFilters,
+) ([]usagestats.GroupStat, error) {
+	s.groupFilters = filters
+	return []usagestats.GroupStat{}, nil
 }
 
 func (s *dashboardUsageRepoCapture) GetUserSpendingRanking(
@@ -73,6 +83,8 @@ func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Eng
 	router := gin.New()
 	router.GET("/admin/dashboard/trend", handler.GetUsageTrend)
 	router.GET("/admin/dashboard/models", handler.GetModelStats)
+	router.GET("/admin/dashboard/groups", handler.GetGroupStats)
+	router.GET("/admin/dashboard/snapshot-v2", handler.GetSnapshotV2)
 	router.GET("/admin/dashboard/users-ranking", handler.GetUserSpendingRanking)
 	return router
 }
@@ -107,6 +119,17 @@ func TestDashboardTrendInvalidStream(t *testing.T) {
 	router := newDashboardRequestTypeTestRouter(repo)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/trend?stream=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardTrendInvalidModelFilterSource(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/trend?model_filter_source=bad", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -160,15 +183,187 @@ func TestDashboardModelStatsInvalidModelSource(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestDashboardModelStatsInvalidModelFilterSource(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model_filter_source=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestDashboardModelStatsValidModelSource(t *testing.T) {
 	repo := &dashboardUsageRepoCapture{}
 	router := newDashboardRequestTypeTestRouter(repo)
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model_source=upstream", nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model=gpt-5-upstream&model_source=upstream", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5-upstream", repo.modelFilters.Model)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelSource)
+}
+
+func TestDashboardModelStatsValidModelFilterSource(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model=gpt-5-upstream&model_source=upstream&model_filter_source=upstream", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5-upstream", repo.modelFilters.Model)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelSource)
+}
+
+func TestDashboardModelStatsPassesModelAndBillingMode(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/models?model=gpt-5&billing_mode=token&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5", repo.modelFilters.Model)
+	require.Equal(t, "token", repo.modelFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelSource)
+}
+
+func TestDashboardGroupStatsPassesModelAndBillingMode(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/groups?model=gpt-5&billing_mode=token&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5", repo.groupFilters.Model)
+	require.Equal(t, "token", repo.groupFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.groupFilters.ModelFilterSource)
+}
+
+func TestDashboardGroupStatsPassesExplicitModelFilterSource(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/groups?model=gpt-5&model_filter_source=upstream&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5", repo.groupFilters.Model)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.groupFilters.ModelFilterSource)
+}
+
+func TestDashboardSnapshotV2PassesModelAndBillingModeToAllUsageSections(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?include_stats=false&include_trend=true&include_model_stats=true&include_group_stats=true&model=gpt-5&billing_mode=token&request_type=stream&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5", repo.trendFilters.Model)
+	require.Equal(t, "token", repo.trendFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.trendFilters.ModelFilterSource)
+	require.NotNil(t, repo.trendFilters.RequestType)
+	require.Equal(t, int16(service.RequestTypeStream), *repo.trendFilters.RequestType)
+
+	require.Equal(t, "gpt-5", repo.modelFilters.Model)
+	require.Equal(t, "token", repo.modelFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelSource)
+	require.NotNil(t, repo.modelFilters.RequestType)
+	require.Equal(t, int16(service.RequestTypeStream), *repo.modelFilters.RequestType)
+
+	require.Equal(t, "gpt-5", repo.groupFilters.Model)
+	require.Equal(t, "token", repo.groupFilters.BillingMode)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.groupFilters.ModelFilterSource)
+	require.NotNil(t, repo.groupFilters.RequestType)
+	require.Equal(t, int16(service.RequestTypeStream), *repo.groupFilters.RequestType)
+}
+
+func TestDashboardSnapshotV2KeepsModelSourceSeparateFromModelFilterSource(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?include_stats=false&include_trend=true&include_model_stats=true&include_group_stats=true&model=gpt-5&model_source=upstream&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5", repo.trendFilters.Model)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.trendFilters.ModelFilterSource)
+	require.Equal(t, "gpt-5", repo.modelFilters.Model)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelSource)
+	require.Equal(t, "gpt-5", repo.groupFilters.Model)
+	require.Equal(t, usagestats.ModelSourceRequested, repo.groupFilters.ModelFilterSource)
+}
+
+func TestDashboardSnapshotV2PassesExplicitModelFilterSourceToUsageFilters(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	resetDashboardReadCachesForTest()
+
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?include_stats=false&include_trend=true&include_model_stats=true&include_group_stats=true&model=gpt-5&model_source=upstream&model_filter_source=upstream&start_date=2026-03-01&end_date=2026-03-02", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.trendFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelFilters.ModelFilterSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.modelSource)
+	require.Equal(t, usagestats.ModelSourceUpstream, repo.groupFilters.ModelFilterSource)
+}
+
+func TestDashboardSnapshotV2InvalidModelSource(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?model_source=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDashboardSnapshotV2InvalidModelFilterSource(t *testing.T) {
+	repo := &dashboardUsageRepoCapture{}
+	router := newDashboardRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/snapshot-v2?model_filter_source=bad", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestDashboardUsersRankingLimitAndCache(t *testing.T) {

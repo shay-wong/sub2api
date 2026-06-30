@@ -92,12 +92,13 @@ func parseAdminUsageLogFilters(c *gin.Context) (usagestats.UsageLogFilters, bool
 	}
 
 	filters := usagestats.UsageLogFilters{
-		UserID:      userID,
-		APIKeyID:    apiKeyID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Model:       c.Query("model"),
-		BillingMode: strings.TrimSpace(c.Query("billing_mode")),
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             c.Query("model"),
+		ModelFilterSource: usagestats.ModelSourceRequested,
+		BillingMode:       strings.TrimSpace(c.Query("billing_mode")),
 	}
 
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {

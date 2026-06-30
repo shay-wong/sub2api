@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/tidwall/gjson"
 )
 
@@ -367,7 +368,7 @@ func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, 
 	}
 
 	now := time.Now()
-	modelClass := geminiModelClassFromName(requestedModel)
+	modelClass := geminiQuotaModelClassForAccount(account, requestedModel)
 
 	// 1) Daily quota precheck (RPD; resets at PST midnight)
 	{
@@ -387,7 +388,7 @@ func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, 
 			start := geminiDailyWindowStart(now)
 			totals, ok := s.getGeminiUsageTotals(account.ID, start, now)
 			if !ok {
-				stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil)
+				stats, err := s.usageRepo.GetModelStatsWithUsageFiltersBySource(ctx, start, now, usagestats.UsageLogFilters{AccountID: account.ID}, usagestats.ModelSourceUpstream)
 				if err != nil {
 					return true, err
 				}
@@ -434,7 +435,7 @@ func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, 
 
 		if limit > 0 {
 			start := now.Truncate(time.Minute)
-			stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, now, 0, 0, account.ID, 0, nil, nil, nil)
+			stats, err := s.usageRepo.GetModelStatsWithUsageFiltersBySource(ctx, start, now, usagestats.UsageLogFilters{AccountID: account.ID}, usagestats.ModelSourceUpstream)
 			if err != nil {
 				return true, err
 			}
@@ -482,14 +483,14 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 		return result, nil
 	}
 
-	modelClass := geminiModelClassFromName(requestedModel)
 	now := time.Now()
 	dailyStart := geminiDailyWindowStart(now)
 	minuteStart := now.Truncate(time.Minute)
 
 	type quotaAccount struct {
-		account *Account
-		quota   GeminiQuota
+		account    *Account
+		quota      GeminiQuota
+		modelClass geminiModelClass
 	}
 	quotaAccounts := make([]quotaAccount, 0, len(accounts))
 	for _, account := range accounts {
@@ -501,8 +502,9 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 			continue
 		}
 		quotaAccounts = append(quotaAccounts, quotaAccount{
-			account: account,
-			quota:   quota,
+			account:    account,
+			quota:      quota,
+			modelClass: geminiQuotaModelClassForAccount(account, requestedModel),
 		})
 	}
 	if len(quotaAccounts) == 0 {
@@ -513,7 +515,7 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 	dailyTotalsByID := make(map[int64]GeminiUsageTotals, len(quotaAccounts))
 	dailyMissIDs := make([]int64, 0, len(quotaAccounts))
 	for _, item := range quotaAccounts {
-		limit := geminiDailyLimit(item.quota, modelClass)
+		limit := geminiDailyLimit(item.quota, item.modelClass)
 		if limit <= 0 {
 			continue
 		}
@@ -536,12 +538,12 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 		}
 	}
 	for _, item := range quotaAccounts {
-		limit := geminiDailyLimit(item.quota, modelClass)
+		limit := geminiDailyLimit(item.quota, item.modelClass)
 		if limit <= 0 {
 			continue
 		}
 		accountID := item.account.ID
-		used := geminiUsedRequests(item.quota, modelClass, dailyTotalsByID[accountID], true)
+		used := geminiUsedRequests(item.quota, item.modelClass, dailyTotalsByID[accountID], true)
 		if used >= limit {
 			resetAt := geminiDailyResetTime(now)
 			slog.Info("gemini_precheck_daily_quota_reached_batch", "account_id", accountID, "used", used, "limit", limit, "reset_at", resetAt)
@@ -556,7 +558,7 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 		if !result[accountID] {
 			continue
 		}
-		if geminiMinuteLimit(item.quota, modelClass) <= 0 {
+		if geminiMinuteLimit(item.quota, item.modelClass) <= 0 {
 			continue
 		}
 		minuteIDs = append(minuteIDs, accountID)
@@ -575,12 +577,12 @@ func (s *RateLimitService) PreCheckUsageBatch(ctx context.Context, accounts []*A
 			continue
 		}
 
-		limit := geminiMinuteLimit(item.quota, modelClass)
+		limit := geminiMinuteLimit(item.quota, item.modelClass)
 		if limit <= 0 {
 			continue
 		}
 
-		used := geminiUsedRequests(item.quota, modelClass, minuteTotalsByID[accountID], false)
+		used := geminiUsedRequests(item.quota, item.modelClass, minuteTotalsByID[accountID], false)
 		if used >= limit {
 			resetAt := minuteStart.Add(time.Minute)
 			slog.Info("gemini_precheck_minute_quota_reached_batch", "account_id", accountID, "used", used, "limit", limit, "reset_at", resetAt)
@@ -625,7 +627,7 @@ func (s *RateLimitService) getGeminiUsageTotalsBatch(ctx context.Context, accoun
 	}
 
 	for _, accountID := range ids {
-		stats, err := s.usageRepo.GetModelStatsWithFilters(ctx, start, end, 0, 0, accountID, 0, nil, nil, nil)
+		stats, err := s.usageRepo.GetModelStatsWithUsageFiltersBySource(ctx, start, end, usagestats.UsageLogFilters{AccountID: accountID}, usagestats.ModelSourceUpstream)
 		if err != nil {
 			return nil, err
 		}

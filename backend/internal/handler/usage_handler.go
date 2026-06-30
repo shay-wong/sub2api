@@ -18,10 +18,18 @@ import (
 )
 
 type userUsageFilters struct {
-	Filters   usagestats.UsageLogFilters
-	StartTime time.Time
-	EndTime   time.Time
+	Filters         usagestats.UsageLogFilters
+	StartTime       time.Time
+	EndTime         time.Time
+	ResponseEndDate string
 }
+
+type userUsageDefaultRange int
+
+const (
+	userUsageDefaultLast7Days userUsageDefaultRange = iota
+	userUsageDefaultToday
+)
 
 type userModelStat struct {
 	Model               string  `json:"model"`
@@ -68,6 +76,10 @@ func NewUsageHandler(
 }
 
 func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) (*userUsageFilters, bool) {
+	return h.parseUserUsageFiltersWithDefault(c, requireRange, userUsageDefaultLast7Days)
+}
+
+func (h *UsageHandler) parseUserUsageFiltersWithDefault(c *gin.Context, requireRange bool, defaultRange userUsageDefaultRange) (*userUsageFilters, bool) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		response.Unauthorized(c, "User not authenticated")
@@ -179,18 +191,27 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 			case "month":
 				startTime = now.AddDate(0, -1, 0)
 			default:
-				startTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, -7), userTZ)
+				if defaultRange == userUsageDefaultToday {
+					startTime = timezone.StartOfDayInUserLocation(now, userTZ)
+				} else {
+					startTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, -7), userTZ)
+				}
 			}
 			startPtr = &startTime
 		}
 		if endPtr == nil {
-			if strings.TrimSpace(c.Query("period")) != "" {
+			if strings.TrimSpace(c.Query("period")) != "" || defaultRange == userUsageDefaultToday {
 				endTime = now
 			} else {
 				endTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, 1), userTZ)
 			}
 			endPtr = &endTime
 		}
+	}
+
+	responseEndDate := endDateStr
+	if responseEndDate == "" {
+		responseEndDate = now.Format("2006-01-02")
 	}
 
 	return &userUsageFilters{
@@ -207,9 +228,17 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 			StartTime:         startPtr,
 			EndTime:           endPtr,
 		},
-		StartTime: derefTime(startPtr),
-		EndTime:   derefTime(endPtr),
+		StartTime:       derefTime(startPtr),
+		EndTime:         derefTime(endPtr),
+		ResponseEndDate: responseEndDate,
 	}, true
+}
+
+func userUsageResponseEndDate(parsed *userUsageFilters) string {
+	if parsed != nil && parsed.ResponseEndDate != "" {
+		return parsed.ResponseEndDate
+	}
+	return ""
 }
 
 func derefTime(value *time.Time) time.Time {
@@ -392,7 +421,7 @@ func (h *UsageHandler) GetByID(c *gin.Context) {
 // Stats handles getting usage statistics
 // GET /api/v1/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {
-	parsed, ok := h.parseUserUsageFilters(c, true)
+	parsed, ok := h.parseUserUsageFiltersWithDefault(c, true, userUsageDefaultToday)
 	if !ok {
 		return
 	}
@@ -468,7 +497,7 @@ func (h *UsageHandler) DashboardTrend(c *gin.Context) {
 	response.Success(c, gin.H{
 		"trend":       trend,
 		"start_date":  parsed.StartTime.Format("2006-01-02"),
-		"end_date":    parsed.EndTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":    userUsageResponseEndDate(parsed),
 		"granularity": granularity,
 	})
 }
@@ -496,7 +525,7 @@ func (h *UsageHandler) DashboardModels(c *gin.Context) {
 	response.Success(c, gin.H{
 		"models":     userModelStatsFromUsageStats(stats),
 		"start_date": parsed.StartTime.Format("2006-01-02"),
-		"end_date":   parsed.EndTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   userUsageResponseEndDate(parsed),
 	})
 }
 
@@ -528,7 +557,7 @@ func (h *UsageHandler) DashboardSnapshotV2(c *gin.Context) {
 	resp := gin.H{
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 		"start_date":   parsed.StartTime.Format("2006-01-02"),
-		"end_date":     parsed.EndTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":     userUsageResponseEndDate(parsed),
 		"granularity":  granularity,
 	}
 

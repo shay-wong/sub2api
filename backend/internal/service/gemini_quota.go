@@ -405,6 +405,14 @@ func geminiModelClassFromName(model string) geminiModelClass {
 	return geminiModelPro
 }
 
+func geminiQuotaModelClassForAccount(account *Account, requestedModel string) geminiModelClass {
+	model := requestedModel
+	if account != nil && (account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount) {
+		model = account.GetMappedModel(requestedModel)
+	}
+	return geminiModelClassFromName(model)
+}
+
 func geminiAggregateUsage(stats []usagestats.ModelStat) GeminiUsageTotals {
 	var totals GeminiUsageTotals
 	for _, stat := range stats {

@@ -2350,25 +2350,27 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 }
 
 // GetGeminiUsageTotalsBatch 批量聚合 Gemini 账号在窗口内的 Pro/Flash 请求与用量。
-// 模型分类规则与 service.geminiModelClassFromName 一致：model 包含 flash/lite 视为 flash，其余视为 pro。
+// 模型分类使用 upstream_model 优先，保持与真实 Gemini 上游额度桶一致；旧数据缺失时再回退到 requested_model/model。
 func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[int64]service.GeminiUsageTotals, error) {
 	result := make(map[int64]service.GeminiUsageTotals, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return result, nil
 	}
 
-	query := `
+	modelExpr := resolveModelDimensionExpression(usagestats.ModelSourceUpstream)
+	modelClassExpr := fmt.Sprintf("LOWER(COALESCE(%s, ''))", modelExpr)
+	query := fmt.Sprintf(`
 		SELECT
 			account_id,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 1 ELSE 0 END), 0) AS flash_requests,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE 1 END), 0) AS pro_requests,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN (input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) ELSE 0 END), 0) AS flash_tokens,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE (input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) END), 0) AS pro_tokens,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN actual_cost ELSE 0 END), 0) AS flash_cost,
-			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE actual_cost END), 0) AS pro_cost
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN 1 ELSE 0 END), 0) AS flash_requests,
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN 0 ELSE 1 END), 0) AS pro_requests,
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN (input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) ELSE 0 END), 0) AS flash_tokens,
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN 0 ELSE (input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) END), 0) AS pro_tokens,
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN actual_cost ELSE 0 END), 0) AS flash_cost,
+			COALESCE(SUM(CASE WHEN %s LIKE '%%flash%%' OR %s LIKE '%%lite%%' THEN 0 ELSE actual_cost END), 0) AS pro_cost
 		FROM usage_logs
 		WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
-	`
+	`, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr, modelClassExpr)
 	args := []any{pq.Array(accountIDs), startTime, endTime}
 	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY account_id"
@@ -3064,21 +3066,22 @@ func (r *usageLogRepository) CountWithFilters(ctx context.Context, filters Usage
 	return total, nil
 }
 
-// ListModelCandidates returns distinct raw model values matching the same filters as the usage log list.
+// ListModelCandidates returns distinct model values matching the same source as filters.ModelFilterSource.
 func (r *usageLogRepository) ListModelCandidates(ctx context.Context, filters UsageLogFilters, limit int) (results []string, err error) {
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
 
 	whereClause, args := buildUsageLogFilterWhere(ctx, filters)
-	query := `
-		SELECT model
+	modelExpr := resolveModelDimensionExpression(filters.ModelFilterSource)
+	query := fmt.Sprintf(`
+		SELECT %s AS model
 		FROM usage_logs
-		` + whereClause + `
-		GROUP BY model
-		HAVING COALESCE(model, '') <> ''
+		%s
+		GROUP BY %s
+		HAVING COALESCE(%s, '') <> ''
 		ORDER BY COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) DESC, model ASC
-		LIMIT $` + strconv.Itoa(len(args)+1)
+		LIMIT $%d`, modelExpr, whereClause, modelExpr, modelExpr, len(args)+1)
 	args = append(args, limit)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -3278,11 +3281,6 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 	return result, nil
 }
 
-// GetUsageTrendWithFilters returns usage trend data with optional filters
-func (r *usageLogRepository) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) (results []TrendDataPoint, err error) {
-	return r.getUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, "", requestType, stream, billingType, "")
-}
-
 func (r *usageLogRepository) GetUsageTrendWithUsageFilters(ctx context.Context, startTime, endTime time.Time, granularity string, filters UsageLogFilters) (results []TrendDataPoint, err error) {
 	return r.getUsageTrendWithFilters(ctx, startTime, endTime, granularity, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
 }
@@ -3434,22 +3432,11 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 	return results, nil
 }
 
-// GetModelStatsWithFilters returns model statistics with optional filters
-func (r *usageLogRepository) GetModelStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) (results []ModelStat, err error) {
-	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, "", requestType, stream, billingType, usagestats.ModelSourceRequested, "")
-}
-
-// GetModelStatsWithFiltersBySource returns model statistics with optional filters and model source dimension.
-// source: requested | upstream | mapping.
-func (r *usageLogRepository) GetModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8, source string) (results []ModelStat, err error) {
-	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, "", requestType, stream, billingType, source, "")
-}
-
 func (r *usageLogRepository) GetModelStatsWithUsageFiltersBySource(ctx context.Context, startTime, endTime time.Time, filters UsageLogFilters, source string) (results []ModelStat, err error) {
-	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType, source, filters.BillingMode)
+	return r.getModelStatsWithFiltersBySource(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, source, filters.BillingMode)
 }
 
-func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, source string, billingMode string) (results []ModelStat, err error) {
+func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, filterSource string, requestType *int16, stream *bool, billingType *int8, source string, billingMode string) (results []ModelStat, err error) {
 	actualCostExpr := "COALESCE(SUM(actual_cost), 0) as actual_cost"
 	// 当仅按 account_id 聚合时，实际费用使用账号倍率（total_cost * account_rate_multiplier）。
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
@@ -3457,6 +3444,7 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	}
 	accountCostExpr := "COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost"
 	modelExpr := resolveModelDimensionExpression(source)
+	modelFilterExpr := resolveModelDimensionExpression(filterSource)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -3493,7 +3481,7 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 		args = append(args, groupID)
 	}
 	if strings.TrimSpace(model) != "" {
-		query += fmt.Sprintf(" AND %s = $%d", modelExpr, len(args)+1)
+		query += fmt.Sprintf(" AND %s = $%d", modelFilterExpr, len(args)+1)
 		args = append(args, model)
 	}
 	query, args = appendRequestTypeOrStreamQueryFilter(query, args, requestType, stream)
@@ -3524,16 +3512,11 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	return results, nil
 }
 
-// GetGroupStatsWithFilters returns group usage statistics with optional filters
-func (r *usageLogRepository) GetGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, requestType *int16, stream *bool, billingType *int8) (results []usagestats.GroupStat, err error) {
-	return r.getGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, "", requestType, stream, billingType, "")
-}
-
 func (r *usageLogRepository) GetGroupStatsWithUsageFilters(ctx context.Context, startTime, endTime time.Time, filters UsageLogFilters) (results []usagestats.GroupStat, err error) {
-	return r.getGroupStatsWithFilters(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
+	return r.getGroupStatsWithFilters(ctx, startTime, endTime, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
 }
 
-func (r *usageLogRepository) getGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, billingMode string) (results []usagestats.GroupStat, err error) {
+func (r *usageLogRepository) getGroupStatsWithFilters(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, modelFilterSource string, requestType *int16, stream *bool, billingType *int8, billingMode string) (results []usagestats.GroupStat, err error) {
 	query := `
 		SELECT
 			COALESCE(ul.group_id, 0) as group_id,
@@ -3567,7 +3550,7 @@ func (r *usageLogRepository) getGroupStatsWithFilters(ctx context.Context, start
 		args = append(args, groupID)
 	}
 	if strings.TrimSpace(model) != "" {
-		modelExpr := resolveModelDimensionExpressionWithAlias(usagestats.ModelSourceRequested, "ul")
+		modelExpr := resolveModelDimensionExpressionWithAlias(modelFilterSource, "ul")
 		query += fmt.Sprintf(" AND %s = $%d", modelExpr, len(args)+1)
 		args = append(args, model)
 	}
@@ -4292,7 +4275,7 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		}
 	}
 
-	models, err := r.GetModelStatsWithFilters(ctx, startTime, endTime, 0, 0, accountID, 0, nil, nil, nil)
+	models, err := r.GetModelStatsWithUsageFiltersBySource(ctx, startTime, endTime, UsageLogFilters{AccountID: accountID}, usagestats.ModelSourceRequested)
 	if err != nil {
 		models = []ModelStat{}
 	}

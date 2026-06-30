@@ -64,7 +64,7 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 
 	if endDate != "" {
 		if t, err := timezone.ParseInUserLocation("2006-01-02", endDate, userTZ); err == nil {
-			endTime = t.Add(24 * time.Hour) // Include the end date
+			endTime = t.AddDate(0, 0, 1) // Include the end date using calendar-day math for DST.
 		} else {
 			endTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, 1), userTZ)
 		}
@@ -73,6 +73,24 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	}
 
 	return startTime, endTime
+}
+
+func dashboardResponseEndDate(c *gin.Context, endTime time.Time) string {
+	if endDate := strings.TrimSpace(c.Query("end_date")); endDate != "" {
+		if _, err := timezone.ParseInUserLocation("2006-01-02", endDate, c.Query("timezone")); err == nil {
+			return endDate
+		}
+	}
+	return endTime.AddDate(0, 0, -1).Format("2006-01-02")
+}
+
+func parseDashboardModelFilterSource(c *gin.Context) (string, bool) {
+	raw := strings.TrimSpace(c.DefaultQuery("model_filter_source", usagestats.ModelSourceRequested))
+	if !usagestats.IsValidModelSource(raw) {
+		response.BadRequest(c, "Invalid model_filter_source, use requested/upstream/mapping")
+		return "", false
+	}
+	return raw, true
 }
 
 // GetStats handles getting dashboard statistics
@@ -212,7 +230,7 @@ func (h *DashboardHandler) GetRealtimeMetrics(c *gin.Context) {
 
 // GetUsageTrend handles getting usage trend data
 // GET /api/v1/admin/dashboard/trend
-// Query params: start_date, end_date (YYYY-MM-DD), granularity (day/hour), user_id, api_key_id, model, account_id, group_id, request_type, stream, billing_type
+// Query params: start_date, end_date (YYYY-MM-DD), granularity (day/hour), user_id, api_key_id, model, model_filter_source, account_id, group_id, request_type, stream, billing_type, billing_mode
 func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
 	if scopeErr != nil {
@@ -225,9 +243,14 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	// Parse optional filter params
 	var userID, apiKeyID, accountID, groupID int64
 	var model string
+	modelFilterSource, ok := parseDashboardModelFilterSource(c)
+	if !ok {
+		return
+	}
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	var billingMode string
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -277,8 +300,27 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 			return
 		}
 	}
+	if billingModeStr := strings.TrimSpace(c.Query("billing_mode")); billingModeStr != "" {
+		if !service.BillingMode(billingModeStr).IsValid() {
+			response.BadRequest(c, "Invalid billing_mode")
+			return
+		}
+		billingMode = billingModeStr
+	}
 
-	trend, hit, err := h.getUsageTrendForScope(c.Request.Context(), scope, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType)
+	filters := usagestats.UsageLogFilters{
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             model,
+		ModelFilterSource: modelFilterSource,
+		RequestType:       requestType,
+		Stream:            stream,
+		BillingType:       billingType,
+		BillingMode:       billingMode,
+	}
+	trend, hit, err := h.getUsageTrendForScope(c.Request.Context(), scope, startTime, endTime, granularity, filters)
 	if err != nil {
 		response.Error(c, 500, "Failed to get usage trend")
 		return
@@ -288,14 +330,14 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	response.Success(c, gin.H{
 		"trend":       trend,
 		"start_date":  startTime.Format("2006-01-02"),
-		"end_date":    endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":    dashboardResponseEndDate(c, endTime),
 		"granularity": granularity,
 	})
 }
 
 // GetModelStats handles getting model usage statistics
 // GET /api/v1/admin/dashboard/models
-// Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
+// Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, model, model_source, model_filter_source, request_type, stream, billing_type, billing_mode
 func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
 	if scopeErr != nil {
@@ -303,13 +345,19 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		return
 	}
 	startTime, endTime := parseTimeRange(c)
+	modelFilterSource, ok := parseDashboardModelFilterSource(c)
+	if !ok {
+		return
+	}
 
 	// Parse optional filter params
 	var userID, apiKeyID, accountID, groupID int64
 	modelSource := usagestats.ModelSourceRequested
+	var model string
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	var billingMode string
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -330,6 +378,9 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		if id, err := strconv.ParseInt(groupIDStr, 10, 64); err == nil {
 			groupID = id
 		}
+	}
+	if modelStr := c.Query("model"); modelStr != "" {
+		model = modelStr
 	}
 	if rawModelSource := strings.TrimSpace(c.Query("model_source")); rawModelSource != "" {
 		if !usagestats.IsValidModelSource(rawModelSource) {
@@ -363,8 +414,27 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 			return
 		}
 	}
+	if billingModeStr := strings.TrimSpace(c.Query("billing_mode")); billingModeStr != "" {
+		if !service.BillingMode(billingModeStr).IsValid() {
+			response.BadRequest(c, "Invalid billing_mode")
+			return
+		}
+		billingMode = billingModeStr
+	}
 
-	stats, hit, err := h.getModelStatsForScope(c.Request.Context(), scope, startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, billingType)
+	filters := usagestats.UsageLogFilters{
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             model,
+		ModelFilterSource: modelFilterSource,
+		RequestType:       requestType,
+		Stream:            stream,
+		BillingType:       billingType,
+		BillingMode:       billingMode,
+	}
+	stats, hit, err := h.getModelStatsForScope(c.Request.Context(), scope, startTime, endTime, filters, modelSource)
 	if err != nil {
 		response.Error(c, 500, "Failed to get model statistics")
 		return
@@ -374,13 +444,13 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	response.Success(c, gin.H{
 		"models":     stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   dashboardResponseEndDate(c, endTime),
 	})
 }
 
 // GetGroupStats handles getting group usage statistics
 // GET /api/v1/admin/dashboard/groups
-// Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
+// Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, model, model_filter_source, request_type, stream, billing_type, billing_mode
 func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
 	if scopeErr != nil {
@@ -388,11 +458,17 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		return
 	}
 	startTime, endTime := parseTimeRange(c)
+	modelFilterSource, ok := parseDashboardModelFilterSource(c)
+	if !ok {
+		return
+	}
 
 	var userID, apiKeyID, accountID, groupID int64
+	var model string
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	var billingMode string
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -413,6 +489,9 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		if id, err := strconv.ParseInt(groupIDStr, 10, 64); err == nil {
 			groupID = id
 		}
+	}
+	if modelStr := c.Query("model"); modelStr != "" {
+		model = modelStr
 	}
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)
@@ -439,8 +518,27 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 			return
 		}
 	}
+	if billingModeStr := strings.TrimSpace(c.Query("billing_mode")); billingModeStr != "" {
+		if !service.BillingMode(billingModeStr).IsValid() {
+			response.BadRequest(c, "Invalid billing_mode")
+			return
+		}
+		billingMode = billingModeStr
+	}
 
-	stats, hit, err := h.getGroupStatsForScope(c.Request.Context(), scope, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType)
+	filters := usagestats.UsageLogFilters{
+		UserID:            userID,
+		APIKeyID:          apiKeyID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Model:             model,
+		ModelFilterSource: modelFilterSource,
+		RequestType:       requestType,
+		Stream:            stream,
+		BillingType:       billingType,
+		BillingMode:       billingMode,
+	}
+	stats, hit, err := h.getGroupStatsForScope(c.Request.Context(), scope, startTime, endTime, filters)
 	if err != nil {
 		response.Error(c, 500, "Failed to get group statistics")
 		return
@@ -450,7 +548,7 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	response.Success(c, gin.H{
 		"groups":     stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   dashboardResponseEndDate(c, endTime),
 	})
 }
 
@@ -476,7 +574,7 @@ func (h *DashboardHandler) GetAPIKeyUsageTrend(c *gin.Context) {
 	response.Success(c, gin.H{
 		"trend":       trend,
 		"start_date":  startTime.Format("2006-01-02"),
-		"end_date":    endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":    dashboardResponseEndDate(c, endTime),
 		"granularity": granularity,
 	})
 }
@@ -503,7 +601,7 @@ func (h *DashboardHandler) GetUserUsageTrend(c *gin.Context) {
 	response.Success(c, gin.H{
 		"trend":       trend,
 		"start_date":  startTime.Format("2006-01-02"),
-		"end_date":    endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":    dashboardResponseEndDate(c, endTime),
 		"granularity": granularity,
 	})
 }
@@ -532,18 +630,21 @@ func parseRankingLimit(raw string) int {
 // GET /api/v1/admin/dashboard/users-ranking
 func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 	startTime, endTime := parseTimeRange(c)
+	responseEndDate := dashboardResponseEndDate(c, endTime)
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
 
 	keyRaw, _ := json.Marshal(struct {
-		ProjectID int64  `json:"project_id,omitempty"`
-		Start     string `json:"start"`
-		End       string `json:"end"`
-		Limit     int    `json:"limit"`
+		ProjectID       int64  `json:"project_id,omitempty"`
+		Start           string `json:"start"`
+		End             string `json:"end"`
+		ResponseEndDate string `json:"response_end_date"`
+		Limit           int    `json:"limit"`
 	}{
-		ProjectID: dashboardCacheProjectID(c.Request.Context()),
-		Start:     startTime.UTC().Format(time.RFC3339),
-		End:       endTime.UTC().Format(time.RFC3339),
-		Limit:     limit,
+		ProjectID:       dashboardCacheProjectID(c.Request.Context()),
+		Start:           startTime.UTC().Format(time.RFC3339),
+		End:             endTime.UTC().Format(time.RFC3339),
+		ResponseEndDate: responseEndDate,
+		Limit:           limit,
 	})
 	cacheKey := string(keyRaw)
 	if cached, ok := dashboardUsersRankingCache.Get(cacheKey); ok {
@@ -564,7 +665,7 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		"total_requests":    ranking.TotalRequests,
 		"total_tokens":      ranking.TotalTokens,
 		"start_date":        startTime.Format("2006-01-02"),
-		"end_date":          endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":          responseEndDate,
 	}
 	dashboardUsersRankingCache.Set(cacheKey, payload)
 	c.Header("X-Snapshot-Cache", "miss")
@@ -737,6 +838,6 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	response.Success(c, gin.H{
 		"users":      stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   dashboardResponseEndDate(c, endTime),
 	})
 }

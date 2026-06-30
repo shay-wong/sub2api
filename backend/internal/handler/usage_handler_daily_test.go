@@ -27,22 +27,18 @@ type dailyUsageRepoStub struct {
 	apiKeyID    int64
 }
 
-func (s *dailyUsageRepoStub) GetUsageTrendWithFilters(
+func (s *dailyUsageRepoStub) GetUsageTrendWithUsageFilters(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	granularity string,
-	userID, apiKeyID, accountID, groupID int64,
-	model string,
-	requestType *int16,
-	stream *bool,
-	billingType *int8,
+	filters usagestats.UsageLogFilters,
 ) ([]usagestats.TrendDataPoint, error) {
 	s.called = true
 	s.startTime = startTime
 	s.endTime = endTime
 	s.granularity = granularity
-	s.userID = userID
-	s.apiKeyID = apiKeyID
+	s.userID = filters.UserID
+	s.apiKeyID = filters.APIKeyID
 	return s.trend, nil
 }
 
