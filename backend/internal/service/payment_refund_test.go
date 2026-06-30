@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -403,6 +404,242 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 	}
 }
 
+func TestQueryAndFinalizeRefundPreservesNoDeductionIntent(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-no-deduction")
+
+	_, err := client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").
+		SetOperator("admin").
+		SetDetail(`{"refundID":"rf_test","deductBalance":false,"deductionType":"none","deductionRollbackOK":true}`).
+		Save(ctx)
+	require.NoError(t, err)
+
+	var deducted float64
+	svc := &PaymentService{
+		entClient:    client,
+		loadBalancer: &captureLoadBalancer{},
+		userRepo: &mockUserRepo{deductBalanceFn: func(ctx context.Context, id int64, amount float64) error {
+			deducted += amount
+			return nil
+		}},
+	}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusSuccess},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Zero(t, deducted)
+	require.Zero(t, result.BalanceDeducted)
+}
+
+func TestQueryAndFinalizeRefundFinalizesLegacyPendingAuditWithDeduction(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-legacy-pending")
+
+	_, err := client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").
+		SetOperator("admin").
+		SetDetail(`{"refundID":"rf_test","deductionRollbackOK":true}`).
+		Save(ctx)
+	require.NoError(t, err)
+
+	var deducted float64
+	svc := &PaymentService{
+		entClient:    client,
+		loadBalancer: &captureLoadBalancer{},
+		userRepo: &mockUserRepo{deductBalanceFn: func(ctx context.Context, id int64, amount float64) error {
+			deducted += amount
+			return nil
+		}},
+	}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusSuccess},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 100.0, deducted)
+	require.Equal(t, 100.0, result.BalanceDeducted)
+}
+
+func TestQueryAndFinalizeRefundRetriesRollbackBeforeMarkingFailed(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-compensates-failed")
+
+	_, err := client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").
+		SetOperator("admin").
+		SetDetail(`{"refundID":"rf_test","deductBalance":true,"deductionType":"balance","balanceToDeduct":100,"deductionRollbackOK":false}`).
+		Save(ctx)
+	require.NoError(t, err)
+
+	var compensated float64
+	svc := &PaymentService{
+		entClient:    client,
+		loadBalancer: &captureLoadBalancer{},
+		userRepo: &mockUserRepo{updateBalanceFn: func(ctx context.Context, id int64, amount float64) error {
+			compensated += amount
+			return nil
+		}},
+	}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusFailed},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Equal(t, 100.0, compensated)
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefundFailed, reloaded.Status)
+}
+
+func TestQueryAndFinalizeRefundRetriesLegacySubscriptionRollbackBeforeMarkingFailed(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-legacy-sub-compensates")
+	groupID := int64(77)
+	days := 30
+	order, err := client.PaymentOrder.UpdateOneID(order.ID).
+		SetOrderType(payment.OrderTypeSubscription).
+		SetSubscriptionGroupID(groupID).
+		SetSubscriptionDays(days).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").
+		SetOperator("admin").
+		SetDetail(`{"refundID":"rf_test","subDaysDeducted":30,"deductionRollbackOK":false}`).
+		Save(ctx)
+	require.NoError(t, err)
+
+	subRepo := &refundUserSubscriptionRepoStub{
+		active: &UserSubscription{
+			ID:        9001,
+			UserID:    order.UserID,
+			GroupID:   groupID,
+			Status:    SubscriptionStatusActive,
+			StartsAt:  time.Now().AddDate(0, 0, -1),
+			ExpiresAt: time.Now().AddDate(0, 0, 29),
+		},
+	}
+	svc := &PaymentService{
+		entClient:       client,
+		loadBalancer:    &captureLoadBalancer{},
+		subscriptionSvc: &SubscriptionService{userSubRepo: subRepo},
+	}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusFailed},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Equal(t, int64(9001), subRepo.extendID)
+	require.Equal(t, 30, subRepo.extendDays)
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefundFailed, reloaded.Status)
+}
+
+func TestQueryAndFinalizeRefundKeepsPendingWhenFailedRollbackStillFails(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-compensation-fails")
+
+	_, err := client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().
+		SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").
+		SetOperator("admin").
+		SetDetail(`{"refundID":"rf_test","deductBalance":true,"deductionType":"balance","balanceToDeduct":100,"deductionRollbackOK":false}`).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{
+		entClient:    client,
+		loadBalancer: &captureLoadBalancer{},
+		userRepo:     &mockUserRepo{updateBalanceErr: errors.New("db unavailable")},
+	}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusFailed},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "refund failed but deduction rollback is still pending")
+
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefundPending, reloaded.Status)
+}
+
+func TestQueryAndFinalizeRefundRejectsProviderSnapshotMismatch(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderForTest(t, ctx, client, "query-finalize-snapshot-mismatch")
+
+	_, err := client.PaymentOrder.UpdateOneID(order.ID).
+		SetProviderSnapshot(map[string]any{
+			"schema_version":       2,
+			"provider_instance_id": psStringValue(order.ProviderInstanceID),
+			"provider_key":         payment.TypeStripe,
+			"currency":             "EUR",
+		}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}}
+	restore := replacePaymentProviderFactoryForTest(t, &refundQueryProviderTestDouble{
+		refundResponse: &payment.RefundResponse{RefundID: "rf_test", Status: payment.ProviderStatusSuccess},
+	})
+	defer restore()
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "stripe currency mismatch")
+}
+
 func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
@@ -464,7 +701,7 @@ func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *
 		SetOrderID(strconv.FormatInt(order.ID, 10)).
 		SetAction("REFUND_PENDING").
 		SetOperator("admin").
-		SetDetail(`{"refundID":"rf_test","deductionRollbackOK":true}`).
+		SetDetail(`{"refundID":"rf_test","deductBalance":true,"deductionType":"balance","balanceToDeduct":100,"deductionRollbackOK":true}`).
 		Save(ctx)
 	require.NoError(t, err)
 	return order
@@ -504,8 +741,47 @@ func (refundProviderTestDouble) Refund(context.Context, payment.RefundRequest) (
 type refundQueryProviderTestDouble struct {
 	refundProviderTestDouble
 	refundResponse *payment.RefundResponse
+	metadata       map[string]string
 }
 
 func (p *refundQueryProviderTestDouble) QueryRefund(context.Context, payment.RefundQueryRequest) (*payment.RefundResponse, error) {
 	return p.refundResponse, nil
+}
+
+func (p *refundQueryProviderTestDouble) MerchantIdentityMetadata() map[string]string {
+	if p.metadata != nil {
+		return p.metadata
+	}
+	return map[string]string{"currency": payment.DefaultPaymentCurrency}
+}
+
+type refundUserSubscriptionRepoStub struct {
+	UserSubscriptionRepository
+	active     *UserSubscription
+	extendID   int64
+	extendDays int
+}
+
+func (s *refundUserSubscriptionRepoStub) GetActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
+	if s.active != nil && s.active.UserID == userID && s.active.GroupID == groupID {
+		return s.active, nil
+	}
+	return nil, ErrSubscriptionNotFound
+}
+
+func (s *refundUserSubscriptionRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
+	if s.active != nil && s.active.ID == id {
+		return s.active, nil
+	}
+	return nil, ErrSubscriptionNotFound
+}
+
+func (s *refundUserSubscriptionRepoStub) ExtendExpiry(_ context.Context, subscriptionID int64, newExpiresAt time.Time) error {
+	if s.active == nil || s.active.ID != subscriptionID {
+		return ErrSubscriptionNotFound
+	}
+	s.extendID = subscriptionID
+	s.extendDays = int(newExpiresAt.Sub(s.active.ExpiresAt).Hours() / 24)
+	s.active.ExpiresAt = newExpiresAt
+	return nil
 }
