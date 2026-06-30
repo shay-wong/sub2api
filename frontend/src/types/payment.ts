@@ -102,6 +102,28 @@ export interface PaymentOrder {
   provider_instance_id?: string
 }
 
+export interface PublicOrderResult {
+  id: number
+  amount: number
+  pay_amount: number
+  fee_rate: number
+  currency?: string
+  payment_type: string
+  out_trade_no: string
+  status: OrderStatus
+  order_type: OrderType
+  created_at: string
+  expires_at: string
+  paid_at?: string
+  completed_at?: string
+  refund_amount: number
+  refund_reason?: string
+  refund_requested_at?: string
+  refund_requested_by?: string
+  refund_request_reason?: string
+  plan_id?: number
+}
+
 // ==================== Plans & Channels ====================
 
 export interface SubscriptionPlan {

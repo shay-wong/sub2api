@@ -109,7 +109,7 @@ import {
 import { usePaymentStore } from '@/stores/payment'
 import { paymentAPI } from '@/api/payment'
 import type { PublicOrderVerifyResult } from '@/api/payment'
-import type { OrderStatus, PaymentOrder } from '@/types/payment'
+import type { OrderStatus, PaymentOrder, PublicOrderResult } from '@/types/payment'
 import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import { normalizePaymentMethodForDisplay, paymentMethodI18nKey } from './paymentUx'
 
@@ -119,7 +119,8 @@ const route = useRoute()
 const router = useRouter()
 const paymentStore = usePaymentStore()
 
-type ResolvedOrder = PaymentOrder | PublicOrderVerifyResult
+type DetailedOrder = PaymentOrder | PublicOrderResult
+type ResolvedOrder = DetailedOrder | PublicOrderVerifyResult
 
 const order = ref<ResolvedOrder | null>(null)
 const loading = ref(true)
@@ -199,15 +200,15 @@ function setResolvedOrder(nextOrder: ResolvedOrder | null): void {
   }
 }
 
-function hasOrderId(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
+function hasOrderId(nextOrder: ResolvedOrder | null): nextOrder is DetailedOrder {
   return !!nextOrder && 'id' in nextOrder && typeof nextOrder.id === 'number'
 }
 
-function hasAmountFields(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
+function hasAmountFields(nextOrder: ResolvedOrder | null): nextOrder is DetailedOrder {
   return !!nextOrder && 'pay_amount' in nextOrder && typeof nextOrder.pay_amount === 'number' && 'amount' in nextOrder && typeof nextOrder.amount === 'number'
 }
 
-function hasPaymentType(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
+function hasPaymentType(nextOrder: ResolvedOrder | null): nextOrder is DetailedOrder {
   return !!nextOrder && 'payment_type' in nextOrder && typeof nextOrder.payment_type === 'string' && nextOrder.payment_type.trim() !== ''
 }
 
