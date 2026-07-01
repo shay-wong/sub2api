@@ -10,48 +10,45 @@ import (
 )
 
 var codexModelMap = map[string]string{
-	"gpt-5.5":                    "gpt-5.5",
-	"codex-auto-review":          "codex-auto-review",
-	"gpt-5.4":                    "gpt-5.4",
-	"gpt-5.4-mini":               "gpt-5.4-mini",
-	"gpt-5.4-none":               "gpt-5.4",
-	"gpt-5.4-low":                "gpt-5.4",
-	"gpt-5.4-medium":             "gpt-5.4",
-	"gpt-5.4-high":               "gpt-5.4",
-	"gpt-5.4-xhigh":              "gpt-5.4",
-	"gpt-5.4-chat-latest":        "gpt-5.4",
-	"gpt-5.3":                    "gpt-5.3-codex",
-	"gpt-5.3-none":               "gpt-5.3-codex",
-	"gpt-5.3-low":                "gpt-5.3-codex",
-	"gpt-5.3-medium":             "gpt-5.3-codex",
-	"gpt-5.3-high":               "gpt-5.3-codex",
-	"gpt-5.3-xhigh":              "gpt-5.3-codex",
-	"gpt-5.3-codex":              "gpt-5.3-codex",
-	"gpt-5.3-codex-spark":        "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-low":    "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-high":   "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-xhigh":  "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-low":          "gpt-5.3-codex",
-	"gpt-5.3-codex-medium":       "gpt-5.3-codex",
-	"gpt-5.3-codex-high":         "gpt-5.3-codex",
-	"gpt-5.3-codex-xhigh":        "gpt-5.3-codex",
-	"gpt-5.2":                    "gpt-5.2",
-	"gpt-5.2-none":               "gpt-5.2",
-	"gpt-5.2-low":                "gpt-5.2",
-	"gpt-5.2-medium":             "gpt-5.2",
-	"gpt-5.2-high":               "gpt-5.2",
-	"gpt-5.2-xhigh":              "gpt-5.2",
-	"gpt-5":                      "gpt-5.4",
-	"gpt-5-mini":                 "gpt-5.4",
-	"gpt-5-nano":                 "gpt-5.4",
-	"gpt-5.1":                    "gpt-5.4",
-	"gpt-5.1-codex":              "gpt-5.3-codex",
-	"gpt-5.1-codex-max":          "gpt-5.3-codex",
-	"gpt-5.1-codex-mini":         "gpt-5.3-codex",
-	"gpt-5.2-codex":              "gpt-5.2",
-	"codex-mini-latest":          "gpt-5.3-codex",
-	"gpt-5-codex":                "gpt-5.3-codex",
+	"gpt-5.5":              "gpt-5.5",
+	"gpt-5.5-pro":          "gpt-5.5-pro",
+	"codex-auto-review":    "codex-auto-review",
+	"gpt-5.4":              "gpt-5.4",
+	"gpt-5.4-mini":         "gpt-5.4-mini",
+	"gpt-5.4-none":         "gpt-5.4",
+	"gpt-5.4-low":          "gpt-5.4",
+	"gpt-5.4-medium":       "gpt-5.4",
+	"gpt-5.4-high":         "gpt-5.4",
+	"gpt-5.4-xhigh":        "gpt-5.4",
+	"gpt-5.4-chat-latest":  "gpt-5.4",
+	"gpt-5.3":              "gpt-5.3-codex",
+	"gpt-5.3-none":         "gpt-5.3-codex",
+	"gpt-5.3-low":          "gpt-5.3-codex",
+	"gpt-5.3-medium":       "gpt-5.3-codex",
+	"gpt-5.3-high":         "gpt-5.3-codex",
+	"gpt-5.3-xhigh":        "gpt-5.3-codex",
+	"gpt-5.3-codex":        "gpt-5.3-codex",
+	"gpt-5.3-codex-spark":  "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-low":    "gpt-5.3-codex",
+	"gpt-5.3-codex-medium": "gpt-5.3-codex",
+	"gpt-5.3-codex-high":   "gpt-5.3-codex",
+	"gpt-5.3-codex-xhigh":  "gpt-5.3-codex",
+	"gpt-5.2":              "gpt-5.2",
+	"gpt-5.2-none":         "gpt-5.2",
+	"gpt-5.2-low":          "gpt-5.2",
+	"gpt-5.2-medium":       "gpt-5.2",
+	"gpt-5.2-high":         "gpt-5.2",
+	"gpt-5.2-xhigh":        "gpt-5.2",
+	"gpt-5":                "gpt-5.4",
+	"gpt-5-mini":           "gpt-5.4",
+	"gpt-5-nano":           "gpt-5.4",
+	"gpt-5.1":              "gpt-5.4",
+	"gpt-5.1-codex":        "gpt-5.3-codex",
+	"gpt-5.1-codex-max":    "gpt-5.3-codex",
+	"gpt-5.1-codex-mini":   "gpt-5.3-codex",
+	"gpt-5.2-codex":        "gpt-5.2",
+	"codex-mini-latest":    "gpt-5.3-codex",
+	"gpt-5-codex":          "gpt-5.3-codex",
 }
 
 var codexVersionModelPrefixes = []struct {
@@ -62,6 +59,7 @@ var codexVersionModelPrefixes = []struct {
 	{prefix: "gpt-5.3-codex", target: "gpt-5.3-codex"},
 	{prefix: "gpt-5.4-mini", target: "gpt-5.4-mini"},
 	{prefix: "gpt-5.4-nano", target: "gpt-5.4-nano"},
+	{prefix: "gpt-5.5-pro", target: "gpt-5.5-pro"},
 	{prefix: "gpt-5.5", target: "gpt-5.5"},
 	{prefix: "gpt-5.4", target: "gpt-5.4"},
 	{prefix: "gpt-5.2", target: "gpt-5.2"},
@@ -1186,15 +1184,24 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]a
 		typ, _ := m["type"].(string)
 
 		if typ == "reasoning" {
-			// 空 rs_* reasoning 引用在 OAuth store=false 下会 404；带 encrypted_content
-			// 的内容是客户端回传的 opaque 推理状态，默认整体保留。以后只有遇到
-			// 上游明确报错的具体字段时，才在这里加窄范围黑名单。
-			if hasNonEmptyString(m["encrypted_content"]) {
-				filtered = append(filtered, m)
-				stats.PreservedEncryptedReasoningCount++
-			} else {
-				stats.DroppedReasoningWithoutEncryptedCount++
+			// chatgpt.com codex (OAuth path) uses store=false. Replaying rs_* ids
+			// can 404, so strip the id while keeping reasoning content, including
+			// encrypted_content, summary, and future opaque fields. Upstream also
+			// requires summary, so backfill an empty array when the client omits it.
+			newItem := make(map[string]any, len(m))
+			for key, value := range m {
+				if key == "id" {
+					continue
+				}
+				newItem[key] = value
 			}
+			if summary, ok := newItem["summary"]; !ok || summary == nil {
+				newItem["summary"] = []any{}
+			}
+			if hasNonEmptyString(m["encrypted_content"]) {
+				stats.PreservedEncryptedReasoningCount++
+			}
+			filtered = append(filtered, newItem)
 			continue
 		}
 

@@ -141,7 +141,9 @@ var (
 		{Name: "session_window_start", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_end", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "session_window_status", Type: field.TypeString, Nullable: true, Size: 20},
+		{Name: "quota_dimension", Type: field.TypeEnum, Enums: []string{"global", "spark"}, Default: "global"},
 		{Name: "proxy_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "parent_account_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "project_id", Type: field.TypeInt64},
 	}
 	// AccountsTable holds the schema information for the "accounts" table.
@@ -152,13 +154,19 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "accounts_proxies_proxy",
-				Columns:    []*schema.Column{AccountsColumns[29]},
+				Columns:    []*schema.Column{AccountsColumns[30]},
 				RefColumns: []*schema.Column{ProxiesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
+				Symbol:     "accounts_accounts_children",
+				Columns:    []*schema.Column{AccountsColumns[31]},
+				RefColumns: []*schema.Column{AccountsColumns[0]},
+				OnDelete:   schema.Restrict,
+			},
+			{
 				Symbol:     "accounts_projects_accounts",
-				Columns:    []*schema.Column{AccountsColumns[30]},
+				Columns:    []*schema.Column{AccountsColumns[32]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -172,7 +180,7 @@ var (
 			{
 				Name:    "account_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30]},
+				Columns: []*schema.Column{AccountsColumns[32]},
 			},
 			{
 				Name:    "account_type",
@@ -187,7 +195,7 @@ var (
 			{
 				Name:    "account_proxy_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[29]},
+				Columns: []*schema.Column{AccountsColumns[30]},
 			},
 			{
 				Name:    "account_priority",
@@ -237,7 +245,12 @@ var (
 			{
 				Name:    "account_project_id_platform_priority",
 				Unique:  false,
-				Columns: []*schema.Column{AccountsColumns[30], AccountsColumns[6], AccountsColumns[13]},
+				Columns: []*schema.Column{AccountsColumns[32], AccountsColumns[6], AccountsColumns[13]},
+			},
+			{
+				Name:    "account_parent_account_id",
+				Unique:  false,
+				Columns: []*schema.Column{AccountsColumns[31]},
 			},
 		},
 	}
@@ -2149,7 +2162,8 @@ func init() {
 		Table: "api_keys",
 	}
 	AccountsTable.ForeignKeys[0].RefTable = ProxiesTable
-	AccountsTable.ForeignKeys[1].RefTable = ProjectsTable
+	AccountsTable.ForeignKeys[1].RefTable = AccountsTable
+	AccountsTable.ForeignKeys[2].RefTable = ProjectsTable
 	AccountsTable.Annotation = &entsql.Annotation{
 		Table: "accounts",
 	}
