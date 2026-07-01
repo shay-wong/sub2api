@@ -13,18 +13,24 @@ const {
   listWithEtag,
   getBatchTodayStats,
   getAllProxies,
+  getAccountOptions,
   getAllGroups,
+  exportData,
   createSparkShadow,
   showSuccess,
+  showWarning,
   showError
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
+  getAccountOptions: vi.fn(),
   getAllGroups: vi.fn(),
+  exportData: vi.fn(),
   createSparkShadow: vi.fn(),
   showSuccess: vi.fn(),
+  showWarning: vi.fn(),
   showError: vi.fn()
 }))
 
@@ -34,23 +40,24 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
+      exportData,
       createSparkShadow,
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
     },
-    proxies: { getAll: getAllProxies },
+    proxies: { getAll: getAllProxies, getAccountOptions },
     groups: { getAll: getAllGroups }
   }
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError, showSuccess, showInfo: vi.fn() })
+  useAppStore: () => ({ showError, showSuccess, showWarning, showInfo: vi.fn() })
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ token: 'test-token' })
+  useAuthStore: () => ({ token: 'test-token', isAdmin: true })
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -102,14 +109,16 @@ const mountView = () =>
 describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, createSparkShadow, showSuccess, showWarning, showError]) {
       fn.mockReset()
     }
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
+    getAccountOptions.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
+    exportData.mockResolvedValue({ type: 'cpa-auth-files', exported_at: '2026-07-01T00:00:00Z', accounts: [], skipped_shadows: 1 })
     createSparkShadow.mockResolvedValue({ id: 999, name: 'parent-acc (Spark)' })
   })
 
@@ -153,6 +162,67 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     await flushPromises()
 
     expect(createSparkShadow).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('CPA 导出返回 skipped_shadows 时显示 warning，避免静默少账号', async () => {
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:accounts-export'),
+      revokeObjectURL: vi.fn()
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const moreButton = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.moreActions'))
+    expect(moreButton).toBeTruthy()
+    await moreButton?.trigger('click')
+
+    const exportButton = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.dataExport'))
+    expect(exportButton).toBeTruthy()
+    await exportButton?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findAllComponents(ConfirmDialog).find(d => d.props('title') === 'admin.accounts.dataExport')
+    expect(dialog?.props('show')).toBe(true)
+    dialog?.vm.$emit('confirm')
+    await flushPromises()
+
+    expect(exportData).toHaveBeenCalledTimes(1)
+    expect(showWarning).toHaveBeenCalledWith('admin.accounts.dataExportedSkippedShadows')
+    expect(showSuccess).not.toHaveBeenCalledWith('admin.accounts.dataExported')
+    wrapper.unmount()
+  })
+
+  it('默认格式导出返回 skipped_shadows 时同样显示 warning', async () => {
+    exportData.mockResolvedValueOnce({ accounts: [], skipped_shadows: 1, exported_at: '2026-07-01T00:00:00Z' })
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:accounts-export'),
+      revokeObjectURL: vi.fn()
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const moreButton = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.moreActions'))
+    expect(moreButton).toBeTruthy()
+    await moreButton?.trigger('click')
+
+    const exportButton = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.dataExport'))
+    expect(exportButton).toBeTruthy()
+    await exportButton?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findAllComponents(ConfirmDialog).find(d => d.props('title') === 'admin.accounts.dataExport')
+    expect(dialog?.props('show')).toBe(true)
+    dialog?.vm.$emit('confirm')
+    await flushPromises()
+
+    expect(exportData).toHaveBeenCalledTimes(1)
+    expect(showWarning).toHaveBeenCalledWith('admin.accounts.dataExportedSkippedShadows')
+    expect(showSuccess).not.toHaveBeenCalledWith('admin.accounts.dataExported')
     wrapper.unmount()
   })
 })
@@ -208,12 +278,13 @@ const mountViewWithRow = () =>
 describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, createSparkShadow, showSuccess, showWarning, showError]) {
       fn.mockReset()
     }
     listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
+    getAccountOptions.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
     vi.stubGlobal('confirm', vi.fn(() => true))
   })

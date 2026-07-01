@@ -1197,6 +1197,8 @@ export interface AdminCPADataPayload {
   type: 'cpa-auth-files'
   exported_at: string
   accounts: AdminCPADataAccount[]
+  // 导出时被排除的 spark 影子账号数量(影子不持凭据、其调度配置不在 CPA 导出内)。
+  skipped_shadows?: number
 }
 
 export interface AdminCPADataAccount {

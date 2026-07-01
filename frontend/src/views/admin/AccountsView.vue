@@ -1176,6 +1176,10 @@ function accountDisplayEmail(row: any): string {
   return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
 }
 
+function exportSkippedShadows(payload: { skipped_shadows?: number }): number {
+  return payload.skipped_shadows ?? 0
+}
+
 type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
 
 function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
@@ -1748,7 +1752,7 @@ const handleExportData = async () => {
     URL.revokeObjectURL(url)
     // spark 影子账号被后端排除出备份(其凭据透传母账号、调度配置不可经凭据型导入重建);
     // 跳过非零时明确提示用户,避免「下载成功但少了账号」的静默丢失。
-    const skippedShadows = 'skipped_shadows' in dataPayload ? dataPayload.skipped_shadows ?? 0 : 0
+    const skippedShadows = exportSkippedShadows(dataPayload)
     if (skippedShadows > 0) {
       appStore.showWarning(t('admin.accounts.dataExportedSkippedShadows', { count: skippedShadows }))
     } else {

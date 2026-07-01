@@ -82,10 +82,16 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
-	projectID, err := resolveProjectIDForCreate(ctx, r.sql, account.ProjectID)
-	if err != nil {
-		return err
+	projectID := account.ProjectID
+	if account.ParentAccountID == nil || projectID <= 0 {
+		var err error
+		projectID, err = resolveProjectIDForCreate(ctx, r.sql, account.ProjectID)
+		if err != nil {
+			return err
+		}
 	}
+	// Linked/shadow accounts inherit their parent resource home project; a scoped
+	// workspace context may only be the profile that made the parent visible.
 	account.ProjectID = projectID
 
 	builder := r.client.Account.Create().

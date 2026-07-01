@@ -55,9 +55,10 @@ type cpaDataResponse struct {
 }
 
 type cpaDataPayload struct {
-	Type       string           `json:"type"`
-	ExportedAt string           `json:"exported_at"`
-	Accounts   []cpaDataAccount `json:"accounts"`
+	Type           string           `json:"type"`
+	ExportedAt     string           `json:"exported_at"`
+	Accounts       []cpaDataAccount `json:"accounts"`
+	SkippedShadows int              `json:"skipped_shadows"`
 }
 
 type cpaDataAccount struct {
@@ -534,6 +535,46 @@ func TestExportDataSupportsCPAFormat(t *testing.T) {
 	require.Equal(t, "export@example.com", resp.Data.Accounts[0].Email)
 	require.Equal(t, "codex", resp.Data.Accounts[0].Type)
 	require.Equal(t, "2026-08-05T13:40:42Z", resp.Data.Accounts[0].Expired)
+}
+
+func TestExportDataCPAReportsSkippedSparkShadow(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	parentID := int64(21)
+	adminSvc.accounts = []service.Account{
+		{
+			ID:       parentID,
+			Name:     "mother",
+			Platform: service.PlatformOpenAI,
+			Type:     service.AccountTypeOAuth,
+			Credentials: map[string]any{
+				"access_token": "access-token",
+			},
+			Status: service.StatusActive,
+		},
+		{
+			ID:              22,
+			Name:            "mother (Spark)",
+			Platform:        service.PlatformOpenAI,
+			Type:            service.AccountTypeOAuth,
+			Credentials:     map[string]any{},
+			ParentAccountID: &parentID,
+			QuotaDimension:  service.QuotaDimensionSpark,
+			Status:          service.StatusActive,
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data?format=cpa&include_proxies=false", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp cpaDataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, cpaDataType, resp.Data.Type)
+	require.Len(t, resp.Data.Accounts, 1, "CPA 导出同样排除 spark 影子")
+	require.Equal(t, "mother", resp.Data.Accounts[0].AccountID)
+	require.Equal(t, 1, resp.Data.SkippedShadows, "CPA payload 也要透出跳过数量供前端提示")
 }
 
 func buildAccountDataTestJWT(t *testing.T, expiresAt time.Time, extraClaims map[string]any) string {

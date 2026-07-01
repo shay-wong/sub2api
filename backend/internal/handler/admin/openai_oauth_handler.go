@@ -517,9 +517,23 @@ type CreateShadowRequest struct {
 // CreateShadow creates a spark-dimension shadow account for a parent OpenAI OAuth account.
 // POST /api/v1/admin/accounts/:id/shadow
 func (h *OpenAIOAuthHandler) CreateShadow(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	parentID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	parent, err := h.adminService.GetAccount(c.Request.Context(), parentID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if !scope.accountVisible(parent) {
+		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
 

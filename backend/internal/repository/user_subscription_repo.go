@@ -557,7 +557,9 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 	}
 
 	client := clientFromContext(ctx, r.client)
-	users, err := client.User.Query().Where(user.IDIn(uniqueInt64s(userIDs)...)).All(ctx)
+	relationCtx := mixins.SkipSoftDelete(ctx)
+	userPredicates := append([]predicate.User{user.IDIn(uniqueInt64s(userIDs)...)}, projectScopedUserPredicate(relationCtx)...)
+	users, err := client.User.Query().Where(userPredicates...).All(relationCtx)
 	if err != nil {
 		return err
 	}
@@ -566,7 +568,8 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 		userByID[u.ID] = userEntityToService(u)
 	}
 
-	groups, err := client.Group.Query().Where(group.IDIn(uniqueInt64s(groupIDs)...)).All(ctx)
+	groupPredicates := append([]predicate.Group{group.IDIn(uniqueInt64s(groupIDs)...)}, projectScopedGroupPredicate(relationCtx)...)
+	groups, err := client.Group.Query().Where(groupPredicates...).All(relationCtx)
 	if err != nil {
 		return err
 	}
@@ -577,7 +580,8 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 
 	assignedByID := map[int64]*service.User{}
 	if len(assignedByIDs) > 0 {
-		assignedUsers, err := client.User.Query().Where(user.IDIn(uniqueInt64s(assignedByIDs)...)).All(ctx)
+		assignedByPredicates := append([]predicate.User{user.IDIn(uniqueInt64s(assignedByIDs)...)}, projectScopedUserPredicate(relationCtx)...)
+		assignedUsers, err := client.User.Query().Where(assignedByPredicates...).All(relationCtx)
 		if err != nil {
 			return err
 		}

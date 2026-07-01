@@ -29,6 +29,7 @@ func newOperatorOpenAIOAuthScopeRouter(adminSvc *stubAdminService, groupIDs []in
 	router.POST("/api/v1/admin/openai/accounts/:id/refresh", handler.RefreshAccountToken)
 	router.GET("/api/v1/admin/openai/accounts/:id/quota", handler.QueryQuota)
 	router.POST("/api/v1/admin/openai/accounts/:id/reset-quota", handler.ResetQuota)
+	router.POST("/api/v1/admin/accounts/:id/shadow", handler.CreateShadow)
 	router.POST("/api/v1/admin/openai/generate-auth-url", handler.GenerateAuthURL)
 	router.POST("/api/v1/admin/openai/create-from-oauth", handler.CreateAccountFromOAuth)
 	router.POST("/api/v1/admin/openai/create-from-codex-pat", handler.CreateAccountFromCodexPAT)
@@ -72,6 +73,7 @@ func TestOperatorOpenAIOAuthRoutesRejectLegacyRole(t *testing.T) {
 		{name: "refresh", method: http.MethodPost, path: "/api/v1/admin/openai/accounts/1/refresh"},
 		{name: "quota", method: http.MethodGet, path: "/api/v1/admin/openai/accounts/1/quota"},
 		{name: "reset_quota", method: http.MethodPost, path: "/api/v1/admin/openai/accounts/1/reset-quota"},
+		{name: "create_shadow", method: http.MethodPost, path: "/api/v1/admin/accounts/1/shadow", body: `{"name":"shadow"}`},
 		{name: "generate_auth_url", method: http.MethodPost, path: "/api/v1/admin/openai/generate-auth-url", body: `{"account_id":1,"proxy_id":4}`},
 		{name: "create_from_oauth", method: http.MethodPost, path: "/api/v1/admin/openai/create-from-oauth", body: `{"session_id":"session","code":"code","state":"state","group_ids":[10],"proxy_id":4}`},
 		{name: "create_from_codex_pat", method: http.MethodPost, path: "/api/v1/admin/openai/create-from-codex-pat", body: `{"access_token":"at-test","group_ids":[10],"proxy_id":4}`},

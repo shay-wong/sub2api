@@ -128,11 +128,12 @@ func TestCreateShadow(t *testing.T) {
 
 	proxyID := int64(7)
 	parent := &Account{
-		Name:     "p",
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		Status:   StatusActive,
-		ProxyID:  &proxyID,
+		ProjectID: 123,
+		Name:      "p",
+		Platform:  PlatformOpenAI,
+		Type:      AccountTypeOAuth,
+		Status:    StatusActive,
+		ProxyID:   &proxyID,
 		Credentials: map[string]any{
 			"refresh_token":      "RT",
 			"chatgpt_account_id": "org-x",
@@ -151,6 +152,7 @@ func TestCreateShadow(t *testing.T) {
 	require.Nil(t, shadow.Credentials["refresh_token"], "影子不得持有 auth token")
 	require.Nil(t, shadow.Credentials["access_token"], "影子不得持有 auth token")
 	require.Equal(t, parent.ProxyID, shadow.ProxyID)
+	require.Equal(t, parent.ProjectID, shadow.ProjectID, "shadow must stay in the same project as its parent")
 
 	// Test 2: 一母一影 — 再作成は拒否
 	_, err = svc.CreateShadow(ctx, parent.ID, ShadowOptions{Name: "dup"})

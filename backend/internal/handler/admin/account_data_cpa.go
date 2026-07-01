@@ -14,9 +14,10 @@ import (
 const cpaDataType = "cpa-auth-files"
 
 type CPADataPayload struct {
-	Type       string           `json:"type"`
-	ExportedAt string           `json:"exported_at"`
-	Accounts   []CPADataAccount `json:"accounts"`
+	Type           string           `json:"type"`
+	ExportedAt     string           `json:"exported_at"`
+	Accounts       []CPADataAccount `json:"accounts"`
+	SkippedShadows int              `json:"skipped_shadows,omitempty"`
 }
 
 type CPADataAccount struct {
@@ -196,7 +197,7 @@ func convertCPAAccountToDataAccount(source CPADataAccount, index int) (DataAccou
 	}, nil
 }
 
-func buildCPADataPayload(accounts []service.Account) (CPADataPayload, error) {
+func buildCPADataPayload(accounts []service.Account, skippedShadows int) (CPADataPayload, error) {
 	out := make([]CPADataAccount, 0, len(accounts))
 	for i := range accounts {
 		account := accounts[i]
@@ -230,9 +231,10 @@ func buildCPADataPayload(accounts []service.Account) (CPADataPayload, error) {
 		return CPADataPayload{}, errors.New("no OpenAI OAuth accounts available for CPA export")
 	}
 	return CPADataPayload{
-		Type:       cpaDataType,
-		ExportedAt: time.Now().UTC().Format(time.RFC3339),
-		Accounts:   out,
+		Type:           cpaDataType,
+		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
+		Accounts:       out,
+		SkippedShadows: skippedShadows,
 	}, nil
 }
 

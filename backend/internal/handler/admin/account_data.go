@@ -151,7 +151,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	}
 
 	if format == dataFormatCPA {
-		payload, err := buildCPADataPayload(accounts)
+		payload, err := buildCPADataPayload(accounts, skippedShadows)
 		if err != nil {
 			response.BadRequest(c, err.Error())
 			return

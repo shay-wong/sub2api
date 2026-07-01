@@ -3699,6 +3699,7 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		priority = parent.Priority
 	}
 	shadow := &Account{
+		ProjectID:       parent.ProjectID,
 		Name:            name,
 		Platform:        PlatformOpenAI,
 		Type:            AccountTypeOAuth,

@@ -185,6 +185,138 @@ func TestAccountRepositoryListUsesActiveProjectProfileScope(t *testing.T) {
 	require.ElementsMatch(t, []int64{bound.ID, unbound.ID, foreign.ID}, ids)
 }
 
+func TestAccountRepositoryListShadowsByParentBypassesActiveProjectProfileScope(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	project, err := client.Project.Create().
+		SetName("Shadow Scope Project").
+		SetSlug("shadow-scope-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	parent, err := client.Account.Create().
+		SetProjectID(project.ID).
+		SetName("shadow-parent").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	hiddenShadow, err := client.Account.Create().
+		SetProjectID(project.ID).
+		SetName("hidden-shadow").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetStatus(service.StatusActive).
+		SetParentAccountID(parent.ID).
+		SetQuotaDimension("spark").
+		Save(ctx)
+	require.NoError(t, err)
+
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(project.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(parent.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	projectCtx := service.WithProjectID(ctx, project.ID)
+	shadows, err := repo.ListShadowsByParent(projectCtx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, shadows, 1, "internal shadow invariants must still see unbound shadows hidden from the active profile")
+	require.Equal(t, hiddenShadow.ID, shadows[0].ID)
+
+	_, err = client.ProjectProfile.UpdateOneID(profile.ID).
+		SetMode(service.ProjectProfileModeUnrestricted).
+		Save(ctx)
+	require.NoError(t, err)
+	shadows, err = repo.ListShadowsByParent(projectCtx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, shadows, 1)
+	require.Equal(t, hiddenShadow.ID, shadows[0].ID)
+}
+
+func TestAccountRepositoryCreateShadowPreservesParentProjectInScopedContext(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	home, err := client.Project.Create().
+		SetName("Shadow Home Project").
+		SetSlug("shadow-home-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	workspace, err := client.Project.Create().
+		SetName("Shadow Workspace Project").
+		SetSlug("shadow-workspace-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(workspace.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	parent, err := client.Account.Create().
+		SetProjectID(home.ID).
+		SetName("foreign-parent").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(parent.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	parentID := parent.ID
+	shadow := &service.Account{
+		ProjectID:       parent.ProjectID,
+		Name:            "foreign-parent-spark",
+		Platform:        service.PlatformOpenAI,
+		Type:            service.AccountTypeOAuth,
+		Status:          service.StatusActive,
+		ParentAccountID: &parentID,
+		QuotaDimension:  service.QuotaDimensionSpark,
+		Credentials:     map[string]any{"model_mapping": map[string]any{}},
+	}
+	err = repo.Create(service.WithProjectID(ctx, workspace.ID), shadow)
+	require.NoError(t, err)
+
+	persisted, err := client.Account.Get(ctx, shadow.ID)
+	require.NoError(t, err)
+	require.Equal(t, home.ID, persisted.ProjectID, "shadow created from a visible foreign parent must stay in the parent's home project")
+
+	normal := &service.Account{
+		ProjectID:   home.ID,
+		Name:        "normal-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{},
+	}
+	err = repo.Create(service.WithProjectID(ctx, workspace.ID), normal)
+	require.NoError(t, err)
+	persistedNormal, err := client.Account.Get(ctx, normal.ID)
+	require.NoError(t, err)
+	require.Equal(t, workspace.ID, persistedNormal.ProjectID, "ordinary scoped creates still belong to the current project")
+}
+
 func TestAccountRepositoryListDoesNotExpandAccountsFromBoundProjectGroups(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()
@@ -475,4 +607,189 @@ func TestUserSubscriptionCreateSkipsBindingForUnrestrictedActiveProjectProfile(t
 		Count(ctx)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+func TestUserSubscriptionListRelationAttachUsesActiveProjectProfileScope(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	project, err := client.Project.Create().
+		SetName("Subscription Relation Scope Project").
+		SetSlug("subscription-relation-scope-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(project.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	user, err := client.User.Create().
+		SetEmail("subscription-relation-user@test.com").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	assignedBy, err := client.User.Create().
+		SetEmail("subscription-relation-assigned@test.com").
+		SetPasswordHash("hash").
+		SetRole(service.RoleAdmin).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetProjectID(project.ID).
+		SetName("subscription-relation-group").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectMember.Create().
+		SetProjectID(project.ID).
+		SetUserID(user.ID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	sub, err := client.UserSubscription.Create().
+		SetUserID(user.ID).
+		SetGroupID(group.ID).
+		SetAssignedBy(assignedBy.ID).
+		SetStartsAt(time.Now().Add(-1 * time.Hour)).
+		SetExpiresAt(time.Now().Add(24 * time.Hour)).
+		SetStatus(service.SubscriptionStatusActive).
+		SetAssignedAt(time.Now()).
+		SetNotes("").
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeSubscription).
+		SetResourceID(sub.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := NewUserSubscriptionRepository(client)
+	projectCtx := service.WithProjectID(ctx, project.ID)
+	subs, _, err := repo.List(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, nil, nil, "", "", "", "")
+	require.NoError(t, err)
+	require.Len(t, subs, 1)
+	require.Equal(t, sub.ID, subs[0].ID)
+	require.NotNil(t, subs[0].User, "project member user should still be attached")
+	require.Equal(t, user.ID, subs[0].User.ID)
+	require.Nil(t, subs[0].Group, "unbound group must not be attached via naked ID lookup")
+	require.Nil(t, subs[0].AssignedByUser, "non-member assigned-by user must not be attached via naked ID lookup")
+
+	_, err = client.ProjectMember.Create().
+		SetProjectID(project.ID).
+		SetUserID(assignedBy.ID).
+		SetRole(service.ProjectRoleAdmin).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeGroup).
+		SetResourceID(group.ID).
+		Save(ctx)
+	require.NoError(t, err)
+	subs, _, err = repo.List(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, nil, nil, "", "", "", "")
+	require.NoError(t, err)
+	require.Len(t, subs, 1)
+	require.NotNil(t, subs[0].Group)
+	require.Equal(t, group.ID, subs[0].Group.ID)
+	require.NotNil(t, subs[0].AssignedByUser)
+	require.Equal(t, assignedBy.ID, subs[0].AssignedByUser.ID)
+}
+
+func TestUserSubscriptionListRelationAttachIncludesSoftDeletedHistory(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	project, err := client.Project.Create().
+		SetName("Subscription Relation History Project").
+		SetSlug("subscription-relation-history-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(project.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	user, err := client.User.Create().
+		SetEmail("subscription-history-user@test.com").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	assignedBy, err := client.User.Create().
+		SetEmail("subscription-history-assigned@test.com").
+		SetPasswordHash("hash").
+		SetRole(service.RoleAdmin).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetProjectID(project.ID).
+		SetName("subscription-history-group").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	for _, member := range []struct {
+		userID int64
+		role   string
+	}{
+		{userID: user.ID, role: service.ProjectRoleUser},
+		{userID: assignedBy.ID, role: service.ProjectRoleAdmin},
+	} {
+		_, err = client.ProjectMember.Create().
+			SetProjectID(project.ID).
+			SetUserID(member.userID).
+			SetRole(member.role).
+			SetStatus(service.StatusActive).
+			Save(ctx)
+		require.NoError(t, err)
+	}
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeGroup).
+		SetResourceID(group.ID).
+		Save(ctx)
+	require.NoError(t, err)
+	sub, err := client.UserSubscription.Create().
+		SetUserID(user.ID).
+		SetGroupID(group.ID).
+		SetAssignedBy(assignedBy.ID).
+		SetStartsAt(time.Now().Add(-1 * time.Hour)).
+		SetExpiresAt(time.Now().Add(24 * time.Hour)).
+		SetStatus(service.SubscriptionStatusActive).
+		SetAssignedAt(time.Now()).
+		SetNotes("").
+		Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.UserSubscription.DeleteOneID(sub.ID).Exec(ctx))
+	require.NoError(t, client.User.DeleteOneID(user.ID).Exec(ctx))
+	require.NoError(t, client.User.DeleteOneID(assignedBy.ID).Exec(ctx))
+	require.NoError(t, client.Group.DeleteOneID(group.ID).Exec(ctx))
+
+	repo := NewUserSubscriptionRepository(client)
+	subs, _, err := repo.List(service.WithProjectID(ctx, project.ID), pagination.PaginationParams{Page: 1, PageSize: 10}, nil, nil, service.SubscriptionStatusRevoked, "", "", "")
+	require.NoError(t, err)
+	require.Len(t, subs, 1)
+	require.Equal(t, sub.ID, subs[0].ID)
+	require.Equal(t, service.SubscriptionStatusRevoked, subs[0].Status)
+	require.NotNil(t, subs[0].User)
+	require.Equal(t, user.ID, subs[0].User.ID)
+	require.NotNil(t, subs[0].User.DeletedAt)
+	require.NotNil(t, subs[0].Group)
+	require.Equal(t, group.ID, subs[0].Group.ID)
+	require.NotNil(t, subs[0].AssignedByUser)
+	require.Equal(t, assignedBy.ID, subs[0].AssignedByUser.ID)
+	require.NotNil(t, subs[0].AssignedByUser.DeletedAt)
 }
