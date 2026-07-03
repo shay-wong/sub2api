@@ -481,7 +481,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
+import { fetchBatch, getEntry, isIpGeoLookupConfigured } from '@/utils/ipGeoLookup'
 import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
 
@@ -515,8 +515,9 @@ const { t } = useI18n()
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const ipGeoBatchLoading = ref(false)
+const ipGeoLookupConfigured = isIpGeoLookupConfigured()
 
-const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
+const showIpGeoToolbar = computed(() => ipGeoLookupConfigured && props.columns.some((col) => col.key === 'ip_address'))
 
 const currentPageIps = computed(() =>
   Array.from(new Set(props.data.map((row) => row.ip_address).filter((ip): ip is string => Boolean(ip))))

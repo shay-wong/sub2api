@@ -1,13 +1,15 @@
 <template>
-  <div v-if="entry.status === 'idle'" class="mt-0.5 text-xs">
-    <button
-      type="button"
-      class="text-primary-600 underline decoration-dashed underline-offset-2 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-      @click="handleFetch"
-    >
-      {{ t('usage.ipGeo.fetch') }}
-    </button>
-  </div>
+  <template v-if="entry.status === 'idle'">
+    <div v-if="ipGeoLookupConfigured" class="mt-0.5 text-xs">
+      <button
+        type="button"
+        class="text-primary-600 underline decoration-dashed underline-offset-2 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+        @click="handleFetch"
+      >
+        {{ t('usage.ipGeo.fetch') }}
+      </button>
+    </div>
+  </template>
 
   <div
     v-else-if="entry.status === 'loading'"
@@ -34,6 +36,7 @@
       {{ entry.label }}
     </button>
     <button
+      v-if="ipGeoLookupConfigured"
       type="button"
       class="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
       :title="t('usage.ipGeo.refreshTitle')"
@@ -43,15 +46,17 @@
     </button>
   </div>
 
-  <div v-else-if="entry.status === 'error'" class="mt-0.5 text-xs">
-    <button
-      type="button"
-      class="text-red-600 underline decoration-dashed underline-offset-2 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-      @click="handleFetch"
-    >
-      {{ t('usage.ipGeo.failed') }}
-    </button>
-  </div>
+  <template v-else-if="entry.status === 'error'">
+    <div v-if="ipGeoLookupConfigured" class="mt-0.5 text-xs">
+      <button
+        type="button"
+        class="text-red-600 underline decoration-dashed underline-offset-2 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+        @click="handleFetch"
+      >
+        {{ t('usage.ipGeo.failed') }}
+      </button>
+    </div>
+  </template>
 
   <div v-else class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
     {{ t('usage.ipGeo.private') }}
@@ -62,12 +67,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { fetchOne, getEntry } from '@/utils/ipGeoLookup'
+import { fetchOne, getEntry, isIpGeoLookupConfigured } from '@/utils/ipGeoLookup'
 
 const props = defineProps<{ ip: string }>()
 const { t } = useI18n()
 
 const entry = computed(() => getEntry(props.ip))
+const ipGeoLookupConfigured = isIpGeoLookupConfigured()
 
 const tooltipText = computed(() => {
   const detail = entry.value.detail

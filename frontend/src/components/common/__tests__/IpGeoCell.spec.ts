@@ -4,11 +4,13 @@ import { mount } from '@vue/test-utils'
 const mocks = vi.hoisted(() => ({
   getEntry: vi.fn(),
   fetchOne: vi.fn(),
+  isIpGeoLookupConfigured: vi.fn(),
 }))
 
 vi.mock('@/utils/ipGeoLookup', () => ({
   getEntry: mocks.getEntry,
   fetchOne: mocks.fetchOne,
+  isIpGeoLookupConfigured: mocks.isIpGeoLookupConfigured,
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -40,6 +42,8 @@ describe('IpGeoCell', () => {
   beforeEach(() => {
     mocks.getEntry.mockReset()
     mocks.fetchOne.mockReset()
+    mocks.isIpGeoLookupConfigured.mockReset()
+    mocks.isIpGeoLookupConfigured.mockReturnValue(true)
   })
 
   it('renders a clickable fetch link in idle state and triggers fetchOne on click', async () => {
@@ -48,6 +52,16 @@ describe('IpGeoCell', () => {
     expect(wrapper.text()).toContain('Fetch region')
     await wrapper.find('button').trigger('click')
     expect(mocks.fetchOne).toHaveBeenCalledWith('8.8.8.8')
+  })
+
+  it('hides the fetch link when IP geolocation is not configured', () => {
+    mocks.isIpGeoLookupConfigured.mockReturnValue(false)
+    mocks.getEntry.mockReturnValue({ status: 'idle' })
+
+    const wrapper = mount(IpGeoCell, { props: { ip: '8.8.8.8' } })
+
+    expect(wrapper.text()).not.toContain('Fetch region')
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 
   it('renders loading state', () => {
@@ -78,6 +92,16 @@ describe('IpGeoCell', () => {
     expect(mocks.fetchOne).toHaveBeenCalledWith('121.35.47.43', true)
   })
 
+  it('keeps a cached success label but hides refresh when IP geolocation is not configured', () => {
+    mocks.isIpGeoLookupConfigured.mockReturnValue(false)
+    mocks.getEntry.mockReturnValue({ status: 'success', label: 'US · California', detail: {} })
+
+    const wrapper = mount(IpGeoCell, { props: { ip: '8.8.4.4' } })
+
+    expect(wrapper.text()).toContain('US · California')
+    expect(wrapper.findAll('button')).toHaveLength(1)
+  })
+
   it('opens the external lookup page when the label is clicked', async () => {
     mocks.getEntry.mockReturnValue({ status: 'success', label: 'US · California', detail: {} })
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
@@ -97,6 +121,16 @@ describe('IpGeoCell', () => {
     expect(wrapper.text()).toContain('Failed')
     await wrapper.find('button').trigger('click')
     expect(mocks.fetchOne).toHaveBeenCalledWith('8.8.8.8')
+  })
+
+  it('hides failed retry when IP geolocation is not configured', () => {
+    mocks.isIpGeoLookupConfigured.mockReturnValue(false)
+    mocks.getEntry.mockReturnValue({ status: 'error' })
+
+    const wrapper = mount(IpGeoCell, { props: { ip: '8.8.8.8' } })
+
+    expect(wrapper.text()).not.toContain('Failed')
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 
   it('renders private state as non-clickable text', () => {

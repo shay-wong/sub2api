@@ -2,6 +2,7 @@ const ipGeoMocks = vi.hoisted(() => ({
   getEntry: vi.fn(() => ({ status: 'idle' as const })),
   fetchOne: vi.fn(),
   fetchBatch: vi.fn(),
+  isIpGeoLookupConfigured: vi.fn(() => true),
 }))
 
 vi.mock('@/utils/ipGeoLookup', () => ipGeoMocks)
@@ -347,7 +348,9 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
     ipGeoMocks.getEntry.mockReset()
     ipGeoMocks.fetchOne.mockReset()
     ipGeoMocks.fetchBatch.mockReset()
+    ipGeoMocks.isIpGeoLookupConfigured.mockReset()
     ipGeoMocks.getEntry.mockReturnValue({ status: 'idle' })
+    ipGeoMocks.isIpGeoLookupConfigured.mockReturnValue(true)
   })
 
   it('does not render the batch toolbar when the ip_address column is not visible', () => {
@@ -360,6 +363,20 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
       global: { stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
     })
     expect(wrapper.text()).not.toContain('usage.ipGeo.batchFetch')
+  })
+
+  it('does not render the batch toolbar when IP geolocation is not configured', () => {
+    ipGeoMocks.isIpGeoLookupConfigured.mockReturnValue(false)
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ request_id: 'r1', ip_address: '8.8.8.8' }],
+        loading: false,
+        columns: [{ key: 'ip_address', label: 'IP' }],
+      },
+      global: { stubs: { DataTable: DataTableStubWithIp, EmptyState: true, Teleport: true } },
+    })
+    expect(wrapper.text()).not.toContain('usage.ipGeo.batchFetch')
+    expect(ipGeoMocks.fetchBatch).not.toHaveBeenCalled()
   })
 
   it('renders the batch toolbar with a pending count when the ip_address column is visible', () => {

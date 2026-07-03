@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { isPrivateIp, getEntry, formatGeoLabel, fetchOne, fetchBatch } from '../ipGeoLookup'
 
+const GEO_LOOKUP_BASE_URL = 'https://geo.example/v1/ip/geo'
+
+function enableGeoLookup(): void {
+  vi.stubEnv('VITE_IP_GEO_LOOKUP_BASE_URL', GEO_LOOKUP_BASE_URL)
+}
+
 describe('isPrivateIp', () => {
   it('identifies private/reserved IPv4 ranges', () => {
     expect(isPrivateIp('10.0.0.1')).toBe(true)
@@ -53,6 +59,7 @@ describe('formatGeoLabel', () => {
 
 describe('fetchOne', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs()
     localStorage.clear()
     global.fetch = vi.fn()
   })
@@ -63,7 +70,15 @@ describe('fetchOne', () => {
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
+  it('does not send a public IP to a third party unless a lookup endpoint is configured', async () => {
+    await fetchOne('198.51.100.7')
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(getEntry('198.51.100.7')).toEqual({ status: 'error' })
+  })
+
   it('fetches and stores a successful geolocation result', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -81,7 +96,7 @@ describe('fetchOne', () => {
 
     await fetchOne('121.35.47.43')
 
-    expect(global.fetch).toHaveBeenCalledWith('https://get.geojs.io/v1/ip/geo/121.35.47.43.json')
+    expect(global.fetch).toHaveBeenCalledWith(`${GEO_LOOKUP_BASE_URL}/121.35.47.43.json`)
     const entry = getEntry('121.35.47.43')
     expect(entry.status).toBe('success')
     expect(entry.label).toBe('CN · Guangdong · Shenzhen')
@@ -89,6 +104,7 @@ describe('fetchOne', () => {
   })
 
   it('marks the entry as error when the response has no country_code', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ ip: '192.0.2.55', organization: 'AS64512 Unknown' }),
@@ -100,6 +116,7 @@ describe('fetchOne', () => {
   })
 
   it('marks the entry as error when the request rejects', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockRejectedValue(new Error('network down'))
 
     await fetchOne('198.51.100.7')
@@ -108,6 +125,7 @@ describe('fetchOne', () => {
   })
 
   it('does not re-fetch a cached successful IP unless forced', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => ({ ip: '8.8.8.8', country_code: 'US', region: 'California', city: 'Mountain View' }),
@@ -126,11 +144,13 @@ describe('fetchOne', () => {
 
 describe('fetchBatch', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs()
     localStorage.clear()
     global.fetch = vi.fn()
   })
 
   it('deduplicates IPs and skips private addresses without a network call', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => [{ ip: '203.0.113.10', country_code: 'US', region: 'Texas', city: 'Dallas' }],
@@ -146,7 +166,17 @@ describe('fetchBatch', () => {
     expect(getEntry('203.0.113.10').status).toBe('success')
   })
 
+  it('does not send batched public IPs unless a lookup endpoint is configured', async () => {
+    const ok = await fetchBatch(['203.0.113.90', '203.0.113.91'])
+
+    expect(ok).toBe(false)
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(getEntry('203.0.113.90').status).toBe('error')
+    expect(getEntry('203.0.113.91').status).toBe('error')
+  })
+
   it('splits more than 50 IPs into multiple chunk requests', async () => {
+    enableGeoLookup();
     const ips = Array.from({ length: 61 }, (_, i) => `203.0.${Math.floor(i / 250)}.${(i % 250) + 1}`)
     ;(global.fetch as any).mockImplementation(async (url: string) => ({
       ok: true,
@@ -166,6 +196,7 @@ describe('fetchBatch', () => {
   })
 
   it('marks individual IPs as error when they are missing from the batch response', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValue({
       ok: true,
       json: async () => [{ ip: '203.0.113.20', country_code: 'US' }],
@@ -180,6 +211,7 @@ describe('fetchBatch', () => {
   })
 
   it('returns false when a chunk request fails at the network level', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockRejectedValue(new Error('network down'))
 
     const ok = await fetchBatch(['203.0.113.50', '203.0.113.51'])
@@ -190,6 +222,7 @@ describe('fetchBatch', () => {
   })
 
   it('skips IPs that already have a cached success entry', async () => {
+    enableGeoLookup();
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       json: async () => [{ ip: '203.0.113.40', country_code: 'CN' }],
@@ -211,6 +244,7 @@ describe('fetchBatch', () => {
 
 describe('ipGeoLookup localStorage persistence', () => {
   beforeEach(() => {
+    vi.unstubAllEnvs()
     localStorage.clear()
     vi.resetModules()
   })
@@ -245,6 +279,7 @@ describe('ipGeoLookup localStorage persistence', () => {
   })
 
   it('persists a successful fetch result to localStorage', async () => {
+    enableGeoLookup();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ ip: '1.2.4.8', country_code: 'CN' }),
@@ -276,6 +311,7 @@ describe('ipGeoLookup localStorage persistence', () => {
   })
 
   it('re-fetches a successful in-memory cache entry after the TTL elapses', async () => {
+    enableGeoLookup();
     const now = new Date('2026-07-01T00:00:00Z')
     vi.setSystemTime(now)
     global.fetch = vi.fn().mockResolvedValue({

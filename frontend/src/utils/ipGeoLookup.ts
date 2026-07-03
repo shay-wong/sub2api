@@ -24,8 +24,15 @@ const IDLE_ENTRY: IpGeoEntry = { status: 'idle' }
 const CACHE_STORAGE_KEY = 'sub2api:ip-geo-cache:v1'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const BATCH_CHUNK_SIZE = 50
-const GEO_SINGLE_URL = 'https://get.geojs.io/v1/ip/geo'
-const GEO_BATCH_URL = 'https://get.geojs.io/v1/ip/geo.json'
+
+function configuredGeoLookupBaseURL(): string | undefined {
+  const baseURL = import.meta.env.VITE_IP_GEO_LOOKUP_BASE_URL?.trim()
+  return baseURL ? baseURL.replace(/\/+$/, '') : undefined
+}
+
+export function isIpGeoLookupConfigured(): boolean {
+  return Boolean(configuredGeoLookupBaseURL())
+}
 
 interface StoredEntry {
   label: string
@@ -162,7 +169,12 @@ export async function fetchOne(ip: string, force = false): Promise<void> {
   }
   cache.set(ip, { status: 'loading' })
   try {
-    const response = await fetch(`${GEO_SINGLE_URL}/${encodeURIComponent(ip)}.json`)
+    const baseURL = configuredGeoLookupBaseURL()
+    if (!baseURL) {
+      cache.set(ip, { status: 'error' })
+      return
+    }
+    const response = await fetch(`${baseURL}/${encodeURIComponent(ip)}.json`)
     if (!response.ok) {
       cache.set(ip, { status: 'error' })
       return
@@ -192,10 +204,16 @@ export async function fetchBatch(ips: string[]): Promise<boolean> {
   targets.forEach((ip) => cache.set(ip, { status: 'loading' }))
 
   let allChunksOk = true
+  const baseURL = configuredGeoLookupBaseURL()
+  if (!baseURL) {
+    targets.forEach((ip) => cache.set(ip, { status: 'error' }))
+    return false
+  }
+
   for (let i = 0; i < targets.length; i += BATCH_CHUNK_SIZE) {
     const chunk = targets.slice(i, i + BATCH_CHUNK_SIZE)
     try {
-      const response = await fetch(`${GEO_BATCH_URL}?ip=${chunk.map(encodeURIComponent).join(',')}`)
+      const response = await fetch(`${baseURL}.json?ip=${chunk.map(encodeURIComponent).join(',')}`)
       if (!response.ok) {
         chunk.forEach((ip) => cache.set(ip, { status: 'error' }))
         allChunksOk = false
