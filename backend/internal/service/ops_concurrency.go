@@ -13,11 +13,22 @@ const (
 	opsConcurrencyBatchChunkSize = 200
 )
 
+type opsAccountStatsRepository interface {
+	ListOpsAccountsForStats(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]Account, error)
+}
+
 func (s *OpsService) listAllAccountsForOps(ctx context.Context, platformFilter string, groupIDs ...int64) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return []Account{}, nil
 	}
 	groupIDs = normalizeOperatorScopeGroupIDs(groupIDs)
+	if repo, ok := s.accountRepo.(opsAccountStatsRepository); ok && len(groupIDs) <= 1 {
+		var groupIDFilter *int64
+		if len(groupIDs) == 1 {
+			groupIDFilter = &groupIDs[0]
+		}
+		return repo.ListOpsAccountsForStats(ctx, platformFilter, groupIDFilter)
+	}
 
 	out := make([]Account, 0, 128)
 	page := 1

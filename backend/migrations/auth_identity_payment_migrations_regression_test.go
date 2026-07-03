@@ -270,6 +270,17 @@ func TestMigration159ScopesProxiesToProjectsAndProfiles(t *testing.T) {
 	require.Contains(t, sql, "ON CONFLICT (project_profile_id, resource_type, resource_id) DO NOTHING")
 }
 
+func TestMigration158BackfillsGrokMediaGenerationGroups(t *testing.T) {
+	content, err := FS.ReadFile("158_enable_grok_media_generation_groups.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "UPDATE groups")
+	require.Contains(t, sql, "SET allow_image_generation = true")
+	require.Contains(t, sql, "WHERE platform = 'grok'")
+	require.Contains(t, sql, "AND allow_image_generation = false")
+}
+
 func TestMigration154AddsSparkShadowColumnsAndConstraintsWithoutHotIndexes(t *testing.T) {
 	content, err := FS.ReadFile("154_account_spark_shadow.sql")
 	require.NoError(t, err)

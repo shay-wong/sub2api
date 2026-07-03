@@ -32,6 +32,14 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldRateLimit5h holds the string denoting the rate_limit_5h field in the database.
 	FieldRateLimit5h = "rate_limit_5h"
+	// FieldPeakRateEnabled holds the string denoting the peak_rate_enabled field in the database.
+	FieldPeakRateEnabled = "peak_rate_enabled"
+	// FieldPeakStart holds the string denoting the peak_start field in the database.
+	FieldPeakStart = "peak_start"
+	// FieldPeakEnd holds the string denoting the peak_end field in the database.
+	FieldPeakEnd = "peak_end"
+	// FieldPeakRateMultiplier holds the string denoting the peak_rate_multiplier field in the database.
+	FieldPeakRateMultiplier = "peak_rate_multiplier"
 	// FieldIsExclusive holds the string denoting the is_exclusive field in the database.
 	FieldIsExclusive = "is_exclusive"
 	// FieldStatus holds the string denoting the status field in the database.
@@ -191,6 +199,10 @@ var Columns = []string{
 	FieldProjectID,
 	FieldRateMultiplier,
 	FieldRateLimit5h,
+	FieldPeakRateEnabled,
+	FieldPeakStart,
+	FieldPeakEnd,
+	FieldPeakRateMultiplier,
 	FieldIsExclusive,
 	FieldStatus,
 	FieldPlatform,
@@ -261,6 +273,18 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultRateLimit5h holds the default value on creation for the "rate_limit_5h" field.
 	DefaultRateLimit5h float64
+	// DefaultPeakRateEnabled holds the default value on creation for the "peak_rate_enabled" field.
+	DefaultPeakRateEnabled bool
+	// DefaultPeakStart holds the default value on creation for the "peak_start" field.
+	DefaultPeakStart string
+	// PeakStartValidator is a validator for the "peak_start" field. It is called by the builders before save.
+	PeakStartValidator func(string) error
+	// DefaultPeakEnd holds the default value on creation for the "peak_end" field.
+	DefaultPeakEnd string
+	// PeakEndValidator is a validator for the "peak_end" field. It is called by the builders before save.
+	PeakEndValidator func(string) error
+	// DefaultPeakRateMultiplier holds the default value on creation for the "peak_rate_multiplier" field.
+	DefaultPeakRateMultiplier float64
 	// DefaultIsExclusive holds the default value on creation for the "is_exclusive" field.
 	DefaultIsExclusive bool
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -357,6 +381,26 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByRateLimit5h orders the results by the rate_limit_5h field.
 func ByRateLimit5h(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateLimit5h, opts...).ToFunc()
+}
+
+// ByPeakRateEnabled orders the results by the peak_rate_enabled field.
+func ByPeakRateEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPeakRateEnabled, opts...).ToFunc()
+}
+
+// ByPeakStart orders the results by the peak_start field.
+func ByPeakStart(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPeakStart, opts...).ToFunc()
+}
+
+// ByPeakEnd orders the results by the peak_end field.
+func ByPeakEnd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPeakEnd, opts...).ToFunc()
+}
+
+// ByPeakRateMultiplier orders the results by the peak_rate_multiplier field.
+func ByPeakRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPeakRateMultiplier, opts...).ToFunc()
 }
 
 // ByIsExclusive orders the results by the is_exclusive field.

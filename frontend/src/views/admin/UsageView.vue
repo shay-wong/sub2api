@@ -119,6 +119,7 @@
           :allow-user-detail="canManageUsers"
           @sort="handleSort"
           @userClick="handleUserClick"
+          @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
         <Pagination
           v-if="usageLogs.length > 0 || pagination.total > 0"
@@ -659,6 +660,10 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   pagination.page = 1
   invalidateUsageTotalCache()
   loadLogs()
+}
+
+const handleIpGeoBatchFailed = () => {
+  appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 const cancelExport = () => exportAbortController?.abort()
 const openCleanupDialog = () => { cleanupDialogVisible.value = true }
