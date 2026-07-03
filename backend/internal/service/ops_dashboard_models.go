@@ -42,10 +42,10 @@ type OpsDashboardOverview struct {
 	HealthScore int `json:"health_score"`
 
 	// Latest system-level snapshot (window=1m, global).
-	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`
+	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics,omitempty"`
 
 	// Background jobs health (heartbeats).
-	JobHeartbeats []*OpsJobHeartbeat `json:"job_heartbeats"`
+	JobHeartbeats []*OpsJobHeartbeat `json:"job_heartbeats,omitempty"`
 
 	SuccessCount         int64 `json:"success_count"`
 	ErrorCountTotal      int64 `json:"error_count_total"`

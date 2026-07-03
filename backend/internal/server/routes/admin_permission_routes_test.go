@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,35 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type routeOpsRepoStub struct {
+	service.OpsRepository
+
+	getDashboardOverviewFn   func(ctx context.Context, filter *service.OpsDashboardFilter) (*service.OpsDashboardOverview, error)
+	getLatestSystemMetricsFn func(ctx context.Context, windowMinutes int) (*service.OpsSystemMetricsSnapshot, error)
+	listJobHeartbeatsFn      func(ctx context.Context) ([]*service.OpsJobHeartbeat, error)
+}
+
+func (s *routeOpsRepoStub) GetDashboardOverview(ctx context.Context, filter *service.OpsDashboardFilter) (*service.OpsDashboardOverview, error) {
+	if s.getDashboardOverviewFn != nil {
+		return s.getDashboardOverviewFn(ctx, filter)
+	}
+	return &service.OpsDashboardOverview{}, nil
+}
+
+func (s *routeOpsRepoStub) GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*service.OpsSystemMetricsSnapshot, error) {
+	if s.getLatestSystemMetricsFn != nil {
+		return s.getLatestSystemMetricsFn(ctx, windowMinutes)
+	}
+	return nil, nil
+}
+
+func (s *routeOpsRepoStub) ListJobHeartbeats(ctx context.Context) ([]*service.OpsJobHeartbeat, error) {
+	if s.listJobHeartbeatsFn != nil {
+		return s.listJobHeartbeatsFn(ctx)
+	}
+	return nil, nil
+}
 
 func TestPaymentAdminRoutesRequireAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -314,6 +344,122 @@ func TestProjectAdminWithoutOpsReadCannotReadGrokRuntimeSanity(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestProjectAdminWithOpsReadCannotReadUsageRecordRuntime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	opsSvc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionOpsRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ops/runtime/usage-record", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestSuperAdminCanReadUsageRecordRuntime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	opsSvc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 1})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleSuperAdmin)
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ops/runtime/usage-record", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"scope":"process"`)
+}
+
+func TestProjectAdminOpsDashboardOverviewOmitsGlobalRuntimeHealth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+	getLatestSystemMetricsCalled := false
+	listJobHeartbeatsCalled := false
+	repo := &routeOpsRepoStub{
+		getDashboardOverviewFn: func(ctx context.Context, filter *service.OpsDashboardFilter) (*service.OpsDashboardOverview, error) {
+			projectID, ok := service.ProjectIDFromContext(ctx)
+			require.True(t, ok)
+			require.Equal(t, int64(1), projectID)
+			ttftP99 := 100
+			return &service.OpsDashboardOverview{
+				RequestCountTotal: 100,
+				RequestCountSLA:   100,
+				SuccessCount:      100,
+				SLA:               1,
+				ErrorRate:         0,
+				TTFT:              service.OpsPercentiles{P99: &ttftP99},
+			}, nil
+		},
+		getLatestSystemMetricsFn: func(ctx context.Context, windowMinutes int) (*service.OpsSystemMetricsSnapshot, error) {
+			getLatestSystemMetricsCalled = true
+			cpuUsagePercent := 99.0
+			return &service.OpsSystemMetricsSnapshot{CPUUsagePercent: &cpuUsagePercent}, nil
+		},
+		listJobHeartbeatsFn: func(ctx context.Context) ([]*service.OpsJobHeartbeat, error) {
+			listJobHeartbeatsCalled = true
+			return []*service.OpsJobHeartbeat{{JobName: "global-job"}}, nil
+		},
+	}
+	opsSvc := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionOpsRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ops/dashboard/overview?time_range=1h", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.False(t, getLatestSystemMetricsCalled)
+	require.False(t, listJobHeartbeatsCalled)
+
+	var resp struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotContains(t, resp.Data, "system_metrics")
+	require.NotContains(t, resp.Data, "job_heartbeats")
+	var healthScore int
+	require.NoError(t, json.Unmarshal(resp.Data["health_score"], &healthScore))
+	require.Equal(t, 100, healthScore)
 }
 
 func TestProjectAdminCanManageProjectProxiesWithPermission(t *testing.T) {

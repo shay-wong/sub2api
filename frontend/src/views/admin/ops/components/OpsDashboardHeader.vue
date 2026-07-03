@@ -806,6 +806,7 @@ const goroutineStatusClass = computed(() => {
 })
 
 const jobHeartbeats = computed(() => overview.value?.job_heartbeats ?? [])
+const showRuntimeHealthCards = computed(() => systemMetrics.value != null || jobHeartbeats.value.length > 0)
 
 const jobsStatus = computed<'ok' | 'warn' | 'unknown'>(() => {
   const list = jobHeartbeats.value
@@ -1434,7 +1435,7 @@ function handleToolbarRefresh() {
     </div>
 
     <!-- Integrated: System health (cards) -->
-    <div v-if="overview" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+    <div v-if="overview && showRuntimeHealthCards" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <!-- CPU -->
         <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">

@@ -5211,7 +5211,7 @@ export default {
       // Health Score & Diagnosis
       health: 'Health',
       healthCondition: 'Health Condition',
-      healthHelp: 'Overall system health score based on SLA, error rate, and resource usage',
+      healthHelp: 'Health is not SLA: project spaces use error rate and TTFT; global views also include resources and background jobs',
       healthyStatus: 'Healthy',
       riskyStatus: 'At Risk',
       idleStatus: 'Idle',
@@ -5867,7 +5867,7 @@ export default {
         upstreamErrors: 'Upstream error statistics, excluding rate limit errors (429/529).',
         latency: 'Request duration statistics, including p50, p90, p95, p99 percentiles.',
         ttft: 'Time To First Token, measuring the speed of first token return in streaming responses.',
-        health: 'System health score (0-100), considering SLA, error rate, and resource usage.'
+        health: 'Health score (0-100) is not SLA. Project spaces use error rate and TTFT; global views also include resources and background jobs.'
       },
       charts: {
         emptyRequest: 'No requests in this window.',

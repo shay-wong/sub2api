@@ -19,7 +19,7 @@ func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview) 
 
 	// Idle/no-data: avoid showing a "bad" score when there is no traffic.
 	// UI can still render a gray/idle state based on QPS + error rate.
-	if overview.RequestCountSLA <= 0 && overview.RequestCountTotal <= 0 && overview.ErrorCountTotal <= 0 {
+	if isDashboardOverviewIdle(overview) {
 		return 100
 	}
 
@@ -29,6 +29,23 @@ func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview) 
 	// Weighted combination: 70% business + 30% infrastructure
 	score := businessHealth*0.7 + infraHealth*0.3
 	return int(math.Round(clampFloat64(score, 0, 100)))
+}
+
+func computeProjectDashboardHealthScore(overview *OpsDashboardOverview) int {
+	if overview == nil {
+		return 0
+	}
+	if isDashboardOverviewIdle(overview) {
+		return 100
+	}
+	return int(math.Round(clampFloat64(computeBusinessHealth(overview), 0, 100)))
+}
+
+func isDashboardOverviewIdle(overview *OpsDashboardOverview) bool {
+	return overview != nil &&
+		overview.RequestCountSLA <= 0 &&
+		overview.RequestCountTotal <= 0 &&
+		overview.ErrorCountTotal <= 0
 }
 
 // computeBusinessHealth calculates business health score (0-100)

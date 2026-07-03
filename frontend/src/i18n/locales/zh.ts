@@ -5364,7 +5364,7 @@ export default {
       // Health Score & Diagnosis
       health: '健康',
       healthCondition: '健康状况',
-      healthHelp: '基于 SLA、错误率和资源使用情况的系统整体健康评分',
+      healthHelp: '健康分不是 SLA：项目空间内按错误率与 TTFT 评分；全局视图还会计入资源与后台任务状态',
       healthyStatus: '健康',
       riskyStatus: '风险',
       idleStatus: '待机',
@@ -6026,7 +6026,7 @@ export default {
         errors: '错误统计，包括总错误数、错误率和上游错误率。',
         latency: '请求时长统计，包括 p50、p90、p95、p99 等百分位数。',
         ttft: '首 Token 延迟（Time To First Token），衡量流式响应的首 Token 返回速度。',
-        health: '系统健康评分（0-100），综合考虑 SLA、错误率和资源使用情况。'
+        health: '健康评分（0-100）不是 SLA。项目空间内按错误率与 TTFT 评分；全局视图还会综合资源与后台任务状态。'
       },
       charts: {
         emptyRequest: '该时间窗口内暂无请求。',

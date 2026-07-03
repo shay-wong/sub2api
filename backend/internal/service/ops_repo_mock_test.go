@@ -15,6 +15,9 @@ type opsRepoMock struct {
 	InsertSystemLogCleanupAuditFn func(ctx context.Context, input *OpsSystemLogCleanupAudit) error
 	LookupDeletedKeyAuditFn       func(ctx context.Context, key string) (*DeletedKeyAuditResult, error)
 	GetWindowStatsFn              func(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error)
+	GetDashboardOverviewFn        func(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error)
+	GetLatestSystemMetricsFn      func(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error)
+	ListJobHeartbeatsFn           func(ctx context.Context) ([]*OpsJobHeartbeat, error)
 }
 
 func (m *opsRepoMock) InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error) {
@@ -87,6 +90,9 @@ func (m *opsRepoMock) GetRealtimeTrafficSummary(ctx context.Context, filter *Ops
 }
 
 func (m *opsRepoMock) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {
+	if m.GetDashboardOverviewFn != nil {
+		return m.GetDashboardOverviewFn(ctx, filter)
+	}
 	return &OpsDashboardOverview{}, nil
 }
 
@@ -115,6 +121,9 @@ func (m *opsRepoMock) InsertSystemMetrics(ctx context.Context, input *OpsInsertS
 }
 
 func (m *opsRepoMock) GetLatestSystemMetrics(ctx context.Context, windowMinutes int) (*OpsSystemMetricsSnapshot, error) {
+	if m.GetLatestSystemMetricsFn != nil {
+		return m.GetLatestSystemMetricsFn(ctx, windowMinutes)
+	}
 	return &OpsSystemMetricsSnapshot{}, nil
 }
 
@@ -123,6 +132,9 @@ func (m *opsRepoMock) UpsertJobHeartbeat(ctx context.Context, input *OpsUpsertJo
 }
 
 func (m *opsRepoMock) ListJobHeartbeats(ctx context.Context) ([]*OpsJobHeartbeat, error) {
+	if m.ListJobHeartbeatsFn != nil {
+		return m.ListJobHeartbeatsFn(ctx)
+	}
 	return []*OpsJobHeartbeat{}, nil
 }
 

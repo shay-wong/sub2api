@@ -41,31 +41,39 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 		}
 		return nil, err
 	}
+	_, projectScoped := ProjectIDFromContext(ctx)
 
-	// Best-effort system health + jobs; dashboard metrics should still render if these are missing.
-	if metrics, err := s.opsRepo.GetLatestSystemMetrics(ctx, 1); err == nil {
-		// Attach config-derived limits so the UI can show "current / max" for connection pools.
-		// These are best-effort and should never block the dashboard rendering.
-		if s != nil && s.cfg != nil {
-			if s.cfg.Database.MaxOpenConns > 0 {
-				metrics.DBMaxOpenConns = intPtr(s.cfg.Database.MaxOpenConns)
+	// Best-effort process-global runtime health is only attached to global reports.
+	// Project-scoped dashboards keep their score and panels tied to project-attributable traffic.
+	if !projectScoped {
+		if metrics, err := s.opsRepo.GetLatestSystemMetrics(ctx, 1); err == nil {
+			// Attach config-derived limits so the UI can show "current / max" for connection pools.
+			// These are best-effort and should never block the dashboard rendering.
+			if s != nil && s.cfg != nil {
+				if s.cfg.Database.MaxOpenConns > 0 {
+					metrics.DBMaxOpenConns = intPtr(s.cfg.Database.MaxOpenConns)
+				}
+				if s.cfg.Redis.PoolSize > 0 {
+					metrics.RedisPoolSize = intPtr(s.cfg.Redis.PoolSize)
+				}
 			}
-			if s.cfg.Redis.PoolSize > 0 {
-				metrics.RedisPoolSize = intPtr(s.cfg.Redis.PoolSize)
-			}
+			overview.SystemMetrics = metrics
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("[Ops] GetLatestSystemMetrics failed: %v", err)
 		}
-		overview.SystemMetrics = metrics
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		log.Printf("[Ops] GetLatestSystemMetrics failed: %v", err)
+
+		if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
+			overview.JobHeartbeats = heartbeats
+		} else {
+			log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
+		}
 	}
 
-	if heartbeats, err := s.opsRepo.ListJobHeartbeats(ctx); err == nil {
-		overview.JobHeartbeats = heartbeats
+	if projectScoped {
+		overview.HealthScore = computeProjectDashboardHealthScore(overview)
 	} else {
-		log.Printf("[Ops] ListJobHeartbeats failed: %v", err)
+		overview.HealthScore = computeDashboardHealthScore(time.Now().UTC(), overview)
 	}
-
-	overview.HealthScore = computeDashboardHealthScore(time.Now().UTC(), overview)
 
 	return overview, nil
 }
