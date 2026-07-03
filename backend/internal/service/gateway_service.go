@@ -543,6 +543,25 @@ type AccountSelectionResult struct {
 	Group       *Group
 }
 
+func selectionGroupFromContext(ctx context.Context) (*int64, *Group) {
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	if !IsGroupContextValid(group) {
+		return nil, nil
+	}
+	id := group.ID
+	return &id, group
+}
+
+func attachSelectionGroup(ctx context.Context, selection *AccountSelectionResult) *AccountSelectionResult {
+	if selection == nil {
+		return nil
+	}
+	groupID, group := selectionGroupFromContext(ctx)
+	selection.GroupID = groupID
+	selection.Group = group
+	return selection
+}
+
 // ClaudeUsage 表示Claude API返回的usage信息
 type ClaudeUsage struct {
 	InputTokens              int `json:"input_tokens"`
@@ -2944,22 +2963,12 @@ func (s *GatewayService) newSelectionResult(ctx context.Context, account *Accoun
 	if err != nil {
 		return nil, err
 	}
-	group, _ := ctx.Value(ctxkey.Group).(*Group)
-	var groupID *int64
-	if IsGroupContextValid(group) {
-		id := group.ID
-		groupID = &id
-	} else {
-		group = nil
-	}
-	return &AccountSelectionResult{
+	return attachSelectionGroup(ctx, &AccountSelectionResult{
 		Account:     hydrated,
 		Acquired:    acquired,
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
-		GroupID:     groupID,
-		Group:       group,
-	}, nil
+	}), nil
 }
 
 // filterByMinPriority 过滤出优先级最小的账号集合
@@ -9307,8 +9316,10 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	}
 
 	if p.IsSubscriptionBill {
-		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+		if p.Cost.ActualCost > 0 && p.User != nil {
+			if groupID := p.groupRateLimitGroupID(); groupID != nil {
+				deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *groupID, p.Cost.ActualCost)
+			}
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)

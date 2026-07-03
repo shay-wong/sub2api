@@ -297,11 +297,41 @@ func NormalizePeakRateConfig(subscriptionType string, enabled bool, start, end s
 // gateway_service.recordUsageCore 与 openai_gateway_service.RecordUsage 共用此函数，
 // 锁死"高峰因子只乘入 token 倍率、图片按次倍率不受影响"这一叠加顺序——任何调换都会被 group_peak_rate_test 覆盖。
 func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time) (text, image float64) {
-	image = resolveImageRateMultiplier(apiKey, base)
+	var group *Group
+	if apiKey != nil {
+		group = apiKey.Group
+	}
+	return computePeakAwareMultipliersForGroup(group, base, now)
+}
+
+func computePeakAwareMultipliersForGroup(group *Group, base float64, now time.Time) (text, image float64) {
+	image = resolveImageRateMultiplierForGroup(group, base)
 	peak := 1.0
-	if apiKey != nil && apiKey.Group != nil {
-		peak = apiKey.Group.PeakMultiplierAt(now)
+	if group != nil {
+		peak = group.PeakMultiplierAt(now)
 	}
 	text = base * peak
 	return
+}
+
+func resolveUsageBillingGroup(apiKey *APIKey, groupID *int64, group *Group) (*int64, *Group) {
+	if group != nil && group.ID > 0 {
+		id := group.ID
+		return &id, group
+	}
+	if groupID != nil && *groupID > 0 {
+		id := *groupID
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ID == id {
+			return &id, apiKey.Group
+		}
+		return &id, nil
+	}
+	if apiKey != nil && apiKey.GroupID != nil && *apiKey.GroupID > 0 {
+		id := *apiKey.GroupID
+		if apiKey.Group != nil && apiKey.Group.ID == id {
+			return &id, apiKey.Group
+		}
+		return &id, nil
+	}
+	return nil, nil
 }

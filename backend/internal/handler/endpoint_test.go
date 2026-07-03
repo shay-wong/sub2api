@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -215,4 +217,141 @@ func TestEffectiveGroupRateLimitGroup_DoesNotUseAPIKeyGroupForDifferentSelection
 	)
 
 	require.Nil(t, got)
+}
+
+func TestHandleSelectedOpenAIPreflight_UsesSelectedGroupForImagePermission(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectedGroupID := int64(20)
+	released := false
+	var gotStatus int
+	var gotCode string
+	var gotMessage string
+
+	subscription, failed := handleSelectedOpenAIPreflight(
+		context.Background(),
+		nil,
+		nil,
+		nil,
+		&service.AccountSelectionResult{
+			GroupID: &selectedGroupID,
+			Group:   &service.Group{ID: selectedGroupID, Hydrated: true, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+		},
+		&service.APIKey{
+			GroupID: &apiKeyGroupID,
+			Group: &service.Group{
+				ID:                   apiKeyGroupID,
+				Hydrated:             true,
+				Platform:             service.PlatformOpenAI,
+				Status:               service.StatusActive,
+				AllowImageGeneration: true,
+			},
+		},
+		nil,
+		true,
+		func() { released = true },
+		nil,
+		func(status int, code, message string) {
+			gotStatus = status
+			gotCode = code
+			gotMessage = message
+		},
+	)
+
+	require.True(t, failed)
+	require.Nil(t, subscription)
+	require.True(t, released)
+	require.Equal(t, http.StatusForbidden, gotStatus)
+	require.Equal(t, "permission_error", gotCode)
+	require.Equal(t, service.ImageGenerationPermissionMessage(), gotMessage)
+}
+
+func TestHandleSelectedOpenAIPreflight_ResolvesSelectedSubscription(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectedGroupID := int64(20)
+	userID := int64(7)
+	originalSub := &service.UserSubscription{ID: 100, UserID: userID, GroupID: apiKeyGroupID}
+	selectedSub := &service.UserSubscription{ID: 200, UserID: userID, GroupID: selectedGroupID}
+	subRepo := &selectedOpenAIPreflightSubRepoStub{sub: selectedSub}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	billingSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	defer billingSvc.Stop()
+	gatewaySvc := service.NewOpenAIGatewayService(
+		nil,
+		nil,
+		nil,
+		nil,
+		subRepo,
+		nil,
+		nil,
+		cfg,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	subscription, failed := handleSelectedOpenAIPreflight(
+		context.Background(),
+		nil,
+		billingSvc,
+		gatewaySvc,
+		&service.AccountSelectionResult{
+			GroupID: &selectedGroupID,
+			Group: &service.Group{
+				ID:               selectedGroupID,
+				Hydrated:         true,
+				Platform:         service.PlatformOpenAI,
+				Status:           service.StatusActive,
+				SubscriptionType: service.SubscriptionTypeSubscription,
+			},
+		},
+		&service.APIKey{
+			User:    &service.User{ID: userID},
+			GroupID: &apiKeyGroupID,
+			Group: &service.Group{
+				ID:               apiKeyGroupID,
+				Hydrated:         true,
+				Platform:         service.PlatformOpenAI,
+				Status:           service.StatusActive,
+				SubscriptionType: service.SubscriptionTypeSubscription,
+			},
+		},
+		originalSub,
+		false,
+		nil,
+		nil,
+		nil,
+	)
+
+	require.False(t, failed)
+	require.Same(t, selectedSub, subscription)
+	require.Equal(t, 1, subRepo.calls)
+	require.Equal(t, userID, subRepo.lastUserID)
+	require.Equal(t, selectedGroupID, subRepo.lastGroupID)
+}
+
+type selectedOpenAIPreflightSubRepoStub struct {
+	service.UserSubscriptionRepository
+	sub         *service.UserSubscription
+	calls       int
+	lastUserID  int64
+	lastGroupID int64
+}
+
+func (s *selectedOpenAIPreflightSubRepoStub) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+	s.calls++
+	s.lastUserID = userID
+	s.lastGroupID = groupID
+	return s.sub, nil
 }

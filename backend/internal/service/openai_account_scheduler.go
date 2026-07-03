@@ -400,11 +400,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
 		_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
-		return &AccountSelectionResult{
+		return attachSelectionGroup(ctx, &AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, false, nil
+		}), false, nil
 	}
 
 	cfg := s.service.schedulingConfig()
@@ -420,7 +420,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			)
 			return nil, true, nil
 		}
-		return &AccountSelectionResult{
+		return attachSelectionGroup(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
@@ -428,7 +428,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, false, nil
+		}), false, nil
 	}
 	return nil, false, nil
 }
@@ -929,11 +929,11 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 			if req.SessionHash != "" && !req.PreserveStickyBinding {
 				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
 			}
-			return &AccountSelectionResult{
+			return attachSelectionGroup(ctx, &AccountSelectionResult{
 				Account:     fresh,
 				Acquired:    true,
 				ReleaseFunc: result.ReleaseFunc,
-			}, compactBlocked, nil
+			}), compactBlocked, nil
 		}
 	}
 	return nil, compactBlocked, nil
@@ -1060,7 +1060,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			compactBlocked = true
 			continue
 		}
-		return &AccountSelectionResult{
+		return attachSelectionGroup(ctx, &AccountSelectionResult{
 			Account: fresh,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      fresh.ID,
@@ -1068,7 +1068,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				Timeout:        cfg.FallbackWaitTimeout,
 				MaxWaiting:     cfg.FallbackMaxWaiting,
 			},
-		}, candidateCount, topK, loadSkew, nil
+		}), candidateCount, topK, loadSkew, nil
 	}
 
 	return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked)
@@ -1308,6 +1308,11 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	platform string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	var err error
+	ctx, groupID, _, err = s.resolveOpenAISelectionGroupContext(ctx, groupID)
+	if err != nil {
+		return nil, OpenAIAccountScheduleDecision{}, err
+	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	decision := OpenAIAccountScheduleDecision{}
 	scheduler := s.getOpenAIAccountScheduler(ctx)

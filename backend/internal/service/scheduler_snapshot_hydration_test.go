@@ -11,15 +11,19 @@ import (
 )
 
 type snapshotHydrationCache struct {
-	snapshot []*Account
-	accounts map[int64]*Account
+	snapshot         []*Account
+	accounts         map[int64]*Account
+	getSnapshotCalls int
+	setSnapshotCalls int
 }
 
 func (c *snapshotHydrationCache) GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error) {
+	c.getSnapshotCalls++
 	return c.snapshot, true, nil
 }
 
 func (c *snapshotHydrationCache) SetSnapshot(ctx context.Context, bucket SchedulerBucket, accounts []Account) error {
+	c.setSnapshotCalls++
 	return nil
 }
 
@@ -60,6 +64,53 @@ func (c *snapshotHydrationCache) GetOutboxWatermark(ctx context.Context) (int64,
 
 func (c *snapshotHydrationCache) SetOutboxWatermark(ctx context.Context, id int64) error {
 	return nil
+}
+
+type scopedSchedulerAccountRepo struct {
+	AccountRepository
+	accounts      []Account
+	calls         int
+	lastProjectID int64
+}
+
+func (r *scopedSchedulerAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	r.calls++
+	r.lastProjectID, _ = ProjectIDFromContext(ctx)
+	return append([]Account(nil), r.accounts...), nil
+}
+
+func TestSchedulerSnapshotServiceListSchedulableAccountsBypassesGlobalCacheWhenProjectScoped(t *testing.T) {
+	groupID := int64(10)
+	cache := &snapshotHydrationCache{
+		snapshot: []*Account{{
+			ID:       1,
+			Platform: PlatformOpenAI,
+		}},
+	}
+	repo := &scopedSchedulerAccountRepo{
+		accounts: []Account{{
+			ID:       2,
+			Platform: PlatformOpenAI,
+		}},
+	}
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, nil)
+
+	accounts, _, err := svc.ListSchedulableAccounts(WithProjectID(context.Background(), 77), &groupID, PlatformOpenAI, false)
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ID != 2 {
+		t.Fatalf("expected scoped DB account, got %+v", accounts)
+	}
+	if cache.getSnapshotCalls != 0 {
+		t.Fatalf("project-scoped request must not read global snapshot cache, got %d reads", cache.getSnapshotCalls)
+	}
+	if cache.setSnapshotCalls != 0 {
+		t.Fatalf("project-scoped request must not write scoped rows into global snapshot cache, got %d writes", cache.setSnapshotCalls)
+	}
+	if repo.calls != 1 || repo.lastProjectID != 77 {
+		t.Fatalf("expected scoped DB fallback once with project 77, calls=%d project=%d", repo.calls, repo.lastProjectID)
+	}
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedulerSnapshot(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
@@ -114,16 +113,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai_chat_completions.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
-	}
-
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
@@ -182,24 +171,30 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-		if handleEffectiveGroupRateLimit5h(
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
 			c.Request.Context(),
 			c,
 			h.billingCacheService,
+			h.gatewayService,
 			selection,
 			apiKey,
+			subscription,
+			false,
 			accountReleaseFunc,
 			func(err error) {
-				reqLog.Info("openai_chat_completions.selected_group_rate_limit_check_failed", zap.Error(err))
+				reqLog.Info("openai_chat_completions.selected_group_billing_check_failed", zap.Error(err))
 			},
 			func(status int, code, message string) {
 				h.handleStreamingAwareError(c, status, code, message, streamStarted)
 			},
-		) {
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -315,6 +310,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
@@ -331,6 +327,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				IPAddress:             clientIP,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				CyberBlocked:          cyberBlocked,

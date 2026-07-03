@@ -111,8 +111,9 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
+	useGlobalCache := !schedulerRequestHasProjectScope(ctx)
 
-	if s.cache != nil {
+	if s.cache != nil && useGlobalCache {
 		cached, hit, err := s.cache.GetSnapshot(ctx, bucket)
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
@@ -133,13 +134,18 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		return nil, useMixed, err
 	}
 
-	if s.cache != nil {
+	if s.cache != nil && useGlobalCache {
 		if err := s.cache.SetSnapshot(fallbackCtx, bucket, accounts); err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache write failed: bucket=%s err=%v", bucket.String(), err)
 		}
 	}
 
 	return accounts, useMixed, nil
+}
+
+func schedulerRequestHasProjectScope(ctx context.Context) bool {
+	_, ok := ProjectIDFromContext(ctx)
+	return ok
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {

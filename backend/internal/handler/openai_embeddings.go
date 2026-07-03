@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -87,16 +86,6 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai_embeddings.billing_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.errorResponse(c, status, code, message)
-		return
-	}
-
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
@@ -149,24 +138,30 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog)
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, selectedGroupID, "", selection, false, &streamStarted, reqLog)
 		if !accountAcquired {
 			return
 		}
-		if handleEffectiveGroupRateLimit5h(
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
 			c.Request.Context(),
 			c,
 			h.billingCacheService,
+			h.gatewayService,
 			selection,
 			apiKey,
+			subscription,
+			false,
 			accountReleaseFunc,
 			func(err error) {
-				reqLog.Info("openai_embeddings.selected_group_rate_limit_check_failed", zap.Error(err))
+				reqLog.Info("openai_embeddings.selected_group_billing_check_failed", zap.Error(err))
 			},
 			func(status int, code, message string) {
 				h.errorResponse(c, status, code, message)
 			},
-		) {
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -236,6 +231,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
@@ -251,6 +247,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				IPAddress:             clientIP,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {

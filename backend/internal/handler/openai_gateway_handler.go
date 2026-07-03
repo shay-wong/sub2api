@@ -270,10 +270,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, body)
-	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
-		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
-		return
-	}
 	var imageReleaseFunc func()
 	if imageIntent {
 		var imageAcquired bool
@@ -314,17 +310,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
-	}
-
-	// 2. Re-check billing eligibility after wait
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
 	}
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
@@ -405,22 +390,28 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-		if handleEffectiveGroupRateLimit5h(
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
 			c.Request.Context(),
 			c,
 			h.billingCacheService,
+			h.gatewayService,
 			selection,
 			apiKey,
+			subscription,
+			imageIntent,
 			accountReleaseFunc,
-			func(err error) { reqLog.Info("openai.selected_group_rate_limit_check_failed", zap.Error(err)) },
+			func(err error) { reqLog.Info("openai.selected_group_billing_check_failed", zap.Error(err)) },
 			func(status int, code, message string) {
 				h.handleStreamingAwareError(c, status, code, message, streamStarted)
 			},
-		) {
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -542,6 +533,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
@@ -560,6 +552,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				CyberBlocked:          cyberBlocked,
@@ -762,16 +755,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai_messages.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
-		return
-	}
-
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
@@ -841,22 +824,28 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
 			return
 		}
-		if handleEffectiveGroupRateLimit5h(
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
 			c.Request.Context(),
 			c,
 			h.billingCacheService,
+			h.gatewayService,
 			selection,
 			apiKey,
+			subscription,
+			false,
 			accountReleaseFunc,
-			func(err error) { reqLog.Info("openai_messages.selected_group_rate_limit_check_failed", zap.Error(err)) },
+			func(err error) { reqLog.Info("openai_messages.selected_group_billing_check_failed", zap.Error(err)) },
 			func(status int, code, message string) {
 				h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
 			},
-		) {
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -973,6 +962,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
@@ -990,6 +980,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				QuotaPlatform:         quotaPlatform,
 				ChannelUsageFields:    channelMappingMsg.ToUsageFields(reqModel, result.UpstreamModel),
 				CyberBlocked:          cyberBlocked,
@@ -1316,10 +1307,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
-	if service.IsImageGenerationIntent("/v1/responses", reqModel, firstMessage) && !service.GroupAllowsImageGeneration(apiKey.Group) {
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.ImageGenerationPermissionMessage())
-		return
-	}
+	imageIntent := service.IsImageGenerationIntent("/v1/responses", reqModel, firstMessage)
 
 	// F5a: 握手层会话屏蔽检查。WS 握手无 body，显式标识仅来自握手 header
 	// （session_id / conversation_id）；无标识则放行，连接内仍有本地 flag 兜底。
@@ -1387,11 +1375,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	requiredTransport := service.OpenAIUpstreamTransportResponsesWebsocketV2Ingress
 	if requestPlatform == service.PlatformGrok {
 		requiredTransport = service.OpenAIUpstreamTransportHTTPSSE
-	}
-	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("openai.websocket_billing_eligibility_check_failed", zap.Error(err))
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
-		return
 	}
 
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(
@@ -1467,13 +1450,31 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			accountReleaseFunc = fastReleaseFunc
 		}
 		currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-		if err := h.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		if err := h.gatewayService.BindStickySession(ctx, selectedGroupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.websocket_bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
-		if err := CheckEffectiveGroupRateLimit5h(ctx, h.billingCacheService, selection, apiKey); err != nil {
-			reqLog.Info("openai.websocket_selected_group_rate_limit_check_failed", zap.Error(err))
-			releaseTurnSlots()
-			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
+			ctx,
+			c,
+			h.billingCacheService,
+			h.gatewayService,
+			selection,
+			apiKey,
+			subscription,
+			imageIntent,
+			releaseTurnSlots,
+			func(err error) { reqLog.Info("openai.websocket_selected_group_billing_check_failed", zap.Error(err)) },
+			func(status int, code, message string) {
+				reason := "billing check failed"
+				if status == http.StatusForbidden && code == "permission_error" {
+					reason = message
+				}
+				closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, reason)
+			},
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -1585,6 +1586,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 				groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+				groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
@@ -1601,6 +1603,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						RequestPayloadHash:    requestPayloadHash,
 						APIKeyService:         h.apiKeyService,
 						GroupRateLimitGroupID: groupRateLimitGroupID,
+						GroupRateLimitGroup:   groupRateLimitGroup,
 						QuotaPlatform:         quotaPlatform,
 						ChannelUsageFields:    channelMappingWS.ToUsageFields(reqModel, result.UpstreamModel),
 						CyberBlocked:          cyberBlocked,
@@ -2476,6 +2479,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 				APIKeyService:         apiKeySvc,
 				QuotaPlatform:         usageAttribution.QuotaPlatform,
 				GroupRateLimitGroupID: usageAttribution.GroupRateLimitGroupID,
+				GroupRateLimitGroup:   usageAttribution.GroupRateLimitGroup,
 				ChannelUsageFields:    channelFields,
 			})
 		}
@@ -2491,12 +2495,14 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 type cyberPolicyUsageAttributionResult struct {
 	QuotaPlatform         string
 	GroupRateLimitGroupID *int64
+	GroupRateLimitGroup   *service.Group
 }
 
 func cyberPolicyUsageAttribution(ctx context.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult) cyberPolicyUsageAttributionResult {
 	return cyberPolicyUsageAttributionResult{
 		QuotaPlatform:         service.QuotaPlatform(ctx, apiKey),
 		GroupRateLimitGroupID: EffectiveGroupRateLimitGroupID(selection, apiKey),
+		GroupRateLimitGroup:   EffectiveGroupRateLimitGroup(selection, apiKey),
 	}
 }
 

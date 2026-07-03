@@ -22,6 +22,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -2002,6 +2003,11 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability) (*AccountSelectionResult, error) {
+	var err error
+	ctx, groupID, _, err = s.resolveOpenAISelectionGroupContext(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -2462,12 +2468,12 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 	if err != nil {
 		return nil, err
 	}
-	return &AccountSelectionResult{
+	return attachSelectionGroup(ctx, &AccountSelectionResult{
 		Account:     hydrated,
 		Acquired:    acquired,
 		ReleaseFunc: release,
 		WaitPlan:    waitPlan,
-	}, nil
+	}), nil
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {
@@ -2476,6 +2482,70 @@ func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, a
 		release()
 	}
 	return selection, err
+}
+
+func (s *OpenAIGatewayService) resolveOpenAISelectionGroupContext(ctx context.Context, groupID *int64) (context.Context, *int64, *Group, error) {
+	if groupID == nil || *groupID <= 0 {
+		return ctx, groupID, nil, nil
+	}
+	currentID := *groupID
+	visited := make(map[int64]struct{})
+	forcePlatform, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	skipClaudeCodeOnly := forcePlatform != ""
+
+	for {
+		if _, seen := visited[currentID]; seen {
+			return ctx, nil, nil, fmt.Errorf("fallback group cycle detected")
+		}
+		visited[currentID] = struct{}{}
+
+		group, err := s.openAISelectionGroupByID(ctx, currentID)
+		if err != nil {
+			return ctx, nil, nil, err
+		}
+		if group == nil {
+			id := currentID
+			return ctx, &id, nil, nil
+		}
+
+		if !skipClaudeCodeOnly && group.ClaudeCodeOnly && !IsClaudeCodeClient(ctx) {
+			if group.FallbackGroupID == nil {
+				return ctx, nil, nil, ErrClaudeCodeOnly
+			}
+			currentID = *group.FallbackGroupID
+			continue
+		}
+
+		id := group.ID
+		return withOpenAISelectionGroupContext(ctx, group), &id, group, nil
+	}
+}
+
+func (s *OpenAIGatewayService) openAISelectionGroupByID(ctx context.Context, groupID int64) (*Group, error) {
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) && group.ID == groupID {
+		return group, nil
+	}
+	if s == nil || s.schedulerSnapshot == nil {
+		return nil, nil
+	}
+	group, err := s.schedulerSnapshot.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("get group failed: %w", err)
+	}
+	if !IsGroupContextValid(group) {
+		return nil, nil
+	}
+	return group, nil
+}
+
+func withOpenAISelectionGroupContext(ctx context.Context, group *Group) context.Context {
+	if !IsGroupContextValid(group) {
+		return ctx
+	}
+	if existing, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(existing) && existing.ID == group.ID {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxkey.Group, group)
 }
 
 func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig {
@@ -6265,6 +6335,7 @@ type OpenAIRecordUsageInput struct {
 	RequestPayloadHash    string
 	APIKeyService         APIKeyQuotaUpdater
 	GroupRateLimitGroupID *int64
+	GroupRateLimitGroup   *Group
 	QuotaPlatform         string // user×platform quota platform resolved by the handler before async billing.
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
@@ -6293,6 +6364,7 @@ type CyberPolicyUsageInput struct {
 	APIKeyService         APIKeyQuotaUpdater
 	QuotaPlatform         string
 	GroupRateLimitGroupID *int64
+	GroupRateLimitGroup   *Group
 	ChannelUsageFields
 }
 
@@ -6329,6 +6401,7 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		APIKeyService:         in.APIKeyService,
 		QuotaPlatform:         in.QuotaPlatform,
 		GroupRateLimitGroupID: in.GroupRateLimitGroupID,
+		GroupRateLimitGroup:   in.GroupRateLimitGroup,
 		ChannelUsageFields:    in.ChannelUsageFields,
 		CyberBlocked:          true,
 	}); err != nil {
@@ -6377,16 +6450,17 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if s.cfg != nil {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
-	if apiKey.GroupID != nil && apiKey.Group != nil {
+	billingGroupID, billingGroup := resolveUsageBillingGroup(apiKey, input.GroupRateLimitGroupID, input.GroupRateLimitGroup)
+	if billingGroupID != nil && billingGroup != nil {
 		resolver := s.userGroupRateResolver
 		if resolver == nil {
 			resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 		}
-		multiplier = resolver.Resolve(ctx, user.ID, *apiKey.GroupID, apiKey.Group.RateMultiplier)
+		multiplier = resolver.Resolve(ctx, user.ID, *billingGroupID, billingGroup.RateMultiplier)
 	}
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 Resolve，以免污染 user:group 倍率缓存。
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+	multiplier, imageMultiplier := computePeakAwareMultipliersForGroup(billingGroup, multiplier, timezone.Now())
 
 	var cost *CostBreakdown
 	var err error
@@ -6412,7 +6486,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
-	cost, err = s.calculateOpenAIRecordUsageCost(ctx, result, apiKey, billingModels, multiplier, imageMultiplier, tokens, serviceTier)
+	cost, err = s.calculateOpenAIRecordUsageCost(ctx, result, billingGroup, billingModels, multiplier, imageMultiplier, tokens, serviceTier)
 	if err != nil {
 		if !isUsagePricingUnavailableError(err) {
 			return err
@@ -6429,8 +6503,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
 
+	subscription, err = s.ResolveOpenAIUsageSubscription(ctx, user, billingGroup, subscription)
+	if err != nil {
+		return err
+	}
+
 	// Determine billing type
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := subscription != nil && billingGroup != nil && billingGroup.IsSubscriptionType()
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -6525,17 +6604,17 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.IPAddress = &input.IPAddress
 	}
 
-	if apiKey.GroupID != nil {
-		usageLog.GroupID = apiKey.GroupID
+	if billingGroupID != nil {
+		usageLog.GroupID = billingGroupID
 	}
 	if subscription != nil {
 		usageLog.SubscriptionID = &subscription.ID
 	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	if billingGroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *billingGroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost,
 		)
 	}
@@ -6566,7 +6645,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
 			Platform:              quotaPlatform,
-			GroupRateLimitGroupID: input.GroupRateLimitGroupID,
+			GroupRateLimitGroupID: billingGroupID,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()
@@ -6582,7 +6661,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	ctx context.Context,
 	result *OpenAIForwardResult,
-	apiKey *APIKey,
+	group *Group,
 	billingModels []string,
 	multiplier float64,
 	imageMultiplier float64,
@@ -6592,8 +6671,8 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.ImageCount > 0 {
 		// 渠道定价为 token 计费时走 token 路径，否则走图片计费
-		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
-			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, group); resolved == nil || resolved.Mode != BillingModeToken {
+			return s.calculateOpenAIImageCost(ctx, billingModel, group, result, imageMultiplier), nil
 		}
 	}
 	if len(billingModels) == 0 || billingModel == "" {
@@ -6605,7 +6684,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		if candidate == "" {
 			continue
 		}
-		cost, err := s.calculateOpenAIRecordUsageTokenCost(ctx, apiKey, candidate, multiplier, tokens, serviceTier)
+		cost, err := s.calculateOpenAIRecordUsageTokenCost(ctx, group, candidate, multiplier, tokens, serviceTier)
 		if err == nil {
 			return cost, nil
 		}
@@ -6630,14 +6709,14 @@ func isUsagePricingUnavailableError(err error) bool {
 
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	ctx context.Context,
-	apiKey *APIKey,
+	group *Group,
 	billingModel string,
 	multiplier float64,
 	tokens UsageTokens,
 	serviceTier string,
 ) (*CostBreakdown, error) {
-	if s.resolver != nil && apiKey.Group != nil {
-		gid := apiKey.Group.ID
+	if s.resolver != nil && group != nil {
+		gid := group.ID
 		return s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
@@ -6655,14 +6734,14 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 	ctx context.Context,
 	billingModel string,
-	apiKey *APIKey,
+	group *Group,
 	result *OpenAIForwardResult,
 	multiplier float64,
 ) *CostBreakdown {
 	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
-	if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved != nil &&
+	if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, group); resolved != nil &&
 		(resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage) {
-		gid := apiKey.Group.ID
+		gid := group.ID
 		cost, err := s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
 			Model:          billingModel,
@@ -6680,26 +6759,44 @@ func (s *OpenAIGatewayService) calculateOpenAIImageCost(
 	}
 
 	var groupConfig *ImagePriceConfig
-	if apiKey != nil && apiKey.Group != nil {
+	if group != nil {
 		groupConfig = &ImagePriceConfig{
-			Price1K: apiKey.Group.ImagePrice1K,
-			Price2K: apiKey.Group.ImagePrice2K,
-			Price4K: apiKey.Group.ImagePrice4K,
+			Price1K: group.ImagePrice1K,
+			Price2K: group.ImagePrice2K,
+			Price4K: group.ImagePrice4K,
 		}
 	}
 	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
 }
 
-func (s *OpenAIGatewayService) resolveOpenAIChannelPricing(ctx context.Context, billingModel string, apiKey *APIKey) *ResolvedPricing {
-	if s.resolver == nil || apiKey == nil || apiKey.Group == nil {
+func (s *OpenAIGatewayService) resolveOpenAIChannelPricing(ctx context.Context, billingModel string, group *Group) *ResolvedPricing {
+	if s.resolver == nil || group == nil {
 		return nil
 	}
-	gid := apiKey.Group.ID
+	gid := group.ID
 	resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
 	if resolved.Source == PricingSourceChannel {
 		return resolved
 	}
 	return nil
+}
+
+// ResolveOpenAIUsageSubscription returns the active subscription for the actual billing group.
+func (s *OpenAIGatewayService) ResolveOpenAIUsageSubscription(ctx context.Context, user *User, group *Group, subscription *UserSubscription) (*UserSubscription, error) {
+	if user == nil || group == nil || !group.IsSubscriptionType() {
+		return nil, nil
+	}
+	if subscription != nil && (subscription.GroupID == group.ID || subscription.GroupID == 0) {
+		return subscription, nil
+	}
+	if s.userSubRepo == nil {
+		return nil, nil
+	}
+	resolved, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve OpenAI usage subscription for group %d: %w", group.ID, err)
+	}
+	return resolved, nil
 }
 
 // ParseCodexRateLimitHeaders extracts Codex usage limits from response headers.

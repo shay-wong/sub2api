@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -99,10 +98,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
 
 	if endpoint.IsGenerationRequest() {
-		if !service.GroupAllowsImageGeneration(apiKey.Group) {
-			h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
-			return
-		}
 		if moderationBody := requestInfo.ModerationBody(); len(moderationBody) > 0 {
 			decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody)
 			if decision != nil && decision.Blocked {
@@ -132,16 +127,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
-	}
-
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
-		reqLog.Info("grok_media.billing_eligibility_check_failed", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.errorResponse(c, status, code, message)
-		return
 	}
 
 	sessionSeed := body
@@ -218,8 +203,28 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
+		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, false, &streamStarted, reqLog)
 		if !accountAcquired {
+			return
+		}
+		var preflightFailed bool
+		subscription, preflightFailed = handleSelectedOpenAIPreflight(
+			c.Request.Context(),
+			c,
+			h.billingCacheService,
+			h.gatewayService,
+			selection,
+			apiKey,
+			subscription,
+			endpoint.IsGenerationRequest(),
+			accountReleaseFunc,
+			func(err error) { reqLog.Info("grok_media.selected_group_billing_check_failed", zap.Error(err)) },
+			func(status int, code, message string) {
+				h.errorResponse(c, status, code, message)
+			},
+		)
+		if preflightFailed {
 			return
 		}
 
@@ -307,7 +312,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			}
 		}
 		if shouldRecordGrokMediaUsage(endpoint, requestModel) {
-			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
+			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, selection, account, result, requestModel, body, requestID)
 		}
 		reqLog.Debug("grok_media.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -328,6 +333,7 @@ func recordGrokMediaUsage(
 	apiKey *service.APIKey,
 	subject middleware2.AuthSubject,
 	subscription *service.UserSubscription,
+	selection *service.AccountSelectionResult,
 	account *service.Account,
 	result *service.OpenAIForwardResult,
 	requestModel string,
@@ -347,21 +353,25 @@ func recordGrokMediaUsage(
 		OriginalModel:      requestModel,
 		ChannelMappedModel: requestModel,
 	}
+	groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+	groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-			Result:             result,
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			ChannelUsageFields: channelUsageFields,
+			Result:                result,
+			APIKey:                apiKey,
+			User:                  apiKey.User,
+			Account:               account,
+			Subscription:          subscription,
+			InboundEndpoint:       inboundEndpoint,
+			UpstreamEndpoint:      upstreamEndpoint,
+			UserAgent:             userAgent,
+			IPAddress:             clientIP,
+			RequestPayloadHash:    service.HashUsageRequestPayload(payloadForHash),
+			APIKeyService:         h.apiKeyService,
+			QuotaPlatform:         quotaPlatform,
+			GroupRateLimitGroupID: groupRateLimitGroupID,
+			GroupRateLimitGroup:   groupRateLimitGroup,
+			ChannelUsageFields:    channelUsageFields,
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.grok_media"),

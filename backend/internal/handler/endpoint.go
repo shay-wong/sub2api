@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -264,4 +265,75 @@ func handleEffectiveGroupRateLimit5h(
 		respond(status, code, message)
 	}
 	return true
+}
+
+func handleSelectedOpenAIPreflight(
+	ctx context.Context,
+	c *gin.Context,
+	billingCacheService *service.BillingCacheService,
+	gatewayService *service.OpenAIGatewayService,
+	selection *service.AccountSelectionResult,
+	apiKey *service.APIKey,
+	subscription *service.UserSubscription,
+	requiresImage bool,
+	release func(),
+	logFailure func(error),
+	respond func(status int, code, message string),
+) (*service.UserSubscription, bool) {
+	if apiKey == nil {
+		return subscription, false
+	}
+	selectedGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+	if requiresImage && !service.GroupAllowsImageGeneration(selectedGroup) {
+		if release != nil {
+			release()
+		}
+		if respond != nil {
+			respond(http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		}
+		return subscription, true
+	}
+
+	actualSubscription := subscription
+	if gatewayService != nil {
+		resolved, err := gatewayService.ResolveOpenAIUsageSubscription(ctx, apiKey.User, selectedGroup, subscription)
+		if err != nil {
+			if logFailure != nil {
+				logFailure(err)
+			}
+			if release != nil {
+				release()
+			}
+			status, code, message, retryAfter := billingErrorDetails(err)
+			if retryAfter > 0 && c != nil {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+			}
+			if respond != nil {
+				respond(status, code, message)
+			}
+			return subscription, true
+		}
+		actualSubscription = resolved
+	}
+
+	if billingCacheService == nil {
+		return actualSubscription, false
+	}
+	if err := billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, selectedGroup, actualSubscription, service.QuotaPlatform(ctx, apiKey)); err != nil {
+		if logFailure != nil {
+			logFailure(err)
+		}
+		if release != nil {
+			release()
+		}
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 && c != nil {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		if respond != nil {
+			respond(status, code, message)
+		}
+		return subscription, true
+	}
+	return actualSubscription, false
 }
