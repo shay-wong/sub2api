@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -31,6 +33,7 @@ func newOpsSystemLogTestRouter(handler *OpsHandler, withUser bool) *gin.Engine {
 	r.GET("/logs", handler.ListSystemLogs)
 	r.POST("/logs/cleanup", handler.CleanupSystemLogs)
 	r.GET("/logs/health", handler.GetSystemLogIngestionHealth)
+	r.GET("/runtime/usage-record", handler.GetUsageRecordRuntime)
 	return r
 }
 
@@ -270,5 +273,44 @@ func TestOpsSystemLogHandler_HealthUnavailableAndMonitoringDisabled(t *testing.T
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404", w.Code)
+	}
+}
+
+func TestOpsRuntimeUsageRecordHandler_ReturnsProcessScopedSnakeCaseStats(t *testing.T) {
+	svc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
+		WorkerCount:           1,
+		QueueSize:             3,
+		TaskTimeout:           2 * time.Second,
+		OverflowPolicy:        config.UsageRecordOverflowPolicySync,
+		OverflowSamplePercent: 0,
+		AutoScaleEnabled:      false,
+	})
+	t.Cleanup(pool.Stop)
+	svc.SetUsageRecordWorkerPool(pool)
+	h := NewOpsHandler(svc)
+	r := newOpsSystemLogTestRouter(h, false)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/runtime/usage-record", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"scope":"process"`) {
+		t.Fatalf("response missing process scope: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"queue_size":3`) {
+		t.Fatalf("response missing snake_case queue_size: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"process_started_at"`) {
+		t.Fatalf("response missing process_started_at: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"uptime_seconds"`) {
+		t.Fatalf("response missing uptime_seconds: %s", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "QueueSize") {
+		t.Fatalf("response leaked CamelCase field names: %s", w.Body.String())
 	}
 }

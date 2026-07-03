@@ -987,7 +987,9 @@ type GatewayUsageRecordConfig struct {
 	WorkerCount int `mapstructure:"worker_count"`
 	// QueueSize: 队列容量（有界）
 	QueueSize int `mapstructure:"queue_size"`
-	// TaskTimeoutSeconds: 单个使用量记录任务超时（秒）
+	// TaskTimeoutSeconds: 单个使用量记录任务入口 ctx 超时（秒）。
+	// RecordUsage 内部会为已完成计费后的 usage_log 持久化使用 post-usage billing 超时窗口，
+	// 避免队列拥塞时因 worker ctx 过早取消而留下“已扣费但无日志”的对账缺口。
 	TaskTimeoutSeconds int `mapstructure:"task_timeout_seconds"`
 	// OverflowPolicy: 队列满时策略（drop/sample/sync）
 	OverflowPolicy string `mapstructure:"overflow_policy"`

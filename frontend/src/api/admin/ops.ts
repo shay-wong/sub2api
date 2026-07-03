@@ -451,6 +451,46 @@ export async function getRealtimeTrafficSummary(
   return data
 }
 
+export interface UsageRecordWorkerPoolStats {
+  max_concurrency: number
+  queue_size: number
+  running_workers: number
+  waiting_tasks: number
+  submitted_tasks: number
+  completed_tasks: number
+  successful_tasks: number
+  failed_tasks: number
+  dropped_tasks: number
+  dropped_queue_full: number
+  dropped_pool_stopped: number
+  sync_fallback_tasks: number
+  task_timeout_ms: number
+  overflow_policy: string
+  overflow_sample_pct: number
+}
+
+export interface UsageLogPersistenceStats {
+  create_not_persisted_total: number
+  create_dropped_total: number
+  best_effort_sync_fallback_total: number
+  best_effort_sync_fallback_succeeded_total: number
+  best_effort_sync_fallback_failed_total: number
+  post_usage_billing_timeout_seconds: number
+}
+
+export interface UsageRecordRuntimeStats {
+  scope: string
+  process_started_at: string
+  uptime_seconds: number
+  worker_pool?: UsageRecordWorkerPoolStats
+  persistence: UsageLogPersistenceStats
+}
+
+export async function getUsageRecordRuntimeStats(): Promise<UsageRecordRuntimeStats> {
+  const { data } = await apiClient.get<UsageRecordRuntimeStats>('/admin/ops/runtime/usage-record')
+  return data
+}
+
 /**
  * Subscribe to realtime QPS updates via WebSocket.
  *
@@ -1317,6 +1357,7 @@ export const opsAPI = {
   getUserConcurrencyStats,
   getAccountAvailabilityStats,
   getRealtimeTrafficSummary,
+  getUsageRecordRuntimeStats,
   subscribeQPS,
 
   // Legacy unified endpoints

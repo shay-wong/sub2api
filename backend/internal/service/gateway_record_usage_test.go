@@ -528,6 +528,7 @@ func TestGatewayServiceRecordUsage_GeneratesRequestIDWhenAllSourcesMissing(t *te
 func TestGatewayServiceRecordUsage_DroppedUsageLogFallsBackToSyncCreate(t *testing.T) {
 	// 计费成功后 best-effort 写入被丢弃（队列超时）时必须同步兜底，
 	// 否则出现“已扣费但无 usage_log”的对账缺口（issue #3656）。
+	before := GatewayUsageLogPersistenceStats()
 	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{
 		bestEffortErr: MarkUsageLogCreateDropped(errors.New("usage log best-effort queue full")),
 	}
@@ -554,6 +555,47 @@ func TestGatewayServiceRecordUsage_DroppedUsageLogFallsBackToSyncCreate(t *testi
 	require.Equal(t, 1, usageRepo.createCalls)
 	// 兜底调用使用的 ctx 必须仍然存活，不能带着已死的 ctx 走过场。
 	require.NoError(t, usageRepo.lastCtxErr)
+	after := GatewayUsageLogPersistenceStats()
+	require.GreaterOrEqual(t, after.PostUsageBillingTimeoutSeconds, int64(1))
+	require.Equal(t, before.CreateDroppedTotal+1, after.CreateDroppedTotal)
+	require.Equal(t, before.BestEffortSyncFallbackTotal+1, after.BestEffortSyncFallbackTotal)
+	require.Equal(t, before.BestEffortSyncFallbackSucceededTotal+1, after.BestEffortSyncFallbackSucceededTotal)
+	require.Equal(t, before.BestEffortSyncFallbackFailedTotal, after.BestEffortSyncFallbackFailedTotal)
+}
+
+func TestGatewayServiceRecordUsage_DroppedUsageLogCountsFailedSyncFallback(t *testing.T) {
+	before := GatewayUsageLogPersistenceStats()
+	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{
+		bestEffortErr: MarkUsageLogCreateDropped(errors.New("usage log best-effort queue full")),
+		createErr:     MarkUsageLogCreateNotPersisted(errors.New("usage log sync fallback failed")),
+	}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_drop_usage_log_fallback_failed",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 6,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 509},
+		User:    &User{ID: 609},
+		Account: &Account{ID: 709},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.bestEffortCalls)
+	require.Equal(t, 1, usageRepo.createCalls)
+	after := GatewayUsageLogPersistenceStats()
+	require.Equal(t, before.CreateDroppedTotal+1, after.CreateDroppedTotal)
+	require.Equal(t, before.CreateNotPersistedTotal+1, after.CreateNotPersistedTotal)
+	require.Equal(t, before.BestEffortSyncFallbackTotal+1, after.BestEffortSyncFallbackTotal)
+	require.Equal(t, before.BestEffortSyncFallbackSucceededTotal, after.BestEffortSyncFallbackSucceededTotal)
+	require.Equal(t, before.BestEffortSyncFallbackFailedTotal+1, after.BestEffortSyncFallbackFailedTotal)
 }
 
 func TestGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) {

@@ -36,6 +36,7 @@ type OpsService struct {
 	openAIGatewayService      *OpenAIGatewayService
 	geminiCompatService       *GeminiMessagesCompatService
 	antigravityGatewayService *AntigravityGatewayService
+	usageRecordWorkerPool     *UsageRecordWorkerPool
 	systemLogSink             *OpsSystemLogSink
 
 	// cleanupReloader 由 wire 在 OpsCleanupService 构造完成后通过 SetCleanupReloader 注入。
@@ -70,6 +71,14 @@ func (s *OpsService) SetOpenAIQuotaAutoPauseSettingsSink(sink func(OpsOpenAIAcco
 		return
 	}
 	s.quotaAutoPauseSink = sink
+}
+
+// SetUsageRecordWorkerPool wires runtime queue stats into ops runtime health responses.
+func (s *OpsService) SetUsageRecordWorkerPool(pool *UsageRecordWorkerPool) {
+	if s == nil {
+		return
+	}
+	s.usageRecordWorkerPool = pool
 }
 
 func NewOpsService(

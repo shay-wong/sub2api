@@ -191,9 +191,10 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.GET("/email-notification/config", adminOnly, h.Admin.Ops.GetEmailNotificationConfig)
 		ops.PUT("/email-notification/config", adminOnly, h.Admin.Ops.UpdateEmailNotificationConfig)
 
-		// Runtime settings (DB-backed)
+		// Runtime status/settings are process-global and stay super-admin only.
 		runtime := ops.Group("/runtime")
 		{
+			runtime.GET("/usage-record", adminOnly, h.Admin.Ops.GetUsageRecordRuntime)
 			runtime.GET("/alert", adminOnly, h.Admin.Ops.GetAlertRuntimeSettings)
 			runtime.PUT("/alert", adminOnly, h.Admin.Ops.UpdateAlertRuntimeSettings)
 			runtime.GET("/logging", adminOnly, h.Admin.Ops.GetRuntimeLogConfig)

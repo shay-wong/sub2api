@@ -66,17 +66,21 @@ type UsageRecordWorkerPoolOptions struct {
 
 // UsageRecordWorkerPoolStats 使用量记录池运行时统计。
 type UsageRecordWorkerPoolStats struct {
-	MaxConcurrency     int
-	RunningWorkers     int64
-	WaitingTasks       uint64
-	SubmittedTasks     uint64
-	CompletedTasks     uint64
-	SuccessfulTasks    uint64
-	FailedTasks        uint64
-	DroppedTasks       uint64
-	DroppedQueueFull   uint64
-	DroppedPoolStopped uint64
-	SyncFallbackTasks  uint64
+	MaxConcurrency     int    `json:"max_concurrency"`
+	QueueSize          int    `json:"queue_size"`
+	RunningWorkers     int64  `json:"running_workers"`
+	WaitingTasks       uint64 `json:"waiting_tasks"`
+	SubmittedTasks     uint64 `json:"submitted_tasks"`
+	CompletedTasks     uint64 `json:"completed_tasks"`
+	SuccessfulTasks    uint64 `json:"successful_tasks"`
+	FailedTasks        uint64 `json:"failed_tasks"`
+	DroppedTasks       uint64 `json:"dropped_tasks"`
+	DroppedQueueFull   uint64 `json:"dropped_queue_full"`
+	DroppedPoolStopped uint64 `json:"dropped_pool_stopped"`
+	SyncFallbackTasks  uint64 `json:"sync_fallback_tasks"`
+	TaskTimeoutMs      int64  `json:"task_timeout_ms"`
+	OverflowPolicy     string `json:"overflow_policy"`
+	OverflowSamplePct  int    `json:"overflow_sample_pct"`
 }
 
 // UsageRecordWorkerPool 提供“有界队列 + 固定 worker”的异步执行器。
@@ -143,6 +147,9 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 
 // Submit 提交一个使用量记录任务。
 // 提交失败（队列满）时按 overflowPolicy 执行降级策略：drop/sample/sync。
+// TaskTimeout 只约束传给任务入口的 ctx；RecordUsage 内部会为计费与 usage_log
+// 持久化另开 postUsageBillingTimeout 窗口，避免请求取消或 worker ctx 过早到期
+// 造成“已扣费但无 usage_log”的对账缺口。
 func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMode {
 	if p == nil || task == nil {
 		return UsageRecordSubmitModeDropped
@@ -191,6 +198,7 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 	}
 	return UsageRecordWorkerPoolStats{
 		MaxConcurrency:     p.pool.MaxConcurrency(),
+		QueueSize:          p.pool.QueueSize(),
 		RunningWorkers:     p.pool.RunningWorkers(),
 		WaitingTasks:       p.pool.WaitingTasks(),
 		SubmittedTasks:     p.pool.SubmittedTasks(),
@@ -201,6 +209,9 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 		DroppedQueueFull:   p.droppedQueueFull.Load(),
 		DroppedPoolStopped: p.droppedPoolStopped.Load(),
 		SyncFallbackTasks:  p.syncFallback.Load(),
+		TaskTimeoutMs:      p.taskTimeout.Milliseconds(),
+		OverflowPolicy:     p.overflowPolicy,
+		OverflowSamplePct:  p.overflowSamplePercent,
 	}
 }
 

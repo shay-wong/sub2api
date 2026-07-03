@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -148,4 +149,29 @@ func TestOpsServiceWindowStatsKeepsEmptyOperatorScope(t *testing.T) {
 	require.NotNil(t, captured)
 	require.Empty(t, captured.GroupIDs)
 	require.True(t, captured.GroupScopeEmpty)
+}
+
+func TestOpsServiceUsageRecordRuntimeStatsAreProcessScoped(t *testing.T) {
+	svc := NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
+		WorkerCount:           1,
+		QueueSize:             7,
+		TaskTimeout:           2 * time.Second,
+		OverflowPolicy:        config.UsageRecordOverflowPolicySync,
+		OverflowSamplePercent: 0,
+		AutoScaleEnabled:      false,
+	})
+	t.Cleanup(pool.Stop)
+	svc.SetUsageRecordWorkerPool(pool)
+
+	stats, err := svc.GetUsageRecordRuntimeStats(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, "process", stats.Scope)
+	require.NotNil(t, stats.WorkerPool)
+	require.Equal(t, 7, stats.WorkerPool.QueueSize)
+	require.Equal(t, config.UsageRecordOverflowPolicySync, stats.WorkerPool.OverflowPolicy)
+	require.False(t, stats.ProcessStartedAt.IsZero())
+	require.GreaterOrEqual(t, stats.UptimeSeconds, int64(0))
+	require.GreaterOrEqual(t, stats.Persistence.PostUsageBillingTimeoutSeconds, int64(1))
 }

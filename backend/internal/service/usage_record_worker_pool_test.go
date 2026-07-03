@@ -114,7 +114,12 @@ func TestUsageRecordWorkerPool_OverflowSync(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return pool.Stats().SyncFallbackTasks >= 1
+		stats := pool.Stats()
+		return stats.SyncFallbackTasks >= 1 &&
+			stats.QueueSize == 1 &&
+			stats.TaskTimeoutMs == int64(time.Second/time.Millisecond) &&
+			stats.OverflowPolicy == config.UsageRecordOverflowPolicySync &&
+			stats.OverflowSamplePct == 0
 	}, time.Second, 10*time.Millisecond)
 }
 

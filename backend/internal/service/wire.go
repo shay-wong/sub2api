@@ -476,6 +476,7 @@ func ProvideOpsService(
 	antigravityGatewayService *AntigravityGatewayService,
 	systemLogSink *OpsSystemLogSink,
 	settingService *SettingService,
+	usageRecordWorkerPool *UsageRecordWorkerPool,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -496,6 +497,7 @@ func ProvideOpsService(
 		// a populated cache rather than zero defaults. Best-effort, sync-bounded.
 		settingService.WarmOpenAIQuotaAutoPauseSettings(context.Background())
 	}
+	svc.SetUsageRecordWorkerPool(usageRecordWorkerPool)
 	return svc
 }
 
