@@ -66,11 +66,12 @@ var codexVersionModelPrefixes = []struct {
 }
 
 type codexTransformResult struct {
-	Modified                              bool
-	NormalizedModel                       string
-	PromptCacheKey                        string
-	DroppedReasoningWithoutEncryptedCount int
-	PreservedEncryptedReasoningCount      int
+	Modified                         bool
+	NormalizedModel                  string
+	PromptCacheKey                   string
+	StrippedReasoningIDCount         int
+	PreservedReasoningCount          int
+	PreservedEncryptedReasoningCount int
 }
 
 type codexOAuthTransformOptions struct {
@@ -249,13 +250,15 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 			PreserveReferences: needsToolContinuation,
 			PreserveCallIDs:    opts.PreserveToolCallIDs,
 		})
-		result.DroppedReasoningWithoutEncryptedCount = filterStats.DroppedReasoningWithoutEncryptedCount
+		result.StrippedReasoningIDCount = filterStats.StrippedReasoningIDCount
+		result.PreservedReasoningCount = filterStats.PreservedReasoningCount
 		result.PreservedEncryptedReasoningCount = filterStats.PreservedEncryptedReasoningCount
 		if filterStats.hasReasoningActivity() {
 			logger.LegacyPrintf(
 				"service.openai_codex_transform",
-				"[CodexOAuthTransform] input reasoning filter summary: dropped_without_encrypted_content=%d preserved_with_encrypted_content=%d preserve_references=%v",
-				filterStats.DroppedReasoningWithoutEncryptedCount,
+				"[CodexOAuthTransform] input reasoning filter summary: stripped_reasoning_ids=%d preserved_reasoning_items=%d preserved_with_encrypted_content=%d preserve_references=%v",
+				filterStats.StrippedReasoningIDCount,
+				filterStats.PreservedReasoningCount,
 				filterStats.PreservedEncryptedReasoningCount,
 				needsToolContinuation,
 			)
@@ -1154,17 +1157,18 @@ type codexInputFilterOptions struct {
 }
 
 type codexInputFilterStats struct {
-	DroppedReasoningWithoutEncryptedCount int
-	PreservedEncryptedReasoningCount      int
+	StrippedReasoningIDCount         int
+	PreservedReasoningCount          int
+	PreservedEncryptedReasoningCount int
 }
 
 func (s codexInputFilterStats) hasReasoningActivity() bool {
-	return s.DroppedReasoningWithoutEncryptedCount > 0 || s.PreservedEncryptedReasoningCount > 0
+	return s.PreservedReasoningCount > 0 || s.StrippedReasoningIDCount > 0 || s.PreservedEncryptedReasoningCount > 0
 }
 
-// filterCodexInput 按需过滤 item_reference、id 与不可用的空 reasoning 引用。
-// preserveReferences 只控制普通引用/id 的保留；reasoning 是否保留取决于是否携带
-// encrypted_content，因为 OAuth store=false 不能回查空 rs_* 引用。
+// filterCodexInput 按需过滤 item_reference 与 id。
+// preserveReferences 只控制普通引用/id 的保留；reasoning 始终保留，但会无条件剥离
+// rs_* id，因为 OAuth store=false 不能回查这些引用。
 func filterCodexInput(input []any, preserveReferences bool) []any {
 	filtered, _ := filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: preserveReferences,
@@ -1189,14 +1193,20 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]a
 			// encrypted_content, summary, and future opaque fields. Upstream also
 			// requires summary, so backfill an empty array when the client omits it.
 			newItem := make(map[string]any, len(m))
+			strippedID := false
 			for key, value := range m {
 				if key == "id" {
+					strippedID = true
 					continue
 				}
 				newItem[key] = value
 			}
 			if summary, ok := newItem["summary"]; !ok || summary == nil {
 				newItem["summary"] = []any{}
+			}
+			stats.PreservedReasoningCount++
+			if strippedID {
+				stats.StrippedReasoningIDCount++
 			}
 			if hasNonEmptyString(m["encrypted_content"]) {
 				stats.PreservedEncryptedReasoningCount++

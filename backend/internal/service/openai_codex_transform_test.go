@@ -1569,7 +1569,8 @@ func TestFilterCodexInput_PreservesEncryptedReasoningItems(t *testing.T) {
 			filtered, stats := filterCodexInputWithOptions(build(), codexInputFilterOptions{
 				PreserveReferences: preserve,
 			})
-			require.Equal(t, 0, stats.DroppedReasoningWithoutEncryptedCount)
+			require.Equal(t, 1, stats.StrippedReasoningIDCount)
+			require.Equal(t, 1, stats.PreservedReasoningCount)
 			require.Equal(t, 1, stats.PreservedEncryptedReasoningCount)
 
 			var reasoning map[string]any
