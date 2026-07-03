@@ -13,6 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func expectSchedulerFullRebuildOutbox(mock sqlmock.Sqlmock) {
+	mock.ExpectExec(regexp.QuoteMeta(`
+			INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING
+		`)).
+		WithArgs(service.SchedulerOutboxEventFullRebuild, nil, nil, nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func TestProjectRepositoryCreateProjectKeepsRestrictedDefaultBindingsWhenScopeIsUnrestricted(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
@@ -78,6 +88,7 @@ func TestProjectRepositoryCreateProjectKeepsRestrictedDefaultBindingsWhenScopeIs
 		WithArgs(int64(101), int64(303)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "name", "description", "mode", "is_active", "created_at", "updated_at"}).
 			AddRow(int64(303), int64(101), unrestrictedProjectScopeProfileName, "Internal project-level unrestricted resource scope.", service.ProjectProfileModeUnrestricted, true, now, now))
+	expectSchedulerFullRebuildOutbox(mock)
 	mock.ExpectCommit()
 
 	repo := NewProjectRepository(db)
@@ -141,6 +152,7 @@ func TestProjectRepositoryActivateUnrestrictedScopeReusesInternalProfile(t *test
 		WithArgs(int64(101), int64(303)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "name", "description", "mode", "is_active", "created_at", "updated_at"}).
 			AddRow(int64(303), int64(101), unrestrictedProjectScopeProfileName, "Internal project-level unrestricted resource scope.", service.ProjectProfileModeUnrestricted, true, now, now))
+	expectSchedulerFullRebuildOutbox(mock)
 	mock.ExpectCommit()
 
 	repo := NewProjectRepository(db)
@@ -148,6 +160,55 @@ func TestProjectRepositoryActivateUnrestrictedScopeReusesInternalProfile(t *test
 	require.NoError(t, err)
 	require.Equal(t, int64(303), profile.ID)
 	require.Equal(t, service.ProjectProfileModeUnrestricted, profile.Mode)
+	require.True(t, profile.IsActive)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestProjectRepositoryActivateProjectProfileEnqueuesSchedulerRebuild(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`)).
+		WithArgs(int64(101), int64(202)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(202)))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE project_profiles
+		SET is_active = FALSE,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = $1
+		  AND is_active = TRUE
+		  AND deleted_at IS NULL
+	`)).
+		WithArgs(int64(101)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		UPDATE project_profiles
+		SET is_active = TRUE,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+		RETURNING id, project_id, name, description, mode, is_active, created_at, updated_at
+	`)).
+		WithArgs(int64(101), int64(202)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "name", "description", "mode", "is_active", "created_at", "updated_at"}).
+			AddRow(int64(202), int64(101), "默认配置", nil, service.ProjectProfileModeRestricted, true, now, now))
+	expectSchedulerFullRebuildOutbox(mock)
+	mock.ExpectCommit()
+
+	repo := NewProjectRepository(db)
+	profile, err := repo.ActivateProjectProfile(context.Background(), 101, 202)
+	require.NoError(t, err)
+	require.Equal(t, int64(202), profile.ID)
 	require.True(t, profile.IsActive)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -534,6 +595,7 @@ func TestProjectRepositorySetBindingsUpdatesRestrictedProfileBindings(t *testing
 		`)).
 		WithArgs(int64(202)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectSchedulerFullRebuildOutbox(mock)
 	mock.ExpectCommit()
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT mode

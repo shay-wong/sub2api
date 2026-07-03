@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -672,6 +673,10 @@ func (r *projectRepository) ActivateProjectProfile(ctx context.Context, projectI
 	if err != nil {
 		return nil, err
 	}
+	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventFullRebuild, nil, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.project", "[SchedulerOutbox] enqueue profile activation rebuild failed: project=%d profile=%d err=%v", projectID, profileID, err)
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -730,6 +735,10 @@ func activateProjectUnrestrictedScopeOnTx(ctx context.Context, tx *sql.Tx, proje
 		RETURNING id, project_id, name, description, mode, is_active, created_at, updated_at
 	`, []any{projectID, profileID}, &item.ID, &item.ProjectID, &item.Name, &description, &item.Mode, &item.IsActive, &createdAt, &updatedAt)
 	if err != nil {
+		return nil, err
+	}
+	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventFullRebuild, nil, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.project", "[SchedulerOutbox] enqueue unrestricted profile activation rebuild failed: project=%d profile=%d err=%v", projectID, profileID, err)
 		return nil, err
 	}
 	if description.Valid {
@@ -979,6 +988,10 @@ func (r *projectRepository) SetProjectProfileBindings(ctx context.Context, proje
 		SET updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 	`, profileID); err != nil {
+		return nil, err
+	}
+	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventFullRebuild, nil, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.project", "[SchedulerOutbox] enqueue profile binding rebuild failed: project=%d profile=%d err=%v", projectID, profileID, err)
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
