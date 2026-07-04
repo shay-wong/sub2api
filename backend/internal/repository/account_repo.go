@@ -1187,11 +1187,11 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 		return rows, nil
 	}
 
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT
-			ag.group_id,
-			a.id AS account_id,
-			a.concurrency,
+	query := `
+			SELECT
+				ag.group_id,
+				a.id AS account_id,
+				a.concurrency,
 			COALESCE(a.extra, '{}'::jsonb)::text AS extra,
 			a.session_window_start,
 			a.session_window_end,
@@ -1203,11 +1203,16 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			AND a.status = $2
 			AND a.schedulable = TRUE
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= $3)
-			AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
-			AND (a.overload_until IS NULL OR a.overload_until <= $3)
-			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= $3)
-		ORDER BY ag.group_id ASC, ag.priority ASC, a.priority ASC, a.id ASC
-	`, pq.Array(groupIDs), service.StatusActive, time.Now())
+				AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
+				AND (a.overload_until IS NULL OR a.overload_until <= $3)
+				AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= $3)
+	`
+	query += groupAccountRelationshipScopeClause(ctx, "ag.group_id", "a.id")
+	query += `
+			ORDER BY ag.group_id ASC, ag.priority ASC, a.priority ASC, a.id ASC
+		`
+
+	rows, err := r.sql.QueryContext(ctx, query, pq.Array(groupIDs), service.StatusActive, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -1834,6 +1839,9 @@ type accountGroupQueryOptions struct {
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {
 	q := r.client.AccountGroup.Query().
 		Where(dbaccountgroup.GroupIDEQ(groupID))
+	if groupPreds := projectScopedGroupPredicate(ctx); len(groupPreds) > 0 {
+		q = q.Where(dbaccountgroup.HasGroupWith(groupPreds...))
+	}
 
 	// 通过 account_groups 中间表查询账号，并按需叠加状态/平台/调度能力过滤。
 	preds := make([]dbpredicate.Account, 0, 8)

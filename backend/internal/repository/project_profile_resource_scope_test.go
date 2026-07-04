@@ -402,6 +402,76 @@ func TestAccountRepositoryListDoesNotExpandAccountsFromBoundProjectGroups(t *tes
 	require.NotEqual(t, unboundAccount.ID, accounts[0].ID)
 }
 
+func TestGroupRepositoryListActiveIDsUsesActiveProjectProfileScope(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	home, err := client.Project.Create().
+		SetName("Group ID Home").
+		SetSlug("group-id-home").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	workspace, err := client.Project.Create().
+		SetName("Group ID Workspace").
+		SetSlug("group-id-workspace").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+
+	bound, err := client.Group.Create().
+		SetProjectID(home.ID).
+		SetName("bound-active-id-group").
+		SetStatus(service.StatusActive).
+		SetPlatform(service.PlatformAnthropic).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		Save(ctx)
+	require.NoError(t, err)
+	unbound, err := client.Group.Create().
+		SetProjectID(home.ID).
+		SetName("unbound-active-id-group").
+		SetStatus(service.StatusActive).
+		SetPlatform(service.PlatformAnthropic).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		Save(ctx)
+	require.NoError(t, err)
+	inactive, err := client.Group.Create().
+		SetProjectID(home.ID).
+		SetName("bound-inactive-id-group").
+		SetStatus(service.StatusDisabled).
+		SetPlatform(service.PlatformAnthropic).
+		SetSubscriptionType(service.SubscriptionTypeStandard).
+		Save(ctx)
+	require.NoError(t, err)
+
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(workspace.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeGroup).
+		SetResourceID(bound.ID).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeGroup).
+		SetResourceID(inactive.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newGroupRepositoryWithSQL(client, nil)
+	ids, err := repo.ListActiveIDs(service.WithProjectID(ctx, workspace.ID))
+	require.NoError(t, err)
+	require.Equal(t, []int64{bound.ID}, ids)
+	require.NotContains(t, ids, unbound.ID)
+	require.NotContains(t, ids, inactive.ID)
+}
+
 func TestAccountRepositoryUpdateKeepsHomeProjectForProfileBoundResource(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()

@@ -489,12 +489,13 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 func (r *groupRepository) ListActiveIDs(ctx context.Context) ([]int64, error) {
 	if r.sql != nil {
 		rows, err := r.sql.QueryContext(ctx, `
-			SELECT id
-			FROM groups
-			WHERE status = $1
-			  AND deleted_at IS NULL
-			ORDER BY sort_order ASC, id ASC
-		`, service.StatusActive)
+				SELECT id
+				FROM groups
+				WHERE status = $1
+				  AND deleted_at IS NULL
+			`+groupOnlyScopeClause(ctx)+`
+				ORDER BY sort_order ASC, id ASC
+			`, service.StatusActive)
 		if err != nil {
 			return nil, err
 		}
@@ -514,8 +515,10 @@ func (r *groupRepository) ListActiveIDs(ctx context.Context) ([]int64, error) {
 		return ids, nil
 	}
 
+	preds := []dbpredicate.Group{group.StatusEQ(service.StatusActive)}
+	preds = append(preds, projectScopedGroupPredicate(ctx)...)
 	groups, err := r.client.Group.Query().
-		Where(group.StatusEQ(service.StatusActive)).
+		Where(preds...).
 		Select(group.FieldID).
 		Order(dbent.Asc(group.FieldSortOrder), dbent.Asc(group.FieldID)).
 		All(ctx)

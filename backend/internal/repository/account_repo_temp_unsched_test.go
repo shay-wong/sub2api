@@ -95,6 +95,41 @@ func TestAccountRepository_ListOAuthRefreshCandidates_SQLFilter(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestAccountRepositoryListSchedulableCapacityByGroupIDsSQLUsesActiveProjectProfileScope(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	var capturedSQL string
+	mock.ExpectQuery("SELECT").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"group_id",
+			"account_id",
+			"concurrency",
+			"extra",
+			"session_window_start",
+			"session_window_end",
+			"session_window_status",
+		}))
+
+	repo := newAccountRepositoryWithSQL(nil, captureQuerySQL{db: db, captured: &capturedSQL}, nil)
+
+	rows, err := repo.ListSchedulableCapacityByGroupIDs(service.WithProjectID(context.Background(), 7), []int64{11})
+	require.NoError(t, err)
+	require.Empty(t, rows)
+
+	normalized := normalizeSQLWhitespace(capturedSQL)
+	require.Contains(t, normalized, "FROM project_profiles pp")
+	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
+	require.Contains(t, normalized, "ppb.resource_type = 'group'")
+	require.Contains(t, normalized, "ppb.resource_id = ag.group_id")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = a.id")
+	require.NotContains(t, normalized, "a.project_id =")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 type captureQuerySQL struct {
 	db       *sql.DB
 	captured *string
