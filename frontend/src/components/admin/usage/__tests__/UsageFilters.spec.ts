@@ -34,6 +34,16 @@ const messages: Record<string, string> = {
   'common.reset': 'Reset',
   'admin.usage.cleanup.button': 'Cleanup',
   'usage.exportExcel': 'Export',
+  'admin.ops.errorLog.type': 'Error Type',
+  'admin.ops.errorLog.status': 'Status',
+  'usage.errors.category': 'Category',
+  'usage.errors.allCategories': 'All Categories',
+  'usage.errors.allStatuses': 'All Statuses',
+  'admin.ops.errorLog.typeUpstream': 'Upstream',
+  'admin.ops.errorLog.typeRequest': 'Request',
+  'admin.ops.errorLog.typeAuth': 'Auth',
+  'admin.ops.errorLog.typeRouting': 'Routing',
+  'admin.ops.errorLog.typeInternal': 'Internal',
 }
 
 // Mock vue-i18n
@@ -86,7 +96,7 @@ const defaultFilters = () => ({
   end_date: '',
 })
 
-function mountFilters(filters = defaultFilters()) {
+function mountFilters(filters = defaultFilters(), props: Record<string, any> = {}) {
   return mount(UsageFilters, {
     props: {
       modelValue: filters,
@@ -95,6 +105,7 @@ function mountFilters(filters = defaultFilters()) {
       endDate: '2026-05-28',
       showActions: false,
       modelOptions: [],
+      ...props,
     },
     global: {
       stubs: {
@@ -249,6 +260,19 @@ describe('UsageFilters — usage-scoped account and group candidates', () => {
 })
 
 describe('UsageFilters — cleanup action visibility', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockSearchUsers.mockReset()
+    mockSearchApiKeys.mockReset()
+    mockSearchAccounts.mockReset()
+    mockSearchGroups.mockReset()
+    mockSearchGroups.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('shows cleanup by default and hides it when disabled', () => {
     const visible = mount(UsageFilters, {
       props: {
@@ -276,5 +300,86 @@ describe('UsageFilters — cleanup action visibility', () => {
     })
 
     expect(hidden.text()).not.toContain('Cleanup')
+  })
+
+  it('hides usage actions and usage-only filters in errors mode even when cleanup is allowed', () => {
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showCleanup: true,
+        mode: 'errors',
+        modelOptions: [],
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+
+    expect(wrapper.text()).toContain('Error Type')
+    expect(wrapper.text()).toContain('Category')
+    expect(wrapper.text()).toContain('Status')
+    expect(wrapper.text()).not.toContain('Cleanup')
+    expect(wrapper.text()).not.toContain('Export')
+    expect(wrapper.text()).not.toContain('Billing Type')
+    expect(wrapper.text()).not.toContain('Billing Mode')
+  })
+
+  it('emits error-change for shared select filters in errors mode', async () => {
+    const wrapper = mountFilters(defaultFilters(), {
+      mode: 'errors',
+      modelOptions: ['gpt-5.3-codex'],
+    })
+    await flushPromises()
+
+    const selects = wrapper.findAllComponents({ name: 'Select' })
+    // errors mode select order: model, error phase, error category, status code, group.
+    selects[0].vm.$emit('change')
+    selects[4].vm.$emit('change')
+
+    expect(wrapper.emitted('error-change')).toHaveLength(2)
+    expect(wrapper.emitted('change')).toBeUndefined()
+  })
+
+  it('emits error-change for shared dropdown filters in errors mode', async () => {
+    mockSearchUsers.mockResolvedValue([{ id: 1, email: 'active@test.com', deleted: false }])
+    mockSearchApiKeys.mockResolvedValue([{ id: 2, name: 'ops-key' }])
+    mockSearchAccounts.mockResolvedValue([{ id: 3, name: 'ops-account' }])
+    const wrapper = mountFilters(defaultFilters(), { mode: 'errors' })
+
+    const inputs = wrapper.findAll('input[type="text"]')
+    await inputs[0].trigger('focus')
+    await inputs[0].setValue('active')
+    await inputs[0].trigger('input')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    await wrapper.findAll('.usage-filter-dropdown button[type="button"]')
+      .find((button) => button.text().includes('active@test.com'))!
+      .trigger('click')
+    await flushPromises()
+
+    await inputs[1].trigger('focus')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    await wrapper.findAll('.usage-filter-dropdown button[type="button"]')
+      .find((button) => button.text().includes('ops-key'))!
+      .trigger('click')
+
+    await inputs[2].trigger('focus')
+    await inputs[2].setValue('ops')
+    await inputs[2].trigger('input')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    await wrapper.findAll('.usage-filter-dropdown button[type="button"]')
+      .find((button) => button.text().includes('ops-account'))!
+      .trigger('click')
+
+    expect(wrapper.emitted('error-change')).toHaveLength(3)
+    expect(wrapper.emitted('change')).toBeUndefined()
+    expect(wrapper.props('modelValue')).toMatchObject({
+      user_id: 1,
+      api_key_id: 2,
+      account_id: 3,
+    })
   })
 })

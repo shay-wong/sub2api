@@ -64,7 +64,7 @@
           <TokenUsageTrend v-if="canReadDashboardCharts" :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
-      <UsageFilters v-model="filters" :mode="activeTab === 'errors' ? 'errors' : 'usage'" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" :show-cleanup="authStore.isAdmin" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+      <UsageFilters v-model="filters" :mode="activeTab === 'errors' ? 'errors' : 'usage'" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" :show-cleanup="authStore.isAdmin" @change="applyFilters" @error-change="applyErrorFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
         <template #after-reset>
           <div class="relative" ref="columnDropdownRef">
             <button
@@ -633,6 +633,12 @@ const applyFilters = () => {
     loadAdminErrors()
   } else {
     errRows.value = []
+  }
+}
+const applyErrorFilters = () => {
+  errPage.value = 1
+  if (activeTab.value === 'errors') {
+    loadAdminErrors()
   }
 }
 const refreshData = () => {

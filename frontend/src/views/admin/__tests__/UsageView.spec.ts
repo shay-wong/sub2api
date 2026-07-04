@@ -153,9 +153,17 @@ const GroupDistributionChartStub = {
   `,
 }
 
+const stubWindowScrollTo = () => {
+  Object.defineProperty(window, 'scrollTo', {
+    writable: true,
+    value: vi.fn(),
+  })
+}
+
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    stubWindowScrollTo()
     list.mockReset()
     count.mockReset()
     getStats.mockReset()
@@ -496,6 +504,7 @@ describe('admin UsageView distribution metric toggles', () => {
 describe('admin UsageView cleanup visibility', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    stubWindowScrollTo()
     list.mockReset()
     count.mockReset()
     getStats.mockReset()
@@ -672,6 +681,7 @@ describe('admin UsageView cleanup visibility', () => {
 describe('admin UsageView handleUserClick', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    stubWindowScrollTo()
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
@@ -732,6 +742,7 @@ describe('admin UsageView handleUserClick', () => {
 describe('admin UsageView errors tab filter forwarding', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    stubWindowScrollTo()
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
@@ -786,5 +797,112 @@ describe('admin UsageView errors tab filter forwarding', () => {
       account_id: 7,
       group_id: 3,
     }))
+  })
+
+  it('refreshes only admin errors for error-only filters', async () => {
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('button.tab')
+    await tabs[1].trigger('click')
+    await flushPromises()
+
+    list.mockClear()
+    count.mockClear()
+    getStats.mockClear()
+    getSnapshotV2.mockClear()
+    getModelStats.mockClear()
+    searchModels.mockClear()
+    listErrorLogs.mockClear()
+
+    const vm = wrapper.vm as any
+    vm.filters.error_phase = 'auth'
+    vm.filters.error_category = 'quota'
+    vm.filters.status_code = 429
+    vm.applyErrorFilters()
+    await flushPromises()
+
+    expect(listErrorLogs).toHaveBeenCalledTimes(1)
+    expect(listErrorLogs).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'auth',
+      category: 'quota',
+      status_codes: '429',
+    }))
+    expect(list).not.toHaveBeenCalled()
+    expect(count).not.toHaveBeenCalled()
+    expect(getStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(searchModels).not.toHaveBeenCalled()
+  })
+
+  it('refreshes only admin errors for shared filters on the errors tab', async () => {
+    const ErrorModeUsageFiltersStub = {
+      props: ['modelValue', 'mode'],
+      emits: ['update:modelValue', 'error-change'],
+      template: `
+        <div data-test="usage-filters" :data-mode="mode">
+          <button class="set-model" @click="$emit('update:modelValue', { ...modelValue, model: 'gpt-5.3-codex' }); $emit('error-change')">model</button>
+          <button class="set-user" @click="$emit('update:modelValue', { ...modelValue, user_id: 2 }); $emit('error-change')">user</button>
+          <button class="set-api-key" @click="$emit('update:modelValue', { ...modelValue, api_key_id: 5 }); $emit('error-change')">api</button>
+          <button class="set-account" @click="$emit('update:modelValue', { ...modelValue, account_id: 7 }); $emit('error-change')">account</button>
+          <button class="set-group" @click="$emit('update:modelValue', { ...modelValue, group_id: 3 }); $emit('error-change')">group</button>
+        </div>
+      `,
+    }
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: ErrorModeUsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('button.tab')
+    await tabs[1].trigger('click')
+    await flushPromises()
+
+    list.mockClear()
+    count.mockClear()
+    getStats.mockClear()
+    getSnapshotV2.mockClear()
+    getModelStats.mockClear()
+    searchModels.mockClear()
+    listErrorLogs.mockClear()
+
+    for (const selector of ['.set-model', '.set-user', '.set-api-key', '.set-account', '.set-group']) {
+      await wrapper.find(selector).trigger('click')
+      await flushPromises()
+    }
+
+    expect(listErrorLogs).toHaveBeenCalledTimes(5)
+    expect(listErrorLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      model: 'gpt-5.3-codex',
+      user_id: 2,
+      api_key_id: 5,
+      account_id: 7,
+      group_id: 3,
+    }))
+    expect(list).not.toHaveBeenCalled()
+    expect(count).not.toHaveBeenCalled()
+    expect(getStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(searchModels).not.toHaveBeenCalled()
   })
 })

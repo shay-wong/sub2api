@@ -81,7 +81,7 @@
         <!-- Model Filter -->
         <div class="w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('usage.model') }}</label>
-          <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
+          <Select v-model="filters.model" :options="modelOptions" searchable @change="emitFilterChange" />
         </div>
 
         <!-- Account Filter -->
@@ -142,25 +142,25 @@
         <!-- Error Phase Filter (errors only) -->
         <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
-          <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
+          <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitErrorChange" />
         </div>
 
         <!-- Error Category Filter (errors only) -->
         <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.errors.category') }}</label>
-          <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
+          <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitErrorChange" />
         </div>
 
         <!-- Status Code Filter (errors only) -->
         <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
-          <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
+          <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitErrorChange" />
         </div>
 
         <!-- Group Filter -->
         <div class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.group') }}</label>
-          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
+          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitFilterChange" />
         </div>
 
       </div>
@@ -217,6 +217,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits([
   'update:modelValue',
   'change',
+  'error-change',
   'refresh',
   'reset',
   'export',
@@ -296,6 +297,14 @@ const billingModeOptions = ref<SelectOption[]>([
 ])
 
 const emitChange = () => emit('change')
+const emitErrorChange = () => emit('error-change')
+const emitFilterChange = () => {
+  if (props.mode === 'errors') {
+    emitErrorChange()
+    return
+  }
+  emitChange()
+}
 
 const debounceUserSearch = () => {
   if (userSearchTimeout) clearTimeout(userSearchTimeout)
@@ -340,7 +349,7 @@ const selectUser = async (u: SimpleUser) => {
     apiKeyResults.value = []
   }
 
-  emitChange()
+  emitFilterChange()
 }
 
 const clearUser = () => {
@@ -349,14 +358,14 @@ const clearUser = () => {
   showUserDropdown.value = false
   filters.value.user_id = undefined
   clearApiKey()
-  emitChange()
+  emitFilterChange()
 }
 
 const selectApiKey = (k: SimpleApiKey) => {
   apiKeyKeyword.value = k.name || String(k.id)
   showApiKeyDropdown.value = false
   filters.value.api_key_id = k.id
-  emitChange()
+  emitFilterChange()
 }
 
 const clearApiKey = () => {
@@ -368,7 +377,7 @@ const clearApiKey = () => {
 
 const onClearApiKey = () => {
   clearApiKey()
-  emitChange()
+  emitFilterChange()
 }
 
 const debounceAccountSearch = () => {
@@ -390,7 +399,7 @@ const selectAccount = (a: SimpleAccount) => {
   accountKeyword.value = a.name
   showAccountDropdown.value = false
   filters.value.account_id = a.id
-  emitChange()
+  emitFilterChange()
 }
 
 const clearAccount = () => {
@@ -398,7 +407,7 @@ const clearAccount = () => {
   accountResults.value = []
   showAccountDropdown.value = false
   filters.value.account_id = undefined
-  emitChange()
+  emitFilterChange()
 }
 
 const onApiKeyFocus = () => {
