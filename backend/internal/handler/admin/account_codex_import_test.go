@@ -424,6 +424,36 @@ func TestCodexAccountIndexAccessTokenOnlyUsesTokenFingerprint(t *testing.T) {
 	}
 }
 
+func TestCodexAccountIndexAccessTokenOnlyCanFindRefreshCapableSameWorkspaceUser(t *testing.T) {
+	existing := service.Account{
+		ID: 23,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "team-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       "token-old",
+			"refresh_token":      "refresh-old",
+		},
+	}
+	index := buildCodexAccountIndex([]service.Account{existing})
+
+	keys := buildCodexImportIdentityKeys("team-1", "user-1", "", "token-new", "")
+	if got, _ := index.Find(keys, "user-1"); got != nil {
+		t.Fatalf("accessToken-only primary match = %v, want no fingerprint match", got)
+	}
+
+	got, matchedKey := index.FindRefreshCapableByStableIdentity("team-1", "user-1")
+	if got == nil || got.ID != existing.ID {
+		t.Fatalf("FindRefreshCapableByStableIdentity = %v, want account ID %d", got, existing.ID)
+	}
+	if matchedKey != "user:user-1" {
+		t.Fatalf("matched key = %q, want user:user-1", matchedKey)
+	}
+
+	if got, _ := index.FindRefreshCapableByStableIdentity("team-2", "user-1"); got != nil {
+		t.Fatalf("different workspace matched account ID %d", got.ID)
+	}
+}
+
 func TestCodexAccountIndexKeepsAllCandidatesForSharedAccountKey(t *testing.T) {
 	legacy := service.Account{
 		ID: 30,
@@ -730,6 +760,190 @@ func TestImportCodexSessionsAccessTokenOnlyPreservesExistingRefreshToken(t *test
 	}
 	if update.AutoPauseOnExpired != nil {
 		t.Fatalf("AutoPauseOnExpired = %v, want nil to preserve OAuth account scheduling", *update.AutoPauseOnExpired)
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlyRotatedTokenUpdatesRefreshCapableAccount(t *testing.T) {
+	oldToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "old-token", time.Now().Add(time.Hour))
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       15,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       oldToken,
+			"refresh_token":      "refresh-old",
+			"client_id":          "client-old",
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": newToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want rotated access token to update existing refresh account", result)
+	}
+	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 15 {
+		t.Fatalf("updated accounts = %+v, want account 15", svc.updatedAccounts)
+	}
+	update := svc.updatedAccounts[0].input
+	if got := update.Credentials["access_token"]; got != newToken {
+		t.Fatalf("access_token = %v, want rotated token", got)
+	}
+	if got := update.Credentials["refresh_token"]; got != "refresh-old" {
+		t.Fatalf("refresh_token = %v, want preserved old refresh token", got)
+	}
+	if got := update.Credentials["client_id"]; got != "client-old" {
+		t.Fatalf("client_id = %v, want preserved old client id", got)
+	}
+	if update.ExpiresAt != nil {
+		t.Fatalf("ExpiresAt = %v, want nil to preserve OAuth account expiry", *update.ExpiresAt)
+	}
+	if update.AutoPauseOnExpired != nil {
+		t.Fatalf("AutoPauseOnExpired = %v, want nil to preserve OAuth scheduling", *update.AutoPauseOnExpired)
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlyStableFallbackOnlyUpdatesOncePerBatch(t *testing.T) {
+	oldToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "old-token", time.Now().Add(time.Hour))
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	staleToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "stale-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       16,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       oldToken,
+			"refresh_token":      "refresh-old",
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": newToken}},
+		{Index: 2, Value: map[string]any{"access_token": staleToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Updated != 1 || result.Created != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want first token updated and second token created separately", result)
+	}
+	if len(svc.updatedAccounts) != 1 || svc.updatedAccounts[0].id != 16 {
+		t.Fatalf("updated accounts = %+v, want account 16 updated once", svc.updatedAccounts)
+	}
+	stored, err := svc.GetAccount(context.Background(), 16)
+	if err != nil {
+		t.Fatalf("GetAccount error = %v", err)
+	}
+	if got := stored.Credentials["access_token"]; got != newToken {
+		t.Fatalf("stored access_token rolled forward/back = %v, want first rotated token", got)
+	}
+	if got := stored.Credentials["refresh_token"]; got != "refresh-old" {
+		t.Fatalf("stored refresh_token = %v, want preserved refresh token", got)
+	}
+	if len(svc.createdAccounts) != 1 {
+		t.Fatalf("created accounts = %d, want second access-only account", len(svc.createdAccounts))
+	}
+	if got := svc.createdAccounts[0].Credentials["access_token"]; got != staleToken {
+		t.Fatalf("created access_token = %v, want stale token isolated as new account", got)
+	}
+}
+
+func TestImportCodexSessionsAccessTokenOnlyFingerprintUpdateBlocksStableRollback(t *testing.T) {
+	currentToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "current-token", time.Now().Add(time.Hour))
+	staleToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "stale-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService([]service.Account{{
+		ID:       17,
+		Name:     "existing",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "workspace-1",
+			"chatgpt_user_id":    "user-1",
+			"access_token":       currentToken,
+			"refresh_token":      "refresh-old",
+		},
+	}})
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": currentToken}},
+		{Index: 2, Value: map[string]any{"access_token": staleToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Updated != 1 || result.Created != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want current token updated once and stale token created separately", result)
+	}
+	stored, err := svc.GetAccount(context.Background(), 17)
+	if err != nil {
+		t.Fatalf("GetAccount error = %v", err)
+	}
+	if got := stored.Credentials["access_token"]; got != currentToken {
+		t.Fatalf("stored access_token rolled back = %v, want current token", got)
+	}
+	if got := stored.Credentials["refresh_token"]; got != "refresh-old" {
+		t.Fatalf("stored refresh_token = %v, want preserved refresh token", got)
+	}
+	if len(svc.createdAccounts) != 1 {
+		t.Fatalf("created accounts = %d, want stale token isolated as new account", len(svc.createdAccounts))
+	}
+}
+
+func TestImportCodexSessionsRefreshCreateBlocksAccessOnlyStableRollback(t *testing.T) {
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	staleToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "stale-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService(nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{
+			"access_token":  newToken,
+			"refresh_token": "refresh-new",
+		}},
+		{Index: 2, Value: map[string]any{"access_token": staleToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), req, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 2 || result.Updated != 0 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want refresh account created and stale access-only token isolated", result)
+	}
+	first, err := svc.GetAccount(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("GetAccount first created error = %v", err)
+	}
+	if got := first.Credentials["access_token"]; got != newToken {
+		t.Fatalf("first account access_token = %v, want refresh-capable token", got)
+	}
+	if got := first.Credentials["refresh_token"]; got != "refresh-new" {
+		t.Fatalf("first account refresh_token = %v, want refresh-new", got)
+	}
+	if len(svc.createdAccounts) != 2 {
+		t.Fatalf("created accounts = %d, want two isolated accounts", len(svc.createdAccounts))
+	}
+	if got := svc.createdAccounts[1].Credentials["access_token"]; got != staleToken {
+		t.Fatalf("second account access_token = %v, want stale token isolated", got)
 	}
 }
 

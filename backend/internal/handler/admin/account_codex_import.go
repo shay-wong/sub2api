@@ -179,6 +179,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 	skipMixedChannelCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	seenIdentity := map[string]codexSeenIdentity{}
+	seenAccessOnlyStableIdentity := map[string]codexSeenIdentity{}
 	for _, entry := range entries {
 		item, err := normalizeCodexImportEntry(entry)
 		if err != nil {
@@ -243,7 +244,23 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index, item.UserID)
 
+		var stableIdentityKeys []string
+		stableIdentitySeen := false
+		if item.RefreshToken == "" {
+			stableIdentityKeys = buildCodexAccessOnlyStableIdentityKeys(item.AccountID, item.UserID)
+			_, stableIdentitySeen = firstSeenCodexIdentity(
+				seenAccessOnlyStableIdentity,
+				stableIdentityKeys,
+				item.UserID,
+			)
+		}
+
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
+		usedStableFallback := false
+		if existing == nil && item.RefreshToken == "" && !stableIdentitySeen {
+			existing, matchedKey = index.FindRefreshCapableByStableIdentity(item.AccountID, item.UserID)
+			usedStableFallback = existing != nil
+		}
 		if existing != nil && updateExisting {
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {
@@ -309,6 +326,13 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				accountID = updated.ID
 				index.Add(*updated)
 			}
+			if usedStableFallback || item.RefreshToken != "" ||
+				(item.RefreshToken == "" && codexCredentialString(existing.Credentials, "refresh_token") != "") {
+				if stableIdentityKeys == nil {
+					stableIdentityKeys = buildCodexAccessOnlyStableIdentityKeys(item.AccountID, item.UserID)
+				}
+				markCodexIdentitySeen(seenAccessOnlyStableIdentity, stableIdentityKeys, entry.Index, item.UserID)
+			}
 			result.Items = append(result.Items, CodexSessionImportItem{
 				Index:     entry.Index,
 				Name:      accountName,
@@ -353,6 +377,12 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 		if account != nil {
 			index.Add(*account)
+		}
+		if item.RefreshToken != "" {
+			if stableIdentityKeys == nil {
+				stableIdentityKeys = buildCodexAccessOnlyStableIdentityKeys(item.AccountID, item.UserID)
+			}
+			markCodexIdentitySeen(seenAccessOnlyStableIdentity, stableIdentityKeys, entry.Index, item.UserID)
 		}
 		result.Created++
 		accountID := int64(0)
@@ -862,6 +892,18 @@ func buildCodexStoredIdentityKeys(accountID, userID, email, accessToken string) 
 	return keys
 }
 
+func buildCodexAccessOnlyStableIdentityKeys(accountID, userID string) []string {
+	accountID = strings.TrimSpace(accountID)
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	if accountID != "" {
+		return []string{"account:" + accountID}
+	}
+	return []string{"user:" + userID}
+}
+
 func buildCodexAccountIndex(accounts []service.Account) *codexAccountIndex {
 	index := &codexAccountIndex{accountsByKey: map[string][]service.Account{}}
 	for _, account := range accounts {
@@ -929,6 +971,30 @@ func (i *codexAccountIndex) Find(keys []string, userID string) (*service.Account
 			}
 			return &account, key
 		}
+	}
+	return nil, ""
+}
+
+func (i *codexAccountIndex) FindRefreshCapableByStableIdentity(accountID, userID string) (*service.Account, string) {
+	if i == nil {
+		return nil, ""
+	}
+	accountID = strings.TrimSpace(accountID)
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ""
+	}
+
+	key := "user:" + userID
+	for _, account := range i.accountsByKey[key] {
+		if codexCredentialString(account.Credentials, "refresh_token") == "" {
+			continue
+		}
+		storedAccountID := codexCredentialString(account.Credentials, "chatgpt_account_id")
+		if accountID == "" || storedAccountID == "" || storedAccountID != accountID {
+			continue
+		}
+		return &account, key
 	}
 	return nil, ""
 }
