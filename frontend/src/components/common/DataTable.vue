@@ -48,7 +48,11 @@
           class="absolute left-0 top-0 w-full pb-3"
           :style="{ transform: `translateY(${start}px)` }"
         >
-          <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+          <div
+            class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+            :class="{ 'cursor-pointer': clickableRows }"
+            @click="handleRowClick($event, row)"
+          >
             <div class="space-y-3">
               <div
                 v-for="column in dataColumns"
@@ -79,7 +83,7 @@
         :key="resolveRowKey(row, index)"
         class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
         :class="{ 'cursor-pointer': clickableRows }"
-        @click="clickableRows && emit('rowClick', row)"
+        @click="handleRowClick($event, row)"
       >
         <div class="space-y-3">
           <div
@@ -211,7 +215,7 @@
             :ref="measureElement"
             class="hover:bg-gray-50 dark:hover:bg-dark-800"
             :class="{ 'cursor-pointer': clickableRows }"
-            @click="clickableRows && emit('rowClick', row)"
+            @click="handleRowClick($event, row)"
           >
             <td
               v-for="(column, colIndex) in columns"
@@ -449,7 +453,7 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
-  /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
+  /** Emit 'rowClick' on row/card click and show pointer cursor. Interactive controls are ignored automatically. */
   clickableRows?: boolean
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
@@ -662,6 +666,33 @@ const handleSort = (key: string) => {
     sortKey.value = key
     sortOrder.value = newOrder
   }
+}
+
+const rowClickIgnoredSelector = [
+  'button',
+  'a',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  '[role="button"]',
+  '[contenteditable="true"]',
+  '[data-row-click-stop]'
+].join(',')
+
+const shouldIgnoreRowClick = (event: MouseEvent) => {
+  const target = event.target
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return Boolean(target.closest(rowClickIgnoredSelector))
+}
+
+const handleRowClick = (event: MouseEvent, row: any) => {
+  if (!props.clickableRows || shouldIgnoreRowClick(event)) {
+    return
+  }
+  emit('rowClick', row)
 }
 
 const sortedData = computed(() => {
