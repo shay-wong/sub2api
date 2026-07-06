@@ -105,6 +105,9 @@ func TestParsePaymentConfig(t *testing.T) {
 		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
 			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
 		}
+		if cfg.SubscriptionUSDToCNYRate != 0 {
+			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
+		}
 	})
 
 	t.Run("all values populated", func(t *testing.T) {
@@ -159,6 +162,9 @@ func TestParsePaymentConfig(t *testing.T) {
 		if cfg.SubscriptionCNYPaymentMultiplier != 0.20 {
 			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.20", cfg.SubscriptionCNYPaymentMultiplier)
 		}
+		if cfg.SubscriptionUSDToCNYRate != 5 {
+			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 5", cfg.SubscriptionUSDToCNYRate)
+		}
 		if cfg.LoadBalanceStrategy != "least_amount" {
 			t.Fatalf("LoadBalanceStrategy = %q, want %q", cfg.LoadBalanceStrategy, "least_amount")
 		}
@@ -198,6 +204,23 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("custom enabled types are preserved", func(t *testing.T) {
+		t.Parallel()
+		vals := map[string]string{
+			SettingEnabledPaymentTypes: "alipay,ldc,usdt_trc20",
+		}
+		cfg := svc.parsePaymentConfig(vals)
+		want := []string{"alipay", "ldc", "usdt_trc20"}
+		if len(cfg.EnabledTypes) != len(want) {
+			t.Fatalf("EnabledTypes len = %d, want %d (%v)", len(cfg.EnabledTypes), len(want), cfg.EnabledTypes)
+		}
+		for i := range want {
+			if cfg.EnabledTypes[i] != want[i] {
+				t.Fatalf("EnabledTypes[%d] = %q, want %q (full=%v)", i, cfg.EnabledTypes[i], want[i], cfg.EnabledTypes)
+			}
+		}
+	})
+
 	t.Run("empty enabled types string", func(t *testing.T) {
 		t.Parallel()
 		vals := map[string]string{
@@ -209,13 +232,30 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("subscription CNY multiplier falls back to legacy balance multiplier", func(t *testing.T) {
+	t.Run("subscription CNY conversion stays disabled without explicit subscription setting", func(t *testing.T) {
 		t.Parallel()
 		cfg := svc.parsePaymentConfig(map[string]string{
 			SettingBalanceRechargeMult: "0.14",
 		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 0.14 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.14", cfg.SubscriptionCNYPaymentMultiplier)
+		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
+			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
+		}
+		if cfg.SubscriptionUSDToCNYRate != 0 {
+			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
+		}
+	})
+
+	t.Run("explicit subscription USD to CNY rate has priority over legacy multiplier", func(t *testing.T) {
+		t.Parallel()
+		cfg := svc.parsePaymentConfig(map[string]string{
+			SettingSubscriptionCNYMult:      "0.20",
+			SettingSubscriptionUSDToCNYRate: "7.15",
+		})
+		if cfg.SubscriptionCNYPaymentMultiplier != 0.20 {
+			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.20", cfg.SubscriptionCNYPaymentMultiplier)
+		}
+		if cfg.SubscriptionUSDToCNYRate != 7.15 {
+			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 7.15", cfg.SubscriptionUSDToCNYRate)
 		}
 	})
 }

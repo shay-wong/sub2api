@@ -267,7 +267,7 @@ import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderTy
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
-import { METHOD_ORDER, getPaymentPopupFeatures } from '@/components/payment/providerConfig'
+import { METHOD_ORDER, getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
   buildCreateOrderPayload,
@@ -494,7 +494,7 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_cny_payment_multiplier: 1, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -511,9 +511,10 @@ const balanceRechargeMultiplier = computed(() => {
   const multiplier = checkout.value.balance_recharge_multiplier
   return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
 })
-const subscriptionCNYPaymentMultiplier = computed(() => {
-  const multiplier = checkout.value.subscription_cny_payment_multiplier ?? checkout.value.balance_recharge_multiplier
-  return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
+// 订阅 CNY 换算汇率（1 USD = X CNY）。0 = 未配置，订阅保持 price 直付（与后端 opt-in 条件严格镜像）。
+const subscriptionUsdToCnyRate = computed(() => {
+  const rate = checkout.value.subscription_usd_to_cny_rate
+  return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
 
@@ -560,10 +561,6 @@ const localeCode = computed(() => {
 	return undefined
 })
 
-interface PaymentAmountFormatOptions {
-	subscription?: boolean
-}
-
 function currencyFractionDigits(currency: string): number {
   try {
     return new Intl.NumberFormat(undefined, {
@@ -588,21 +585,17 @@ function ceilPaymentAmount(value: number, currency: string): number {
 }
 
 function subscriptionPaymentAmountForCurrency(value: number, currency: string): number {
-	if (currency !== DEFAULT_PAYMENT_CURRENCY) return value
-	return roundPaymentAmount(value / subscriptionCNYPaymentMultiplier.value, currency)
+  const rate = subscriptionUsdToCnyRate.value
+  if (rate <= 0 || currency !== DEFAULT_PAYMENT_CURRENCY) return roundPaymentAmount(value, currency)
+  return roundPaymentAmount(value * rate, currency)
 }
 
-function subscriptionPaymentAmount(value: number): number {
-  return subscriptionPaymentAmountForCurrency(value, selectedCurrency.value)
-}
-
-function formatSelectedPaymentAmount(value: number, options: PaymentAmountFormatOptions = {}): string {
-	const amount = options.subscription ? subscriptionPaymentAmount(value) : value
-	return formatPaymentAmount(amount, selectedCurrency.value, localeCode.value)
+function formatSelectedPaymentAmount(value: number): string {
+  return formatPaymentAmount(value, selectedCurrency.value, localeCode.value)
 }
 
 function formatSelectedSubscriptionPaymentAmount(value: number): string {
-	return formatSelectedPaymentAmount(value, { subscription: true })
+  return formatSelectedPaymentAmount(subscriptionPaymentAmountForCurrency(value, selectedCurrency.value))
 }
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
@@ -610,6 +603,7 @@ const methodOptions = computed<PaymentMethodOption[]>(() =>
     const ml = visibleMethods.value[type]
     return {
       type,
+      display_name: ml?.display_name,
       fee_rate: ml?.fee_rate ?? 0,
       available: ml?.available !== false && amountFitsMethod(validAmount.value, type),
     }
@@ -651,7 +645,7 @@ const canSubmit = computed(() =>
 
 const subPaymentAmount = computed(() => {
   const price = selectedPlan.value?.price ?? 0
-  return roundPaymentAmount(price, selectedCurrency.value)
+  return subscriptionPaymentAmountForCurrency(price, selectedCurrency.value)
 })
 
 const subFeeAmount = computed(() => {
@@ -665,7 +659,7 @@ const subTotalAmount = computed(() => {
 })
 
 function subscriptionTotalAmountForCurrency(value: number, currency: string): number {
-  const paymentAmount = roundPaymentAmount(value, currency)
+  const paymentAmount = subscriptionPaymentAmountForCurrency(value, currency)
   if (feeRate.value <= 0 || paymentAmount <= 0) return paymentAmount
   const fee = ceilPaymentAmount((paymentAmount * feeRate.value) / 100, currency)
   return roundPaymentAmount(paymentAmount + fee, currency)
@@ -679,6 +673,7 @@ const subMethodOptions = computed<PaymentMethodOption[]>(() => {
     const currency = normalizePaymentCurrency(ml?.currency)
     return {
       type,
+      display_name: ml?.display_name,
       fee_rate: ml?.fee_rate ?? 0,
       available: ml?.available !== false && amountFitsMethod(subscriptionTotalAmountForCurrency(price, currency), type),
     }
@@ -702,8 +697,8 @@ watch(() => [validAmount.value, selectedMethod.value] as const, ([amt, method]) 
 const paymentButtonClass = computed(() => {
   const m = selectedMethod.value
   if (!m) return 'btn-primary'
-  if (m.includes('alipay')) return 'btn-alipay'
-  if (m.includes('wxpay')) return 'btn-wxpay'
+  if (isBuiltInAlipayMethod(m)) return 'btn-alipay'
+  if (isBuiltInWxpayMethod(m)) return 'btn-wxpay'
   if (m === 'stripe') return 'btn-stripe'
   if (m === 'airwallex') return 'btn-airwallex'
   return 'btn-primary'
@@ -1124,6 +1119,7 @@ onMounted(async () => {
         paymentState.value = restored
         paymentPhase.value = 'paying'
         const restoredMethod = normalizeVisibleMethod(restored.paymentType)
+          || (visibleMethods.value[restored.paymentType] ? restored.paymentType : '')
         if (restoredMethod) {
           selectedMethod.value = restoredMethod
         }

@@ -159,6 +159,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			service.OpenAIUpstreamTransportHTTPSSE,
 			"",
 			false,
+			false,
 			service.PlatformGrok,
 		)
 		if err != nil {

@@ -519,7 +519,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	return r.ListWithGroupScope(ctx, params, platform, accountType, status, search, groupIDs, privacyMode)
 }
 
-func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *accountRepository) accountListFilteredQuery(ctx context.Context, platform, accountType, status, search string, groupIDs []int64, privacyMode string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 	q = q.Where(projectScopedAccountPredicate(ctx)...)
 
@@ -616,6 +616,11 @@ func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagin
 		}))
 	}
 
+	return q
+}
+
+func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, privacyMode)
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -667,6 +672,20 @@ func normalizeAccountGroupFilterIDs(values []int64) []int64 {
 		out = append(out, value)
 	}
 	return out
+}
+
+func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
+	groupIDs := []int64(nil)
+	if groupID == service.AccountListGroupUngrouped {
+		groupIDs = []int64{service.AccountListGroupUngrouped}
+	} else if groupID > 0 {
+		groupIDs = []int64{groupID}
+	}
+	accounts, err := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, privacyMode).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
 }
 
 func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platformFilter string, groupIDFilter *int64) ([]service.Account, error) {
