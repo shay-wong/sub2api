@@ -1068,7 +1068,15 @@ const openDirectoryPicker = () => {
 
 const setSelectedFiles = (selectedFiles: File[]) => {
   if (importing.value) return
-  files.value = selectedFiles.filter(isSupportedImportFile)
+  const picked = selectedFiles.filter(isSupportedImportFile)
+  if (picked.length === 0) {
+    appStore.showError(t('admin.accounts.dataImportSelectFile'))
+    return
+  }
+  if (picked.length < selectedFiles.length) {
+    appStore.showWarning(t('admin.accounts.dataImportIgnoredFiles', { count: selectedFiles.length - picked.length }))
+  }
+  files.value = picked
   result.value = null
   importProgress.value = null
 }

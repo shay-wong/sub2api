@@ -4,6 +4,7 @@ import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 
 const showError = vi.fn()
 const showSuccess = vi.fn()
+const showWarning = vi.fn()
 const { importData, importCodexSession } = vi.hoisted(() => ({
   importData: vi.fn(),
   importCodexSession: vi.fn()
@@ -12,7 +13,8 @@ const { importData, importCodexSession } = vi.hoisted(() => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError,
-    showSuccess
+    showSuccess,
+    showWarning
   })
 }))
 
@@ -128,6 +130,7 @@ describe('ImportDataModal', () => {
     document.body.innerHTML = ''
     showError.mockReset()
     showSuccess.mockReset()
+    showWarning.mockReset()
     importData.mockReset()
     importCodexSession.mockReset()
   })

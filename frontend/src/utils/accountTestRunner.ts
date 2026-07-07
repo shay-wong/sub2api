@@ -30,7 +30,7 @@ const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
 const buildRequestBody = (options: RunAccountConnectionTestOptions) => {
   const body: Record<string, string> = {}
   if (options.modelId) body.model_id = options.modelId
-  if (options.prompt) body.prompt = options.prompt
+  if (options.prompt !== undefined) body.prompt = options.prompt
   if (options.mode) body.mode = options.mode
   return JSON.stringify(body)
 }
