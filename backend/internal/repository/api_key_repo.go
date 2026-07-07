@@ -353,6 +353,15 @@ func (r *apiKeyRepository) UpdateProjectID(ctx context.Context, id int64, projec
 			WHERE oel.api_key_id = tak.id
 			  AND oel.project_id IS DISTINCT FROM $2
 			RETURNING oel.id
+		),
+		updated_batch_image_jobs AS (
+			-- API key scoped history follows the key's active project, matching usage and ops error logs.
+			UPDATE batch_image_jobs bij
+			SET project_id = $2
+			FROM target_api_key tak
+			WHERE bij.api_key_id = tak.id
+			  AND bij.project_id IS DISTINCT FROM $2
+			RETURNING bij.id
 		)
 		UPDATE api_keys ak
 		SET project_id = $2,

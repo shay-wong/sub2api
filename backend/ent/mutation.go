@@ -11521,6 +11521,8 @@ type BatchImageJobMutation struct {
 	batch_id            *string
 	user_id             *int64
 	adduser_id          *int64
+	project_id          *int64
+	addproject_id       *int64
 	api_key_id          *int64
 	addapi_key_id       *int64
 	account_id          *int64
@@ -11764,6 +11766,62 @@ func (m *BatchImageJobMutation) AddedUserID() (r int64, exists bool) {
 func (m *BatchImageJobMutation) ResetUserID() {
 	m.user_id = nil
 	m.adduser_id = nil
+}
+
+// SetProjectID sets the "project_id" field.
+func (m *BatchImageJobMutation) SetProjectID(i int64) {
+	m.project_id = &i
+	m.addproject_id = nil
+}
+
+// ProjectID returns the value of the "project_id" field in the mutation.
+func (m *BatchImageJobMutation) ProjectID() (r int64, exists bool) {
+	v := m.project_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProjectID returns the old "project_id" field's value of the BatchImageJob entity.
+// If the BatchImageJob object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BatchImageJobMutation) OldProjectID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProjectID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProjectID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProjectID: %w", err)
+	}
+	return oldValue.ProjectID, nil
+}
+
+// AddProjectID adds i to the "project_id" field.
+func (m *BatchImageJobMutation) AddProjectID(i int64) {
+	if m.addproject_id != nil {
+		*m.addproject_id += i
+	} else {
+		m.addproject_id = &i
+	}
+}
+
+// AddedProjectID returns the value that was added to the "project_id" field in this mutation.
+func (m *BatchImageJobMutation) AddedProjectID() (r int64, exists bool) {
+	v := m.addproject_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetProjectID resets all changes to the "project_id" field.
+func (m *BatchImageJobMutation) ResetProjectID() {
+	m.project_id = nil
+	m.addproject_id = nil
 }
 
 // SetAPIKeyID sets the "api_key_id" field.
@@ -13704,12 +13762,15 @@ func (m *BatchImageJobMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *BatchImageJobMutation) Fields() []string {
-	fields := make([]string, 0, 40)
+	fields := make([]string, 0, 41)
 	if m.batch_id != nil {
 		fields = append(fields, batchimagejob.FieldBatchID)
 	}
 	if m.user_id != nil {
 		fields = append(fields, batchimagejob.FieldUserID)
+	}
+	if m.project_id != nil {
+		fields = append(fields, batchimagejob.FieldProjectID)
 	}
 	if m.api_key_id != nil {
 		fields = append(fields, batchimagejob.FieldAPIKeyID)
@@ -13837,6 +13898,8 @@ func (m *BatchImageJobMutation) Field(name string) (ent.Value, bool) {
 		return m.BatchID()
 	case batchimagejob.FieldUserID:
 		return m.UserID()
+	case batchimagejob.FieldProjectID:
+		return m.ProjectID()
 	case batchimagejob.FieldAPIKeyID:
 		return m.APIKeyID()
 	case batchimagejob.FieldAccountID:
@@ -13926,6 +13989,8 @@ func (m *BatchImageJobMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldBatchID(ctx)
 	case batchimagejob.FieldUserID:
 		return m.OldUserID(ctx)
+	case batchimagejob.FieldProjectID:
+		return m.OldProjectID(ctx)
 	case batchimagejob.FieldAPIKeyID:
 		return m.OldAPIKeyID(ctx)
 	case batchimagejob.FieldAccountID:
@@ -14024,6 +14089,13 @@ func (m *BatchImageJobMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUserID(v)
+		return nil
+	case batchimagejob.FieldProjectID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProjectID(v)
 		return nil
 	case batchimagejob.FieldAPIKeyID:
 		v, ok := value.(int64)
@@ -14302,6 +14374,9 @@ func (m *BatchImageJobMutation) AddedFields() []string {
 	if m.adduser_id != nil {
 		fields = append(fields, batchimagejob.FieldUserID)
 	}
+	if m.addproject_id != nil {
+		fields = append(fields, batchimagejob.FieldProjectID)
+	}
 	if m.addapi_key_id != nil {
 		fields = append(fields, batchimagejob.FieldAPIKeyID)
 	}
@@ -14345,6 +14420,8 @@ func (m *BatchImageJobMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case batchimagejob.FieldUserID:
 		return m.AddedUserID()
+	case batchimagejob.FieldProjectID:
+		return m.AddedProjectID()
 	case batchimagejob.FieldAPIKeyID:
 		return m.AddedAPIKeyID()
 	case batchimagejob.FieldAccountID:
@@ -14382,6 +14459,13 @@ func (m *BatchImageJobMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddUserID(v)
+		return nil
+	case batchimagejob.FieldProjectID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddProjectID(v)
 		return nil
 	case batchimagejob.FieldAPIKeyID:
 		v, ok := value.(int64)
@@ -14639,6 +14723,9 @@ func (m *BatchImageJobMutation) ResetField(name string) error {
 		return nil
 	case batchimagejob.FieldUserID:
 		m.ResetUserID()
+		return nil
+	case batchimagejob.FieldProjectID:
+		m.ResetProjectID()
 		return nil
 	case batchimagejob.FieldAPIKeyID:
 		m.ResetAPIKeyID()

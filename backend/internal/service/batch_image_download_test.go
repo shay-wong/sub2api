@@ -196,6 +196,7 @@ func newTestBatchImageDownloadService() (*BatchImageDownloadService, *fakeBatchI
 	repo.jobs["imgbatch_download"] = &BatchImageJob{
 		BatchID:           "imgbatch_download",
 		UserID:            11,
+		ProjectID:         77,
 		APIKeyID:          &apiKeyID,
 		AccountID:         &accountID,
 		Provider:          BatchImageProviderGeminiAPI,

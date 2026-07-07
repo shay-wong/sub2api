@@ -101,6 +101,7 @@ type BatchImageJob struct {
 	ID                int64
 	BatchID           string
 	UserID            int64
+	ProjectID         int64
 	APIKeyID          *int64
 	AccountID         *int64
 	Provider          string
@@ -160,6 +161,7 @@ type BatchImageJob struct {
 type CreateBatchImageJobParams struct {
 	BatchID           string
 	UserID            int64
+	ProjectID         int64
 	APIKeyID          *int64
 	AccountID         *int64
 	Provider          string
@@ -249,6 +251,7 @@ type BatchImageItemFilter struct {
 
 type BatchImageJobFilter struct {
 	Status         string
+	Statuses       []string
 	TaskNameLike   string
 	Downloaded     *bool
 	CreatedAfter   *time.Time
@@ -306,6 +309,7 @@ type BatchImageRepository interface {
 	GetBatchImageJobByBatchIDForOwner(ctx context.Context, userID, apiKeyID int64, batchID string) (*BatchImageJob, error)
 	GetBatchImageJobByID(ctx context.Context, id int64) (*BatchImageJob, error)
 	ListBatchImageJobsForOwner(ctx context.Context, userID, apiKeyID int64, filter BatchImageJobFilter) ([]*BatchImageJob, error)
+	ListBatchImageJobsForUser(ctx context.Context, userID int64, filter BatchImageJobFilter) ([]*BatchImageJob, error)
 	TransitionBatchImageJobStatus(ctx context.Context, batchID, toStatus string, opts BatchImageTransitionOptions) error
 	UpdateBatchImageJobProviderOutputRef(ctx context.Context, batchID, providerOutputRef string) error
 	UpdateBatchImageJobProviderSubmit(ctx context.Context, params UpdateBatchImageJobProviderSubmitParams) error
@@ -347,6 +351,23 @@ func IsSupportedBatchImageProvider(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func batchImageContextForProject(ctx context.Context, projectID int64) context.Context {
+	if projectID <= 0 {
+		return ctx
+	}
+	if existing, ok := ProjectIDFromContext(ctx); ok && existing == projectID {
+		return ctx
+	}
+	return WithProjectID(ctx, projectID)
+}
+
+func batchImageContextForJob(ctx context.Context, job *BatchImageJob) context.Context {
+	if job == nil {
+		return ctx
+	}
+	return batchImageContextForProject(ctx, job.ProjectID)
 }
 
 func IsTerminalBatchImageJobStatus(status string) bool {

@@ -49,6 +49,27 @@ func (_u *BatchImageJobUpdate) AddUserID(v int64) *BatchImageJobUpdate {
 	return _u
 }
 
+// SetProjectID sets the "project_id" field.
+func (_u *BatchImageJobUpdate) SetProjectID(v int64) *BatchImageJobUpdate {
+	_u.mutation.ResetProjectID()
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *BatchImageJobUpdate) SetNillableProjectID(v *int64) *BatchImageJobUpdate {
+	if v != nil {
+		_u.SetProjectID(*v)
+	}
+	return _u
+}
+
+// AddProjectID adds value to the "project_id" field.
+func (_u *BatchImageJobUpdate) AddProjectID(v int64) *BatchImageJobUpdate {
+	_u.mutation.AddProjectID(v)
+	return _u
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (_u *BatchImageJobUpdate) SetAPIKeyID(v int64) *BatchImageJobUpdate {
 	_u.mutation.ResetAPIKeyID()
@@ -919,6 +940,12 @@ func (_u *BatchImageJobUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	if value, ok := _u.mutation.AddedUserID(); ok {
 		_spec.AddField(batchimagejob.FieldUserID, field.TypeInt64, value)
 	}
+	if value, ok := _u.mutation.ProjectID(); ok {
+		_spec.SetField(batchimagejob.FieldProjectID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProjectID(); ok {
+		_spec.AddField(batchimagejob.FieldProjectID, field.TypeInt64, value)
+	}
 	if value, ok := _u.mutation.APIKeyID(); ok {
 		_spec.SetField(batchimagejob.FieldAPIKeyID, field.TypeInt64, value)
 	}
@@ -1173,6 +1200,27 @@ func (_u *BatchImageJobUpdateOne) SetNillableUserID(v *int64) *BatchImageJobUpda
 // AddUserID adds value to the "user_id" field.
 func (_u *BatchImageJobUpdateOne) AddUserID(v int64) *BatchImageJobUpdateOne {
 	_u.mutation.AddUserID(v)
+	return _u
+}
+
+// SetProjectID sets the "project_id" field.
+func (_u *BatchImageJobUpdateOne) SetProjectID(v int64) *BatchImageJobUpdateOne {
+	_u.mutation.ResetProjectID()
+	_u.mutation.SetProjectID(v)
+	return _u
+}
+
+// SetNillableProjectID sets the "project_id" field if the given value is not nil.
+func (_u *BatchImageJobUpdateOne) SetNillableProjectID(v *int64) *BatchImageJobUpdateOne {
+	if v != nil {
+		_u.SetProjectID(*v)
+	}
+	return _u
+}
+
+// AddProjectID adds value to the "project_id" field.
+func (_u *BatchImageJobUpdateOne) AddProjectID(v int64) *BatchImageJobUpdateOne {
+	_u.mutation.AddProjectID(v)
 	return _u
 }
 
@@ -2075,6 +2123,12 @@ func (_u *BatchImageJobUpdateOne) sqlSave(ctx context.Context) (_node *BatchImag
 	}
 	if value, ok := _u.mutation.AddedUserID(); ok {
 		_spec.AddField(batchimagejob.FieldUserID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.ProjectID(); ok {
+		_spec.SetField(batchimagejob.FieldProjectID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedProjectID(); ok {
+		_spec.AddField(batchimagejob.FieldProjectID, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.APIKeyID(); ok {
 		_spec.SetField(batchimagejob.FieldAPIKeyID, field.TypeInt64, value)

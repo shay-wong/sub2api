@@ -50,6 +50,82 @@ func TestBatchImageRepository_CreateJobAndDuplicates(t *testing.T) {
 	require.True(t, errors.Is(err, service.ErrBatchImageJobExists))
 }
 
+func TestBatchImageRepository_ProjectScopeUsesJobProjectID(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	repo := newBatchImageRepositoryWithSQL(tx)
+	projectA := createBatchImageTestProject(t, tx, "batch-image-a-"+batchImageSafeTestIDSegment(t.Name(), 28))
+	projectB := createBatchImageTestProject(t, tx, "batch-image-b-"+batchImageSafeTestIDSegment(t.Name(), 28))
+	apiKeyID := int64(4242)
+	otherAPIKeyID := int64(4243)
+	userID := int64(1001)
+	idempotencyKey := batchImageTestStringPtr("idem-" + batchImageSafeTestIDSegment(t.Name(), 48))
+
+	jobA, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectA), service.CreateBatchImageJobParams{
+		BatchID:        batchImageTestID(t, "scope-a"),
+		UserID:         userID,
+		APIKeyID:       &apiKeyID,
+		Provider:       service.BatchImageProviderGeminiAPI,
+		Model:          "gemini-2.5-flash-image",
+		ItemCount:      1,
+		IdempotencyKey: idempotencyKey,
+	})
+	require.NoError(t, err)
+	require.Equal(t, projectA, jobA.ProjectID)
+
+	jobB, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectB), service.CreateBatchImageJobParams{
+		BatchID:        batchImageTestID(t, "scope-b"),
+		UserID:         userID,
+		APIKeyID:       &apiKeyID,
+		Provider:       service.BatchImageProviderGeminiAPI,
+		Model:          "gemini-2.5-flash-image",
+		ItemCount:      1,
+		IdempotencyKey: idempotencyKey,
+	})
+	require.NoError(t, err)
+	require.Equal(t, projectB, jobB.ProjectID)
+
+	jobAOtherKey, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectA), service.CreateBatchImageJobParams{
+		BatchID:   batchImageTestID(t, "scope-a-other-key"),
+		UserID:    userID,
+		APIKeyID:  &otherAPIKeyID,
+		Provider:  service.BatchImageProviderGeminiAPI,
+		Model:     "gemini-2.5-flash-image",
+		ItemCount: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, projectA, jobAOtherKey.ProjectID)
+
+	gotA, err := repo.GetBatchImageJobByIdempotencyKey(service.WithProjectID(ctx, projectA), userID, apiKeyID, *idempotencyKey)
+	require.NoError(t, err)
+	require.Equal(t, jobA.BatchID, gotA.BatchID)
+
+	gotB, err := repo.GetBatchImageJobByIdempotencyKey(service.WithProjectID(ctx, projectB), userID, apiKeyID, *idempotencyKey)
+	require.NoError(t, err)
+	require.Equal(t, jobB.BatchID, gotB.BatchID)
+
+	_, err = repo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(ctx, projectA), userID, apiKeyID, jobB.BatchID)
+	require.ErrorIs(t, err, service.ErrBatchImageJobNotFound)
+
+	jobsA, err := repo.ListBatchImageJobsForOwner(service.WithProjectID(ctx, projectA), userID, apiKeyID, service.BatchImageJobFilter{Limit: 20})
+	require.NoError(t, err)
+	require.Len(t, jobsA, 1)
+	require.Equal(t, jobA.BatchID, jobsA[0].BatchID)
+
+	jobsB, err := repo.ListBatchImageJobsForOwner(service.WithProjectID(ctx, projectB), userID, apiKeyID, service.BatchImageJobFilter{Limit: 20})
+	require.NoError(t, err)
+	require.Len(t, jobsB, 1)
+	require.Equal(t, jobB.BatchID, jobsB[0].BatchID)
+
+	allProjectA, err := repo.ListBatchImageJobsForUser(service.WithProjectID(ctx, projectA), userID, service.BatchImageJobFilter{Limit: 20})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{jobA.BatchID, jobAOtherKey.BatchID}, batchImageTestJobIDs(allProjectA))
+
+	allProjectB, err := repo.ListBatchImageJobsForUser(service.WithProjectID(ctx, projectB), userID, service.BatchImageJobFilter{Limit: 20})
+	require.NoError(t, err)
+	require.Equal(t, []string{jobB.BatchID}, batchImageTestJobIDs(allProjectB))
+}
+
 func TestBatchImageRepository_InvalidProvider(t *testing.T) {
 	tx := testTx(t)
 	repo := newBatchImageRepositoryWithSQL(tx)
@@ -333,6 +409,26 @@ func TestBatchImageRepository_AppendEvent(t *testing.T) {
 	err = tx.QueryRowContext(ctx, `SELECT payload::text FROM batch_image_events WHERE job_id = $1 AND event_type = 'job_created'`, batchID).Scan(&payload)
 	require.NoError(t, err)
 	require.Contains(t, payload, batchID)
+}
+
+func createBatchImageTestProject(t *testing.T, tx batchImageSQLExecutor, slug string) int64 {
+	t.Helper()
+	var projectID int64
+	err := scanSingleRow(context.Background(), tx, `
+		INSERT INTO projects (name, slug, description, status, profiles, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, NOW(), NOW())
+		RETURNING id
+	`, []any{slug, slug, "Batch image repository integration project.", service.StatusActive}, &projectID)
+	require.NoError(t, err)
+	return projectID
+}
+
+func batchImageTestJobIDs(jobs []*service.BatchImageJob) []string {
+	ids := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		ids = append(ids, job.BatchID)
+	}
+	return ids
 }
 
 func batchImageTestID(t *testing.T, prefix string) string {

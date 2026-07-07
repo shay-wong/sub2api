@@ -206,6 +206,7 @@ func cleanupTestJob(batchID, status string) *BatchImageJob {
 	return &BatchImageJob{
 		BatchID:           batchID,
 		UserID:            11,
+		ProjectID:         77,
 		APIKeyID:          &apiKeyID,
 		AccountID:         &accountID,
 		Provider:          BatchImageProviderGeminiAPI,

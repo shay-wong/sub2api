@@ -13,7 +13,6 @@ import (
 type batchImageSQLExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 type batchImageRepository struct {
@@ -42,6 +41,13 @@ func (r *batchImageRepository) CreateBatchImageJob(ctx context.Context, params s
 	if params.Currency == "" {
 		params.Currency = "USD"
 	}
+	if params.ProjectID <= 0 {
+		projectID, err := resolveProjectIDForCreate(ctx, r.sql, 0)
+		if err != nil {
+			return nil, err
+		}
+		params.ProjectID = projectID
+	}
 
 	job, err := createBatchImageJobWithSQL(ctx, r.sql, params)
 	if err != nil {
@@ -51,7 +57,7 @@ func (r *batchImageRepository) CreateBatchImageJob(ctx context.Context, params s
 }
 
 func (r *batchImageRepository) GetBatchImageJobByBatchID(ctx context.Context, batchID string) (*service.BatchImageJob, error) {
-	job, err := scanBatchImageJob(r.sql.QueryRowContext(ctx, batchImageJobSelectSQL+" WHERE batch_id = $1", batchID))
+	job, err := scanBatchImageJobQuery(ctx, r.sql, batchImageJobSelectSQL+" WHERE batch_id = $1", batchID)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
@@ -59,9 +65,12 @@ func (r *batchImageRepository) GetBatchImageJobByBatchID(ctx context.Context, ba
 }
 
 func (r *batchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.Context, userID, apiKeyID int64, key string) (*service.BatchImageJob, error) {
-	job, err := scanBatchImageJob(r.sql.QueryRowContext(ctx, batchImageJobSelectSQL+`
- WHERE user_id = $1 AND api_key_id = $2 AND idempotency_key = $3
- ORDER BY id DESC LIMIT 1`, userID, apiKeyID, key))
+	query := batchImageJobSelectSQL + `
+	 WHERE user_id = $1 AND api_key_id = $2 AND idempotency_key = $3`
+	args := []any{userID, apiKeyID, key}
+	query, args = appendBatchImageProjectScope(ctx, query, args)
+	job, err := scanBatchImageJobQuery(ctx, r.sql, query+`
+	 ORDER BY id DESC LIMIT 1`, args...)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
@@ -69,8 +78,11 @@ func (r *batchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.Cont
 }
 
 func (r *batchImageRepository) GetBatchImageJobByBatchIDForOwner(ctx context.Context, userID, apiKeyID int64, batchID string) (*service.BatchImageJob, error) {
-	job, err := scanBatchImageJob(r.sql.QueryRowContext(ctx, batchImageJobSelectSQL+`
- WHERE batch_id = $1 AND user_id = $2 AND api_key_id = $3 AND user_deleted_at IS NULL`, batchID, userID, apiKeyID))
+	query := batchImageJobSelectSQL + `
+	 WHERE batch_id = $1 AND user_id = $2 AND api_key_id = $3 AND user_deleted_at IS NULL`
+	args := []any{batchID, userID, apiKeyID}
+	query, args = appendBatchImageProjectScope(ctx, query, args)
+	job, err := scanBatchImageJobQuery(ctx, r.sql, query, args...)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
@@ -79,7 +91,7 @@ func (r *batchImageRepository) GetBatchImageJobByBatchIDForOwner(ctx context.Con
 
 func (r *batchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, userID, apiKeyID int64, filter service.BatchImageJobFilter) ([]*service.BatchImageJob, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 101 {
 		limit = 20
 	}
 	if filter.Offset < 0 {
@@ -95,6 +107,78 @@ func (r *batchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, u
 		query += " AND status = $" + strconv.Itoa(len(args)+1)
 		args = append(args, filter.Status)
 	}
+	if len(filter.Statuses) > 0 {
+		query += " AND status IN ("
+		for i, status := range filter.Statuses {
+			if i > 0 {
+				query += ", "
+			}
+			query += "$" + strconv.Itoa(len(args)+1)
+			args = append(args, status)
+		}
+		query += ")"
+	}
+	query, args = appendBatchImageProjectScope(ctx, query, args)
+	if filter.TaskNameLike != "" {
+		query += " AND task_name ILIKE $" + strconv.Itoa(len(args)+1)
+		args = append(args, "%"+filter.TaskNameLike+"%")
+	}
+	if filter.Downloaded != nil {
+		if *filter.Downloaded {
+			query += " AND downloaded_at IS NOT NULL"
+		} else {
+			query += " AND downloaded_at IS NULL"
+		}
+	}
+	if filter.CreatedAfter != nil {
+		query += " AND created_at >= $" + strconv.Itoa(len(args)+1)
+		args = append(args, *filter.CreatedAfter)
+	}
+	if filter.CreatedBefore != nil {
+		query += " AND created_at < $" + strconv.Itoa(len(args)+1)
+		args = append(args, *filter.CreatedBefore)
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT $" + strconv.Itoa(len(args)+1) + " OFFSET $" + strconv.Itoa(len(args)+2)
+	args = append(args, limit, filter.Offset)
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanBatchImageJobs(rows)
+}
+
+func (r *batchImageRepository) ListBatchImageJobsForUser(ctx context.Context, userID int64, filter service.BatchImageJobFilter) ([]*service.BatchImageJob, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 101 {
+		limit = 20
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+
+	query := batchImageJobSelectSQL + " WHERE user_id = $1"
+	args := []any{userID}
+	if filter.ExcludeDeleted {
+		query += " AND user_deleted_at IS NULL"
+	}
+	if filter.Status != "" {
+		query += " AND status = $" + strconv.Itoa(len(args)+1)
+		args = append(args, filter.Status)
+	}
+	if len(filter.Statuses) > 0 {
+		query += " AND status IN ("
+		for i, status := range filter.Statuses {
+			if i > 0 {
+				query += ", "
+			}
+			query += "$" + strconv.Itoa(len(args)+1)
+			args = append(args, status)
+		}
+		query += ")"
+	}
+	query, args = appendBatchImageProjectScope(ctx, query, args)
 	if filter.TaskNameLike != "" {
 		query += " AND task_name ILIKE $" + strconv.Itoa(len(args)+1)
 		args = append(args, "%"+filter.TaskNameLike+"%")
@@ -126,7 +210,7 @@ func (r *batchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, u
 }
 
 func (r *batchImageRepository) GetBatchImageJobByID(ctx context.Context, id int64) (*service.BatchImageJob, error) {
-	job, err := scanBatchImageJob(r.sql.QueryRowContext(ctx, batchImageJobSelectSQL+" WHERE id = $1", id))
+	job, err := scanBatchImageJobQuery(ctx, r.sql, batchImageJobSelectSQL+" WHERE id = $1", id)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
@@ -186,7 +270,7 @@ func (r *batchImageRepository) UpdateBatchImageJobProviderSubmit(ctx context.Con
 
 func (r *batchImageRepository) updateBatchImageJobProviderSubmitWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, params service.UpdateBatchImageJobProviderSubmitParams) error {
 	var current string
-	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, params.BatchID).Scan(&current); err != nil {
+	if err := scanSingleRow(ctx, sqlq, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, []any{params.BatchID}, &current); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	if !service.CanTransitionBatchImageJob(current, service.BatchImageJobStatusSubmitted) {
@@ -282,7 +366,7 @@ WHERE batch_id = $1
 		return err
 	}
 	if affected == 0 {
-		job, getErr := scanBatchImageJob(sqlq.QueryRowContext(ctx, batchImageJobSelectSQL+" WHERE batch_id = $1", params.BatchID))
+		job, getErr := scanBatchImageJobQuery(ctx, sqlq, batchImageJobSelectSQL+" WHERE batch_id = $1", params.BatchID)
 		if getErr != nil {
 			return translatePersistenceError(getErr, service.ErrBatchImageJobNotFound, nil)
 		}
@@ -299,14 +383,14 @@ WHERE batch_id = $1
 
 func (r *batchImageRepository) SetBatchImageJobSettlementFailed(ctx context.Context, batchID, code, message string) (int, error) {
 	var retryCount int
-	err := r.sql.QueryRowContext(ctx, `
+	err := scanSingleRow(ctx, r.sql, `
 UPDATE batch_image_jobs
 SET last_error_code = $2,
     last_error_message = $3,
     retry_count = retry_count + 1,
     updated_at = $4
 WHERE batch_id = $1
-RETURNING retry_count`, batchID, code, message, time.Now()).Scan(&retryCount)
+RETURNING retry_count`, []any{batchID, code, message, time.Now()}, &retryCount)
 	if err != nil {
 		return 0, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
@@ -317,7 +401,7 @@ RETURNING retry_count`, batchID, code, message, time.Now()).Scan(&retryCount)
 
 func (r *batchImageRepository) transitionBatchImageJobStatusWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, batchID, toStatus string, opts service.BatchImageTransitionOptions) error {
 	var current string
-	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, batchID).Scan(&current); err != nil {
+	if err := scanSingleRow(ctx, sqlq, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, []any{batchID}, &current); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	if !service.CanTransitionBatchImageJob(current, toStatus) {
@@ -410,7 +494,7 @@ func (r *batchImageRepository) ReplaceBatchImageItemsForJob(ctx context.Context,
 
 func (r *batchImageRepository) replaceBatchImageItemsForJobWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, batchID string, items []service.CreateBatchImageItemParams, counts service.BatchImageCounts) error {
 	var id int64
-	if err := sqlq.QueryRowContext(ctx, `SELECT id FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, batchID).Scan(&id); err != nil {
+	if err := scanSingleRow(ctx, sqlq, `SELECT id FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, []any{batchID}, &id); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	promptPreviews, err := r.batchImageItemPromptPreviews(ctx, sqlq, batchID)
@@ -462,7 +546,7 @@ func (r *batchImageRepository) batchImageItemPromptPreviews(ctx context.Context,
 
 func (r *batchImageRepository) ListBatchImageItems(ctx context.Context, batchID string, filter service.BatchImageItemFilter) ([]*service.BatchImageItem, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 501 {
 		limit = 100
 	}
 	if filter.Offset < 0 {
@@ -510,8 +594,8 @@ func (r *batchImageRepository) GetBatchImageJobForDownload(ctx context.Context, 
 }
 
 func (r *batchImageRepository) GetBatchImageItemForDownload(ctx context.Context, batchID, customID string) (*service.BatchImageItem, error) {
-	item, err := scanBatchImageItem(r.sql.QueryRowContext(ctx, batchImageItemSelectSQL+`
- WHERE job_id = $1 AND custom_id = $2`, batchID, customID))
+	item, err := scanBatchImageItemQuery(ctx, r.sql, batchImageItemSelectSQL+`
+ WHERE job_id = $1 AND custom_id = $2`, batchID, customID)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageItemNotFound, nil)
 	}
@@ -695,30 +779,31 @@ func (r *batchImageRepository) AppendBatchImageEvent(ctx context.Context, batchI
 }
 
 func createBatchImageJobWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, params service.CreateBatchImageJobParams) (*service.BatchImageJob, error) {
-	return scanBatchImageJob(sqlq.QueryRowContext(ctx, `
-INSERT INTO batch_image_jobs (
-    batch_id, user_id, api_key_id, account_id, provider, model, task_name, parent_batch_id, status,
-    provider_job_name, provider_input_ref, provider_output_ref, gcs_input_uri, gcs_output_uri,
-    item_count, success_count, fail_count, cancelled_count,
+	return scanBatchImageJobQuery(ctx, sqlq, `
+	INSERT INTO batch_image_jobs (
+	    batch_id, user_id, project_id, api_key_id, account_id, provider, model, task_name, parent_batch_id, status,
+	    provider_job_name, provider_input_ref, provider_output_ref, gcs_input_uri, gcs_output_uri,
+	    item_count, success_count, fail_count, cancelled_count,
     estimated_cost, hold_amount, actual_cost,
     base_unit_price, group_rate_multiplier, account_rate_multiplier,
     batch_discount_multiplier, hold_multiplier, billable_unit_price, hold_unit_price,
     pricing_snapshot_version,
     currency, hold_id,
-    idempotency_key, request_hash, manifest_hash, retry_count, output_expires_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18,
-    $19, $20, $21,
-    $22, $23, $24,
-    $25, $26, $27, $28,
-    $29,
-    $30, $31,
-    $32, $33, $34, $35, $36
-)
-RETURNING `+batchImageJobColumns,
-		params.BatchID, params.UserID, params.APIKeyID, params.AccountID, params.Provider, params.Model, params.TaskName, params.ParentBatchID, params.Status,
+	    idempotency_key, request_hash, manifest_hash, retry_count, output_expires_at
+	) VALUES (
+	    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+	    $10,
+	    $11, $12, $13, $14, $15,
+	    $16, $17, $18, $19,
+	    $20, $21, $22,
+	    $23, $24, $25,
+	    $26, $27, $28, $29,
+	    $30,
+	    $31, $32,
+	    $33, $34, $35, $36, $37
+	)
+	RETURNING `+batchImageJobColumns,
+		params.BatchID, params.UserID, params.ProjectID, params.APIKeyID, params.AccountID, params.Provider, params.Model, params.TaskName, params.ParentBatchID, params.Status,
 		params.ProviderJobName, params.ProviderInputRef, params.ProviderOutputRef, params.GCSInputURI, params.GCSOutputURI,
 		params.ItemCount, params.SuccessCount, params.FailCount, params.CancelledCount,
 		params.EstimatedCost, params.HoldAmount, params.ActualCost,
@@ -727,11 +812,11 @@ RETURNING `+batchImageJobColumns,
 		params.PricingSnapshotVersion,
 		params.Currency, params.HoldID,
 		params.IdempotencyKey, params.RequestHash, params.ManifestHash, params.RetryCount, params.OutputExpiresAt,
-	))
+	)
 }
 
 func createBatchImageItemWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, params service.CreateBatchImageItemParams) (*service.BatchImageItem, error) {
-	return scanBatchImageItem(sqlq.QueryRowContext(ctx, `
+	return scanBatchImageItemQuery(ctx, sqlq, `
 INSERT INTO batch_image_items (
     job_id, custom_id, status, request_hash, prompt_preview, provider_source_object,
     source_line_number, source_byte_offset, source_byte_length,
@@ -748,7 +833,7 @@ RETURNING `+batchImageItemColumns,
 		params.SourceLineNumber, params.SourceByteOffset, params.SourceByteLength,
 		params.MimeType, params.FileExtension, params.ImageCount,
 		params.ErrorCode, params.ErrorMessage, params.BilledAmount, params.IndexedAt,
-	))
+	)
 }
 
 func appendBatchImageEventWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, batchID, eventType string, payload any) error {
@@ -766,12 +851,31 @@ VALUES ($1, $2, $3)`, batchID, eventType, payloadArg)
 	return err
 }
 
+func appendBatchImageProjectScope(ctx context.Context, query string, args []any) (string, []any) {
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		query += " AND project_id = $" + strconv.Itoa(len(args)+1)
+		args = append(args, projectID)
+	}
+	return query, args
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+type queryRowScanner struct {
+	ctx   context.Context
+	sql   sqlQueryer
+	query string
+	args  []any
+}
+
+func (r queryRowScanner) Scan(dest ...any) error {
+	return scanSingleRow(r.ctx, r.sql, r.query, r.args, dest...)
+}
+
 const batchImageJobColumns = `
-id, batch_id, user_id, api_key_id, account_id, provider, model, task_name, parent_batch_id, status,
+id, batch_id, user_id, project_id, api_key_id, account_id, provider, model, task_name, parent_batch_id, status,
 provider_job_name, provider_input_ref, provider_output_ref, gcs_input_uri, gcs_output_uri,
 item_count, success_count, fail_count, cancelled_count,
 estimated_cost, hold_amount, actual_cost,
@@ -786,6 +890,10 @@ created_at, updated_at, submitted_at, started_at, finished_at, settled_at`
 
 const batchImageJobSelectSQL = `SELECT ` + batchImageJobColumns + ` FROM batch_image_jobs`
 
+func scanBatchImageJobQuery(ctx context.Context, sqlq sqlQueryer, query string, args ...any) (*service.BatchImageJob, error) {
+	return scanBatchImageJob(queryRowScanner{ctx: ctx, sql: sqlq, query: query, args: args})
+}
+
 func scanBatchImageJob(row rowScanner) (*service.BatchImageJob, error) {
 	var job service.BatchImageJob
 	var apiKeyID, accountID sql.NullInt64
@@ -798,7 +906,7 @@ func scanBatchImageJob(row rowScanner) (*service.BatchImageJob, error) {
 	var submittedAt, startedAt, finishedAt, settledAt sql.NullTime
 
 	err := row.Scan(
-		&job.ID, &job.BatchID, &job.UserID, &apiKeyID, &accountID, &job.Provider, &job.Model, &job.TaskName, &parentBatchID, &job.Status,
+		&job.ID, &job.BatchID, &job.UserID, &job.ProjectID, &apiKeyID, &accountID, &job.Provider, &job.Model, &job.TaskName, &parentBatchID, &job.Status,
 		&providerJobName, &providerInputRef, &providerOutputRef, &gcsInputURI, &gcsOutputURI,
 		&job.ItemCount, &job.SuccessCount, &job.FailCount, &job.CancelledCount,
 		&job.EstimatedCost, &holdAmount, &actualCost,
@@ -866,6 +974,10 @@ error_code, error_message, billed_amount,
 created_at, indexed_at`
 
 const batchImageItemSelectSQL = `SELECT ` + batchImageItemColumns + ` FROM batch_image_items`
+
+func scanBatchImageItemQuery(ctx context.Context, sqlq sqlQueryer, query string, args ...any) (*service.BatchImageItem, error) {
+	return scanBatchImageItem(queryRowScanner{ctx: ctx, sql: sqlq, query: query, args: args})
+}
 
 func scanBatchImageItem(row rowScanner) (*service.BatchImageItem, error) {
 	var item service.BatchImageItem

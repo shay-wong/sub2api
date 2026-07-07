@@ -19,6 +19,7 @@ type APIKeyRepoSuite struct {
 	suite.Suite
 	ctx    context.Context
 	client *dbent.Client
+	sql    batchImageSQLExecutor
 	repo   *apiKeyRepository
 }
 
@@ -26,6 +27,7 @@ func (s *APIKeyRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
 	s.client = tx.Client()
+	s.sql = tx
 	s.repo = newAPIKeyRepositoryWithSQL(s.client, tx)
 }
 
@@ -213,6 +215,54 @@ func (s *APIKeyRepoSuite) TestUpdateRejectsProfileBoundAPIKeyFromDifferentProjec
 	s.Require().NoError(err)
 	s.Require().Equal(homeProjectID, got.ProjectID)
 	s.Require().Equal("Profile Bound Key", got.Name)
+}
+
+func (s *APIKeyRepoSuite) TestUpdateProjectIDMovesBatchImageJobs() {
+	user := s.mustCreateUser("update-project-batch-image@test.com")
+	homeProjectID := mustDefaultProjectID(s.T(), s.client)
+	target, err := s.client.Project.Create().
+		SetName("API Key Batch Image Transfer").
+		SetSlug("api-key-batch-transfer-" + batchImageSafeTestIDSegment(s.T().Name(), 32)).
+		SetProfiles(map[string]any{}).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	_, err = s.client.ProjectMember.Create().
+		SetProjectID(target.ID).
+		SetUserID(user.ID).
+		SetRole(service.ProjectRoleAdmin).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	key := &service.APIKey{
+		UserID:    user.ID,
+		ProjectID: homeProjectID,
+		Key:       "sk-update-project-batch-image",
+		Name:      "Batch Image Key",
+		Status:    service.StatusActive,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, key))
+
+	batchRepo := newBatchImageRepositoryWithSQL(s.sql)
+	apiKeyID := key.ID
+	job, err := batchRepo.CreateBatchImageJob(service.WithProjectID(s.ctx, homeProjectID), service.CreateBatchImageJobParams{
+		BatchID:   batchImageTestID(s.T(), "key-transfer"),
+		UserID:    user.ID,
+		APIKeyID:  &apiKeyID,
+		Provider:  service.BatchImageProviderGeminiAPI,
+		Model:     "gemini-2.5-flash-image",
+		ItemCount: 1,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(homeProjectID, job.ProjectID)
+
+	s.Require().NoError(s.repo.UpdateProjectID(s.ctx, key.ID, target.ID))
+
+	_, err = batchRepo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(s.ctx, homeProjectID), user.ID, key.ID, job.BatchID)
+	s.Require().ErrorIs(err, service.ErrBatchImageJobNotFound)
+
+	moved, err := batchRepo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(s.ctx, target.ID), user.ID, key.ID, job.BatchID)
+	s.Require().NoError(err)
+	s.Require().Equal(target.ID, moved.ProjectID)
 }
 
 // --- Delete ---

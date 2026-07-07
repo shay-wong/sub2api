@@ -181,8 +181,8 @@
               <button
                 type="button"
                 class="batch-row-action flex flex-col items-center gap-0.5 rounded-lg p-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
-                :class="canDownload(row) ? 'text-gray-500 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400' : 'text-gray-300 dark:text-dark-500'"
-                :disabled="!canDownload(row) || downloading"
+                :class="canDownload(row) && hasUsableApiKey(row) ? 'text-gray-500 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400' : 'text-gray-300 dark:text-dark-500'"
+                :disabled="!canDownload(row) || !hasUsableApiKey(row) || downloading"
                 title="下载 ZIP"
                 @click="downloadJob(row)"
               >
@@ -193,7 +193,7 @@
 	                />
                 <span class="text-xs">下载</span>
 	              </button>
-              <div v-if="canRetry(row) || canDeleteRecord(row)">
+              <div v-if="hasUsableApiKey(row) && (canRetry(row) || canDeleteRecord(row))">
                 <button
                   type="button"
                   class="batch-row-action flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:hover:bg-dark-700 dark:hover:text-white"
@@ -359,7 +359,7 @@
 
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white">明细</h3>
-          <button type="button" class="btn btn-secondary btn-sm" :disabled="refreshing || loadingItems" @click="refreshDetail">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="!currentJob || !hasUsableApiKey(currentJob) || refreshing || loadingItems" @click="refreshDetail">
             <Icon name="refresh" size="sm" class="mr-1.5" :class="refreshing || loadingItems ? 'animate-spin' : ''" />
             刷新
           </button>
@@ -477,7 +477,7 @@
 
       <template #footer>
         <div class="flex justify-end gap-3">
-	          <button type="button" class="btn btn-secondary" :disabled="!currentJob || !canCancel(currentJob) || cancelling" @click="cancelSelected">
+	          <button type="button" class="btn btn-secondary" :disabled="!currentJob || !canCancel(currentJob) || !hasUsableApiKey(currentJob) || cancelling" @click="cancelSelected">
 	            <Icon v-if="cancelling" name="refresh" size="sm" class="mr-2 animate-spin" />
 	            取消任务
 	          </button>
@@ -485,7 +485,7 @@
 	            v-if="currentJob && currentDisplayJob && canRetry(currentDisplayJob)"
 	            type="button"
 	            class="btn btn-secondary inline-flex min-w-[116px] items-center justify-center"
-	            :disabled="retryingBatchId === currentJob.id"
+	            :disabled="!hasUsableApiKey(currentJob) || retryingBatchId === currentJob.id"
 	            @click="retrySelected"
 	          >
 	            <Icon name="refresh" size="sm" class="mr-2" :class="currentJob && retryingBatchId === currentJob.id ? 'animate-spin' : ''" />
@@ -494,7 +494,7 @@
 	          <button
             type="button"
             class="btn btn-primary inline-flex min-w-[112px] items-center justify-center"
-            :disabled="!currentJob || !canDownload(currentJob) || downloading"
+            :disabled="!currentJob || !canDownload(currentJob) || !hasUsableApiKey(currentJob) || downloading"
             @click="downloadSelected"
           >
             <Icon
@@ -759,6 +759,7 @@ import {
   downloadBatchImageZip,
   getBatchImageItemContent,
   getBatchImageJob,
+  listAllBatchImageJobs,
   listBatchImageJobs,
   listBatchImageItems,
   listBatchImageModels,
@@ -943,6 +944,8 @@ const filteredApiKeys = computed(() => {
   return geminiApiKeys.value.filter(key => key.id === selectedFilterID)
 })
 
+const allApiKeysSelected = computed(() => !Number(filters.apiKeyId || 0))
+
 const apiKeyFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: '全部 API Key' },
   ...geminiApiKeys.value.map(key => ({
@@ -981,7 +984,7 @@ const visibleBatchJobs = computed(() => {
 })
 
 const selectedDownloadableRows = computed(() =>
-  selectedRows.value.filter(job => canDownload(job)),
+  selectedRows.value.filter(job => canDownload(job) && hasUsableApiKey(job)),
 )
 
 const allVisibleSelected = computed(() =>
@@ -1299,10 +1302,10 @@ function resetFilters() {
   applyFilters()
 }
 
-function listOptions(): BatchImageJobsListOptions {
+function listOptions(limit = pagination.page_size, cursor = (pagination.page - 1) * pagination.page_size): BatchImageJobsListOptions {
   const options: BatchImageJobsListOptions = {
-    limit: pagination.page_size,
-    cursor: String((pagination.page - 1) * pagination.page_size),
+    limit,
+    cursor: String(cursor),
   }
   if (filters.taskName.trim()) options.taskName = filters.taskName.trim()
   if (filters.status) options.status = filters.status
@@ -1310,7 +1313,25 @@ function listOptions(): BatchImageJobsListOptions {
   return options
 }
 
-function toJobRow(job: BatchImageJob, key = selectedApiKey.value): BatchImageJobRow {
+async function loadBatchJobsForKey(key: ApiKey, options: BatchImageJobsListOptions) {
+  const result = await listBatchImageJobs(key.key, options)
+  return {
+    hasMore: Boolean(result.has_more),
+    rows: (result.data || []).map(job => toJobRow(job, key)),
+  }
+}
+
+async function loadBatchJobsForAllKeys(options: BatchImageJobsListOptions) {
+  const keyByID = new Map(geminiApiKeys.value.map(key => [key.id, key]))
+  const result = await listAllBatchImageJobs(options)
+  return {
+    hasMore: Boolean(result.has_more),
+    rows: (result.data || []).map(job => toJobRow(job, keyByID.get(job.key_id || 0) || null)),
+  }
+}
+
+function toJobRow(job: BatchImageJob, key: ApiKey | null = selectedApiKey.value): BatchImageJobRow {
+  const apiKeyID = key?.id || job.key_id || 0
   return {
     id: job.id,
     task_name: job.task_name || defaultTaskName(job.created_at),
@@ -1326,9 +1347,39 @@ function toJobRow(job: BatchImageJob, key = selectedApiKey.value): BatchImageJob
     actual_cost: job.actual_cost,
     created_at: job.created_at,
     downloaded_at: job.downloaded_at,
-    api_key_id: key?.id || 0,
-    api_key_name: key?.name || '',
+    api_key_id: apiKeyID,
+    api_key_name: apiKeyDisplayName(apiKeyID, key),
     child_count: 0,
+  }
+}
+
+function apiKeyDisplayName(apiKeyID: number, key: ApiKey | null) {
+  if (key?.name) return key.name
+  const currentKey = geminiApiKeys.value.find(item => item.id === apiKeyID)
+  if (currentKey?.name) return currentKey.name
+  return apiKeyID > 0 ? `API Key #${apiKeyID}` : ''
+}
+
+function jobRowToBatchImageJob(row: BatchImageJobRow): BatchImageJob {
+  return {
+    id: row.id,
+    object: 'image.batch',
+    key_id: row.api_key_id || undefined,
+    task_name: row.task_name,
+    parent_batch_id: row.parent_batch_id,
+    status: row.status,
+    model: row.model,
+    provider: row.provider,
+    item_count: row.item_count,
+    success_count: row.success_count,
+    fail_count: row.fail_count,
+    estimated_cost: row.estimated_cost,
+    hold_amount: row.hold_amount,
+    actual_cost: row.actual_cost,
+    created_at: row.created_at,
+    submitted_at: null,
+    settled_at: null,
+    downloaded_at: row.downloaded_at,
   }
 }
 
@@ -1483,28 +1534,17 @@ function copyPromptPopover() {
 }
 
 async function loadBatchJobs() {
-  const keys = filteredApiKeys.value
-  if (!keys.length) {
-    batchJobs.value = []
-    pagination.has_more = false
-    return
-  }
   loadingJobs.value = true
   closeMoreMenu()
   try {
-    const options = listOptions()
-    const results = await Promise.all(keys.map(async (key) => {
-      const result = await listBatchImageJobs(key.key, options)
-      return {
-        hasMore: Boolean(result.has_more),
-        rows: (result.data || []).map(job => toJobRow(job, key)),
-      }
-    }))
-    batchJobs.value = applyChildCounts(results
-      .flatMap(result => result.rows)
-      .sort((a, b) => b.created_at - a.created_at)
-      .slice(0, pagination.page_size))
-    pagination.has_more = results.some(result => result.hasMore)
+    const keys = filteredApiKeys.value
+    const result = allApiKeysSelected.value
+      ? await loadBatchJobsForAllKeys(listOptions())
+      : keys.length === 1
+        ? await loadBatchJobsForKey(keys[0], listOptions())
+        : { hasMore: false, rows: [] }
+    batchJobs.value = applyChildCounts(result.rows)
+    pagination.has_more = result.hasMore
     selectedJobIds.value = new Set([...selectedJobIds.value].filter(id => visibleBatchJobs.value.some(job => job.id === id)))
   } catch (error: any) {
     appStore.showError(batchImageErrorMessage(error, batchImageText('loadJobsFailed')))
@@ -1575,11 +1615,10 @@ function closeDetail() {
 }
 
 function keyForSelectedBatch(): ApiKey | null {
-  if (selectedBatchApiKeyId.value) {
-    const key = geminiApiKeys.value.find(item => item.id === selectedBatchApiKeyId.value)
-    if (key) return key
+  if (!selectedBatchId.value) {
+    return selectedApiKey.value
   }
-  return selectedApiKey.value
+  return apiKeyByID(selectedBatchApiKeyId.value)
 }
 
 function requireApiKey(): ApiKey | null {
@@ -1650,7 +1689,7 @@ async function submitJob() {
 
 async function refreshSelected() {
   if (!selectedBatchId.value) return
-  const key = keyForSelectedBatch() || requireApiKey()
+  const key = keyForSelectedBatch()
   if (!key) return
   refreshing.value = true
   try {
@@ -1681,10 +1720,12 @@ function selectJob(batchId: string) {
     selectedBatchApiKeyId.value = 0
   }
   selectedBatchId.value = batchId
-  currentJob.value = null
+  currentJob.value = row ? jobRowToBatchImageJob(row) : null
   items.value = []
-  void refreshSelected()
-  void loadItems()
+  if (keyForSelectedBatch()) {
+    void refreshSelected()
+    void loadItems()
+  }
 }
 
 function startPolling() {
@@ -1728,11 +1769,34 @@ function applyJobApiKey(job: BatchImageJobRow | Pick<BatchImageJob, 'id'>) {
   }
 }
 
-function apiKeyForJob(job: BatchImageJobRow | Pick<BatchImageJob, 'id'>): ApiKey | null {
-  if ('api_key_id' in job && job.api_key_id) {
-    return geminiApiKeys.value.find(key => key.id === job.api_key_id) || null
+function apiKeyForJob(job: BatchImageJobRow | BatchImageJob | Pick<BatchImageJob, 'id'>): ApiKey | null {
+  if ('api_key_id' in job) {
+    return apiKeyByID(job.api_key_id)
+  }
+  const apiKeyID = apiKeyIDForJob(job)
+  if (apiKeyID > 0) {
+    return apiKeyByID(apiKeyID)
+  }
+  if (selectedBatchId.value && job.id === selectedBatchId.value) {
+    return null
   }
   return selectedApiKey.value
+}
+
+function apiKeyIDForJob(job: BatchImageJobRow | BatchImageJob | Pick<BatchImageJob, 'id'>) {
+  if ('api_key_id' in job && job.api_key_id) return job.api_key_id
+  if ('key_id' in job && job.key_id) return job.key_id
+  if (selectedBatchId.value && job.id === selectedBatchId.value) return selectedBatchApiKeyId.value
+  return 0
+}
+
+function apiKeyByID(apiKeyID: number) {
+  if (apiKeyID <= 0) return null
+  return geminiApiKeys.value.find(key => key.id === apiKeyID) || null
+}
+
+function hasUsableApiKey(job: BatchImageJobRow | BatchImageJob | Pick<BatchImageJob, 'id'>) {
+  return Boolean(apiKeyForJob(job))
 }
 
 function toggleJobSelection(batchId: string, checked: boolean) {
@@ -1757,7 +1821,7 @@ function canDeleteRecord(job: Pick<BatchImageJob, 'status'>) {
 
 async function cancelSelected() {
   if (!currentJob.value) return
-  const key = keyForSelectedBatch() || requireApiKey()
+  const key = keyForSelectedBatch()
   if (!key) return
   if (!window.confirm(batchImageText('cancelConfirm'))) return
   cancelling.value = true
@@ -1786,7 +1850,7 @@ async function retrySelected() {
 async function retryFailedJob(job: BatchImageJobRow | BatchImageJob) {
   if (!canRetry(job) || retryingBatchId.value) return
   closeMoreMenu()
-  const key = apiKeyForJob(job) || keyForSelectedBatch() || requireApiKey()
+  const key = apiKeyForJob(job)
   if (!key) return
   retryingBatchId.value = job.id
   try {
@@ -1851,7 +1915,7 @@ async function downloadJob(job: (BatchImageJobRow | Pick<BatchImageJob, 'id'>)) 
   if (downloading.value) return
   closeMoreMenu()
   applyJobApiKey(job)
-  const key = apiKeyForJob(job) || requireApiKey()
+  const key = apiKeyForJob(job)
   if (!key) return
   downloading.value = true
   downloadingBatchId.value = job.id
@@ -2178,7 +2242,7 @@ async function loadPreviewImageSource(blob: Blob): Promise<{ image: PreviewImage
 async function loadItems() {
   const batchId = selectedBatchId.value || currentJob.value?.id || ''
   if (!batchId) return
-  const key = keyForSelectedBatch() || requireApiKey()
+  const key = keyForSelectedBatch()
   if (!key) return
   loadingItems.value = true
   try {
@@ -2220,7 +2284,7 @@ async function loadItemPreview(item: BatchImageItem) {
   const batchId = item.batch_id || selectedBatchId.value || currentJob.value?.id || ''
   const previewKey = itemPreviewKey(item)
   if (!batchId || !canLoadItemPreview(item) || (itemPreviewUrls[previewKey] && !previewErrorIds.value.has(previewKey))) return
-  const key = keyForSelectedBatch() || requireApiKey()
+  const key = keyForSelectedBatch()
   if (!key) return
   const cacheKey = previewCacheKey(batchId, item.custom_id, 0)
   previewLoadingIds.value = new Set([...previewLoadingIds.value, previewKey])

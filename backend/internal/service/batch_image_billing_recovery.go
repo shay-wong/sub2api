@@ -40,8 +40,9 @@ func (s *BatchImageBillingRecoveryService) ReleaseStaleUnsubmittedOnce(ctx conte
 		if job == nil {
 			continue
 		}
+		jobCtx := batchImageContextForJob(ctx, job)
 		msg := "batch image submission did not reach provider before recovery cutoff"
-		if err := s.Repo.TransitionBatchImageJobStatus(ctx, job.BatchID, BatchImageJobStatusFailed, BatchImageTransitionOptions{
+		if err := s.Repo.TransitionBatchImageJobStatus(jobCtx, job.BatchID, BatchImageJobStatusFailed, BatchImageTransitionOptions{
 			EventType:    "billing_hold_recovery_failed_unsubmitted",
 			EventPayload: map[string]any{"batch_id": job.BatchID},
 			ErrorCode:    batchImageStringPtr("SUBMIT_STALE_BEFORE_PROVIDER"),
@@ -50,11 +51,11 @@ func (s *BatchImageBillingRecoveryService) ReleaseStaleUnsubmittedOnce(ctx conte
 			return released, err
 		}
 		job.Status = BatchImageJobStatusFailed
-		if err := releaseBatchImageBalanceHold(ctx, s.Billing, job, batchImageDerefString(job.RequestHash)); err != nil {
+		if err := releaseBatchImageBalanceHold(jobCtx, s.Billing, job, batchImageDerefString(job.RequestHash)); err != nil {
 			return released, err
 		}
 		if s.AuthCache != nil && job.UserID > 0 {
-			s.AuthCache.InvalidateAuthCacheByUserID(ctx, job.UserID)
+			s.AuthCache.InvalidateAuthCacheByUserID(jobCtx, job.UserID)
 		}
 		released++
 	}

@@ -34,6 +34,12 @@ func (_c *BatchImageJobCreate) SetUserID(v int64) *BatchImageJobCreate {
 	return _c
 }
 
+// SetProjectID sets the "project_id" field.
+func (_c *BatchImageJobCreate) SetProjectID(v int64) *BatchImageJobCreate {
+	_c.mutation.SetProjectID(v)
+	return _c
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (_c *BatchImageJobCreate) SetAPIKeyID(v int64) *BatchImageJobCreate {
 	_c.mutation.SetAPIKeyID(v)
@@ -636,6 +642,9 @@ func (_c *BatchImageJobCreate) check() error {
 	if _, ok := _c.mutation.UserID(); !ok {
 		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "BatchImageJob.user_id"`)}
 	}
+	if _, ok := _c.mutation.ProjectID(); !ok {
+		return &ValidationError{Name: "project_id", err: errors.New(`ent: missing required field "BatchImageJob.project_id"`)}
+	}
 	if _, ok := _c.mutation.Provider(); !ok {
 		return &ValidationError{Name: "provider", err: errors.New(`ent: missing required field "BatchImageJob.provider"`)}
 	}
@@ -787,6 +796,10 @@ func (_c *BatchImageJobCreate) createSpec() (*BatchImageJob, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.UserID(); ok {
 		_spec.SetField(batchimagejob.FieldUserID, field.TypeInt64, value)
 		_node.UserID = value
+	}
+	if value, ok := _c.mutation.ProjectID(); ok {
+		_spec.SetField(batchimagejob.FieldProjectID, field.TypeInt64, value)
+		_node.ProjectID = value
 	}
 	if value, ok := _c.mutation.APIKeyID(); ok {
 		_spec.SetField(batchimagejob.FieldAPIKeyID, field.TypeInt64, value)
@@ -1007,6 +1020,24 @@ func (u *BatchImageJobUpsert) UpdateUserID() *BatchImageJobUpsert {
 // AddUserID adds v to the "user_id" field.
 func (u *BatchImageJobUpsert) AddUserID(v int64) *BatchImageJobUpsert {
 	u.Add(batchimagejob.FieldUserID, v)
+	return u
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *BatchImageJobUpsert) SetProjectID(v int64) *BatchImageJobUpsert {
+	u.Set(batchimagejob.FieldProjectID, v)
+	return u
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsert) UpdateProjectID() *BatchImageJobUpsert {
+	u.SetExcluded(batchimagejob.FieldProjectID)
+	return u
+}
+
+// AddProjectID adds v to the "project_id" field.
+func (u *BatchImageJobUpsert) AddProjectID(v int64) *BatchImageJobUpsert {
+	u.Add(batchimagejob.FieldProjectID, v)
 	return u
 }
 
@@ -1730,6 +1761,27 @@ func (u *BatchImageJobUpsertOne) AddUserID(v int64) *BatchImageJobUpsertOne {
 func (u *BatchImageJobUpsertOne) UpdateUserID() *BatchImageJobUpsertOne {
 	return u.Update(func(s *BatchImageJobUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *BatchImageJobUpsertOne) SetProjectID(v int64) *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// AddProjectID adds v to the "project_id" field.
+func (u *BatchImageJobUpsertOne) AddProjectID(v int64) *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.AddProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsertOne) UpdateProjectID() *BatchImageJobUpsertOne {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.UpdateProjectID()
 	})
 }
 
@@ -2728,6 +2780,27 @@ func (u *BatchImageJobUpsertBulk) AddUserID(v int64) *BatchImageJobUpsertBulk {
 func (u *BatchImageJobUpsertBulk) UpdateUserID() *BatchImageJobUpsertBulk {
 	return u.Update(func(s *BatchImageJobUpsert) {
 		s.UpdateUserID()
+	})
+}
+
+// SetProjectID sets the "project_id" field.
+func (u *BatchImageJobUpsertBulk) SetProjectID(v int64) *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.SetProjectID(v)
+	})
+}
+
+// AddProjectID adds v to the "project_id" field.
+func (u *BatchImageJobUpsertBulk) AddProjectID(v int64) *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.AddProjectID(v)
+	})
+}
+
+// UpdateProjectID sets the "project_id" field to the value that was provided on create.
+func (u *BatchImageJobUpsertBulk) UpdateProjectID() *BatchImageJobUpsertBulk {
+	return u.Update(func(s *BatchImageJobUpsert) {
+		s.UpdateProjectID()
 	})
 }
 

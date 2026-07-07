@@ -73,9 +73,10 @@ type BatchImageReferenceInput struct {
 }
 
 type BatchImageOwner struct {
-	UserID   int64
-	APIKeyID int64
-	GroupID  *int64
+	UserID    int64
+	ProjectID int64
+	APIKeyID  int64
+	GroupID   *int64
 }
 
 type BatchImagePublicService struct {
@@ -124,6 +125,11 @@ type BatchImagePublicBatch struct {
 	OutputDeletedAt *int64   `json:"output_deleted_at,omitempty"`
 }
 
+type BatchImagePublicBatchWithKey struct {
+	*BatchImagePublicBatch
+	KeyID int64 `json:"key_id,omitempty"`
+}
+
 type BatchImagePublicItem struct {
 	CustomID      string                 `json:"custom_id"`
 	Status        string                 `json:"status"`
@@ -150,6 +156,12 @@ type BatchImagePublicListResponse struct {
 	Object  string                   `json:"object"`
 	Data    []*BatchImagePublicBatch `json:"data"`
 	HasMore bool                     `json:"has_more"`
+}
+
+type BatchImagePublicListAllResponse struct {
+	Object  string                          `json:"object"`
+	Data    []*BatchImagePublicBatchWithKey `json:"data"`
+	HasMore bool                            `json:"has_more"`
 }
 
 type BatchImagePublicModel struct {
@@ -198,6 +210,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if !s.enabled() {
 		return nil, ErrBatchImageDisabled
 	}
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	normalized, err := s.validateSubmitRequest(req)
 	if err != nil {
 		return nil, err
@@ -252,6 +265,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	job, err := s.Repo.CreateBatchImageJob(ctx, CreateBatchImageJobParams{
 		BatchID:                 batchID,
 		UserID:                  owner.UserID,
+		ProjectID:               owner.ProjectID,
 		APIKeyID:                &apiKeyID,
 		AccountID:               &accountID,
 		Provider:                provider.Name(),
@@ -410,10 +424,12 @@ func (s *BatchImagePublicService) hidePreUpstreamSubmitFailure(ctx context.Conte
 	if s == nil || s.Repo == nil || job == nil || job.ProviderJobName != nil {
 		return
 	}
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	_ = s.Repo.MarkBatchImageJobUserDeleted(ctx, owner.UserID, owner.APIKeyID, job.BatchID, time.Now())
 }
 
 func (s *BatchImagePublicService) Get(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err
@@ -422,61 +438,33 @@ func (s *BatchImagePublicService) Get(ctx context.Context, owner BatchImageOwner
 }
 
 func (s *BatchImagePublicService) List(ctx context.Context, owner BatchImageOwner, query BatchImageJobsQuery) (*BatchImagePublicListResponse, error) {
-	filter := BatchImageJobFilter{Limit: query.Limit, Offset: parseBatchImageCursor(query.Cursor), ExcludeDeleted: true}
-	filter.TaskNameLike = strings.TrimSpace(query.TaskName)
-	switch strings.TrimSpace(query.Status) {
-	case "", "all":
-	case "queued":
-		filter.Status = BatchImageJobStatusSubmitted
-	case "processing_results":
-		filter.Status = BatchImageJobStatusIndexing
-	case "completed":
-		filter.Status = BatchImageJobStatusCompleted
-	case "failed":
-		filter.Status = BatchImageJobStatusFailed
-	case "cancelled":
-		filter.Status = BatchImageJobStatusCancelled
-	case "output_deleted":
-		filter.Status = BatchImageJobStatusOutputDeleted
-	default:
-		filter.Status = strings.TrimSpace(query.Status)
-	}
-	switch strings.TrimSpace(strings.ToLower(query.Downloaded)) {
-	case "", "all":
-	case "true", "1", "yes", "downloaded":
-		downloaded := true
-		filter.Downloaded = &downloaded
-	case "false", "0", "no", "not_downloaded":
-		downloaded := false
-		filter.Downloaded = &downloaded
-	default:
-		return nil, ErrBatchImageInvalidItems
-	}
-	if from := parseBatchImageListTime(query.From); from != nil {
-		filter.CreatedAfter = from
-	}
-	if to := parseBatchImageListTime(query.To); to != nil {
-		filter.CreatedBefore = to
-	}
-	if filter.Limit <= 0 || filter.Limit > 100 {
-		filter.Limit = 20
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
+	filter, err := batchImageJobFilterFromQuery(query)
+	if err != nil {
+		return nil, err
 	}
 	jobs, err := s.Repo.ListBatchImageJobsForOwner(ctx, owner.UserID, owner.APIKeyID, filter)
 	if err != nil {
 		return nil, err
 	}
-	data := make([]*BatchImagePublicBatch, 0, len(jobs))
-	for _, job := range jobs {
-		data = append(data, BatchImageJobToPublic(job))
+	return batchImageJobsToPublicList(jobs, filter.Limit), nil
+}
+
+func (s *BatchImagePublicService) ListAll(ctx context.Context, owner BatchImageOwner, query BatchImageJobsQuery) (*BatchImagePublicListAllResponse, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
+	filter, err := batchImageJobFilterFromQuery(query)
+	if err != nil {
+		return nil, err
 	}
-	return &BatchImagePublicListResponse{
-		Object:  "list",
-		Data:    data,
-		HasMore: len(data) == filter.Limit,
-	}, nil
+	jobs, err := s.Repo.ListBatchImageJobsForUser(ctx, owner.UserID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return batchImageJobsToPublicListAll(jobs, filter.Limit), nil
 }
 
 func (s *BatchImagePublicService) MarkDownloaded(ctx context.Context, owner BatchImageOwner, batchID string) error {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return err
@@ -485,6 +473,7 @@ func (s *BatchImagePublicService) MarkDownloaded(ctx context.Context, owner Batc
 }
 
 func (s *BatchImagePublicService) DeleteRecord(ctx context.Context, owner BatchImageOwner, batchID string) error {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return err
@@ -499,6 +488,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 	if !s.enabled() {
 		return nil, ErrBatchImageDisabled
 	}
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	if s.Pricing == nil {
 		return nil, ErrBatchImageSettlementPricingMissing
 	}
@@ -555,6 +545,7 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 }
 
 func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImageOwner, batchID string, query BatchImageItemsQuery) (*BatchImagePublicItemsResponse, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	filter := BatchImageItemFilter{Limit: query.Limit, Offset: parseBatchImageCursor(query.Cursor)}
 	switch strings.TrimSpace(query.Status) {
 	case "", "all":
@@ -570,9 +561,14 @@ func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImag
 	if filter.Limit <= 0 || filter.Limit > 500 {
 		filter.Limit = 100
 	}
+	filter.Limit++
 	items, err := s.Repo.ListBatchImageItemsForOwner(ctx, owner.UserID, owner.APIKeyID, batchID, filter)
 	if err != nil {
 		return nil, err
+	}
+	hasMore := len(items) >= filter.Limit
+	if hasMore {
+		items = items[:filter.Limit-1]
 	}
 	data := make([]BatchImagePublicItem, 0, len(items))
 	for _, item := range items {
@@ -581,11 +577,12 @@ func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImag
 	return &BatchImagePublicItemsResponse{
 		Object:  "list",
 		Data:    data,
-		HasMore: len(data) == filter.Limit,
+		HasMore: hasMore,
 	}, nil
 }
 
 func (s *BatchImagePublicService) Cancel(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err
@@ -1046,6 +1043,86 @@ func BatchImageJobToPublic(job *BatchImageJob) *BatchImagePublicBatch {
 		SettledAt:       batchImageUnixPtr(job.SettledAt),
 		DownloadedAt:    batchImageUnixPtr(job.DownloadedAt),
 		OutputDeletedAt: batchImageUnixPtr(job.OutputDeletedAt),
+	}
+}
+
+func batchImageJobFilterFromQuery(query BatchImageJobsQuery) (BatchImageJobFilter, error) {
+	filter := BatchImageJobFilter{Limit: query.Limit, Offset: parseBatchImageCursor(query.Cursor), ExcludeDeleted: true}
+	filter.TaskNameLike = strings.TrimSpace(query.TaskName)
+	switch strings.TrimSpace(query.Status) {
+	case "", "all":
+	case "queued":
+		filter.Statuses = []string{BatchImageJobStatusCreated, BatchImageJobStatusUploading, BatchImageJobStatusSubmitted}
+	case "processing_results":
+		filter.Status = BatchImageJobStatusIndexing
+	case "completed":
+		filter.Status = BatchImageJobStatusCompleted
+	case "failed":
+		filter.Status = BatchImageJobStatusFailed
+	case "cancelled":
+		filter.Status = BatchImageJobStatusCancelled
+	case "output_deleted":
+		filter.Status = BatchImageJobStatusOutputDeleted
+	default:
+		filter.Status = strings.TrimSpace(query.Status)
+	}
+	switch strings.TrimSpace(strings.ToLower(query.Downloaded)) {
+	case "", "all":
+	case "true", "1", "yes", "downloaded":
+		downloaded := true
+		filter.Downloaded = &downloaded
+	case "false", "0", "no", "not_downloaded":
+		downloaded := false
+		filter.Downloaded = &downloaded
+	default:
+		return BatchImageJobFilter{}, ErrBatchImageInvalidItems
+	}
+	if from := parseBatchImageListTime(query.From); from != nil {
+		filter.CreatedAfter = from
+	}
+	if to := parseBatchImageListTime(query.To); to != nil {
+		filter.CreatedBefore = to
+	}
+	if filter.Limit <= 0 || filter.Limit > 100 {
+		filter.Limit = 20
+	}
+	filter.Limit++
+	return filter, nil
+}
+
+func batchImageJobsToPublicList(jobs []*BatchImageJob, limit int) *BatchImagePublicListResponse {
+	hasMore := len(jobs) >= limit
+	if hasMore {
+		jobs = jobs[:limit-1]
+	}
+	data := make([]*BatchImagePublicBatch, 0, len(jobs))
+	for _, job := range jobs {
+		data = append(data, BatchImageJobToPublic(job))
+	}
+	return &BatchImagePublicListResponse{
+		Object:  "list",
+		Data:    data,
+		HasMore: hasMore,
+	}
+}
+
+func batchImageJobsToPublicListAll(jobs []*BatchImageJob, limit int) *BatchImagePublicListAllResponse {
+	hasMore := len(jobs) >= limit
+	if hasMore {
+		jobs = jobs[:limit-1]
+	}
+	data := make([]*BatchImagePublicBatchWithKey, 0, len(jobs))
+	for _, job := range jobs {
+		item := &BatchImagePublicBatchWithKey{BatchImagePublicBatch: BatchImageJobToPublic(job)}
+		if job != nil && job.APIKeyID != nil {
+			item.KeyID = *job.APIKeyID
+		}
+		data = append(data, item)
+	}
+	return &BatchImagePublicListAllResponse{
+		Object:  "list",
+		Data:    data,
+		HasMore: hasMore,
 	}
 }
 

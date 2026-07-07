@@ -270,6 +270,23 @@ func TestMigration159ScopesProxiesToProjectsAndProfiles(t *testing.T) {
 	require.Contains(t, sql, "ON CONFLICT (project_profile_id, resource_type, resource_id) DO NOTHING")
 }
 
+func TestMigration170AddsBatchImageProjectScope(t *testing.T) {
+	content, err := FS.ReadFile("170_batch_image_project_scope.sql")
+	require.NoError(t, err)
+
+	sql := string(content)
+	require.Contains(t, sql, "ALTER TABLE batch_image_jobs\n    ADD COLUMN IF NOT EXISTS project_id BIGINT")
+	require.Contains(t, sql, "SELECT ak.project_id FROM api_keys ak WHERE ak.id = bij.api_key_id")
+	require.Contains(t, sql, "SELECT a.project_id FROM accounts a WHERE a.id = bij.account_id")
+	require.Contains(t, sql, "SELECT id FROM projects WHERE slug = 'default'")
+	require.Contains(t, sql, "WHERE bij.project_id IS NULL")
+	require.Contains(t, sql, "ALTER TABLE batch_image_jobs\n    ALTER COLUMN project_id SET NOT NULL")
+	require.Contains(t, sql, "ADD CONSTRAINT batch_image_jobs_project_id_fkey")
+	require.Contains(t, sql, "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT")
+	require.Contains(t, sql, "CREATE INDEX IF NOT EXISTS batch_image_jobs_project_user_created_at_idx")
+	require.Contains(t, sql, "ON batch_image_jobs (project_id, user_id, created_at)")
+}
+
 func TestMigration158BackfillsGrokMediaGenerationGroups(t *testing.T) {
 	content, err := FS.ReadFile("158_enable_grok_media_generation_groups.sql")
 	require.NoError(t, err)

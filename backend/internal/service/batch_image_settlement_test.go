@@ -316,6 +316,28 @@ func TestBatchImageSettlementBillingRequestIDs(t *testing.T) {
 	require.Len(t, billing.seen, 2)
 }
 
+func TestBatchImageSettlementService_SettleRestoresJobProjectScope(t *testing.T) {
+	repo := newFakeBatchImageRepository()
+	job := testSettlingBatchImageJob("imgbatch_project_scope")
+	job.ProjectID = 77
+	repo.jobs[job.BatchID] = job
+	billing := &fakeBatchImageBillingRepo{}
+	usageLogs := &batchImageUsageLogRepo{}
+	svc := &BatchImageSettlementService{
+		Repo:         repo,
+		BillingRepo:  billing,
+		UsageLogRepo: usageLogs,
+		Pricing:      &fakeBatchImagePricingResolver{unitPrice: 0.25},
+	}
+
+	_, err := svc.Settle(context.Background(), job.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, []int64{77}, billing.captureProjects)
+	require.Len(t, usageLogs.logs, 1)
+	require.Equal(t, int64(77), usageLogs.logs[0].ProjectID)
+	require.Equal(t, []int64{77}, usageLogs.projectIDs)
+}
+
 func testSettlingBatchImageJob(batchID string) *BatchImageJob {
 	apiKeyID := int64(321)
 	accountID := int64(654)
@@ -359,16 +381,19 @@ func (r *fakeBatchImagePricingResolver) BatchImageUnitPrice(_ context.Context, j
 }
 
 type fakeBatchImageBillingRepo struct {
-	commands       []*UsageBillingCommand
-	reserves       []*BatchImageBalanceHoldCommand
-	captures       []*BatchImageBalanceHoldCommand
-	releases       []*BatchImageBalanceHoldCommand
-	seen           map[string]struct{}
-	alreadyApplied map[string]bool
-	err            error
-	reserveErr     error
-	captureErr     error
-	releaseErr     error
+	commands        []*UsageBillingCommand
+	reserves        []*BatchImageBalanceHoldCommand
+	captures        []*BatchImageBalanceHoldCommand
+	releases        []*BatchImageBalanceHoldCommand
+	reserveProjects []int64
+	captureProjects []int64
+	releaseProjects []int64
+	seen            map[string]struct{}
+	alreadyApplied  map[string]bool
+	err             error
+	reserveErr      error
+	captureErr      error
+	releaseErr      error
 }
 
 func (r *fakeBatchImageBillingRepo) Apply(_ context.Context, cmd *UsageBillingCommand) (*UsageBillingApplyResult, error) {
@@ -391,7 +416,8 @@ func (r *fakeBatchImageBillingRepo) Apply(_ context.Context, cmd *UsageBillingCo
 	return &UsageBillingApplyResult{Applied: true}, nil
 }
 
-func (r *fakeBatchImageBillingRepo) ReserveBatchImageBalance(_ context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+func (r *fakeBatchImageBillingRepo) ReserveBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+	r.reserveProjects = append(r.reserveProjects, batchImageTestProjectIDFromContext(ctx))
 	if r.reserveErr != nil {
 		r.reserves = append(r.reserves, cmd)
 		return nil, r.reserveErr
@@ -399,7 +425,8 @@ func (r *fakeBatchImageBillingRepo) ReserveBatchImageBalance(_ context.Context, 
 	return r.applyHold(cmd, &r.reserves)
 }
 
-func (r *fakeBatchImageBillingRepo) CaptureBatchImageBalance(_ context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+func (r *fakeBatchImageBillingRepo) CaptureBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+	r.captureProjects = append(r.captureProjects, batchImageTestProjectIDFromContext(ctx))
 	if r.captureErr != nil {
 		r.captures = append(r.captures, cmd)
 		return nil, r.captureErr
@@ -407,7 +434,8 @@ func (r *fakeBatchImageBillingRepo) CaptureBatchImageBalance(_ context.Context, 
 	return r.applyHold(cmd, &r.captures)
 }
 
-func (r *fakeBatchImageBillingRepo) ReleaseBatchImageBalance(_ context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+func (r *fakeBatchImageBillingRepo) ReleaseBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error) {
+	r.releaseProjects = append(r.releaseProjects, batchImageTestProjectIDFromContext(ctx))
 	if r.releaseErr != nil {
 		r.releases = append(r.releases, cmd)
 		return nil, r.releaseErr
@@ -433,6 +461,23 @@ func (r *fakeBatchImageBillingRepo) applyHold(cmd *BatchImageBalanceHoldCommand,
 	}
 	*calls = append(*calls, cmd)
 	return &BatchImageBalanceHoldResult{Applied: true}, nil
+}
+
+func batchImageTestProjectIDFromContext(ctx context.Context) int64 {
+	projectID, _ := ProjectIDFromContext(ctx)
+	return projectID
+}
+
+type batchImageUsageLogRepo struct {
+	UsageLogRepository
+	logs       []*UsageLog
+	projectIDs []int64
+}
+
+func (r *batchImageUsageLogRepo) Create(ctx context.Context, log *UsageLog) (bool, error) {
+	r.logs = append(r.logs, log)
+	r.projectIDs = append(r.projectIDs, batchImageTestProjectIDFromContext(ctx))
+	return true, nil
 }
 
 var _ UsageBillingRepository = (*fakeBatchImageBillingRepo)(nil)

@@ -79,6 +79,7 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 	if err != nil {
 		return nil, err
 	}
+	ctx = batchImageContextForJob(ctx, job)
 
 	manifestHash := BuildBatchImageSettlementManifestHash(job)
 	result := &BatchImageSettlementResult{
@@ -214,6 +215,7 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 	imageSize := "1K"
 	usageLog := &UsageLog{
 		UserID:                job.UserID,
+		ProjectID:             job.ProjectID,
 		APIKeyID:              *job.APIKeyID,
 		AccountID:             *job.AccountID,
 		RequestID:             strings.TrimSpace(requestID),
@@ -299,6 +301,7 @@ func (p *BatchImagePipelineProcessor) Process(ctx context.Context, batchID strin
 	if err != nil {
 		return BatchImageProcessResult{}, err
 	}
+	ctx = batchImageContextForJob(ctx, job)
 	if job.Status == BatchImageJobStatusSettling {
 		if p.SettlementService == nil {
 			return BatchImageProcessResult{Terminal: true}, nil

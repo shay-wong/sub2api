@@ -1111,6 +1111,7 @@
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
 	import { useClipboard } from '@/composables/useClipboard'
+import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
@@ -1163,6 +1164,7 @@ interface GroupOption {
 const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()
+const { refreshBatchImageAccess } = useBatchImageAccess()
 
 const allColumns = computed<Column[]>(() => [
   { key: 'name', label: t('common.name'), sortable: true },
@@ -1475,6 +1477,11 @@ const loadApiKeys = async () => {
   }
 }
 
+const refreshApiKeysAndBatchImageAccess = async () => {
+  await loadApiKeys()
+  void refreshBatchImageAccess(true)
+}
+
 const loadGroups = async () => {
   try {
     groups.value = await userGroupsAPI.getAvailable()
@@ -1560,7 +1567,7 @@ const toggleKeyStatus = async (key: ApiKey) => {
     appStore.showSuccess(
       newStatus === 'active' ? t('keys.keyEnabledSuccess') : t('keys.keyDisabledSuccess')
     )
-    loadApiKeys()
+    await refreshApiKeysAndBatchImageAccess()
   } catch (error) {
     appStore.showError(t('keys.failedToUpdateStatus'))
   }
@@ -1605,7 +1612,7 @@ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
   try {
     await keysAPI.update(key.id, { group_id: newGroupId })
     appStore.showSuccess(t('keys.groupChangedSuccess'))
-    loadApiKeys()
+    await refreshApiKeysAndBatchImageAccess()
   } catch (error) {
     appStore.showError(t('keys.failedToChangeGroup'))
   }
@@ -1720,7 +1727,7 @@ const handleSubmit = async () => {
       }
     }
     closeModals()
-    loadApiKeys()
+    await refreshApiKeysAndBatchImageAccess()
   } catch (error: any) {
     const errorMsg = error.response?.data?.detail || t('keys.failedToSave')
     appStore.showError(errorMsg)
@@ -1742,7 +1749,7 @@ const handleDelete = async () => {
     await keysAPI.delete(selectedKey.value.id)
     appStore.showSuccess(t('keys.keyDeletedSuccess'))
     showDeleteDialog.value = false
-    loadApiKeys()
+    await refreshApiKeysAndBatchImageAccess()
   } catch (error: any) {
     // 优先使用后端返回的错误消息，提供更具体的错误信息给用户
     const errorMsg = error?.message || t('keys.failedToDelete')

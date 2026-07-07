@@ -1,4 +1,4 @@
-import { buildGatewayUrl } from './client'
+import { apiClient, buildGatewayUrl } from './client'
 
 export type BatchImageStatus =
   | 'queued'
@@ -42,6 +42,7 @@ export interface BatchImageSubmitRequest {
 export interface BatchImageJob {
   id: string
   object: string
+  key_id?: number
   task_name: string
   parent_batch_id?: string | null
   status: BatchImageStatus
@@ -109,6 +110,30 @@ export interface BatchImageJobsListOptions {
   to?: string
 }
 
+function batchImageJobsSearchParams(options: number | BatchImageJobsListOptions = 20) {
+  const params = new URLSearchParams()
+  if (typeof options === 'number') {
+    params.set('limit', String(options))
+  } else {
+    params.set('limit', String(options.limit || 20))
+    if (options.cursor) params.set('cursor', options.cursor)
+    if (options.status) params.set('status', options.status)
+    if (options.taskName) params.set('task_name', options.taskName)
+    if (options.downloaded) params.set('downloaded', options.downloaded)
+    if (options.from) params.set('from', options.from)
+    if (options.to) params.set('to', options.to)
+  }
+  return params
+}
+
+function batchImageJobsQueryParams(options: number | BatchImageJobsListOptions = 20) {
+  const query: Record<string, string> = {}
+  batchImageJobsSearchParams(options).forEach((value, key) => {
+    query[key] = value
+  })
+  return query
+}
+
 async function parseBatchImageError(response: Response): Promise<Error> {
   try {
     const body = await response.json()
@@ -160,23 +185,19 @@ export async function getBatchImageJob(apiKey: string, batchId: string): Promise
 }
 
 export async function listBatchImageJobs(apiKey: string, options: number | BatchImageJobsListOptions = 20): Promise<BatchImageJobsResponse> {
-  const params = new URLSearchParams()
-  if (typeof options === 'number') {
-    params.set('limit', String(options))
-  } else {
-    params.set('limit', String(options.limit || 20))
-    if (options.cursor) params.set('cursor', options.cursor)
-    if (options.status) params.set('status', options.status)
-    if (options.taskName) params.set('task_name', options.taskName)
-    if (options.downloaded) params.set('downloaded', options.downloaded)
-    if (options.from) params.set('from', options.from)
-    if (options.to) params.set('to', options.to)
-  }
+  const params = batchImageJobsSearchParams(options)
   const response = await fetch(buildGatewayUrl(`/v1/images/batches?${params.toString()}`), {
     headers: authHeaders(apiKey),
   })
   if (!response.ok) throw await parseBatchImageError(response)
   return response.json()
+}
+
+export async function listAllBatchImageJobs(options: number | BatchImageJobsListOptions = 20): Promise<BatchImageJobsResponse> {
+  const { data } = await apiClient.get<BatchImageJobsResponse>('/user/batch-image/jobs', {
+    params: batchImageJobsQueryParams(options),
+  })
+  return data
 }
 
 export async function listBatchImageModels(apiKey: string): Promise<BatchImageModelsResponse> {

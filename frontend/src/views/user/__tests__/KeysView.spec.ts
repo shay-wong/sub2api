@@ -7,10 +7,12 @@ import KeysView from '../KeysView.vue'
 
 const {
   listKeys,
+  toggleStatus,
   getPublicSettings,
   getDashboardApiKeysUsage,
   getAvailableGroups,
   getUserGroupRates,
+  refreshBatchImageAccess,
   showError,
   showSuccess,
   copyToClipboard,
@@ -18,10 +20,12 @@ const {
   nextStep,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
+  toggleStatus: vi.fn(),
   getPublicSettings: vi.fn(),
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
   getUserGroupRates: vi.fn(),
+  refreshBatchImageAccess: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   copyToClipboard: vi.fn(),
@@ -59,7 +63,7 @@ vi.mock('@/api', () => ({
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    toggleStatus: vi.fn(),
+    toggleStatus,
   },
   authAPI: {
     getPublicSettings,
@@ -90,6 +94,12 @@ vi.mock('@/stores/onboarding', () => ({
 vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({
     copyToClipboard,
+  }),
+}))
+
+vi.mock('@/composables/useBatchImageAccess', () => ({
+  useBatchImageAccess: () => ({
+    refreshBatchImageAccess,
   }),
 }))
 
@@ -225,10 +235,12 @@ describe('user KeysView column settings', () => {
     localStorage.clear()
 
     listKeys.mockReset()
+    toggleStatus.mockReset()
     getPublicSettings.mockReset()
     getDashboardApiKeysUsage.mockReset()
     getAvailableGroups.mockReset()
     getUserGroupRates.mockReset()
+    refreshBatchImageAccess.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
     copyToClipboard.mockReset()
@@ -246,6 +258,8 @@ describe('user KeysView column settings', () => {
     getDashboardApiKeysUsage.mockResolvedValue({ stats: {} })
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
+    refreshBatchImageAccess.mockResolvedValue(undefined)
+    toggleStatus.mockResolvedValue(undefined)
     isCurrentStep.mockReturnValue(false)
   })
 
@@ -316,5 +330,17 @@ describe('user KeysView column settings', () => {
     const wrapper = await mountView()
 
     expect(wrapper.get('[data-test="current-concurrency"]').text()).toBe('3')
+  })
+
+  it('refreshes batch image access after changing API key status', async () => {
+    const wrapper = await mountView()
+    listKeys.mockClear()
+
+    await (wrapper.vm as any).toggleKeyStatus(createApiKey())
+    await flushPromises()
+
+    expect(toggleStatus).toHaveBeenCalledWith(1, 'inactive')
+    expect(listKeys).toHaveBeenCalledTimes(1)
+    expect(refreshBatchImageAccess).toHaveBeenCalledWith(true)
   })
 })

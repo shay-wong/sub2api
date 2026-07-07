@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -334,13 +335,14 @@ func (p *fakeProcessorProvider) Cleanup(context.Context, *BatchImageJob, *Accoun
 }
 
 type fakeBatchImageRepository struct {
-	jobs          map[string]*BatchImageJob
-	items         map[string][]CreateBatchImageItemParams
-	counts        map[string]BatchImageCounts
-	transitions   map[string][]string
-	events        map[string][]string
-	transitionErr error
-	replaceCalls  int
+	jobs               map[string]*BatchImageJob
+	items              map[string][]CreateBatchImageItemParams
+	counts             map[string]BatchImageCounts
+	transitions        map[string][]string
+	transitionProjects []int64
+	events             map[string][]string
+	transitionErr      error
+	replaceCalls       int
 }
 
 func newFakeBatchImageRepository() *fakeBatchImageRepository {
@@ -353,10 +355,14 @@ func newFakeBatchImageRepository() *fakeBatchImageRepository {
 	}
 }
 
-func (r *fakeBatchImageRepository) CreateBatchImageJob(_ context.Context, params CreateBatchImageJobParams) (*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) CreateBatchImageJob(ctx context.Context, params CreateBatchImageJobParams) (*BatchImageJob, error) {
+	if params.ProjectID <= 0 {
+		params.ProjectID, _ = ProjectIDFromContext(ctx)
+	}
 	job := &BatchImageJob{
 		BatchID:                 params.BatchID,
 		UserID:                  params.UserID,
+		ProjectID:               params.ProjectID,
 		APIKeyID:                params.APIKeyID,
 		AccountID:               params.AccountID,
 		Status:                  params.Status,
@@ -393,8 +399,11 @@ func (r *fakeBatchImageRepository) GetBatchImageJobByBatchID(_ context.Context, 
 	return job, nil
 }
 
-func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(_ context.Context, userID, apiKeyID int64, key string) (*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.Context, userID, apiKeyID int64, key string) (*BatchImageJob, error) {
 	for _, job := range r.jobs {
+		if !batchImageTestJobVisibleInContext(ctx, job) {
+			continue
+		}
 		if job.UserID == userID && job.APIKeyID != nil && *job.APIKeyID == apiKeyID && batchImageDerefString(job.IdempotencyKey) == key {
 			return job, nil
 		}
@@ -402,17 +411,25 @@ func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(_ context.Co
 	return nil, ErrBatchImageJobNotFound
 }
 
-func (r *fakeBatchImageRepository) GetBatchImageJobByBatchIDForOwner(_ context.Context, userID, apiKeyID int64, batchID string) (*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) GetBatchImageJobByBatchIDForOwner(ctx context.Context, userID, apiKeyID int64, batchID string) (*BatchImageJob, error) {
 	job, ok := r.jobs[batchID]
-	if !ok || job.UserID != userID || job.APIKeyID == nil || *job.APIKeyID != apiKeyID {
+	if !ok || !batchImageTestJobVisibleInContext(ctx, job) || job.UserID != userID || job.APIKeyID == nil || *job.APIKeyID != apiKeyID {
 		return nil, ErrBatchImageJobNotFound
 	}
 	return job, nil
 }
 
-func (r *fakeBatchImageRepository) ListBatchImageJobsForOwner(_ context.Context, userID, apiKeyID int64, filter BatchImageJobFilter) ([]*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, userID, apiKeyID int64, filter BatchImageJobFilter) ([]*BatchImageJob, error) {
+	return r.listBatchImageJobs(ctx, userID, &apiKeyID, filter)
+}
+
+func (r *fakeBatchImageRepository) ListBatchImageJobsForUser(ctx context.Context, userID int64, filter BatchImageJobFilter) ([]*BatchImageJob, error) {
+	return r.listBatchImageJobs(ctx, userID, nil, filter)
+}
+
+func (r *fakeBatchImageRepository) listBatchImageJobs(ctx context.Context, userID int64, apiKeyID *int64, filter BatchImageJobFilter) ([]*BatchImageJob, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 101 {
 		limit = 20
 	}
 	offset := filter.Offset
@@ -421,10 +438,19 @@ func (r *fakeBatchImageRepository) ListBatchImageJobsForOwner(_ context.Context,
 	}
 	var jobs []*BatchImageJob
 	for _, job := range r.jobs {
-		if job.UserID != userID || job.APIKeyID == nil || *job.APIKeyID != apiKeyID {
+		if !batchImageTestJobVisibleInContext(ctx, job) {
+			continue
+		}
+		if job.UserID != userID {
+			continue
+		}
+		if apiKeyID != nil && (job.APIKeyID == nil || *job.APIKeyID != *apiKeyID) {
 			continue
 		}
 		if filter.Status != "" && job.Status != filter.Status {
+			continue
+		}
+		if len(filter.Statuses) > 0 && !batchImageTestStatusIn(job.Status, filter.Statuses) {
 			continue
 		}
 		if filter.TaskNameLike != "" && !strings.Contains(strings.ToLower(job.TaskName), strings.ToLower(filter.TaskNameLike)) {
@@ -445,14 +471,20 @@ func (r *fakeBatchImageRepository) ListBatchImageJobsForOwner(_ context.Context,
 		if filter.CreatedBefore != nil && !job.CreatedAt.Before(*filter.CreatedBefore) {
 			continue
 		}
-		if offset > 0 {
-			offset--
-			continue
-		}
 		jobs = append(jobs, job)
-		if len(jobs) >= limit {
-			break
+	}
+	sort.SliceStable(jobs, func(i, j int) bool {
+		if !jobs[i].CreatedAt.Equal(jobs[j].CreatedAt) {
+			return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
 		}
+		return jobs[i].ID > jobs[j].ID
+	})
+	if offset >= len(jobs) {
+		return nil, nil
+	}
+	jobs = jobs[offset:]
+	if len(jobs) > limit {
+		jobs = jobs[:limit]
 	}
 	return jobs, nil
 }
@@ -466,7 +498,7 @@ func (r *fakeBatchImageRepository) GetBatchImageJobByID(_ context.Context, id in
 	return nil, ErrBatchImageJobNotFound
 }
 
-func (r *fakeBatchImageRepository) TransitionBatchImageJobStatus(_ context.Context, batchID, toStatus string, opts BatchImageTransitionOptions) error {
+func (r *fakeBatchImageRepository) TransitionBatchImageJobStatus(ctx context.Context, batchID, toStatus string, opts BatchImageTransitionOptions) error {
 	job, ok := r.jobs[batchID]
 	if !ok {
 		return ErrBatchImageJobNotFound
@@ -481,6 +513,7 @@ func (r *fakeBatchImageRepository) TransitionBatchImageJobStatus(_ context.Conte
 	job.LastErrorCode = opts.ErrorCode
 	job.LastErrorMessage = opts.ErrorMessage
 	r.transitions[batchID] = append(r.transitions[batchID], toStatus)
+	r.transitionProjects = append(r.transitionProjects, batchImageTestProjectIDFromContext(ctx))
 	if opts.EventType != "" {
 		r.events[batchID] = append(r.events[batchID], opts.EventType)
 	}
@@ -606,7 +639,7 @@ func (r *fakeBatchImageRepository) ReplaceBatchImageItemsForJob(_ context.Contex
 
 func (r *fakeBatchImageRepository) ListBatchImageItems(_ context.Context, batchID string, filter BatchImageItemFilter) ([]*BatchImageItem, error) {
 	limit := filter.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 501 {
 		limit = 100
 	}
 	offset := filter.Offset
@@ -645,6 +678,23 @@ func (r *fakeBatchImageRepository) ListBatchImageItems(_ context.Context, batchI
 		}
 	}
 	return result, nil
+}
+
+func batchImageTestJobVisibleInContext(ctx context.Context, job *BatchImageJob) bool {
+	if job == nil {
+		return false
+	}
+	projectID, ok := ProjectIDFromContext(ctx)
+	return !ok || job.ProjectID == 0 || job.ProjectID == projectID
+}
+
+func batchImageTestStatusIn(status string, allowed []string) bool {
+	for _, candidate := range allowed {
+		if status == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *fakeBatchImageRepository) ListBatchImageItemsForOwner(ctx context.Context, userID, apiKeyID int64, batchID string, filter BatchImageItemFilter) ([]*BatchImageItem, error) {

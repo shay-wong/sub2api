@@ -107,6 +107,7 @@ func NewBatchImageDownloadService(repo BatchImageRepository, accountRepo Account
 }
 
 func (s *BatchImageDownloadService) OpenItemContent(ctx context.Context, owner BatchImageOwner, batchID string, customID string, imageIndex int) (*BatchImageContentStream, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	if imageIndex < 0 {
 		return nil, ErrBatchImageItemImageIndexOutOfRange
 	}
@@ -179,6 +180,7 @@ func (s *BatchImageDownloadService) OpenItemContent(ctx context.Context, owner B
 }
 
 func (s *BatchImageDownloadService) StreamZip(ctx context.Context, owner BatchImageOwner, batchID string, opts BatchImageZipOptions, w io.Writer) (*BatchImageZipResult, error) {
+	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.getCompletedJob(ctx, owner, batchID)
 	if err != nil {
 		return nil, err

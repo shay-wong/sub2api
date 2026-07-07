@@ -37,6 +37,11 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
 
+	// batch_image_jobs: project scope for public batch image ownership.
+	requireColumn(t, tx, "batch_image_jobs", "project_id", "bigint", 0, false)
+	requireIndex(t, tx, "batch_image_jobs", "batch_image_jobs_project_user_created_at_idx")
+	requireForeignKeyOnDelete(t, tx, "batch_image_jobs", "project_id", "projects", "RESTRICT")
+
 	// redeem_codes: subscription fields
 	requireColumn(t, tx, "redeem_codes", "group_id", "bigint", 0, true)
 	requireColumn(t, tx, "redeem_codes", "validity_days", "integer", 0, false)

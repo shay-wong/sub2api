@@ -17,6 +17,8 @@ const (
 	FieldBatchID = "batch_id"
 	// FieldUserID holds the string denoting the user_id field in the database.
 	FieldUserID = "user_id"
+	// FieldProjectID holds the string denoting the project_id field in the database.
+	FieldProjectID = "project_id"
 	// FieldAPIKeyID holds the string denoting the api_key_id field in the database.
 	FieldAPIKeyID = "api_key_id"
 	// FieldAccountID holds the string denoting the account_id field in the database.
@@ -102,6 +104,7 @@ var Columns = []string{
 	FieldID,
 	FieldBatchID,
 	FieldUserID,
+	FieldProjectID,
 	FieldAPIKeyID,
 	FieldAccountID,
 	FieldProvider,
@@ -227,6 +230,11 @@ func ByBatchID(opts ...sql.OrderTermOption) OrderOption {
 // ByUserID orders the results by the user_id field.
 func ByUserID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUserID, opts...).ToFunc()
+}
+
+// ByProjectID orders the results by the project_id field.
+func ByProjectID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProjectID, opts...).ToFunc()
 }
 
 // ByAPIKeyID orders the results by the api_key_id field.
