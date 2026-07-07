@@ -15,6 +15,7 @@ type snapshotHydrationCache struct {
 	accounts         map[int64]*Account
 	getSnapshotCalls int
 	setSnapshotCalls int
+	getAccountCalls  int
 }
 
 func (c *snapshotHydrationCache) GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error) {
@@ -28,6 +29,7 @@ func (c *snapshotHydrationCache) SetSnapshot(ctx context.Context, bucket Schedul
 }
 
 func (c *snapshotHydrationCache) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
+	c.getAccountCalls++
 	if c.accounts == nil {
 		return nil, nil
 	}
@@ -68,15 +70,29 @@ func (c *snapshotHydrationCache) SetOutboxWatermark(ctx context.Context, id int6
 
 type scopedSchedulerAccountRepo struct {
 	AccountRepository
-	accounts      []Account
-	calls         int
-	lastProjectID int64
+	accounts             []Account
+	calls                int
+	lastProjectID        int64
+	getByIDCalls         int
+	lastGetByIDProjectID int64
 }
 
 func (r *scopedSchedulerAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	r.calls++
 	r.lastProjectID, _ = ProjectIDFromContext(ctx)
 	return append([]Account(nil), r.accounts...), nil
+}
+
+func (r *scopedSchedulerAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.getByIDCalls++
+	r.lastGetByIDProjectID, _ = ProjectIDFromContext(ctx)
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			account := r.accounts[i]
+			return &account, nil
+		}
+	}
+	return nil, ErrAccountNotFound
 }
 
 func TestSchedulerSnapshotServiceListSchedulableAccountsBypassesGlobalCacheWhenProjectScoped(t *testing.T) {
@@ -110,6 +126,49 @@ func TestSchedulerSnapshotServiceListSchedulableAccountsBypassesGlobalCacheWhenP
 	}
 	if repo.calls != 1 || repo.lastProjectID != 77 {
 		t.Fatalf("expected scoped DB fallback once with project 77, calls=%d project=%d", repo.calls, repo.lastProjectID)
+	}
+}
+
+func TestSchedulerSnapshotServiceGetAccountBypassesGlobalCacheWhenProjectScoped(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			1: {
+				ID:       1,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key": "sk-global-cache",
+				},
+			},
+		},
+	}
+	repo := &scopedSchedulerAccountRepo{
+		accounts: []Account{{
+			ID:       1,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"api_key": "sk-project-scoped",
+			},
+		}},
+	}
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, nil)
+
+	account, err := svc.GetAccount(WithProjectID(context.Background(), 77), 1)
+	if err != nil {
+		t.Fatalf("GetAccount error: %v", err)
+	}
+	if account == nil {
+		t.Fatalf("expected account")
+	}
+	if got := account.GetCredential("api_key"); got != "sk-project-scoped" {
+		t.Fatalf("expected project-scoped DB account, got api_key=%q", got)
+	}
+	if cache.getAccountCalls != 0 {
+		t.Fatalf("project-scoped GetAccount must not read global account cache, got %d reads", cache.getAccountCalls)
+	}
+	if repo.getByIDCalls != 1 || repo.lastGetByIDProjectID != 77 {
+		t.Fatalf("expected scoped GetByID once with project 77, calls=%d project=%d", repo.getByIDCalls, repo.lastGetByIDProjectID)
 	}
 }
 
@@ -164,6 +223,48 @@ func TestOpenAISelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedul
 	}
 	if got := selection.Account.GetOpenAIApiKey(); got != "sk-live" {
 		t.Fatalf("expected hydrated api key, got %q", got)
+	}
+}
+
+func TestOpenAIHydrateSelectedAccountPreservesProjectScopeForSchedulerSnapshot(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			1: {
+				ID:       1,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key": "sk-global-cache",
+				},
+			},
+		},
+	}
+	repo := &scopedSchedulerAccountRepo{
+		accounts: []Account{{
+			ID:       1,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"api_key": "sk-project-scoped",
+			},
+		}},
+	}
+	svc := &OpenAIGatewayService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, repo, nil, nil),
+	}
+
+	account, err := svc.hydrateSelectedAccount(WithProjectID(context.Background(), 77), &Account{ID: 1})
+	if err != nil {
+		t.Fatalf("hydrateSelectedAccount error: %v", err)
+	}
+	if got := account.GetOpenAIApiKey(); got != "sk-project-scoped" {
+		t.Fatalf("expected project-scoped api key, got %q", got)
+	}
+	if cache.getAccountCalls != 0 {
+		t.Fatalf("project-scoped gateway hydration must not read global account cache, got %d reads", cache.getAccountCalls)
+	}
+	if repo.getByIDCalls != 1 || repo.lastGetByIDProjectID != 77 {
+		t.Fatalf("expected scoped GetByID once with project 77, calls=%d project=%d", repo.getByIDCalls, repo.lastGetByIDProjectID)
 	}
 }
 
@@ -237,6 +338,46 @@ func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedu
 	}
 	if got := result.Account.GetCredential("api_key"); got != "anthropic-live-key" {
 		t.Fatalf("expected hydrated api key, got %q", got)
+	}
+}
+
+func TestGatewayHydrateSelectedAccountPreservesProjectScopeForSchedulerSnapshot(t *testing.T) {
+	cache := &snapshotHydrationCache{
+		accounts: map[int64]*Account{
+			9: {
+				ID:       9,
+				Platform: PlatformAnthropic,
+				Credentials: map[string]any{
+					"api_key": "anthropic-global-cache",
+				},
+			},
+		},
+	}
+	repo := &scopedSchedulerAccountRepo{
+		accounts: []Account{{
+			ID:       9,
+			Platform: PlatformAnthropic,
+			Credentials: map[string]any{
+				"api_key": "anthropic-project-scoped",
+			},
+		}},
+	}
+	svc := &GatewayService{
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, repo, nil, nil),
+	}
+
+	account, err := svc.hydrateSelectedAccount(WithProjectID(context.Background(), 77), &Account{ID: 9})
+	if err != nil {
+		t.Fatalf("hydrateSelectedAccount error: %v", err)
+	}
+	if got := account.GetCredential("api_key"); got != "anthropic-project-scoped" {
+		t.Fatalf("expected project-scoped api key, got %q", got)
+	}
+	if cache.getAccountCalls != 0 {
+		t.Fatalf("project-scoped gateway hydration must not read global account cache, got %d reads", cache.getAccountCalls)
+	}
+	if repo.getByIDCalls != 1 || repo.lastGetByIDProjectID != 77 {
+		t.Fatalf("expected scoped GetByID once with project 77, calls=%d project=%d", repo.getByIDCalls, repo.lastGetByIDProjectID)
 	}
 }
 

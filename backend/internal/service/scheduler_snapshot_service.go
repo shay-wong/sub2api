@@ -152,7 +152,8 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 	if accountID <= 0 {
 		return nil, nil
 	}
-	if s.cache != nil {
+	useGlobalCache := !schedulerRequestHasProjectScope(ctx)
+	if s.cache != nil && useGlobalCache {
 		account, err := s.cache.GetAccount(ctx, accountID)
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] account cache read failed: id=%d err=%v", accountID, err)
@@ -161,6 +162,9 @@ func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int
 		}
 	}
 
+	if s.accountRepo == nil {
+		return nil, ErrAccountNotFound
+	}
 	if err := s.guardFallback(ctx); err != nil {
 		return nil, err
 	}
