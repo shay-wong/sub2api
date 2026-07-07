@@ -29,6 +29,12 @@ const (
 )
 
 const (
+	BatchImageErrorSubmitStaleBeforeProvider = "SUBMIT_STALE_BEFORE_PROVIDER"
+	BatchImageErrorBillingReleaseFailed      = "BILLING_RELEASE_FAILED"
+	BatchImageErrorBillingReleaseRecovered   = "BILLING_RELEASE_RECOVERED"
+)
+
+const (
 	BatchImageItemStatusPending   = "pending"
 	BatchImageItemStatusSuccess   = "success"
 	BatchImageItemStatusFailed    = "failed"
@@ -322,6 +328,8 @@ type BatchImageRepository interface {
 	UpdateBatchImageJobProviderOutputRef(ctx context.Context, batchID, providerOutputRef string) error
 	UpdateBatchImageJobProviderSubmit(ctx context.Context, params UpdateBatchImageJobProviderSubmitParams) error
 	RecordBatchImageJobSubmitFailure(ctx context.Context, batchID, code, message string, markFailed bool) error
+	MarkBatchImageBillingReleaseFailed(ctx context.Context, batchID, message string) error
+	MarkBatchImageBillingReleaseRecovered(ctx context.Context, batchID string) error
 	MarkBatchImageJobSettled(ctx context.Context, params MarkBatchImageJobSettledParams) error
 	SetBatchImageJobSettlementFailed(ctx context.Context, batchID, code, message string) (int, error)
 	CreateBatchImageItem(ctx context.Context, params CreateBatchImageItemParams) (*BatchImageItem, error)

@@ -14,11 +14,12 @@ import (
 type recordingBatchImageQueue struct {
 	*fakeBatchImageQueue
 	enqueued []string
+	err      error
 }
 
 func (q *recordingBatchImageQueue) Enqueue(_ context.Context, batchID string) error {
 	q.enqueued = append(q.enqueued, batchID)
-	return nil
+	return q.err
 }
 
 func TestBatchImageBillingRecoveryService_ReleasesStaleUnsubmittedHold(t *testing.T) {
@@ -58,8 +59,10 @@ func TestBatchImageBillingRecoveryService_ReleasesStaleUnsubmittedHold(t *testin
 	require.NoError(t, err)
 	require.Equal(t, 1, released)
 	require.Equal(t, BatchImageJobStatusFailed, repo.jobs[stale.BatchID].Status)
-	require.Equal(t, "SUBMIT_STALE_BEFORE_PROVIDER", batchImageDerefString(repo.jobs[stale.BatchID].LastErrorCode))
+	require.Equal(t, BatchImageErrorBillingReleaseRecovered, batchImageDerefString(repo.jobs[stale.BatchID].LastErrorCode))
 	require.Equal(t, []int64{stale.ProjectID}, repo.transitionProjects)
+	require.Contains(t, repo.events[stale.BatchID], "billing_hold_recovery_failed_unsubmitted")
+	require.Contains(t, repo.events[stale.BatchID], "billing_hold_release_recovered")
 	require.Len(t, billing.releases, 1)
 	require.Equal(t, BatchImageReleaseRequestID(stale.BatchID), billing.releases[0].RequestID)
 	require.Equal(t, []int64{stale.ProjectID}, billing.releaseProjects)
@@ -119,7 +122,48 @@ func TestBatchImageBillingRecoveryService_EnqueuesRetryWhenReleaseFails(t *testi
 	require.Error(t, err)
 	require.Equal(t, 0, released)
 	require.Equal(t, BatchImageJobStatusFailed, repo.jobs[stale.BatchID].Status)
+	require.Equal(t, BatchImageErrorBillingReleaseFailed, batchImageDerefString(repo.jobs[stale.BatchID].LastErrorCode))
 	require.Equal(t, []string{stale.BatchID}, queue.enqueued)
+}
+
+func TestBatchImageBillingRecoveryService_RetriesFailedReleaseWhenQueueEnqueueFails(t *testing.T) {
+	repo := newFakeBatchImageRepository()
+	apiKeyID := int64(22)
+	holdAmount := 0.5
+	stale := &BatchImageJob{
+		BatchID:       "imgbatch_release_queue_fail",
+		UserID:        11,
+		ProjectID:     77,
+		APIKeyID:      &apiKeyID,
+		Status:        BatchImageJobStatusCreated,
+		EstimatedCost: holdAmount,
+		HoldAmount:    &holdAmount,
+		CreatedAt:     time.Now().Add(-time.Hour),
+		UpdatedAt:     time.Now().Add(-time.Hour),
+	}
+	repo.jobs[stale.BatchID] = stale
+	billing := &fakeBatchImageBillingRepo{releaseErr: errors.New("billing db down")}
+	queue := &recordingBatchImageQueue{
+		fakeBatchImageQueue: newFakeBatchImageQueue(""),
+		err:                 errors.New("redis down"),
+	}
+	svc := &BatchImageBillingRecoveryService{Repo: repo, Billing: billing, Queue: queue, StaleAfter: time.Minute, Limit: 10}
+
+	released, err := svc.ReleaseStaleUnsubmittedOnce(context.Background())
+	require.Error(t, err)
+	require.Equal(t, 0, released)
+	require.Equal(t, BatchImageJobStatusFailed, repo.jobs[stale.BatchID].Status)
+	require.Equal(t, BatchImageErrorBillingReleaseFailed, batchImageDerefString(repo.jobs[stale.BatchID].LastErrorCode))
+	require.Equal(t, []string{stale.BatchID}, queue.enqueued)
+
+	billing.releaseErr = nil
+	queue.err = nil
+	released, err = svc.ReleaseStaleUnsubmittedOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, released)
+	require.Equal(t, BatchImageErrorBillingReleaseRecovered, batchImageDerefString(repo.jobs[stale.BatchID].LastErrorCode))
+	require.Contains(t, repo.events[stale.BatchID], "billing_hold_release_recovered")
+	require.Len(t, billing.releases, 2)
 }
 
 type batchImageBillingRecoveryAuthCache struct {

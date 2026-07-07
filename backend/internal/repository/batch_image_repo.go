@@ -358,6 +358,51 @@ WHERE batch_id = $1`, batchID, code, message, now)
 	return appendBatchImageEventWithSQL(ctx, r.sql, batchID, eventType, map[string]any{"error_code": code})
 }
 
+func (r *batchImageRepository) MarkBatchImageBillingReleaseFailed(ctx context.Context, batchID, message string) error {
+	now := time.Now()
+	res, err := r.sql.ExecContext(ctx, `
+UPDATE batch_image_jobs
+SET status = CASE WHEN status IN ('failed', 'cancelled') THEN status ELSE 'failed' END,
+    last_error_code = $2,
+    last_error_message = $3,
+    finished_at = CASE WHEN finished_at IS NULL THEN $4 ELSE finished_at END,
+    updated_at = $4,
+    version = version + 1
+WHERE batch_id = $1`, batchID, service.BatchImageErrorBillingReleaseFailed, message, now)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return service.ErrBatchImageJobNotFound
+	}
+	return appendBatchImageEventWithSQL(ctx, r.sql, batchID, "billing_hold_release_failed", map[string]any{
+		"batch_id":   batchID,
+		"error_code": service.BatchImageErrorBillingReleaseFailed,
+	})
+}
+
+func (r *batchImageRepository) MarkBatchImageBillingReleaseRecovered(ctx context.Context, batchID string) error {
+	now := time.Now()
+	res, err := r.sql.ExecContext(ctx, `
+UPDATE batch_image_jobs
+SET last_error_code = $2,
+    last_error_message = $3,
+    updated_at = $4,
+    version = version + 1
+WHERE batch_id = $1
+  AND status IN ('failed', 'cancelled')
+  AND last_error_code IN ($5, $6)`, batchID, service.BatchImageErrorBillingReleaseRecovered, "billing hold released after retry", now, service.BatchImageErrorBillingReleaseFailed, service.BatchImageErrorSubmitStaleBeforeProvider)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+		return nil
+	}
+	return appendBatchImageEventWithSQL(ctx, r.sql, batchID, "billing_hold_release_recovered", map[string]any{
+		"batch_id": batchID,
+	})
+}
+
 func (r *batchImageRepository) MarkBatchImageJobSettled(ctx context.Context, params service.MarkBatchImageJobSettledParams) error {
 	if r.db == nil {
 		return r.markBatchImageJobSettledWithSQL(ctx, r.sql, params)
@@ -693,12 +738,15 @@ func (r *batchImageRepository) ListStaleUnsubmittedBatchImageJobs(ctx context.Co
 		limit = 100
 	}
 	rows, err := r.sql.QueryContext(ctx, batchImageJobSelectSQL+`
- WHERE status IN ('created', 'uploading')
-   AND provider_job_name IS NULL
-   AND COALESCE(hold_amount, estimated_cost, 0) > 0
-   AND updated_at <= $1
- ORDER BY updated_at ASC, id ASC
- LIMIT $2`, cutoff, limit)
+ WHERE COALESCE(hold_amount, estimated_cost, 0) > 0
+   AND (
+     (status IN ('created', 'uploading') AND provider_job_name IS NULL AND updated_at <= $1)
+     OR (status IN ('failed', 'cancelled') AND last_error_code IN ($3, $4))
+   )
+ ORDER BY CASE WHEN status IN ('failed', 'cancelled') AND last_error_code IN ($3, $4) THEN 0 ELSE 1 END,
+          updated_at ASC,
+          id ASC
+ LIMIT $2`, cutoff, limit, service.BatchImageErrorBillingReleaseFailed, service.BatchImageErrorSubmitStaleBeforeProvider)
 	if err != nil {
 		return nil, err
 	}

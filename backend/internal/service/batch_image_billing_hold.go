@@ -114,3 +114,75 @@ func releaseBatchImageBalanceHold(ctx context.Context, repo UsageBillingReposito
 	}
 	return nil
 }
+
+func releaseBatchImageHoldWithRecovery(
+	ctx context.Context,
+	repo BatchImageRepository,
+	billing UsageBillingRepository,
+	queue BatchImageQueue,
+	authCache APIKeyAuthCacheInvalidator,
+	job *BatchImageJob,
+	payloadHash string,
+) error {
+	if job == nil {
+		return nil
+	}
+	releaseCtx, releaseCancel := batchImageCompensationContext(ctx)
+	releaseErr := releaseBatchImageBalanceHold(releaseCtx, billing, job, payloadHash)
+	releaseCancel()
+	if releaseErr != nil {
+		stateCtx, stateCancel := batchImageCompensationContext(ctx)
+		defer stateCancel()
+		var markErr error
+		if repo != nil {
+			markErr = repo.MarkBatchImageBillingReleaseFailed(stateCtx, job.BatchID, sanitizeBatchImagePublicMessage(releaseErr.Error()))
+		}
+		if markErr != nil {
+			return ErrBatchImageBillingHoldFailed.WithCause(errors.Join(releaseErr, markErr))
+		}
+		enqueueErr := enqueueBatchImageBillingRetry(stateCtx, repo, queue, job.BatchID)
+		if enqueueErr != nil {
+			return ErrBatchImageBillingHoldFailed.WithCause(errors.Join(releaseErr, enqueueErr))
+		}
+		return ErrBatchImageBillingHoldFailed.WithCause(releaseErr)
+	}
+
+	stateCtx, stateCancel := batchImageCompensationContext(ctx)
+	defer stateCancel()
+	if repo != nil && isBatchImageBillingReleaseRecoveryMarker(batchImageDerefString(job.LastErrorCode)) {
+		if err := repo.MarkBatchImageBillingReleaseRecovered(stateCtx, job.BatchID); err != nil {
+			return err
+		}
+		job.LastErrorCode = batchImageStringPtr(BatchImageErrorBillingReleaseRecovered)
+		job.LastErrorMessage = batchImageStringPtr("billing hold released after retry")
+	}
+	if authCache != nil && job.UserID > 0 {
+		authCache.InvalidateAuthCacheByUserID(stateCtx, job.UserID)
+	}
+	return nil
+}
+
+func enqueueBatchImageBillingRetry(ctx context.Context, repo BatchImageRepository, queue BatchImageQueue, batchID string) error {
+	if queue == nil {
+		return nil
+	}
+	if err := queue.Enqueue(ctx, batchID); err != nil && !errors.Is(err, ErrBatchImageAlreadyQueued) {
+		logger.L().Warn("batch_image.billing_retry_enqueue_failed",
+			zap.String("batch_id", batchID),
+			zap.Error(err),
+		)
+		if repo != nil {
+			if eventErr := repo.AppendBatchImageEvent(ctx, batchID, "billing_retry_enqueue_failed", map[string]any{
+				"batch_id": batchID,
+				"error":    sanitizeBatchImagePublicMessage(err.Error()),
+			}); eventErr != nil {
+				logger.L().Warn("batch_image.billing_retry_event_failed",
+					zap.String("batch_id", batchID),
+					zap.Error(eventErr),
+				)
+			}
+		}
+		return err
+	}
+	return nil
+}

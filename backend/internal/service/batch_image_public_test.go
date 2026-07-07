@@ -373,6 +373,25 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		}
 	})
 
+	t.Run("provider failure with release marker failure does not enqueue retry", func(t *testing.T) {
+		svc, repo, queue, gemini, _ := newTestBatchImagePublicService(true)
+		gemini.submitErr = errors.New("projects/secret-provider-job failed")
+		billing := svc.BillingRepo.(*fakeBatchImageBillingRepo)
+		billing.releaseErr = errors.New("billing database timeout")
+		repo.markReleaseErr = errors.New("write failed")
+
+		_, err := svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "")
+		require.ErrorIs(t, err, ErrBatchImageBillingHoldFailed)
+		require.Len(t, billing.reserves, 1)
+		require.Len(t, billing.releases, 1)
+		require.Empty(t, queue.enqueued)
+		require.Len(t, repo.jobs, 1)
+		for _, job := range repo.jobs {
+			require.Equal(t, BatchImageJobStatusUploading, job.Status)
+			require.Empty(t, batchImageDerefString(job.LastErrorCode))
+		}
+	})
+
 	t.Run("queue failure is recorded after provider submit", func(t *testing.T) {
 		svc, repo, queue, _, _ := newTestBatchImagePublicService(true)
 		queue.err = errors.New("redis unavailable")
@@ -404,6 +423,33 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Equal(t, []string{first.ID}, queue.enqueued)
 	})
 
+	t.Run("idempotency returns existing batch when group was later disabled", func(t *testing.T) {
+		svc, _, queue, gemini, _ := newTestBatchImagePublicService(true)
+		req := validBatchImageSubmitRequest()
+		first, err := svc.Submit(ctx, testBatchImageOwner(), req, "client-key")
+		require.NoError(t, err)
+
+		groupID := int64(7)
+		svc.GroupRepo = &publicBatchImageGroupRepo{groups: map[int64]*Group{
+			groupID: {
+				ID:                           groupID,
+				Platform:                     PlatformGemini,
+				RateMultiplier:               1,
+				AllowBatchImageGeneration:    false,
+				BatchImageDiscountMultiplier: 0.5,
+				BatchImageHoldMultiplier:     0.6,
+			},
+		}}
+		owner := testBatchImageOwner()
+		owner.GroupID = &groupID
+
+		second, err := svc.Submit(ctx, owner, req, "client-key")
+		require.NoError(t, err)
+		require.Equal(t, first.ID, second.ID)
+		require.Len(t, gemini.submits, 1)
+		require.Equal(t, []string{first.ID}, queue.enqueued)
+	})
+
 	t.Run("idempotency conflict rejects changed request", func(t *testing.T) {
 		svc, _, _, _, _ := newTestBatchImagePublicService(true)
 		req := validBatchImageSubmitRequest()
@@ -426,6 +472,39 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.NoError(t, err)
 		requireBatchImagePublicJSONHasNoInternals(t, string(body))
 	})
+}
+
+func TestBatchImagePublicService_SubmitHeartbeatInterval(t *testing.T) {
+	svc, _, _, _, _ := newTestBatchImagePublicService(true)
+	require.Equal(t, 200*time.Second, svc.submitHeartbeatInterval())
+
+	svc.Config.BatchImage.StaleActiveAfterSeconds = 9
+	require.Equal(t, 3*time.Second, svc.submitHeartbeatInterval())
+
+	svc.Config.BatchImage.StaleActiveAfterSeconds = 30
+	require.Equal(t, 10*time.Second, svc.submitHeartbeatInterval())
+
+	svc.Config.BatchImage.StaleActiveAfterSeconds = 45
+	require.Equal(t, 15*time.Second, svc.submitHeartbeatInterval())
+}
+
+func TestBatchImagePublicService_AbortOrphanProviderJobUsesDetachedContext(t *testing.T) {
+	svc, repo, _, gemini, _ := newTestBatchImagePublicService(true)
+	account := testBatchImageAccount(101, AccountTypeAPIKey)
+	job := &BatchImageJob{BatchID: "imgbatch_orphan", Provider: BatchImageProviderGeminiAPI}
+	repo.jobs[job.BatchID] = job
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.abortOrphanProviderJob(ctx, gemini, job, &account, &BatchProviderJob{
+		ProviderJobName:  "providers/gemini_api/job",
+		ProviderInputRef: "files/gemini_api/input",
+	})
+
+	require.Equal(t, 1, gemini.cancelCount)
+	require.NoError(t, gemini.cancelCtxErr)
+	require.NoError(t, gemini.cleanupCtxErr)
+	require.Contains(t, repo.events[job.BatchID], "provider_job_aborted_after_submit")
 }
 
 func TestBatchImagePublicService_List(t *testing.T) {
@@ -996,9 +1075,11 @@ type publicBatchImageProvider struct {
 	submitErr      error
 	cancelCount    int
 	cancelErr      error
+	cancelCtxErr   error
 	result         string
 	cleanupTargets []CleanupTarget
 	cleanupErr     error
+	cleanupCtxErr  error
 }
 
 func (p *publicBatchImageProvider) Name() string { return p.name }
@@ -1021,7 +1102,8 @@ func (p *publicBatchImageProvider) Get(context.Context, *BatchImageJob, *Account
 	return &BatchProviderStatus{InternalState: BatchProviderStateQueued}, nil
 }
 
-func (p *publicBatchImageProvider) Cancel(context.Context, *BatchImageJob, *Account) error {
+func (p *publicBatchImageProvider) Cancel(ctx context.Context, _ *BatchImageJob, _ *Account) error {
+	p.cancelCtxErr = ctx.Err()
 	p.cancelCount++
 	return p.cancelErr
 }
@@ -1030,7 +1112,8 @@ func (p *publicBatchImageProvider) OpenResult(context.Context, *BatchImageJob, *
 	return io.NopCloser(strings.NewReader(p.result)), "application/jsonl", nil
 }
 
-func (p *publicBatchImageProvider) Cleanup(_ context.Context, _ *BatchImageJob, _ *Account, target CleanupTarget) error {
+func (p *publicBatchImageProvider) Cleanup(ctx context.Context, _ *BatchImageJob, _ *Account, target CleanupTarget) error {
+	p.cleanupCtxErr = ctx.Err()
 	p.cleanupTargets = append(p.cleanupTargets, target)
 	return p.cleanupErr
 }

@@ -316,6 +316,32 @@ func TestBatchImageProviderProcessor_StatusFlow(t *testing.T) {
 		require.Len(t, billing.releases, 1)
 		require.Equal(t, BatchImageReleaseRequestID("imgbatch_flow"), billing.releases[0].RequestID)
 	})
+
+	t.Run("terminal release retry marks recovered after worker release", func(t *testing.T) {
+		repo := newFakeBatchImageRepository()
+		apiKeyID := int64(22)
+		holdAmount := 0.5
+		repo.jobs["imgbatch_flow"] = &BatchImageJob{
+			BatchID:       "imgbatch_flow",
+			UserID:        11,
+			APIKeyID:      &apiKeyID,
+			Status:        BatchImageJobStatusFailed,
+			Provider:      "fake",
+			EstimatedCost: holdAmount,
+			HoldAmount:    &holdAmount,
+			LastErrorCode: batchImageStringPtr(BatchImageErrorBillingReleaseFailed),
+		}
+		processor := newTestBatchImageProcessor(repo, &fakeProcessorProvider{})
+		billing := &fakeBatchImageBillingRepo{}
+		processor.BillingRepo = billing
+
+		got, err := processor.Process(ctx, "imgbatch_flow")
+		require.NoError(t, err)
+		require.True(t, got.Terminal)
+		require.Len(t, billing.releases, 1)
+		require.Equal(t, BatchImageErrorBillingReleaseRecovered, batchImageDerefString(repo.jobs["imgbatch_flow"].LastErrorCode))
+		require.Contains(t, repo.events["imgbatch_flow"], "billing_hold_release_recovered")
+	})
 }
 
 func TestCanTransitionBatchImageJob_PR5DirectIndexing(t *testing.T) {
@@ -388,6 +414,7 @@ type fakeBatchImageRepository struct {
 	transitionProjects []int64
 	events             map[string][]string
 	transitionErr      error
+	markReleaseErr     error
 	replaceCalls       int
 }
 
@@ -646,6 +673,36 @@ func (r *fakeBatchImageRepository) RecordBatchImageJobSubmitFailure(_ context.Co
 	return nil
 }
 
+func (r *fakeBatchImageRepository) MarkBatchImageBillingReleaseFailed(_ context.Context, batchID, message string) error {
+	if r.markReleaseErr != nil {
+		return r.markReleaseErr
+	}
+	job, ok := r.jobs[batchID]
+	if !ok {
+		return ErrBatchImageJobNotFound
+	}
+	if job.Status != BatchImageJobStatusFailed && job.Status != BatchImageJobStatusCancelled {
+		job.Status = BatchImageJobStatusFailed
+	}
+	job.LastErrorCode = batchImageStringPtr(BatchImageErrorBillingReleaseFailed)
+	job.LastErrorMessage = batchImageOptionalStringPtr(message)
+	r.events[batchID] = append(r.events[batchID], "billing_hold_release_failed")
+	return nil
+}
+
+func (r *fakeBatchImageRepository) MarkBatchImageBillingReleaseRecovered(_ context.Context, batchID string) error {
+	job, ok := r.jobs[batchID]
+	if !ok {
+		return ErrBatchImageJobNotFound
+	}
+	if (job.Status == BatchImageJobStatusFailed || job.Status == BatchImageJobStatusCancelled) && isBatchImageBillingReleaseRecoveryMarker(batchImageDerefString(job.LastErrorCode)) {
+		job.LastErrorCode = batchImageStringPtr(BatchImageErrorBillingReleaseRecovered)
+		job.LastErrorMessage = batchImageStringPtr("billing hold released after retry")
+		r.events[batchID] = append(r.events[batchID], "billing_hold_release_recovered")
+	}
+	return nil
+}
+
 func (r *fakeBatchImageRepository) MarkBatchImageJobSettled(_ context.Context, params MarkBatchImageJobSettledParams) error {
 	job, ok := r.jobs[params.BatchID]
 	if !ok {
@@ -875,17 +932,16 @@ func (r *fakeBatchImageRepository) ListStaleUnsubmittedBatchImageJobs(_ context.
 		if len(jobs) >= limit {
 			break
 		}
-		if job.Status != BatchImageJobStatusCreated && job.Status != BatchImageJobStatusUploading {
-			continue
-		}
-		if batchImageDerefString(job.ProviderJobName) != "" {
-			continue
-		}
 		holdAmount := job.EstimatedCost
 		if job.HoldAmount != nil {
 			holdAmount = *job.HoldAmount
 		}
-		if holdAmount <= 0 || job.UpdatedAt.After(cutoff) {
+		if holdAmount <= 0 {
+			continue
+		}
+		isStaleSubmitting := (job.Status == BatchImageJobStatusCreated || job.Status == BatchImageJobStatusUploading) && batchImageDerefString(job.ProviderJobName) == "" && !job.UpdatedAt.After(cutoff)
+		isReleaseRetry := (job.Status == BatchImageJobStatusFailed || job.Status == BatchImageJobStatusCancelled) && isBatchImageBillingReleaseRecoveryMarker(batchImageDerefString(job.LastErrorCode))
+		if !isStaleSubmitting && !isReleaseRetry {
 			continue
 		}
 		jobs = append(jobs, job)

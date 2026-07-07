@@ -31,6 +31,7 @@ const (
 	maxBatchImageReferenceImageBytes    = 10 * 1024 * 1024
 	defaultBatchImageMaxReferenceImages = 1000
 	defaultBatchImageMaxReferenceBytes  = 128 * 1024 * 1024
+	batchImageCompensationTimeout       = 30 * time.Second
 )
 
 type BatchImageAccountSelectionRepository interface {
@@ -217,11 +218,6 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if err != nil {
 		return nil, err
 	}
-	// 与 ListModels 使用同一鉴权谓词（AllowBatchImageGeneration + Platform==Gemini），
-	// 避免两个入口校验口径不一致留下防御纵深缺口。
-	if err := s.ensureGroupAllowsBatchImage(ctx, owner.GroupID); err != nil {
-		return nil, err
-	}
 	requestHash := HashBatchImageSubmitRequest(normalized)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey != "" {
@@ -241,6 +237,13 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 		if !errors.Is(err, ErrBatchImageJobNotFound) {
 			return nil, err
 		}
+	}
+
+	// 与 ListModels 使用同一鉴权谓词（AllowBatchImageGeneration + Platform==Gemini），
+	// 避免两个入口校验口径不一致留下防御纵深缺口。幂等重放已在上方返回，
+	// 这里仅约束需要创建新上游任务的请求。
+	if err := s.ensureGroupAllowsBatchImage(ctx, owner.GroupID); err != nil {
+		return nil, err
 	}
 
 	provider, account, err := s.selectProviderAndAccount(ctx, owner, normalized.Provider, normalized.Model)
@@ -414,13 +417,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 }
 
 func (s *BatchImagePublicService) releaseFailedSubmitHold(ctx context.Context, job *BatchImageJob, requestHash string) error {
-	if err := releaseBatchImageBalanceHold(ctx, s.BillingRepo, job, requestHash); err != nil {
-		_ = s.Repo.RecordBatchImageJobSubmitFailure(ctx, job.BatchID, "BILLING_RELEASE_FAILED", sanitizeBatchImagePublicMessage(err.Error()), true)
-		s.enqueueBillingRetry(ctx, job.BatchID)
-		return ErrBatchImageBillingHoldFailed
-	}
-	s.invalidateAuthCache(ctx, job.UserID)
-	return nil
+	return releaseBatchImageHoldWithRecovery(ctx, s.Repo, s.BillingRepo, s.Queue, s.AuthCache, job, requestHash)
 }
 
 // runSubmitHeartbeat 在 provider.Submit 期间周期性刷新 job 的 updated_at，
@@ -451,7 +448,10 @@ func (s *BatchImagePublicService) submitHeartbeatInterval() time.Duration {
 		staleAfter = time.Duration(s.Config.BatchImage.StaleActiveAfterSeconds) * time.Second
 	}
 	interval := staleAfter / 3
-	if interval < 15*time.Second {
+	if interval <= 0 {
+		return time.Second
+	}
+	if interval < 15*time.Second && staleAfter >= 45*time.Second {
 		interval = 15 * time.Second
 	}
 	return interval
@@ -463,25 +463,27 @@ func (s *BatchImagePublicService) abortOrphanProviderJob(ctx context.Context, pr
 	if s == nil || provider == nil || job == nil || providerJob == nil {
 		return
 	}
+	compCtx, cancel := batchImageCompensationContext(ctx)
+	defer cancel()
 	orphan := *job
 	orphan.ProviderJobName = batchImageOptionalStringPtr(providerJob.ProviderJobName)
 	orphan.ProviderInputRef = batchImageOptionalStringPtr(providerJob.ProviderInputRef)
 	orphan.GCSInputURI = batchImageOptionalStringPtr(batchImageGCSRef(provider.Name(), providerJob.ProviderInputRef))
-	if err := provider.Cancel(ctx, &orphan, account); err != nil {
+	if err := provider.Cancel(compCtx, &orphan, account); err != nil {
 		logger.L().Warn("batch_image.orphan_provider_job_cancel_failed",
 			zap.String("batch_id", job.BatchID),
 			zap.String("provider", provider.Name()),
 			zap.Error(err),
 		)
 	}
-	if err := provider.Cleanup(ctx, &orphan, account, CleanupTargetInput); err != nil {
+	if err := provider.Cleanup(compCtx, &orphan, account, CleanupTargetInput); err != nil {
 		logger.L().Warn("batch_image.orphan_provider_job_cleanup_failed",
 			zap.String("batch_id", job.BatchID),
 			zap.String("provider", provider.Name()),
 			zap.Error(err),
 		)
 	}
-	if err := s.Repo.AppendBatchImageEvent(ctx, job.BatchID, "provider_job_aborted_after_submit", map[string]any{
+	if err := s.Repo.AppendBatchImageEvent(compCtx, job.BatchID, "provider_job_aborted_after_submit", map[string]any{
 		"batch_id": job.BatchID,
 		"provider": provider.Name(),
 	}); err != nil {
@@ -511,25 +513,12 @@ func (s *BatchImagePublicService) createPendingItems(ctx context.Context, batchI
 	return s.Repo.BulkCreateBatchImageItems(ctx, params)
 }
 
-func (s *BatchImagePublicService) enqueueBillingRetry(ctx context.Context, batchID string) {
-	if s == nil || s.Queue == nil {
-		return
+func batchImageCompensationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
 	}
-	if err := s.Queue.Enqueue(ctx, batchID); err != nil && !errors.Is(err, ErrBatchImageAlreadyQueued) {
-		logger.L().Warn("batch_image.billing_retry_enqueue_failed",
-			zap.String("batch_id", batchID),
-			zap.Error(err),
-		)
-		if eventErr := s.Repo.AppendBatchImageEvent(ctx, batchID, "billing_retry_enqueue_failed", map[string]any{
-			"batch_id": batchID,
-			"error":    sanitizeBatchImagePublicMessage(err.Error()),
-		}); eventErr != nil {
-			logger.L().Warn("batch_image.billing_retry_event_failed",
-				zap.String("batch_id", batchID),
-				zap.Error(eventErr),
-			)
-		}
-	}
+	return context.WithTimeout(base, batchImageCompensationTimeout)
 }
 
 func (s *BatchImagePublicService) hidePreUpstreamSubmitFailure(ctx context.Context, owner BatchImageOwner, job *BatchImageJob) {
@@ -706,11 +695,9 @@ func (s *BatchImagePublicService) Cancel(ctx context.Context, owner BatchImageOw
 	}
 	if isBatchImageProcessorDoneStatus(job.Status) {
 		if job.Status == BatchImageJobStatusFailed || job.Status == BatchImageJobStatusCancelled {
-			if err := releaseBatchImageBalanceHold(ctx, s.BillingRepo, job, batchImageDerefString(job.RequestHash)); err != nil {
-				s.enqueueBillingRetry(ctx, job.BatchID)
+			if err := releaseBatchImageHoldWithRecovery(ctx, s.Repo, s.BillingRepo, s.Queue, s.AuthCache, job, batchImageDerefString(job.RequestHash)); err != nil {
 				return nil, ErrBatchImageCancelFailed
 			}
-			s.invalidateAuthCache(ctx, owner.UserID)
 		}
 		return BatchImageJobToPublic(job), nil
 	}
@@ -752,11 +739,10 @@ func (s *BatchImagePublicService) Cancel(ctx context.Context, owner BatchImageOw
 	}); err != nil {
 		return nil, err
 	}
-	if err := releaseBatchImageBalanceHold(ctx, s.BillingRepo, job, batchImageDerefString(job.RequestHash)); err != nil {
-		s.enqueueBillingRetry(ctx, job.BatchID)
+	job.Status = BatchImageJobStatusCancelled
+	if err := releaseBatchImageHoldWithRecovery(ctx, s.Repo, s.BillingRepo, s.Queue, s.AuthCache, job, batchImageDerefString(job.RequestHash)); err != nil {
 		return nil, ErrBatchImageCancelFailed
 	}
-	s.invalidateAuthCache(ctx, owner.UserID)
 	updated, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err
