@@ -247,7 +247,6 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		MaxPendingOrders:          pcParseInt(vals[SettingMaxPendingOrders], defaultMaxPendingOrders),
 		BalanceDisabled:           vals[SettingBalancePayDisabled] == "true",
 		BalanceRechargeMultiplier: normalizeBalanceRechargeMultiplier(pcParseFloat(vals[SettingBalanceRechargeMult], defaultBalanceRechargeMultiplier)),
-		SubscriptionUSDToCNYRate:  normalizeSubscriptionUSDToCNYRate(pcParseFloat(vals[SettingSubscriptionUSDToCNYRate], 0)),
 		RechargeFeeRate:           pcParseFloat(vals[SettingRechargeFeeRate], 0),
 		LoadBalanceStrategy:       vals[SettingLoadBalanceStrategy],
 		ProductNamePrefix:         vals[SettingProductNamePrefix],
@@ -263,10 +262,22 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 
 		AlipayForceQRCode: vals[SettingAlipayForceQRCode] == "true",
 	}
-	legacyMultiplier := normalizePaymentMultiplier(pcParseFloat(vals[SettingSubscriptionCNYMult], defaultPaymentMultiplier))
-	cfg.SubscriptionCNYPaymentMultiplier = legacyMultiplier
-	if cfg.SubscriptionUSDToCNYRate <= 0 && vals[SettingSubscriptionCNYMult] != "" {
+	canonicalRate, canonicalRateConfigured := parseConfiguredSubscriptionUSDToCNYRate(vals[SettingSubscriptionUSDToCNYRate])
+	if canonicalRateConfigured {
+		cfg.SubscriptionUSDToCNYRate = canonicalRate
+	}
+	legacyMultiplierConfigured := strings.TrimSpace(vals[SettingSubscriptionCNYMult]) != ""
+	switch {
+	case canonicalRateConfigured && cfg.SubscriptionUSDToCNYRate > 0:
+		cfg.SubscriptionCNYPaymentMultiplier = subscriptionUSDToCNYRateToPaymentMultiplier(cfg.SubscriptionUSDToCNYRate)
+	case canonicalRateConfigured:
+		cfg.SubscriptionCNYPaymentMultiplier = 0
+	case legacyMultiplierConfigured:
+		legacyMultiplier := normalizePaymentMultiplier(pcParseFloat(vals[SettingSubscriptionCNYMult], defaultPaymentMultiplier))
+		cfg.SubscriptionCNYPaymentMultiplier = legacyMultiplier
 		cfg.SubscriptionUSDToCNYRate = subscriptionCNYPaymentMultiplierToUSDToCNYRate(legacyMultiplier)
+	default:
+		cfg.SubscriptionCNYPaymentMultiplier = defaultPaymentMultiplier
 	}
 	if cfg.LoadBalanceStrategy == "" {
 		cfg.LoadBalanceStrategy = payment.DefaultLoadBalanceStrategy
@@ -314,15 +325,15 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 			return infraerrors.BadRequest("INVALID_BALANCE_RECHARGE_MULTIPLIER", "balance recharge multiplier must be greater than 0")
 		}
 	}
-	if req.SubscriptionCNYPaymentMultiplier != nil {
-		if math.IsNaN(*req.SubscriptionCNYPaymentMultiplier) || math.IsInf(*req.SubscriptionCNYPaymentMultiplier, 0) || *req.SubscriptionCNYPaymentMultiplier <= 0 {
-			return infraerrors.BadRequest("INVALID_SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER", "subscription CNY payment multiplier must be greater than 0")
-		}
-	}
 	if req.SubscriptionUSDToCNYRate != nil {
 		v := *req.SubscriptionUSDToCNYRate
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
 			return infraerrors.BadRequest("INVALID_SUBSCRIPTION_USD_TO_CNY_RATE", "subscription USD to CNY rate must be 0 (disabled) or a positive number")
+		}
+	}
+	if req.SubscriptionUSDToCNYRate == nil && req.SubscriptionCNYPaymentMultiplier != nil {
+		if math.IsNaN(*req.SubscriptionCNYPaymentMultiplier) || math.IsInf(*req.SubscriptionCNYPaymentMultiplier, 0) || *req.SubscriptionCNYPaymentMultiplier <= 0 {
+			return infraerrors.BadRequest("INVALID_SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER", "subscription CNY payment multiplier must be greater than 0")
 		}
 	}
 	if req.RechargeFeeRate != nil {
@@ -335,6 +346,21 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 			return infraerrors.BadRequest("INVALID_RECHARGE_FEE_RATE", "recharge fee rate allows at most 2 decimal places")
 		}
 	}
+	subscriptionUSDToCNYRate := req.SubscriptionUSDToCNYRate
+	var subscriptionCNYPaymentMultiplier *float64
+	if subscriptionUSDToCNYRate != nil {
+		if *subscriptionUSDToCNYRate > 0 {
+			derived := subscriptionUSDToCNYRateToPaymentMultiplier(*subscriptionUSDToCNYRate)
+			subscriptionCNYPaymentMultiplier = &derived
+		}
+	} else {
+		subscriptionCNYPaymentMultiplier = req.SubscriptionCNYPaymentMultiplier
+		if req.SubscriptionCNYPaymentMultiplier != nil {
+			derived := subscriptionCNYPaymentMultiplierToUSDToCNYRate(*req.SubscriptionCNYPaymentMultiplier)
+			subscriptionUSDToCNYRate = &derived
+		}
+	}
+
 	m := map[string]string{
 		SettingPaymentEnabled:                    formatBoolOrEmpty(req.Enabled),
 		SettingMinRechargeAmount:                 formatPositiveFloat(req.MinAmount),
@@ -344,8 +370,8 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 		SettingMaxPendingOrders:                  formatPositiveInt(req.MaxPendingOrders),
 		SettingBalancePayDisabled:                formatBoolOrEmpty(req.BalanceDisabled),
 		SettingBalanceRechargeMult:               formatPositiveFloat(req.BalanceRechargeMultiplier),
-		SettingSubscriptionCNYMult:               formatPositiveFloat(req.SubscriptionCNYPaymentMultiplier),
-		SettingSubscriptionUSDToCNYRate:          formatPositiveFloatExact(req.SubscriptionUSDToCNYRate),
+		SettingSubscriptionCNYMult:               formatPositiveFloatExact(subscriptionCNYPaymentMultiplier),
+		SettingSubscriptionUSDToCNYRate:          formatNonNegativeFloatExact(subscriptionUSDToCNYRate),
 		SettingRechargeFeeRate:                   formatNonNegativeFloat(req.RechargeFeeRate),
 		SettingLoadBalanceStrategy:               derefStr(req.LoadBalanceStrategy),
 		SettingProductNamePrefix:                 derefStr(req.ProductNamePrefix),
@@ -389,6 +415,13 @@ func formatPositiveFloat(v *float64) string {
 func formatPositiveFloatExact(v *float64) string {
 	if v == nil || *v <= 0 {
 		return "" // empty → parsePaymentConfig 视为未配置（换算关闭）
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
+}
+
+func formatNonNegativeFloatExact(v *float64) string {
+	if v == nil || *v < 0 {
+		return ""
 	}
 	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
@@ -442,6 +475,18 @@ func pcParseFloat(s string, defaultVal float64) float64 {
 		return defaultVal
 	}
 	return v
+}
+
+func parseConfiguredSubscriptionUSDToCNYRate(raw string) (float64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, false
+	}
+	return v, true
 }
 
 func pcParseInt(s string, defaultVal int) int {
