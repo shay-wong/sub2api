@@ -9,6 +9,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -38,6 +40,17 @@ func NewBatchImageCleanupService(repo BatchImageRepository, accountRepo AccountR
 	}
 }
 
+// appendCleanupEvent 追加清理审计事件；事件写入失败不阻断清理流程，但必须留痕。
+func (s *BatchImageCleanupService) appendCleanupEvent(ctx context.Context, batchID, eventType string, payload any) {
+	if err := s.Repo.AppendBatchImageEvent(ctx, batchID, eventType, payload); err != nil {
+		logger.L().Warn("batch_image.cleanup_event_failed",
+			zap.String("batch_id", batchID),
+			zap.String("event_type", eventType),
+			zap.Error(err),
+		)
+	}
+}
+
 func (s *BatchImageCleanupService) DeleteOutputsForOwner(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
 	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
@@ -50,7 +63,7 @@ func (s *BatchImageCleanupService) DeleteOutputsForOwner(ctx context.Context, ow
 	if job.Status != BatchImageJobStatusCompleted {
 		return nil, ErrBatchImageOutputDeleteNotReady
 	}
-	_ = s.Repo.AppendBatchImageEvent(ctx, job.BatchID, "manual_output_delete_requested", map[string]any{
+	s.appendCleanupEvent(ctx, job.BatchID, "manual_output_delete_requested", map[string]any{
 		"batch_id":       job.BatchID,
 		"cleanup_target": "output",
 		"reason":         "manual",
@@ -179,7 +192,7 @@ func (s *BatchImageCleanupService) cleanupJob(ctx context.Context, job *BatchIma
 		if !IsTerminalBatchImageJobStatus(job.Status) {
 			return ErrBatchImageCleanupFailed
 		}
-		_ = s.Repo.AppendBatchImageEvent(ctx, job.BatchID, "input_cleanup_started", cleanupEventPayload(job.BatchID, target, reason, nil))
+		s.appendCleanupEvent(ctx, job.BatchID, "input_cleanup_started", cleanupEventPayload(job.BatchID, target, reason, nil))
 	case CleanupTargetOutput:
 		if job.OutputDeletedAt != nil || job.Status == BatchImageJobStatusOutputDeleted {
 			return nil
@@ -187,7 +200,7 @@ func (s *BatchImageCleanupService) cleanupJob(ctx context.Context, job *BatchIma
 		if job.Status != BatchImageJobStatusCompleted && job.Status != BatchImageJobStatusFailed && job.Status != BatchImageJobStatusCancelled {
 			return ErrBatchImageOutputDeleteNotReady
 		}
-		_ = s.Repo.AppendBatchImageEvent(ctx, job.BatchID, "output_cleanup_started", cleanupEventPayload(job.BatchID, target, reason, nil))
+		s.appendCleanupEvent(ctx, job.BatchID, "output_cleanup_started", cleanupEventPayload(job.BatchID, target, reason, nil))
 	default:
 		return ErrUnsupportedCleanupTarget
 	}
@@ -195,9 +208,14 @@ func (s *BatchImageCleanupService) cleanupJob(ctx context.Context, job *BatchIma
 	if err := s.callProviderCleanup(ctx, job, target); err != nil {
 		code := cleanupFailureCode(err)
 		msg := sanitizeBatchImagePublicMessage(err.Error())
-		_ = s.Repo.RecordBatchImageCleanupFailure(ctx, job.BatchID, code, msg)
+		if recordErr := s.Repo.RecordBatchImageCleanupFailure(ctx, job.BatchID, code, msg); recordErr != nil {
+			logger.L().Warn("batch_image.cleanup_failure_record_failed",
+				zap.String("batch_id", job.BatchID),
+				zap.Error(recordErr),
+			)
+		}
 		event := string(target) + "_cleanup_failed"
-		_ = s.Repo.AppendBatchImageEvent(ctx, job.BatchID, event, map[string]any{"batch_id": job.BatchID, "cleanup_target": string(target), "reason": reason, "error_code": code})
+		s.appendCleanupEvent(ctx, job.BatchID, event, map[string]any{"batch_id": job.BatchID, "cleanup_target": string(target), "reason": reason, "error_code": code})
 		if errors.Is(err, ErrBatchImageProviderUnsafeCleanupPath) {
 			return ErrBatchImageCleanupUnsafePath
 		}
