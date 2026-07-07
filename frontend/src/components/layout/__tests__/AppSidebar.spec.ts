@@ -2,12 +2,110 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describe, expect, it } from 'vitest'
+import { mount, RouterLinkStub } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../AppSidebar.vue')
 const componentSource = readFileSync(componentPath, 'utf8')
 const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
 const styleSource = readFileSync(stylePath, 'utf8')
+
+const sidebarTestState = vi.hoisted(() => ({
+  appStore: {
+    sidebarCollapsed: false,
+    mobileOpen: false,
+    siteName: 'Sub2API',
+    siteLogo: '',
+    siteVersion: 'test',
+    publicSettingsLoaded: true,
+    backendModeEnabled: false,
+    cachedPublicSettings: { custom_menu_items: [] },
+    toggleSidebar: vi.fn(),
+    setMobileOpen: vi.fn(),
+  },
+  authStore: {
+    isAdmin: false,
+    canAccessAdminConsole: true,
+    isSimpleMode: false,
+    hasUserAccess: true,
+    hasAdminPermission: vi.fn(() => true),
+  },
+  adminSettingsStore: {
+    customMenuItems: [],
+    opsMonitoringEnabled: true,
+    paymentEnabled: true,
+    fetch: vi.fn(),
+  },
+  onboardingStore: {
+    isCurrentStep: vi.fn(() => false),
+    nextStep: vi.fn(),
+  },
+  route: {
+    path: '/admin/accounts',
+  },
+  router: {
+    push: vi.fn(),
+  },
+}))
+
+vi.mock('@/stores', () => ({
+  useAdminSettingsStore: () => sidebarTestState.adminSettingsStore,
+  useAppStore: () => sidebarTestState.appStore,
+  useAuthStore: () => sidebarTestState.authStore,
+  useOnboardingStore: () => sidebarTestState.onboardingStore,
+}))
+
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string) => key,
+    }),
+  }
+})
+
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return {
+    ...actual,
+    useRoute: () => sidebarTestState.route,
+    useRouter: () => sidebarTestState.router,
+  }
+})
+
+vi.mock('@/utils/featureFlags', () => ({
+  FeatureFlags: {
+    affiliate: 'affiliate',
+    availableChannels: 'availableChannels',
+    channelMonitor: 'channelMonitor',
+    payment: 'payment',
+    riskControl: 'riskControl',
+  },
+  makeSidebarFlag: () => () => true,
+}))
+
+beforeEach(() => {
+  sidebarTestState.appStore.sidebarCollapsed = false
+  sidebarTestState.appStore.mobileOpen = false
+  sidebarTestState.appStore.siteName = 'Sub2API'
+  sidebarTestState.appStore.siteLogo = ''
+  sidebarTestState.appStore.siteVersion = 'test'
+  sidebarTestState.appStore.publicSettingsLoaded = true
+  sidebarTestState.appStore.backendModeEnabled = false
+  sidebarTestState.appStore.cachedPublicSettings = { custom_menu_items: [] }
+  sidebarTestState.authStore.isAdmin = false
+  sidebarTestState.authStore.canAccessAdminConsole = true
+  sidebarTestState.authStore.isSimpleMode = false
+  sidebarTestState.authStore.hasUserAccess = true
+  sidebarTestState.authStore.hasAdminPermission.mockReturnValue(true)
+  sidebarTestState.adminSettingsStore.customMenuItems = []
+  sidebarTestState.adminSettingsStore.opsMonitoringEnabled = true
+  sidebarTestState.adminSettingsStore.paymentEnabled = true
+  sidebarTestState.route.path = '/admin/accounts'
+  localStorage.setItem('theme', 'light')
+  vi.clearAllMocks()
+})
 
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
@@ -35,6 +133,24 @@ describe('AppSidebar admin/user hierarchy', () => {
   it('renders admin-console navigation only for admin-console roles', () => {
     expect(componentSource).toContain('<template v-if="canAccessAdminConsole">')
     expect(componentSource).toContain('const canAccessAdminConsole = computed(() => authStore.canAccessAdminConsole)')
+  })
+
+  it('routes project-admin brand links to the admin dashboard at runtime', async () => {
+    const { default: AppSidebar } = await import('../AppSidebar.vue')
+
+    const wrapper = mount(AppSidebar, {
+      global: {
+        stubs: {
+          RouterLink: RouterLinkStub,
+          VersionBadge: true,
+          transition: false,
+        },
+      },
+    })
+
+    const links = wrapper.findAllComponents(RouterLinkStub)
+    expect(links[0].props('to')).toBe('/admin/dashboard')
+    expect(links[1].props('to')).toBe('/admin/dashboard')
   })
 
   it('keeps user navigation available to admin-console roles', () => {
