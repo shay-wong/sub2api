@@ -102,6 +102,7 @@ export interface User {
   projects?: UserProject[]
   role: UserRole // User role for authorization
   balance: number // User balance for API usage
+  frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
   rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
   status: 'active' | 'disabled' // Account status
@@ -538,8 +539,11 @@ export interface Group {
   monthly_limit_usd: number | null
   // 图片生成计费配置
   allow_image_generation: boolean
+  allow_batch_image_generation: boolean
   image_rate_independent: boolean
   image_rate_multiplier: number
+  batch_image_discount_multiplier: number
+  batch_image_hold_multiplier: number
   image_price_1k: number | null
   image_price_2k: number | null
   image_price_4k: number | null
@@ -674,8 +678,11 @@ export interface CreateGroupRequest {
   monthly_limit_usd?: number | null
   rate_limit_5h?: number | null
   allow_image_generation?: boolean
+  allow_batch_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number
+  batch_image_discount_multiplier?: number
+  batch_image_hold_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -714,8 +721,11 @@ export interface UpdateGroupRequest {
   monthly_limit_usd?: number | null
   rate_limit_5h?: number | null
   allow_image_generation?: boolean
+  allow_batch_image_generation?: boolean
   image_rate_independent?: boolean
   image_rate_multiplier?: number
+  batch_image_discount_multiplier?: number
+  batch_image_hold_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null

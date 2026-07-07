@@ -22,6 +22,7 @@ type User struct {
 	ProjectMemberStatus string
 	ProjectPermissions  []string
 	Balance             float64
+	FrozenBalance       float64
 	Concurrency         int
 	Status              string
 	AllowedGroups       []int64
