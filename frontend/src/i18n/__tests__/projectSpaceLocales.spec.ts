@@ -5,6 +5,7 @@ import zh from '@/i18n/locales/zh'
 
 const requiredKeys = [
   'nav.projects',
+  'common.apply',
   'admin.projectSwitcher.label',
   'admin.users.roles.super_admin',
   'admin.users.roles.admin',
@@ -42,6 +43,7 @@ const requiredKeys = [
   'admin.projects.addResource',
   'admin.projects.searchMember',
   'admin.projects.searchMemberPlaceholder',
+  'admin.projects.searchResourcesPlaceholder',
   'admin.projects.userId',
   'admin.projects.role',
   'admin.projects.status',

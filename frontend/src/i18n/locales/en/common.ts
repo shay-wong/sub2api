@@ -59,6 +59,7 @@ export default {
     processing: 'Processing...',
     contactSupport: 'Contact Support',
     add: 'Add',
+    apply: 'Apply',
     invalidEmail: 'Please enter a valid email address',
     optional: 'optional',
     selectOption: 'Select an option',

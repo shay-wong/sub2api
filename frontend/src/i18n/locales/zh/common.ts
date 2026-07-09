@@ -59,6 +59,7 @@ export default {
     processing: '处理中...',
     contactSupport: '联系客服',
     add: '添加',
+    apply: '应用',
     invalidEmail: '请输入有效的邮箱地址',
     optional: '可选',
     selectOption: '请选择',
