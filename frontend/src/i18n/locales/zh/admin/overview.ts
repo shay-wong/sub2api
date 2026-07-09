@@ -515,7 +515,9 @@ export default {
       failedToLoadApiKeys: '加载用户 API 密钥失败',
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       roles: {
+        super_admin: '超级管理员',
         admin: '管理员',
+        operator: '运营',
         user: '用户'
       },
       form: {

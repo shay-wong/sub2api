@@ -576,7 +576,9 @@ export default {
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
       roles: {
+        super_admin: 'Super Admin',
         admin: 'Admin',
+        operator: 'Operator',
         user: 'User'
       },
       // Settings Dropdowns
