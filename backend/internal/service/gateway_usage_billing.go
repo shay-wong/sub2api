@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ type RecordUsageInput struct {
 	APIKeyService         APIKeyQuotaUpdater // 可选：用于更新API Key配额
 	QuotaPlatform         string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
 	GroupRateLimitGroupID *int64             // 本次实际使用的分组；缺省回退 APIKey.GroupID，用于分组 5h 用量窗口。
+	GroupRateLimitGroup   *Group             // 本次实际使用的分组快照；用于统一倍率、渠道定价、账号统计和使用日志归因。
 
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
@@ -101,6 +103,53 @@ func QuotaPlatform(ctx context.Context, apiKey *APIKey) string {
 		return fp
 	}
 	return PlatformFromAPIKey(apiKey)
+}
+
+func usageQuotaPlatform(inputPlatform string, billingGroup *Group, apiKey *APIKey) string {
+	if platform := strings.TrimSpace(inputPlatform); platform != "" {
+		return platform
+	}
+	if billingGroup != nil {
+		if platform := strings.TrimSpace(billingGroup.Platform); platform != "" {
+			return platform
+		}
+	}
+	return strings.TrimSpace(PlatformFromAPIKey(apiKey))
+}
+
+func (s *GatewayService) ResolveGatewayUsageSubscription(ctx context.Context, user *User, group *Group, subscription *UserSubscription) (*UserSubscription, error) {
+	if user == nil || group == nil || !group.IsSubscriptionType() {
+		return nil, nil
+	}
+	if subscription != nil && (subscription.GroupID == group.ID || subscription.GroupID == 0) {
+		return subscription, nil
+	}
+	if s.userSubRepo == nil {
+		return nil, nil
+	}
+	resolved, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve gateway usage subscription for group %d: %w", group.ID, err)
+	}
+	return resolved, nil
+}
+
+func apiKeyForUsageBillingGroup(apiKey *APIKey, groupID *int64, group *Group) *APIKey {
+	if apiKey == nil {
+		return nil
+	}
+	if groupID == nil && group == nil {
+		return apiKey
+	}
+	clone := *apiKey
+	if groupID != nil && *groupID > 0 {
+		id := *groupID
+		clone.GroupID = &id
+	} else {
+		clone.GroupID = nil
+	}
+	clone.Group = group
+	return &clone
 }
 
 func (p *postUsageBillingParams) shouldDeductAPIKeyQuota() bool {
@@ -596,6 +645,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		APIKeyService:         input.APIKeyService,
 		QuotaPlatform:         input.QuotaPlatform,
 		GroupRateLimitGroupID: input.GroupRateLimitGroupID,
+		GroupRateLimitGroup:   input.GroupRateLimitGroup,
 		ChannelUsageFields:    input.ChannelUsageFields,
 	}, &recordUsageOpts{})
 }
@@ -618,6 +668,7 @@ type RecordUsageLongContextInput struct {
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	QuotaPlatform         string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
 	GroupRateLimitGroupID *int64             // 本次实际使用的分组；缺省回退 APIKey.GroupID，用于分组 5h 用量窗口。
+	GroupRateLimitGroup   *Group             // 本次实际使用的分组快照；用于统一倍率、渠道定价、账号统计和使用日志归因。
 
 	ChannelUsageFields // 渠道映射信息（由 handler 在 Forward 前解析）
 }
@@ -639,6 +690,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		APIKeyService:         input.APIKeyService,
 		QuotaPlatform:         input.QuotaPlatform,
 		GroupRateLimitGroupID: input.GroupRateLimitGroupID,
+		GroupRateLimitGroup:   input.GroupRateLimitGroup,
 		ChannelUsageFields:    input.ChannelUsageFields,
 	}, &recordUsageOpts{
 		LongContextThreshold:  input.LongContextThreshold,
@@ -662,6 +714,7 @@ type recordUsageCoreInput struct {
 	APIKeyService         APIKeyQuotaUpdater
 	QuotaPlatform         string
 	GroupRateLimitGroupID *int64
+	GroupRateLimitGroup   *Group
 	ChannelUsageFields
 }
 
@@ -692,18 +745,21 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}
 
+	billingGroupID, billingGroup := resolveUsageBillingGroup(apiKey, input.GroupRateLimitGroupID, input.GroupRateLimitGroup)
+	billingAPIKey := apiKeyForUsageBillingGroup(apiKey, billingGroupID, billingGroup)
+
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）
 	multiplier := 1.0
 	if s.cfg != nil {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
-	if apiKey.GroupID != nil && apiKey.Group != nil {
-		groupDefault := apiKey.Group.RateMultiplier
-		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *apiKey.GroupID, groupDefault)
+	if billingAPIKey.GroupID != nil && billingAPIKey.Group != nil {
+		groupDefault := billingAPIKey.Group.RateMultiplier
+		multiplier = s.getUserGroupRateMultiplier(ctx, user.ID, *billingAPIKey.GroupID, groupDefault)
 	}
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, timezone.Now())
+	multiplier, imageMultiplier := computePeakAwareMultipliers(billingAPIKey, multiplier, timezone.Now())
 
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
@@ -721,10 +777,16 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 计算费用
-	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	cost := s.calculateRecordUsageCost(ctx, result, billingAPIKey, billingModel, multiplier, imageMultiplier, opts)
+
+	var err error
+	subscription, err = s.ResolveGatewayUsageSubscription(ctx, user, billingGroup, subscription)
+	if err != nil {
+		return err
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := subscription != nil && billingGroup != nil && billingGroup.IsSubscriptionType()
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
@@ -733,12 +795,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 创建使用日志
 	accountRateMultiplier := account.BillingRateMultiplier()
 	usageLog := s.buildRecordUsageLog(ctx, input, result, apiKey, user, account, subscription,
-		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, opts)
+		requestedModel, multiplier, imageMultiplier, accountRateMultiplier, billingType, cacheTTLOverridden, cost, billingGroupID, opts)
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
-	if apiKey.GroupID != nil {
+	if billingGroupID != nil {
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
-			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
+			account.ID, *billingGroupID, result.UpstreamModel, result.Model,
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			UsageTokens{
@@ -762,10 +824,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 配额平台由 handler 在请求 ctx 内经 QuotaPlatform() 算定并通过 input 传入；
 	// 后扣运行在 worker 池的 background ctx 上，无法再从 ctx 取 ForcePlatform。
 	// 缺省（未设置）时回退到分组平台，保持对其它调用方的兼容。
-	quotaPlatform := input.QuotaPlatform
-	if quotaPlatform == "" {
-		quotaPlatform = PlatformFromAPIKey(apiKey)
-	}
+	quotaPlatform := usageQuotaPlatform(input.QuotaPlatform, billingGroup, apiKey)
 	requestID := usageLog.RequestID
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                  cost,
@@ -778,7 +837,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		AccountRateMultiplier: accountRateMultiplier,
 		APIKeyService:         input.APIKeyService,
 		Platform:              quotaPlatform,
-		GroupRateLimitGroupID: input.GroupRateLimitGroupID,
+		GroupRateLimitGroupID: billingGroupID,
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
@@ -930,6 +989,7 @@ func (s *GatewayService) buildRecordUsageLog(
 	billingType int8,
 	cacheTTLOverridden bool,
 	cost *CostBreakdown,
+	billingGroupID *int64,
 	opts *recordUsageOpts,
 ) *UsageLog {
 	durationMs := int(result.Duration.Milliseconds())
@@ -971,7 +1031,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
 		UserAgent:             optionalTrimmedStringPtr(input.UserAgent),
 		IPAddress:             optionalTrimmedStringPtr(input.IPAddress),
-		GroupID:               apiKey.GroupID,
+		GroupID:               billingGroupID,
 		SubscriptionID:        optionalSubscriptionID(subscription),
 		CreatedAt:             time.Now(),
 	}

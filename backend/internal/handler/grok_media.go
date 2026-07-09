@@ -349,13 +349,13 @@ func recordGrokMediaUsage(
 	}
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 	channelUsageFields := service.ChannelUsageFields{
 		OriginalModel:      requestModel,
 		ChannelMappedModel: requestModel,
 	}
 	groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 	groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+	quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:                result,

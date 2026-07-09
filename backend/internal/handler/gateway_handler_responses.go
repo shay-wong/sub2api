@@ -282,7 +282,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
@@ -299,6 +300,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				RequestPayloadHash:    requestPayloadHash,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				reqLog.Error("gateway.responses.record_usage_failed",

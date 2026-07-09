@@ -3111,6 +3111,10 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result)
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(1), result.Account.ID)
+		require.NotNil(t, result.GroupID)
+		require.Equal(t, fallbackID, *result.GroupID)
+		require.NotNil(t, result.Group)
+		require.Equal(t, fallbackID, result.Group.ID)
 	})
 
 	t.Run("ClaudeCode限制-无降级返回错误", func(t *testing.T) {

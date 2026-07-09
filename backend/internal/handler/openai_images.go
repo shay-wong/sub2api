@@ -347,7 +347,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		upstreamModel := ""
 		if result != nil {
@@ -355,6 +354,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:                result,

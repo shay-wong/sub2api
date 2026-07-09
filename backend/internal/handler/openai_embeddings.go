@@ -234,7 +234,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{

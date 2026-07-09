@@ -312,7 +312,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {

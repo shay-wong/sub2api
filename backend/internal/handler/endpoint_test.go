@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -389,6 +391,41 @@ func TestEffectiveGroupRateLimitGroup_DoesNotUseAPIKeyGroupForDifferentSelection
 	require.Nil(t, got)
 }
 
+func TestEffectiveQuotaPlatform_SelectionGroupWinsOverAPIKeyGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectionGroupID := int64(20)
+
+	got := EffectiveQuotaPlatform(
+		context.Background(),
+		&service.AccountSelectionResult{
+			GroupID: &selectionGroupID,
+			Group:   &service.Group{ID: selectionGroupID, Platform: service.PlatformGemini},
+		},
+		&service.APIKey{
+			GroupID: &apiKeyGroupID,
+			Group:   &service.Group{ID: apiKeyGroupID, Platform: service.PlatformAnthropic},
+		},
+	)
+
+	require.Equal(t, service.PlatformGemini, got)
+}
+
+func TestEffectiveQuotaPlatform_ForcePlatformWinsOverSelectionGroup(t *testing.T) {
+	selectionGroupID := int64(20)
+	ctx := context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity)
+
+	got := EffectiveQuotaPlatform(
+		ctx,
+		&service.AccountSelectionResult{
+			GroupID: &selectionGroupID,
+			Group:   &service.Group{ID: selectionGroupID, Platform: service.PlatformGemini},
+		},
+		&service.APIKey{},
+	)
+
+	require.Equal(t, service.PlatformAntigravity, got)
+}
+
 func TestHandleSelectedOpenAIPreflight_UsesSelectedGroupForImagePermission(t *testing.T) {
 	apiKeyGroupID := int64(10)
 	selectedGroupID := int64(20)
@@ -511,6 +548,63 @@ func TestHandleSelectedOpenAIPreflight_ResolvesSelectedSubscription(t *testing.T
 	require.Equal(t, selectedGroupID, subRepo.lastGroupID)
 }
 
+func TestHandleSelectedOpenAIPreflight_UsesSelectedGroupPlatformForQuota(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectedGroupID := int64(20)
+	userID := int64(7)
+	quotaCache := &selectedOpenAIPreflightQuotaCache{}
+	cfg := &config.Config{}
+	cfg.Billing.UserPlatformQuotaCacheTTLSeconds = 60
+	billingSvc := service.NewBillingCacheService(quotaCache, nil, nil, nil, nil, nil, nil, cfg, &selectedOpenAIPreflightQuotaRepoStub{})
+	defer billingSvc.Stop()
+
+	released := false
+	var gotStatus int
+	var gotCode string
+	subscription, failed := handleSelectedOpenAIPreflight(
+		context.Background(),
+		nil,
+		billingSvc,
+		nil,
+		&service.AccountSelectionResult{
+			GroupID: &selectedGroupID,
+			Group: &service.Group{
+				ID:               selectedGroupID,
+				Hydrated:         true,
+				Platform:         service.PlatformGemini,
+				Status:           service.StatusActive,
+				SubscriptionType: service.SubscriptionTypeStandard,
+			},
+		},
+		&service.APIKey{
+			User:    &service.User{ID: userID},
+			GroupID: &apiKeyGroupID,
+			Group: &service.Group{
+				ID:               apiKeyGroupID,
+				Hydrated:         true,
+				Platform:         service.PlatformOpenAI,
+				Status:           service.StatusActive,
+				SubscriptionType: service.SubscriptionTypeStandard,
+			},
+		},
+		nil,
+		false,
+		func() { released = true },
+		nil,
+		func(status int, code, _ string) {
+			gotStatus = status
+			gotCode = code
+		},
+	)
+
+	require.True(t, failed)
+	require.Nil(t, subscription)
+	require.True(t, released)
+	require.Equal(t, http.StatusTooManyRequests, gotStatus)
+	require.Equal(t, "rate_limit_exceeded", gotCode)
+	require.Equal(t, []string{service.PlatformGemini}, quotaCache.platforms)
+}
+
 type selectedOpenAIPreflightSubRepoStub struct {
 	service.UserSubscriptionRepository
 	sub         *service.UserSubscription
@@ -524,4 +618,38 @@ func (s *selectedOpenAIPreflightSubRepoStub) GetActiveByUserIDAndGroupID(ctx con
 	s.lastUserID = userID
 	s.lastGroupID = groupID
 	return s.sub, nil
+}
+
+type selectedOpenAIPreflightQuotaCache struct {
+	service.BillingCache
+	platforms []string
+}
+
+func (s *selectedOpenAIPreflightQuotaCache) GetUserBalance(context.Context, int64) (float64, error) {
+	return 100, nil
+}
+
+func (s *selectedOpenAIPreflightQuotaCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, platform string) (*service.UserPlatformQuotaCacheEntry, bool, error) {
+	s.platforms = append(s.platforms, platform)
+	now := time.Now().UTC()
+	if platform == service.PlatformGemini {
+		zero := 0.0
+		return &service.UserPlatformQuotaCacheEntry{
+			DailyLimitUSD:    &zero,
+			DailyWindowStart: &now,
+			SchemaVersion:    service.UserPlatformQuotaCacheSchemaV1,
+		}, true, nil
+	}
+	return &service.UserPlatformQuotaCacheEntry{
+		DailyWindowStart: &now,
+		SchemaVersion:    service.UserPlatformQuotaCacheSchemaV1,
+	}, true, nil
+}
+
+func (s *selectedOpenAIPreflightQuotaCache) SetUserPlatformQuotaCache(context.Context, int64, string, *service.UserPlatformQuotaCacheEntry, time.Duration) error {
+	return nil
+}
+
+type selectedOpenAIPreflightQuotaRepoStub struct {
+	service.UserPlatformQuotaRepository
 }

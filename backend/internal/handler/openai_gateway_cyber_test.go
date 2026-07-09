@@ -101,6 +101,26 @@ func TestCyberPolicyUsageAttributionUsesRequestPlatformAndSelectionGroup(t *test
 	require.Equal(t, selectionGroupID, *got.GroupRateLimitGroupID)
 }
 
+func TestCyberPolicyUsageAttributionUsesSelectionGroupPlatform(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectionGroupID := int64(20)
+	selectionGroup := &service.Group{ID: selectionGroupID, Platform: service.PlatformGemini}
+
+	got := cyberPolicyUsageAttribution(
+		context.Background(),
+		&service.APIKey{
+			GroupID: &apiKeyGroupID,
+			Group:   &service.Group{ID: apiKeyGroupID, Platform: service.PlatformOpenAI},
+		},
+		&service.AccountSelectionResult{GroupID: &selectionGroupID, Group: selectionGroup},
+	)
+
+	require.Equal(t, service.PlatformGemini, got.QuotaPlatform)
+	require.NotNil(t, got.GroupRateLimitGroupID)
+	require.Equal(t, selectionGroupID, *got.GroupRateLimitGroupID)
+	require.Same(t, selectionGroup, got.GroupRateLimitGroup)
+}
+
 func TestSelectedGroupNameFollowsActualCyberAttributionGroup(t *testing.T) {
 	apiKeyGroup := &service.Group{ID: 10, Name: "api-key-group"}
 	selectionGroup := &service.Group{ID: 20, Name: "fallback-group"}

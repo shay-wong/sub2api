@@ -526,7 +526,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
@@ -998,7 +998,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
@@ -1626,7 +1626,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
 				groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 				groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
-				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+				quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
@@ -2539,7 +2539,7 @@ type cyberPolicyUsageAttributionResult struct {
 
 func cyberPolicyUsageAttribution(ctx context.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult) cyberPolicyUsageAttributionResult {
 	return cyberPolicyUsageAttributionResult{
-		QuotaPlatform:         service.QuotaPlatform(ctx, apiKey),
+		QuotaPlatform:         EffectiveQuotaPlatform(ctx, selection, apiKey),
 		GroupRateLimitGroupID: EffectiveGroupRateLimitGroupID(selection, apiKey),
 		GroupRateLimitGroup:   EffectiveGroupRateLimitGroup(selection, apiKey),
 	}

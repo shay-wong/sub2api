@@ -1132,6 +1132,156 @@ func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimi
 	require.InDelta(t, billingRepo.lastCmd.BalanceCost, billingRepo.lastCmd.GroupRateLimit5hCost, 1e-12)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(30)
+	actualGroupID := int64(40)
+	dailyLimit := 1.0
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	quotaCache := &openAIRecordUsageQuotaCacheStub{quotaEntry: &UserPlatformQuotaCacheEntry{DailyLimitUSD: &dailyLimit}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.cfg.Database.UserPlatformQuotaFlusherEnabled = true
+	svc.billingCacheService = &BillingCacheService{cache: quotaCache, cfg: svc.cfg}
+	svc.userPlatformQuotaRepo = &openAIRecordUsageUserPlatformQuotaRepoStub{}
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai_actual_group_quota_platform",
+			Usage: OpenAIUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1202,
+			GroupID: &apiKeyGroupID,
+			Group:   &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1},
+		},
+		User:                  &User{ID: 2202},
+		Account:               &Account{ID: 3202},
+		GroupRateLimitGroupID: &actualGroupID,
+		GroupRateLimitGroup:   &Group{ID: actualGroupID, Platform: PlatformAntigravity, RateMultiplier: 1},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, quotaCache.incrCalls)
+	require.Equal(t, int64(2202), quotaCache.lastIncrUserID)
+	require.Equal(t, PlatformAntigravity, quotaCache.lastIncrPlatform)
+	require.Greater(t, quotaCache.lastIncrCost, 0.0)
+	require.True(t, quotaCache.lastIncrMarkDirty)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ImageCostUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(30)
+	actualGroupID := int64(40)
+	apiKeyGroupImagePrice := 0.99
+	actualGroupImagePrice := 0.021
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:    "openai_actual_group_image_price",
+			Model:        "gpt-image-2",
+			BillingModel: "gpt-image-2",
+			ImageCount:   1,
+			ImageSize:    ImageBillingSize2K,
+			Duration:     time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1203,
+			GroupID: &apiKeyGroupID,
+			Group: &Group{
+				ID:             apiKeyGroupID,
+				Platform:       PlatformOpenAI,
+				RateMultiplier: 1,
+				ImagePrice2K:   &apiKeyGroupImagePrice,
+			},
+		},
+		User:                  &User{ID: 2203},
+		Account:               &Account{ID: 3203},
+		GroupRateLimitGroupID: &actualGroupID,
+		GroupRateLimitGroup: &Group{
+			ID:             actualGroupID,
+			Platform:       PlatformAntigravity,
+			RateMultiplier: 1,
+			ImagePrice2K:   &actualGroupImagePrice,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
+	require.InDelta(t, actualGroupImagePrice, usageRepo.lastLog.ActualCost, 1e-12)
+	require.NotEqual(t, apiKeyGroupImagePrice, usageRepo.lastLog.ActualCost)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeImage), *usageRepo.lastLog.BillingMode)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_VideoCostUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(31)
+	actualGroupID := int64(41)
+	apiKeyGroupVideoPrice := 0.44
+	actualGroupVideoPrice := 0.08
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:            "openai_actual_group_video_price",
+			Model:                "grok-imagine-video-1.5",
+			BillingModel:         "grok-imagine-video-1.5",
+			ImageCount:           1,
+			VideoCount:           1,
+			VideoResolution:      VideoBillingResolution480P,
+			VideoDurationSeconds: 1,
+			Duration:             time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1204,
+			GroupID: &apiKeyGroupID,
+			Group: &Group{
+				ID:                   apiKeyGroupID,
+				Platform:             PlatformGrok,
+				RateMultiplier:       1,
+				VideoRateIndependent: true,
+				VideoRateMultiplier:  0.9,
+				VideoPrice480P:       &apiKeyGroupVideoPrice,
+			},
+		},
+		User:                  &User{ID: 2204},
+		Account:               &Account{ID: 3204, Platform: PlatformGrok},
+		GroupRateLimitGroupID: &actualGroupID,
+		GroupRateLimitGroup: &Group{
+			ID:                   actualGroupID,
+			Platform:             PlatformGrok,
+			RateMultiplier:       1,
+			VideoRateIndependent: true,
+			VideoRateMultiplier:  0.25,
+			VideoPrice480P:       &actualGroupVideoPrice,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
+	require.InDelta(t, actualGroupVideoPrice, usageRepo.lastLog.TotalCost, 1e-12)
+	require.InDelta(t, actualGroupVideoPrice*0.25, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, 0.25, usageRepo.lastLog.RateMultiplier, 1e-12)
+	require.NotEqual(t, apiKeyGroupVideoPrice*0.9, usageRepo.lastLog.ActualCost)
+	require.NotNil(t, usageRepo.lastLog.BillingMode)
+	require.Equal(t, string(BillingModeVideo), *usageRepo.lastLog.BillingMode)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupForGroupRateLimit(t *testing.T) {
 	apiKeyGroupID := int64(30)
 	usageRepo := &openAIRecordUsageLogRepoStub{}

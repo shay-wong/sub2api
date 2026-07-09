@@ -199,6 +199,96 @@ func TestGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimitGroup
 	require.InDelta(t, billingRepo.lastCmd.BalanceCost, billingRepo.lastCmd.GroupRateLimit5hCost, 1e-12)
 }
 
+func TestGatewayServiceRecordUsage_UsageLogAndAccountStatsUseExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	actualGroupID := int64(20)
+	actualGroup := &Group{ID: actualGroupID, Platform: PlatformAnthropic, RateMultiplier: 2.0}
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	svc.channelService = newTestChannelServiceForStats(t, &Channel{
+		ID:     1,
+		Status: StatusActive,
+		AccountStatsPricingRules: []AccountStatsPricingRule{
+			{
+				GroupIDs: []int64{actualGroupID},
+				Pricing: []ChannelModelPricing{
+					{
+						Models:     []string{"claude-sonnet-4"},
+						InputPrice: testPtrFloat64(0.01),
+					},
+				},
+			},
+		},
+	}, actualGroupID, PlatformAnthropic)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_usage_log_actual_group",
+			Usage: ClaudeUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:                &APIKey{ID: 512, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:                  &User{ID: 612},
+		Account:               &Account{ID: 712},
+		GroupRateLimitGroupID: &actualGroupID,
+		GroupRateLimitGroup:   actualGroup,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
+	require.Equal(t, 2.0, usageRepo.lastLog.RateMultiplier)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, 10.0, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+}
+
+func TestGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitGroupRateLimitGroup(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	actualGroupID := int64(20)
+	dailyLimit := 1.0
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	quotaCache := &openAIRecordUsageQuotaCacheStub{quotaEntry: &UserPlatformQuotaCacheEntry{DailyLimitUSD: &dailyLimit}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	svc.cfg.Database.UserPlatformQuotaFlusherEnabled = true
+	svc.billingCacheService = &BillingCacheService{cache: quotaCache, cfg: svc.cfg}
+	svc.userPlatformQuotaRepo = &openAIRecordUsageUserPlatformQuotaRepoStub{}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_actual_group_quota_platform",
+			Usage: ClaudeUsage{
+				InputTokens:  1000,
+				OutputTokens: 200,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      513,
+			GroupID: &apiKeyGroupID,
+			Group:   &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1},
+		},
+		User:                  &User{ID: 613},
+		Account:               &Account{ID: 713},
+		GroupRateLimitGroupID: &actualGroupID,
+		GroupRateLimitGroup:   &Group{ID: actualGroupID, Platform: PlatformAntigravity, RateMultiplier: 1},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, quotaCache.incrCalls)
+	require.Equal(t, int64(613), quotaCache.lastIncrUserID)
+	require.Equal(t, PlatformAntigravity, quotaCache.lastIncrPlatform)
+	require.Greater(t, quotaCache.lastIncrCost, 0.0)
+	require.True(t, quotaCache.lastIncrMarkDirty)
+}
+
 func TestGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupForGroupRateLimit(t *testing.T) {
 	apiKeyGroupID := int64(10)
 	usageRepo := &openAIRecordUsageLogRepoStub{}

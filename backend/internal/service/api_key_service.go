@@ -33,7 +33,8 @@ var (
 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
-	ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key 额度已用完")
+	ErrAPIKeyQuotaExhausted          = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key 额度已用完")
+	ErrAPIKeyConcurrencySortTooLarge = infraerrors.BadRequest("API_KEY_CONCURRENCY_SORT_TOO_LARGE", "too many API keys match current_concurrency sort; narrow filters or use a different sort")
 
 	// Rate limit errors
 	ErrAPIKeyRateLimit5hExceeded = infraerrors.TooManyRequests("API_KEY_RATE_5H_EXCEEDED", "api key 5小时限额已用完")
@@ -42,9 +43,10 @@ var (
 )
 
 const (
-	apiKeyMaxErrorsPerHour       = 20
-	apiKeyLastUsedMinTouch       = 30 * time.Second
-	apiKeySortCurrentConcurrency = "current_concurrency"
+	apiKeyMaxErrorsPerHour              = 20
+	apiKeyLastUsedMinTouch              = 30 * time.Second
+	apiKeySortCurrentConcurrency        = "current_concurrency"
+	apiKeyCurrentConcurrencySortMaxKeys = 5000
 	// DB 写失败后的短退避，避免请求路径持续同步重试造成写风暴与高延迟。
 	apiKeyLastUsedFailBackoff = 5 * time.Second
 )
@@ -87,7 +89,7 @@ type APIKeyRepository interface {
 }
 
 type apiKeyAllByUserIDLister interface {
-	ListAllByUserID(ctx context.Context, userID int64, filters APIKeyListFilters) ([]APIKey, error)
+	ListAllByUserID(ctx context.Context, userID int64, filters APIKeyListFilters, limit int) ([]APIKey, error)
 }
 
 // APIKeyRateLimitData holds rate limit usage and window state for an API key.
@@ -464,9 +466,12 @@ func (s *APIKeyService) listByCurrentConcurrency(ctx context.Context, userID int
 		return nil, nil, fmt.Errorf("list api keys by current concurrency: repository does not support unpaginated API key listing")
 	}
 
-	keys, err := repo.ListAllByUserID(ctx, userID, filters)
+	keys, err := repo.ListAllByUserID(ctx, userID, filters, apiKeyCurrentConcurrencySortMaxKeys+1)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list api keys: %w", err)
+	}
+	if len(keys) > apiKeyCurrentConcurrencySortMaxKeys {
+		return nil, nil, ErrAPIKeyConcurrencySortTooLarge
 	}
 	s.fillCurrentConcurrency(ctx, keys)
 	sortAPIKeysByCurrentConcurrency(keys, params.NormalizedSortOrder(pagination.SortOrderDesc))

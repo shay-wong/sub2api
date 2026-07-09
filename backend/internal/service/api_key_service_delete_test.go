@@ -42,6 +42,7 @@ type apiKeyRepoStub struct {
 	listAllByUserIDErr     error
 	listAllByUserIDCalls   []int64
 	listAllByUserIDFilters []APIKeyListFilters
+	listAllByUserIDLimits  []int
 	updateLastUsed         func(ctx context.Context, id int64, usedAt time.Time) error
 	touchedIDs             []int64
 	touchedUsedAts         []time.Time
@@ -127,12 +128,13 @@ func (s *apiKeyRepoStub) ListByUserID(ctx context.Context, userID int64, params 
 	}, nil
 }
 
-func (s *apiKeyRepoStub) ListAllByUserID(ctx context.Context, userID int64, filters APIKeyListFilters) ([]APIKey, error) {
+func (s *apiKeyRepoStub) ListAllByUserID(ctx context.Context, userID int64, filters APIKeyListFilters, limit int) ([]APIKey, error) {
 	if !s.allowListAllByUserID {
 		panic("unexpected ListAllByUserID call")
 	}
 	s.listAllByUserIDCalls = append(s.listAllByUserIDCalls, userID)
 	s.listAllByUserIDFilters = append(s.listAllByUserIDFilters, filters)
+	s.listAllByUserIDLimits = append(s.listAllByUserIDLimits, limit)
 	if s.listAllByUserIDErr != nil {
 		return nil, s.listAllByUserIDErr
 	}
@@ -140,7 +142,11 @@ func (s *apiKeyRepoStub) ListAllByUserID(ctx context.Context, userID int64, filt
 	if s.listAllByUserIDKeys != nil {
 		source = s.listAllByUserIDKeys
 	}
-	return filterAPIKeyStubKeys(userID, source, filters), nil
+	result := filterAPIKeyStubKeys(userID, source, filters)
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func filterAPIKeyStubKeys(userID int64, keys []APIKey, filters APIKeyListFilters) []APIKey {
@@ -427,6 +433,7 @@ func TestAPIKeyService_List_SortByCurrentConcurrency(t *testing.T) {
 	require.Empty(t, repo.listByUserIDCalls)
 	require.Equal(t, []int64{7}, repo.listAllByUserIDCalls)
 	require.Len(t, repo.listAllByUserIDFilters, 1)
+	require.Equal(t, []int{apiKeyCurrentConcurrencySortMaxKeys + 1}, repo.listAllByUserIDLimits)
 	require.Equal(t, filters.Search, repo.listAllByUserIDFilters[0].Search)
 	require.Equal(t, filters.Status, repo.listAllByUserIDFilters[0].Status)
 	require.NotNil(t, repo.listAllByUserIDFilters[0].GroupID)
@@ -457,6 +464,29 @@ func TestAPIKeyService_List_SortByCurrentConcurrencyAscTiesByID(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{3, 1, 2, 4}, apiKeyTestIDs(got))
 	require.Equal(t, 4, page.PageSize)
+}
+
+func TestAPIKeyService_List_SortByCurrentConcurrencyRejectsUnboundedResult(t *testing.T) {
+	keys := make([]APIKey, 0, apiKeyCurrentConcurrencySortMaxKeys+1)
+	for i := 0; i < apiKeyCurrentConcurrencySortMaxKeys+1; i++ {
+		id := int64(i + 1)
+		keys = append(keys, APIKey{ID: id, UserID: 7, Key: "sk-test", Name: "key", Status: StatusActive})
+	}
+	repo := &apiKeyRepoStub{
+		allowListAllByUserID: true,
+		listAllByUserIDKeys:  keys,
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+
+	got, page, err := svc.List(context.Background(), 7, pagination.PaginationParams{
+		Page:   1,
+		SortBy: "current_concurrency",
+	}, APIKeyListFilters{})
+
+	require.ErrorIs(t, err, ErrAPIKeyConcurrencySortTooLarge)
+	require.Nil(t, got)
+	require.Nil(t, page)
+	require.Equal(t, []int{apiKeyCurrentConcurrencySortMaxKeys + 1}, repo.listAllByUserIDLimits)
 }
 
 func apiKeyTestIDs(keys []APIKey) []int64 {

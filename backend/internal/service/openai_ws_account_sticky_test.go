@@ -48,6 +48,44 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Hit(t *testing.T
 	}
 }
 
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_AttachesSelectionGroup(t *testing.T) {
+	selectedGroup := &Group{ID: 24, Platform: PlatformAntigravity, Status: StatusActive, Hydrated: true}
+	ctx := withOpenAISelectionGroupContext(context.Background(), selectedGroup)
+	account := Account{
+		ID:          3,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 2,
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	cfg := newOpenAIWSV2TestConfig()
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+
+	require.NoError(t, store.BindResponseAccount(ctx, selectedGroup.ID, "resp_prev_group", account.ID, time.Hour))
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &selectedGroup.ID, "resp_prev_group", "gpt-5.1", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.GroupID)
+	require.Equal(t, selectedGroup.ID, *selection.GroupID)
+	require.Same(t, selectedGroup, selection.Group)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_QuotaAutoPausedMiss(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)
@@ -243,8 +281,9 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_ForceHTTPIgnored
 }
 
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(t *testing.T) {
-	ctx := context.Background()
 	groupID := int64(23)
+	selectedGroup := &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
+	ctx := withOpenAISelectionGroupContext(context.Background(), selectedGroup)
 	accounts := []Account{
 		{
 			ID:          21,
@@ -303,6 +342,9 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(21), selection.Account.ID, "busy previous_response sticky account should remain selected")
+	require.NotNil(t, selection.GroupID)
+	require.Equal(t, selectedGroup.ID, *selection.GroupID)
+	require.Same(t, selectedGroup, selection.Group)
 	require.False(t, selection.Acquired)
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, int64(21), selection.WaitPlan.AccountID)

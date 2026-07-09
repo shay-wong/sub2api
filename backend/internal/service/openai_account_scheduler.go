@@ -1056,15 +1056,15 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			if req.SessionHash != "" && !req.PreserveStickyBinding {
 				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, account.ID)
 			}
-			return &AccountSelectionResult{
+			return attachSelectionGroup(ctx, &AccountSelectionResult{
 				Account:     account,
 				Acquired:    true,
 				ReleaseFunc: result.ReleaseFunc,
-			}, nil
+			}), nil
 		}
 		if s.service.concurrencyService != nil {
 			cfg := s.service.schedulingConfig()
-			return &AccountSelectionResult{
+			return attachSelectionGroup(ctx, &AccountSelectionResult{
 				Account: account,
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      account.ID,
@@ -1072,7 +1072,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 					Timeout:        cfg.StickySessionWaitTimeout,
 					MaxWaiting:     cfg.StickySessionMaxWaiting,
 				},
-			}, nil
+			}), nil
 		}
 	}
 	return nil, nil

@@ -1659,6 +1659,68 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsS
 	require.True(t, decision.StickySessionHit)
 }
 
+func TestDefaultOpenAIAccountScheduler_TryFallbackToWeightedStickyAttachesSelectionGroup(t *testing.T) {
+	groupID := int64(101001)
+	group := &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
+	account := Account{
+		ID:          21011,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+	}
+
+	tests := []struct {
+		name     string
+		acquired bool
+	}{
+		{name: "acquired", acquired: true},
+		{name: "busy", acquired: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := withOpenAISelectionGroupContext(context.Background(), group)
+			svc := &OpenAIGatewayService{
+				accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+				cfg:         &config.Config{},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+					acquireResults: map[int64]bool{account.ID: tt.acquired},
+				}),
+			}
+			scheduler := &defaultOpenAIAccountScheduler{service: svc}
+
+			selection, err := scheduler.tryFallbackToWeightedSticky(ctx, OpenAIAccountScheduleRequest{
+				GroupID:                 &groupID,
+				Platform:                PlatformOpenAI,
+				StickyWeighted:          true,
+				StickyPreviousAccountID: account.ID,
+				RequiredTransport:       OpenAIUpstreamTransportAny,
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, account.ID, selection.Account.ID)
+			require.NotNil(t, selection.GroupID)
+			require.Equal(t, groupID, *selection.GroupID)
+			require.Same(t, group, selection.Group)
+			if tt.acquired {
+				require.True(t, selection.Acquired)
+				require.NotNil(t, selection.ReleaseFunc)
+				selection.ReleaseFunc()
+				require.Nil(t, selection.WaitPlan)
+				return
+			}
+			require.False(t, selection.Acquired)
+			require.NotNil(t, selection.WaitPlan)
+			require.Equal(t, account.ID, selection.WaitPlan.AccountID)
+		})
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeByTTFT(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10101)

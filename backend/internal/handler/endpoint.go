@@ -328,6 +328,18 @@ func EffectiveGroupRateLimitGroup(selection *service.AccountSelectionResult, api
 	return nil
 }
 
+func EffectiveQuotaPlatform(ctx context.Context, selection *service.AccountSelectionResult, apiKey *service.APIKey) string {
+	if forced := service.QuotaPlatform(ctx, nil); forced != "" {
+		return forced
+	}
+	if group := EffectiveGroupRateLimitGroup(selection, apiKey); group != nil {
+		if platform := strings.TrimSpace(group.Platform); platform != "" {
+			return platform
+		}
+	}
+	return service.PlatformFromAPIKey(apiKey)
+}
+
 func CheckEffectiveGroupRateLimit5h(ctx context.Context, billingCacheService *service.BillingCacheService, selection *service.AccountSelectionResult, apiKey *service.APIKey) error {
 	if billingCacheService == nil || apiKey == nil {
 		return nil
@@ -421,7 +433,7 @@ func handleSelectedOpenAIPreflight(
 	if billingCacheService == nil {
 		return actualSubscription, false
 	}
-	if err := billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, selectedGroup, actualSubscription, service.QuotaPlatform(ctx, apiKey)); err != nil {
+	if err := billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, selectedGroup, actualSubscription, EffectiveQuotaPlatform(ctx, selection, apiKey)); err != nil {
 		if logFailure != nil {
 			logFailure(err)
 		}

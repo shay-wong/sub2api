@@ -150,6 +150,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		multiplier = s.cfg.Default.RateMultiplier
 	}
 	billingGroupID, billingGroup := resolveUsageBillingGroup(apiKey, input.GroupRateLimitGroupID, input.GroupRateLimitGroup)
+	billingAPIKey := apiKeyForUsageBillingGroup(apiKey, billingGroupID, billingGroup)
 	if billingGroupID != nil && billingGroup != nil {
 		resolver := s.userGroupRateResolver
 		if resolver == nil {
@@ -161,7 +162,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// 不并入上面的 Resolve，以免污染 user:group 倍率缓存。
 	baseMultiplier := multiplier
 	multiplier, imageMultiplier := computePeakAwareMultipliersForGroup(billingGroup, baseMultiplier, timezone.Now())
-	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
+	videoMultiplier := resolveVideoRateMultiplier(billingAPIKey, baseMultiplier)
 
 	var cost *CostBreakdown
 	var err error
@@ -187,7 +188,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
 	}
-	cost, err = s.calculateOpenAIRecordUsageCost(ctx, result, apiKey, billingModels, multiplier, imageMultiplier, videoMultiplier, tokens, serviceTier)
+	cost, err = s.calculateOpenAIRecordUsageCost(ctx, result, billingAPIKey, billingModels, multiplier, imageMultiplier, videoMultiplier, tokens, serviceTier)
 	if err != nil {
 		if !isUsagePricingUnavailableError(err) {
 			return err
@@ -341,10 +342,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Async usage billing runs outside the original request context, so it
 	// cannot recover ForcePlatform there. Fall back for internal/test callers.
-	quotaPlatform := input.QuotaPlatform
-	if quotaPlatform == "" {
-		quotaPlatform = PlatformFromAPIKey(apiKey)
-	}
+	quotaPlatform := usageQuotaPlatform(input.QuotaPlatform, billingGroup, apiKey)
 
 	billingErr := func() error {
 		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{

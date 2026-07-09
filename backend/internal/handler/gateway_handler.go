@@ -338,6 +338,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
+			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
@@ -407,7 +408,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), groupRateLimitGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -447,7 +448,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					body,
 					hasBoundSession,
-					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
+					service.WithForwardGeminiSession(derefGroupID(groupRateLimitGroupID), sessionKey),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
@@ -534,8 +535,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:                result,
@@ -552,6 +553,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ForceCacheBilling:     forceCacheBilling,
 					APIKeyService:         h.apiKeyService,
 					GroupRateLimitGroupID: groupRateLimitGroupID,
+					GroupRateLimitGroup:   groupRateLimitGroup,
 					ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
@@ -641,6 +643,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
+			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, currentAPIKey)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// [DEBUG-STICKY] 打印账号选择结果
@@ -724,7 +727,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					zap.String("session_key", sessionKey),
 					zap.Int64("account_id", account.ID),
 				)
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), groupRateLimitGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -953,7 +956,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), groupRateLimitGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -981,8 +984,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, currentAPIKey)
+			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, currentAPIKey)
+			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, currentAPIKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:                result,
@@ -999,6 +1002,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ForceCacheBilling:     forceCacheBilling,
 					APIKeyService:         h.apiKeyService,
 					GroupRateLimitGroupID: groupRateLimitGroupID,
+					GroupRateLimitGroup:   groupRateLimitGroup,
 					ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(

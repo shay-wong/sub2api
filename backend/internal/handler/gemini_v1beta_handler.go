@@ -375,6 +375,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature
@@ -447,7 +448,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
 			}
-			if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySession(c.Request.Context(), groupRateLimitGroupID, sessionKey, account.ID); err != nil {
 				reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -475,7 +476,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
-		sessionGroupID := derefGroupID(apiKey.GroupID)
+		sessionGroupID := derefGroupID(groupRateLimitGroupID)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -538,8 +539,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 		forceCacheBilling := fs.ForceCacheBilling
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsageWithLongContext(ctx, &service.RecordUsageLongContextInput{
 				Result:                result,
@@ -558,6 +559,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				ForceCacheBilling:     forceCacheBilling,
 				APIKeyService:         h.apiKeyService,
 				GroupRateLimitGroupID: groupRateLimitGroupID,
+				GroupRateLimitGroup:   groupRateLimitGroup,
 				ChannelUsageFields:    channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {
 				logger.L().With(
