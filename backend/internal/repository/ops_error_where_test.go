@@ -103,6 +103,22 @@ func TestBuildOpsErrorLogsWhere_CyberPolicyStatusExemption(t *testing.T) {
 	}
 }
 
+// TestBuildOpsErrorLogsWhere_InBandStreamErrorsUseStatusGuard documents the
+// visibility contract for in-band SSE errors. The handler must persist the
+// intended failure status (for example 429), so ordinary non-cyber stream
+// errors remain visible through the default status >= 400 guard.
+func TestBuildOpsErrorLogsWhere_InBandStreamErrorsUseStatusGuard(t *testing.T) {
+	where, _ := buildOpsErrorLogsWhere(&service.OpsErrorLogFilter{
+		ErrorTypesAny: []string{"rate_limit_error"},
+	})
+	if !strings.Contains(where, "COALESCE(e.status_code, 0) >= 400") {
+		t.Fatalf("default stream error filter must keep the status >= 400 guard\nfull: %s", where)
+	}
+	if strings.Contains(where, "e.error_type = 'rate_limit_error'") {
+		t.Fatalf("rate_limit_error must be visible via persisted intended status, not a status-code exemption\nfull: %s", where)
+	}
+}
+
 func TestBuildOpsErrorLogsWhere_MatchDeletedKeyOwner(t *testing.T) {
 	uid := int64(42)
 

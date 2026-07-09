@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -224,6 +225,19 @@ func TestOpenAIHandleStreamingAwareError_BareResponsesRouteEmitsResponseFailed(t
 	id, _ := resp["id"].(string)
 	assert.True(t, strings.HasPrefix(id, "resp_"))
 	assert.Equal(t, "rate_limit_exceeded", errObj["code"])
+}
+
+func TestOpenAIAnthropicStreamingAwareErrorMarksOpsStreamError(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, "/v1/messages")
+	h := &OpenAIGatewayHandler{}
+	h.anthropicStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
+		"Concurrency limit exceeded for user, please retry later", true)
+
+	require.Contains(t, w.Body.String(), "event: error")
+	streamErr, ok := service.GetOpsStreamError(c)
+	require.True(t, ok)
+	require.Equal(t, "rate_limit_error", streamErr.ErrType)
+	require.Equal(t, http.StatusTooManyRequests, streamErr.IntendedStatus)
 }
 
 // Synthesized response.failed id falls back to uuid when no request_id is present.
