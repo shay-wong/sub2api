@@ -117,10 +117,10 @@ const UsageTableStub = {
   template: '<div data-test="usage-table" :data-allow-user-detail="String(allowUserDetail)"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
 const OpsErrorLogTableStub = {
-  props: ['rows'],
+  props: ['rows', 'userClickable'],
   emits: ['openErrorDetail'],
   template: `
-    <div data-test="ops-error-table">
+    <div data-test="ops-error-table" :data-user-clickable="String(userClickable)">
       <span v-for="row in rows" :key="row.id">{{ row.message }}</span>
       <button class="open-error" @click="$emit('openErrorDetail', rows[0]?.id)">open</button>
     </div>
@@ -175,6 +175,7 @@ describe('admin UsageView distribution metric toggles', () => {
     getById.mockReset()
     getModelStats.mockReset()
     searchModels.mockReset()
+    listErrorLogs.mockReset()
     authState.isAdmin = true
     authState.adminPermissions = ['admin.ops.read']
 
@@ -201,6 +202,7 @@ describe('admin UsageView distribution metric toggles', () => {
     })
     getModelStats.mockResolvedValue({ models: [] })
     searchModels.mockResolvedValue([{ name: 'claude-3' }, { name: 'gpt-4o' }])
+    listErrorLogs.mockResolvedValue({ items: [], total: 0, pages: 0 })
   })
 
   afterEach(() => {
@@ -603,6 +605,7 @@ describe('admin UsageView cleanup visibility', () => {
     await flushPromises()
 
     expect(list).toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('usage.tabs.ranking')
     expect(getStats).toHaveBeenCalled()
     expect(searchModels).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }))
     expect(getModelStats).not.toHaveBeenCalled()
@@ -641,6 +644,32 @@ describe('admin UsageView cleanup visibility', () => {
     await flushPromises()
 
     expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('disables ops error user detail without user management permission', async () => {
+    authState.isAdmin = false
+    authState.adminPermissions = ['admin.usage.read', 'admin.ops.read']
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        OpsErrorLogTable: OpsErrorLogTableStub, OpsErrorDetailModal: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="ops-error-table"]').attributes('data-user-clickable')).toBe('false')
     wrapper.unmount()
   })
 

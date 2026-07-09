@@ -153,7 +153,7 @@
             :rows="errRows" :total="errTotal" :loading="errLoading"
             :page="errPage" :page-size="errPageSize"
             :visible-column-keys="errVisibleColumnKeys"
-            user-clickable
+            :user-clickable="canManageUsers"
             @userClick="handleUserClick"
             @openErrorDetail="openError"
             @sort="onErrSort"
@@ -937,7 +937,9 @@ const detailTabs = computed(() => [
   ...(canReadOpsErrors.value
     ? [{ key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const }]
     : []),
-  { key: 'ranking' as const, label: t('usage.tabs.ranking'), icon: 'chart' as const },
+  ...(canReadDashboardCharts.value
+    ? [{ key: 'ranking' as const, label: t('usage.tabs.ranking'), icon: 'chart' as const }]
+    : []),
 ])
 const usageFiltersRef = ref<InstanceType<typeof UsageFilters> | null>(null)
 const rankingMounted = ref(false)
@@ -945,6 +947,7 @@ const rankingRef = ref<InstanceType<typeof UserTokenRanking> | null>(null)
 
 const switchTab = (tab: DetailTab) => {
   if (tab === 'errors' && !canReadOpsErrors.value) return
+  if (tab === 'ranking' && !canReadDashboardCharts.value) return
   activeTab.value = tab
   if (tab === 'errors' && errRows.value.length === 0) loadAdminErrors()
   if (tab === 'ranking') rankingMounted.value = true
@@ -1052,6 +1055,8 @@ onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); us
 
 watch(canReadDashboardCharts, (allowed) => {
   if (!allowed) {
+    if (activeTab.value === 'ranking') activeTab.value = 'usage'
+    rankingMounted.value = false
     resetDashboardChartState()
     return
   }
