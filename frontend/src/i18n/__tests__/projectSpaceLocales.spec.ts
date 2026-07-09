@@ -4,12 +4,14 @@ import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
 const requiredKeys = [
+  'nav.projects',
   'admin.projectSwitcher.label',
   'admin.users.roles.super_admin',
   'admin.users.roles.admin',
   'admin.users.roles.user',
   'admin.projects.title',
   'admin.projects.description',
+  'admin.projects.defaultProjectDescription',
   'admin.projects.owner',
   'admin.projects.createProject',
   'admin.projects.noProjects',
@@ -123,4 +125,11 @@ describe.each([
       expect(value).not.toBe(key)
     })
   }
+})
+
+describe('zh project space locale copy', () => {
+  it('does not leave project owner labels in English', () => {
+    expect(valueAt(zh, 'admin.projects.owner')).toBe('所有者')
+    expect(valueAt(zh, 'admin.projects.transferOwner')).toBe('转移所有者')
+  })
 })

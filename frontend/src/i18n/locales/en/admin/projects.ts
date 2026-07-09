@@ -6,6 +6,7 @@ export default {
   projects: {
     title: 'Projects',
     description: 'Manage project members and application profiles. Only super admins can manage project spaces.',
+    defaultProjectDescription: 'Migrated default project for existing resources.',
     createProject: 'Create Project',
     project: 'Project',
     projects: 'Projects',

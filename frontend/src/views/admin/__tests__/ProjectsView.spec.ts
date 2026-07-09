@@ -259,6 +259,25 @@ describe('admin ProjectsView project resource scope', () => {
     expect(updateProfile).not.toHaveBeenCalledWith(1, 2, expect.objectContaining({ mode: 'unrestricted' }))
   })
 
+  it('localizes the migrated default project description', async () => {
+    listProjects.mockResolvedValue([
+      {
+        id: 1,
+        name: '默认项目',
+        slug: 'default',
+        description: 'Migrated default project for existing resources.',
+        role: 'super_admin',
+        is_owner: true
+      }
+    ])
+
+    const wrapper = mountProjectsView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.projects.defaultProjectDescription')
+    expect(wrapper.text()).not.toContain('Migrated default project for existing resources.')
+  })
+
   it('activates unrestricted as a project-level scope only after applying the selection', async () => {
     authState.isAdmin = true
     listProfiles

@@ -19,7 +19,7 @@
               </span>
             </div>
             <p class="mt-1 line-clamp-1 text-sm text-gray-500 dark:text-dark-300">
-              {{ selectedProject?.description || t('admin.projects.description') }}
+              {{ selectedProject ? formatProjectDescription(selectedProject) : t('admin.projects.description') }}
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -934,6 +934,7 @@ type CandidateItem = {
 }
 
 type ProjectProfileScopeValue = 'unrestricted' | `profile:${number}`
+const DEFAULT_PROJECT_MIGRATION_DESCRIPTION = 'Migrated default project for existing resources.'
 type ResourcePickerTarget = 'project' | 'profile-draft'
 
 const { t } = useI18n()
@@ -1975,6 +1976,13 @@ function formatProjectRole(role: string): string {
   if (role === 'super_admin') return t('admin.users.roles.super_admin')
   if (role === 'admin') return t('admin.users.roles.admin')
   return t('admin.users.roles.user')
+}
+
+function formatProjectDescription(project: AdminProject): string {
+  if (project.slug === 'default' && project.description === DEFAULT_PROJECT_MIGRATION_DESCRIPTION) {
+    return t('admin.projects.defaultProjectDescription')
+  }
+  return project.description || t('admin.projects.description')
 }
 
 function displayMemberRole(member: ProjectMember): string {
