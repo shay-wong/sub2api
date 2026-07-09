@@ -150,7 +150,7 @@ func (h *UsageHandler) parseUserUsageFiltersWithDefault(c *gin.Context, requireR
 	}
 
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
-	if billingMode != "" && !service.BillingMode(billingMode).IsValid() {
+	if billingMode != "" && !service.BillingMode(billingMode).IsValidUsageFilter() {
 		response.BadRequest(c, "Invalid billing_mode")
 		return nil, false
 	}

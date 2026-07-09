@@ -30,7 +30,7 @@
     </div>
 
     <!-- Navigation -->
-    <nav class="sidebar-nav scrollbar-hide">
+    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin-console roles: allowed admin menu first, then personal menu -->
       <template v-if="canAccessAdminConsole">
         <!-- Admin Section -->
@@ -188,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -248,6 +248,7 @@ const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const canAccessAdminConsole = computed(() => authStore.canAccessAdminConsole)
+const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
 const homePath = computed(() => (canAccessAdminConsole.value ? '/admin/dashboard' : '/dashboard'))
@@ -956,6 +957,20 @@ onMounted(() => {
   void refreshBatchImageAccess()
   if (authStore.isAdmin) {
     adminSettingsStore.fetch()
+  }
+  // Restore sidebar scroll position after route change re-mounts the component
+  if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
+    void nextTick(() => {
+      if (sidebarNavRef.value) {
+        sidebarNavRef.value.scrollTop = appStore.sidebarScrollTop
+      }
+    })
+  }
+})
+
+onBeforeUnmount(() => {
+  if (sidebarNavRef.value) {
+    appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }
 })
 </script>

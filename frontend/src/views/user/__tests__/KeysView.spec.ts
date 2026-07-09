@@ -48,6 +48,7 @@ const messages: Record<string, string> = {
   'keys.group': 'Group',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
+  'keys.lastUsedIP': 'Last Used IP',
   'keys.rateLimitColumn': 'Rate Limit',
   'keys.searchPlaceholder': 'Search name or key...',
   'keys.status.active': 'Active',
@@ -123,6 +124,7 @@ const createApiKey = (): ApiKey => ({
   ip_whitelist: [],
   ip_blacklist: [],
   last_used_at: null,
+  last_used_ip: null,
   quota: 0,
   quota_used: 0,
   expires_at: null,
@@ -168,6 +170,12 @@ const DataTableStub = {
         <slot name="cell-name" :value="row.name" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
+        </div>
+        <div
+          v-if="columns.some((col) => col.key === 'last_used_ip')"
+          data-test="last-used-ip"
+        >
+          <slot name="cell-last_used_ip" :value="row.last_used_ip" :row="row" />
         </div>
       </div>
       <slot name="empty" />
@@ -279,6 +287,7 @@ describe('user KeysView column settings', () => {
     ])
     expect(visibleColumnKeys(wrapper)).not.toContain('rate_limit')
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_at')
+    expect(visibleColumnKeys(wrapper)).not.toContain('last_used_ip')
   })
 
   it('shows a hidden column when toggled and persists the preference', async () => {
@@ -289,8 +298,28 @@ describe('user KeysView column settings', () => {
     await nextTick()
 
     expect(visibleColumnKeys(wrapper)).toContain('rate_limit')
-    expect(localStorage.getItem('api-key-hidden-columns')).toBe(JSON.stringify(['last_used_at']))
-    expect(localStorage.getItem('api-key-column-settings-version')).toBe('1')
+    expect(localStorage.getItem('api-key-hidden-columns')).toBe(
+      JSON.stringify(['last_used_at', 'last_used_ip'])
+    )
+    expect(localStorage.getItem('api-key-column-settings-version')).toBe('2')
+  })
+
+  it('shows the last used IP column when toggled', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [{ ...createApiKey(), last_used_ip: '203.0.113.10' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    await wrapper.get('button[title="Column Settings"]').trigger('click')
+    await getButtonByText(wrapper, 'Last Used IP').trigger('click')
+    await nextTick()
+
+    expect(visibleColumnKeys(wrapper)).toContain('last_used_ip')
+    expect(wrapper.get('[data-test="last-used-ip"]').text()).toBe('203.0.113.10')
   })
 
   it('restores column preferences from localStorage on mount', async () => {
@@ -310,6 +339,10 @@ describe('user KeysView column settings', () => {
       'last_used_at',
       'actions',
     ])
+    expect(localStorage.getItem('api-key-hidden-columns')).toBe(
+      JSON.stringify(['group', 'created_at', 'last_used_ip'])
+    )
+    expect(localStorage.getItem('api-key-column-settings-version')).toBe('2')
   })
 
   it('does not include always-visible columns in the toggleable menu', async () => {
@@ -322,6 +355,7 @@ describe('user KeysView column settings', () => {
     expect(columnMenuText).toContain('API Key')
     expect(columnMenuText).toContain('Current Concurrency')
     expect(columnMenuText).toContain('Rate Limit')
+    expect(columnMenuText).toContain('Last Used IP')
     expect(columnMenuText).not.toContain('Name')
     expect(columnMenuText).not.toContain('Actions')
   })

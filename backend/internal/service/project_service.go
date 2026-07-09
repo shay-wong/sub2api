@@ -28,15 +28,16 @@ const (
 )
 
 var (
-	ErrProjectNotFound               = infraerrors.NotFound("PROJECT_NOT_FOUND", "project not found")
-	ErrProjectAccessForbidden        = infraerrors.Forbidden("PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
-	ErrProjectInvalidInput           = infraerrors.BadRequest("PROJECT_INVALID_INPUT", "project input is invalid")
-	ErrProjectInvalidRole            = infraerrors.BadRequest("PROJECT_INVALID_ROLE", "project member role must be admin or user")
-	ErrProjectSlugConflict           = infraerrors.Conflict("PROJECT_SLUG_CONFLICT", "project slug already exists")
-	ErrProjectOwnerTransferRequired  = infraerrors.BadRequest("PROJECT_OWNER_TRANSFER_REQUIRED", "project owner must be transferred before removal")
-	ErrProjectProfileNotFound        = infraerrors.NotFound("PROJECT_PROFILE_NOT_FOUND", "project profile not found")
-	ErrProjectAPIKeyGroupUnavailable = infraerrors.Forbidden("PROJECT_API_KEY_GROUP_UNAVAILABLE", "api key group is not available in target project")
-	ErrProjectMemberDisabled         = infraerrors.Forbidden("PROJECT_MEMBER_DISABLED", "api key owner is disabled in this project")
+	ErrProjectNotFound                   = infraerrors.NotFound("PROJECT_NOT_FOUND", "project not found")
+	ErrProjectAccessForbidden            = infraerrors.Forbidden("PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
+	ErrProjectInvalidInput               = infraerrors.BadRequest("PROJECT_INVALID_INPUT", "project input is invalid")
+	ErrProjectInvalidRole                = infraerrors.BadRequest("PROJECT_INVALID_ROLE", "project member role must be admin or user")
+	ErrProjectSlugConflict               = infraerrors.Conflict("PROJECT_SLUG_CONFLICT", "project slug already exists")
+	ErrProjectOwnerTransferRequired      = infraerrors.BadRequest("PROJECT_OWNER_TRANSFER_REQUIRED", "project owner must be transferred before removal")
+	ErrProjectProfileNotFound            = infraerrors.NotFound("PROJECT_PROFILE_NOT_FOUND", "project profile not found")
+	ErrProjectAPIKeyGroupUnavailable     = infraerrors.Forbidden("PROJECT_API_KEY_GROUP_UNAVAILABLE", "api key group is not available in target project")
+	ErrProjectMemberDisabled             = infraerrors.Forbidden("PROJECT_MEMBER_DISABLED", "api key owner is disabled in this project")
+	ErrProjectAdminCannotManageAdminUser = infraerrors.Forbidden("PROJECT_ADMIN_CANNOT_MANAGE_ADMIN_USER", "project admin cannot manage admin users")
 )
 
 type ProjectRepository interface {

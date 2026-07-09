@@ -323,6 +323,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { sanitizeUrl } from '@/utils/url'
 
 const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
 
@@ -341,7 +342,7 @@ const projectSwitcherOpen = ref(false)
 const projectSwitcherRef = ref<HTMLElement | null>(null)
 const selectedProjectID = ref(localStorage.getItem(SELECTED_PROJECT_ID_KEY) ?? '')
 const contactInfo = computed(() => appStore.contactInfo)
-const docUrl = computed(() => appStore.docUrl)
+const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const userProjects = computed(() => user.value?.projects ?? [])
 const showProjectSwitcher = computed(() => userProjects.value.length > 1)

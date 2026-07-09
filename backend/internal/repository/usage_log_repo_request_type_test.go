@@ -402,9 +402,14 @@ func TestAppendUsageLogBillingModeWhereCondition(t *testing.T) {
 		wantCondition string
 	}{
 		{
-			name:          "image includes legacy image rows",
+			name:          "image includes explicit image and legacy image rows",
 			billingMode:   string(service.BillingModeImage),
-			wantCondition: "(billing_mode = $1 OR COALESCE(image_count, 0) > 0)",
+			wantCondition: "(billing_mode = $1 OR ((billing_mode IS NULL OR billing_mode = '') AND COALESCE(image_count, 0) > 0))",
+		},
+		{
+			name:          "video remains exact",
+			billingMode:   string(service.BillingModeVideo),
+			wantCondition: "billing_mode = $1",
 		},
 		{
 			name:          "token includes legacy non-image rows",
@@ -430,7 +435,7 @@ func TestAppendUsageLogBillingModeWhereCondition(t *testing.T) {
 func TestAppendUsageLogBillingModeWhereConditionWithAlias(t *testing.T) {
 	conditions, args := appendUsageLogBillingModeWhereConditionWithAlias(nil, nil, string(service.BillingModeImage), "ul")
 
-	require.Equal(t, []string{"(ul.billing_mode = $1 OR COALESCE(ul.image_count, 0) > 0)"}, conditions)
+	require.Equal(t, []string{"(ul.billing_mode = $1 OR ((ul.billing_mode IS NULL OR ul.billing_mode = '') AND COALESCE(ul.image_count, 0) > 0))"}, conditions)
 	require.Equal(t, []any{string(service.BillingModeImage)}, args)
 }
 
@@ -603,7 +608,7 @@ func TestUsageLogRepositoryListModelCandidatesUsesUsageFilters(t *testing.T) {
 		EndTime:           &end,
 	}
 
-	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) AS model\\s+FROM usage_logs\\s+WHERE user_id = \\$1 AND api_key_id = \\$2 AND account_id = \\$3 AND group_id = \\$4 AND \\(request_type = \\$5 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\) AND billing_type = \\$6 AND \\(billing_mode = \\$7 OR COALESCE\\(image_count, 0\\) > 0\\) AND created_at >= \\$8 AND created_at < \\$9\\s+GROUP BY COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\s+HAVING COALESCE\\(COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\), ''\\) <> ''\\s+ORDER BY .*\\s+LIMIT \\$10").
+	mock.ExpectQuery("SELECT COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) AS model\\s+FROM usage_logs\\s+WHERE user_id = \\$1 AND api_key_id = \\$2 AND account_id = \\$3 AND group_id = \\$4 AND \\(request_type = \\$5 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\) AND billing_type = \\$6 AND \\(billing_mode = \\$7 OR \\(\\(billing_mode IS NULL OR billing_mode = ''\\) AND COALESCE\\(image_count, 0\\) > 0\\)\\) AND created_at >= \\$8 AND created_at < \\$9\\s+GROUP BY COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\)\\s+HAVING COALESCE\\(COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\), ''\\) <> ''\\s+ORDER BY .*\\s+LIMIT \\$10").
 		WithArgs(filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, requestType, int16(billingType), string(service.BillingModeImage), start, end, 50).
 		WillReturnRows(sqlmock.NewRows([]string{"model"}).AddRow("claude-3").AddRow("gpt-4o"))
 
