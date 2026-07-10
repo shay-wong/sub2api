@@ -679,7 +679,20 @@ func TestUserSubscriptionCreateSkipsBindingForUnrestrictedActiveProjectProfile(t
 	require.Zero(t, count)
 }
 
-func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing.T) {
+type userSubscriptionResetScopeFixture struct {
+	client         *dbent.Client
+	ctx            context.Context
+	projectCtx     context.Context
+	repo           service.UserSubscriptionRepository
+	bound          *dbent.UserSubscription
+	hidden         *dbent.UserSubscription
+	oldWindowStart time.Time
+	newWindowStart time.Time
+}
+
+func newUserSubscriptionResetScopeFixture(t *testing.T) userSubscriptionResetScopeFixture {
+	t.Helper()
+
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()
 
@@ -711,8 +724,7 @@ func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing
 	require.NoError(t, err)
 
 	oldWindowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	newWindowStart := oldWindowStart.Add(24 * time.Hour)
-	createSubscription := func(emailSuffix string, usage float64) *dbent.UserSubscription {
+	createSubscription := func(label string, dailyUsage, weeklyUsage, monthlyUsage float64) *dbent.UserSubscription {
 		t.Helper()
 		sub, err := client.UserSubscription.Create().
 			SetUserID(user.ID).
@@ -721,15 +733,19 @@ func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing
 			SetExpiresAt(time.Now().Add(24 * time.Hour)).
 			SetStatus(service.SubscriptionStatusActive).
 			SetAssignedAt(time.Now()).
-			SetNotes(emailSuffix).
+			SetNotes(label).
 			SetDailyWindowStart(oldWindowStart).
-			SetDailyUsageUsd(usage).
+			SetWeeklyWindowStart(oldWindowStart).
+			SetMonthlyWindowStart(oldWindowStart).
+			SetDailyUsageUsd(dailyUsage).
+			SetWeeklyUsageUsd(weeklyUsage).
+			SetMonthlyUsageUsd(monthlyUsage).
 			Save(ctx)
 		require.NoError(t, err)
 		return sub
 	}
-	bound := createSubscription("bound", 10)
-	hidden := createSubscription("hidden", 7)
+	bound := createSubscription("bound", 10, 20, 30)
+	hidden := createSubscription("hidden", 7, 17, 27)
 	_, err = client.ProjectProfileBinding.Create().
 		SetProjectProfileID(profile.ID).
 		SetResourceType(service.ProjectResourceTypeSubscription).
@@ -737,24 +753,77 @@ func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing
 		Save(ctx)
 	require.NoError(t, err)
 
-	repo := NewUserSubscriptionRepository(client)
-	projectCtx := service.WithProjectID(ctx, project.ID)
-	require.NoError(t, repo.ResetDailyUsage(projectCtx, bound.ID, &oldWindowStart, newWindowStart))
-	_, err = client.UserSubscription.UpdateOneID(bound.ID).SetDailyUsageUsd(3).Save(ctx)
-	require.NoError(t, err)
-	require.NoError(t, repo.ResetDailyUsage(projectCtx, bound.ID, &oldWindowStart, newWindowStart))
+	return userSubscriptionResetScopeFixture{
+		client:         client,
+		ctx:            ctx,
+		projectCtx:     service.WithProjectID(ctx, project.ID),
+		repo:           NewUserSubscriptionRepository(client),
+		bound:          bound,
+		hidden:         hidden,
+		oldWindowStart: oldWindowStart,
+		newWindowStart: oldWindowStart.Add(24 * time.Hour),
+	}
+}
 
-	got, err := client.UserSubscription.Get(ctx, bound.ID)
+func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing.T) {
+	fixture := newUserSubscriptionResetScopeFixture(t)
+
+	require.NoError(t, fixture.repo.ResetDailyUsage(fixture.projectCtx, fixture.bound.ID, &fixture.oldWindowStart, fixture.newWindowStart))
+	_, err := fixture.client.UserSubscription.UpdateOneID(fixture.bound.ID).SetDailyUsageUsd(3).Save(fixture.ctx)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.ResetDailyUsage(fixture.projectCtx, fixture.bound.ID, &fixture.oldWindowStart, fixture.newWindowStart))
+
+	got, err := fixture.client.UserSubscription.Get(fixture.ctx, fixture.bound.ID)
 	require.NoError(t, err)
 	require.InDelta(t, 3, got.DailyUsageUsd, 1e-6)
-	require.WithinDuration(t, newWindowStart, *got.DailyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.newWindowStart, *got.DailyWindowStart, time.Microsecond)
 
-	err = repo.ResetDailyUsage(projectCtx, hidden.ID, &oldWindowStart, newWindowStart)
+	err = fixture.repo.ResetDailyUsage(fixture.projectCtx, fixture.hidden.ID, &fixture.oldWindowStart, fixture.newWindowStart)
 	require.ErrorIs(t, err, service.ErrSubscriptionNotFound)
-	got, err = client.UserSubscription.Get(ctx, hidden.ID)
+	got, err = fixture.client.UserSubscription.Get(fixture.ctx, fixture.hidden.ID)
 	require.NoError(t, err)
 	require.InDelta(t, 7, got.DailyUsageUsd, 1e-6)
-	require.WithinDuration(t, oldWindowStart, *got.DailyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.oldWindowStart, *got.DailyWindowStart, time.Microsecond)
+}
+
+func TestUserSubscriptionResetUsageWindowsUsesActiveProjectProfileScope(t *testing.T) {
+	fixture := newUserSubscriptionResetScopeFixture(t)
+
+	require.NoError(t, fixture.repo.ResetUsageWindows(
+		fixture.projectCtx,
+		fixture.bound.ID,
+		true,
+		true,
+		true,
+		fixture.newWindowStart,
+	))
+
+	got, err := fixture.client.UserSubscription.Get(fixture.ctx, fixture.bound.ID)
+	require.NoError(t, err)
+	require.Zero(t, got.DailyUsageUsd)
+	require.Zero(t, got.WeeklyUsageUsd)
+	require.Zero(t, got.MonthlyUsageUsd)
+	require.WithinDuration(t, fixture.newWindowStart, *got.DailyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.newWindowStart, *got.WeeklyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.newWindowStart, *got.MonthlyWindowStart, time.Microsecond)
+
+	err = fixture.repo.ResetUsageWindows(
+		fixture.projectCtx,
+		fixture.hidden.ID,
+		true,
+		true,
+		true,
+		fixture.newWindowStart,
+	)
+	require.ErrorIs(t, err, service.ErrSubscriptionNotFound)
+	got, err = fixture.client.UserSubscription.Get(fixture.ctx, fixture.hidden.ID)
+	require.NoError(t, err)
+	require.InDelta(t, 7, got.DailyUsageUsd, 1e-6)
+	require.InDelta(t, 17, got.WeeklyUsageUsd, 1e-6)
+	require.InDelta(t, 27, got.MonthlyUsageUsd, 1e-6)
+	require.WithinDuration(t, fixture.oldWindowStart, *got.DailyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.oldWindowStart, *got.WeeklyWindowStart, time.Microsecond)
+	require.WithinDuration(t, fixture.oldWindowStart, *got.MonthlyWindowStart, time.Microsecond)
 }
 
 func TestUserSubscriptionListRelationAttachUsesActiveProjectProfileScope(t *testing.T) {
