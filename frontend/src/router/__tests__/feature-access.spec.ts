@@ -6,16 +6,24 @@ type NavigationGuard = (
   next: ReturnType<typeof vi.fn>
 ) => Promise<void>
 
+type RouteDefinition = {
+  path: string
+  meta?: Record<string, unknown>
+}
+
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
+  routes: [] as RouteDefinition[],
 }))
 
 const authStore = vi.hoisted(() => ({
   checkAuth: vi.fn(),
   isAuthenticated: true,
   isAdmin: false,
+  canAccessAdminConsole: false,
   isSimpleMode: false,
   hasPendingAuthSession: false,
+  hasAdminPermission: vi.fn(),
 }))
 
 const appStore = vi.hoisted(() => ({
@@ -32,13 +40,16 @@ const appStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((options: { routes: RouteDefinition[] }) => {
+    routerHarness.routes = options.routes
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guard = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -105,6 +116,14 @@ function runGuard(meta: Record<string, unknown>, path: string) {
   return { navigation, next }
 }
 
+function getRouteMeta(path: string): Record<string, unknown> {
+  const route = routerHarness.routes.find((candidate) => candidate.path === path)
+  if (!route?.meta) {
+    throw new Error(`route metadata not found for ${path}`)
+  }
+  return route.meta
+}
+
 describe('feature route guard', () => {
   beforeAll(async () => {
     await import('@/router')
@@ -113,7 +132,9 @@ describe('feature route guard', () => {
   beforeEach(() => {
     authStore.isAuthenticated = true
     authStore.isAdmin = false
+    authStore.canAccessAdminConsole = false
     authStore.isSimpleMode = false
+    authStore.hasAdminPermission.mockReset()
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
@@ -173,5 +194,39 @@ describe('feature route guard', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
+  })
+
+  it('allows a super admin through the real risk-control route when settings load fails', async () => {
+    authStore.isAdmin = true
+    authStore.canAccessAdminConsole = true
+    appStore.fetchPublicSettings.mockResolvedValue(null)
+
+    const meta = getRouteMeta('/admin/risk-control')
+    expect(meta).toMatchObject({
+      requiresAuth: true,
+      requiresAdmin: true,
+      requiresAdminOnly: true,
+      requiresRiskControl: true,
+    })
+
+    const { navigation, next } = runGuard(meta, '/admin/risk-control')
+    await navigation
+
+    expect(appStore.publicSettingsLoaded).toBe(false)
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('keeps the real risk-control route unavailable to project admins', async () => {
+    authStore.canAccessAdminConsole = true
+    authStore.hasAdminPermission.mockReturnValue(true)
+
+    const meta = getRouteMeta('/admin/risk-control')
+    const { navigation, next } = runGuard(meta, '/admin/risk-control')
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/admin/dashboard')
   })
 })
