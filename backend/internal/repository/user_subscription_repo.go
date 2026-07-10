@@ -435,43 +435,93 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
-func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	update := client.UserSubscription.Update().Where(predicates...)
+	if resetDaily {
+		update.SetDailyUsageUsd(0).SetDailyWindowStart(newWindowStart)
+	}
+	if resetWeekly {
+		update.SetWeeklyUsageUsd(0).SetWeeklyWindowStart(newWindowStart)
+	}
+	if resetMonthly {
+		update.SetMonthlyUsageUsd(0).SetMonthlyWindowStart(newWindowStart)
+	}
+	affected, err := update.Save(ctx)
+	if err == nil && affected == 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
+func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
+	client := clientFromContext(ctx, r.client)
+	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	if expectedWindowStart == nil {
+		predicates = append(predicates, usersubscription.DailyWindowStartIsNil())
+	} else {
+		predicates = append(predicates, usersubscription.DailyWindowStartEQ(*expectedWindowStart))
+	}
+	n, err := client.UserSubscription.Update().
+		Where(predicates...).
 		SetDailyUsageUsd(0).
 		SetDailyWindowStart(newWindowStart).
 		Save(ctx)
-	if err == nil && affected == 0 {
-		return service.ErrSubscriptionNotFound
-	}
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	return r.translateConditionalWindowReset(ctx, client, id, n, err)
 }
 
-func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	if expectedWindowStart == nil {
+		predicates = append(predicates, usersubscription.WeeklyWindowStartIsNil())
+	} else {
+		predicates = append(predicates, usersubscription.WeeklyWindowStartEQ(*expectedWindowStart))
+	}
+	n, err := client.UserSubscription.Update().
+		Where(predicates...).
 		SetWeeklyUsageUsd(0).
 		SetWeeklyWindowStart(newWindowStart).
 		Save(ctx)
-	if err == nil && affected == 0 {
-		return service.ErrSubscriptionNotFound
-	}
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	return r.translateConditionalWindowReset(ctx, client, id, n, err)
 }
 
-func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
+func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	if expectedWindowStart == nil {
+		predicates = append(predicates, usersubscription.MonthlyWindowStartIsNil())
+	} else {
+		predicates = append(predicates, usersubscription.MonthlyWindowStartEQ(*expectedWindowStart))
+	}
+	n, err := client.UserSubscription.Update().
+		Where(predicates...).
 		SetMonthlyUsageUsd(0).
 		SetMonthlyWindowStart(newWindowStart).
 		Save(ctx)
-	if err == nil && affected == 0 {
+	return r.translateConditionalWindowReset(ctx, client, id, n, err)
+}
+
+func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context.Context, client *dbent.Client, id int64, affected int, err error) error {
+	if err != nil {
+		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	if affected > 0 {
+		return nil
+	}
+
+	// A stale reset is an expected no-op: another request already advanced the
+	// window. Preserve not-found semantics for callers that target a missing row.
+	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	exists, err := client.UserSubscription.Query().Where(predicates...).Exist(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	if !exists {
 		return service.ErrSubscriptionNotFound
 	}
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	return nil
 }
 
 // IncrementUsage 原子性地累加订阅用量。

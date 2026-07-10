@@ -679,6 +679,84 @@ func TestUserSubscriptionCreateSkipsBindingForUnrestrictedActiveProjectProfile(t
 	require.Zero(t, count)
 }
 
+func TestUserSubscriptionResetDailyUsageUsesActiveProjectProfileScope(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	project, err := client.Project.Create().
+		SetName("Subscription Reset Scope Project").
+		SetSlug("subscription-reset-scope-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(project.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	user, err := client.User.Create().
+		SetEmail("subscription-reset-scope@test.com").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetProjectID(project.ID).
+		SetName("subscription-reset-scope-group").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	oldWindowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newWindowStart := oldWindowStart.Add(24 * time.Hour)
+	createSubscription := func(emailSuffix string, usage float64) *dbent.UserSubscription {
+		t.Helper()
+		sub, err := client.UserSubscription.Create().
+			SetUserID(user.ID).
+			SetGroupID(group.ID).
+			SetStartsAt(time.Now().Add(-1 * time.Hour)).
+			SetExpiresAt(time.Now().Add(24 * time.Hour)).
+			SetStatus(service.SubscriptionStatusActive).
+			SetAssignedAt(time.Now()).
+			SetNotes(emailSuffix).
+			SetDailyWindowStart(oldWindowStart).
+			SetDailyUsageUsd(usage).
+			Save(ctx)
+		require.NoError(t, err)
+		return sub
+	}
+	bound := createSubscription("bound", 10)
+	hidden := createSubscription("hidden", 7)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeSubscription).
+		SetResourceID(bound.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := NewUserSubscriptionRepository(client)
+	projectCtx := service.WithProjectID(ctx, project.ID)
+	require.NoError(t, repo.ResetDailyUsage(projectCtx, bound.ID, &oldWindowStart, newWindowStart))
+	_, err = client.UserSubscription.UpdateOneID(bound.ID).SetDailyUsageUsd(3).Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, repo.ResetDailyUsage(projectCtx, bound.ID, &oldWindowStart, newWindowStart))
+
+	got, err := client.UserSubscription.Get(ctx, bound.ID)
+	require.NoError(t, err)
+	require.InDelta(t, 3, got.DailyUsageUsd, 1e-6)
+	require.WithinDuration(t, newWindowStart, *got.DailyWindowStart, time.Microsecond)
+
+	err = repo.ResetDailyUsage(projectCtx, hidden.ID, &oldWindowStart, newWindowStart)
+	require.ErrorIs(t, err, service.ErrSubscriptionNotFound)
+	got, err = client.UserSubscription.Get(ctx, hidden.ID)
+	require.NoError(t, err)
+	require.InDelta(t, 7, got.DailyUsageUsd, 1e-6)
+	require.WithinDuration(t, oldWindowStart, *got.DailyWindowStart, time.Microsecond)
+}
+
 func TestUserSubscriptionListRelationAttachUsesActiveProjectProfileScope(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()
