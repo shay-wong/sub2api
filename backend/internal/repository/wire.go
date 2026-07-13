@@ -14,7 +14,7 @@ import (
 
 // ProvideConcurrencyCache 创建并发控制缓存，从配置读取 TTL 参数
 // 性能优化：TTL 可配置，支持长时间运行的 LLM 请求场景
-func ProvideConcurrencyCache(rdb *redis.Client, cfg *config.Config) service.ConcurrencyCache {
+func ProvideConcurrencyCache(rdb *redis.Client, cfg *config.Config) service.RuntimeConcurrencyCache {
 	waitTTLSeconds := int(cfg.Gateway.Scheduling.StickySessionWaitTimeout.Seconds())
 	if cfg.Gateway.Scheduling.FallbackWaitTimeout > cfg.Gateway.Scheduling.StickySessionWaitTimeout {
 		waitTTLSeconds = int(cfg.Gateway.Scheduling.FallbackWaitTimeout.Seconds())

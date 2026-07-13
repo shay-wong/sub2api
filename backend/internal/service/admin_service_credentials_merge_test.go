@@ -116,6 +116,32 @@ func TestUpdateAccount_EmptyCredentialsSkipsUpdate(t *testing.T) {
 	require.Equal(t, "renamed", repo.account.Name)
 }
 
+func TestUpdateAccount_ClearPlanTypePreservesSensitiveCredentials(t *testing.T) {
+	accountID := int64(207)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"access_token": "at-existing",
+				"plan_type":    "pro",
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Credentials:   map[string]any{},
+		ClearPlanType: true,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, "at-existing", repo.account.Credentials["access_token"])
+	require.NotContains(t, repo.account.Credentials, "plan_type")
+}
+
 func TestUpdateAccount_WithGroupScopePreservesOutOfScopeGroups(t *testing.T) {
 	accountID := int64(205)
 	repo := &updateAccountCredsRepoStub{

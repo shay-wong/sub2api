@@ -367,6 +367,18 @@ func TestAcquireOpenAIWSIngressLease(t *testing.T) {
 	})
 }
 
+func TestNewRuntimeConcurrencyServiceWiresIngressLeaseCache(t *testing.T) {
+	cache := &ingressLeaseCacheForTest{acquireIngressResult: true, refreshIngressResult: true}
+	svc := NewRuntimeConcurrencyService(cache)
+
+	lease, acquired, err := svc.AcquireOpenAIWSIngressLease(context.Background(), 1, 1)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotNil(t, lease)
+	lease.Release()
+	require.Equal(t, 1, cache.acquireIngressCalls)
+}
+
 func TestOpenAIWSIngressLeaseRefreshLoss(t *testing.T) {
 	t.Run("missing lease is lost immediately", func(t *testing.T) {
 		cache := &ingressLeaseCacheForTest{refreshIngressResult: false}

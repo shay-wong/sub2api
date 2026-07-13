@@ -797,6 +797,10 @@ const virtualizeMobile = computed(() => props.virtualizeMobile && !isDesktopView
 
 const mobileRowVirtualizer = useWindowVirtualizer(computed(() => ({
   count: virtualizeMobile.value ? (sortedData.value?.length ?? 0) : 0,
+  getItemKey: (index: number) => {
+    const row = sortedData.value?.[index]
+    return row != null ? resolveRowKey(row, index) : index
+  },
   estimateSize: () => props.estimateMobileRowHeight ?? 180,
   overscan: props.overscan ?? 5,
   scrollMargin: mobileScrollMargin.value,
@@ -942,6 +946,7 @@ watch(
 
 defineExpose({
   virtualizer: rowVirtualizer,
+  mobileVirtualizer: mobileRowVirtualizer,
   shouldVirtualize,
   sortedData,
   resolveRowKey,

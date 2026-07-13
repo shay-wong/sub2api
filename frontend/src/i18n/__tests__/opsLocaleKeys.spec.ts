@@ -37,14 +37,20 @@ describe('groups locale key completeness', () => {
     expect(enKeys).toContain('admin.groups.failedToSave')
   })
 
-  const webSearchPricingKeys = [
+  const requiredKeys = [
+    'admin.groups.columns.rateLimit5h',
+    'admin.groups.form.rateLimit5h',
+    'admin.groups.form.rateLimit5hPlaceholder',
+    'admin.groups.form.rateLimit5hHint',
+    'admin.groups.rateLimit5hInvalidError',
+    'admin.groups.unlimited',
     'admin.groups.webSearchPricing.title',
     'admin.groups.webSearchPricing.pricePerCall',
     'admin.groups.webSearchPricing.pricePerCallHint',
     'admin.groups.webSearchPricing.finalPricePreview',
   ]
 
-  for (const key of webSearchPricingKeys) {
+  for (const key of requiredKeys) {
     it(`en and zh locales both have ${key}`, () => {
       expect(flattenKeys(en)).toContain(key)
       expect(flattenKeys(zh)).toContain(key)

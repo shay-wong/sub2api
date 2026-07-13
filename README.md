@@ -615,7 +615,19 @@ The connection cap is coordinated through Redis using a 60-second lease that
 is refreshed every 20 seconds. A process that cannot confirm a lease for a
 full lease lifetime closes its local WebSocket rather than continuing outside
 the global cap. Use `http_bridge` for client-WebSocket/upstream-HTTP operation
-when rolling out or mitigating upstream WebSocket issues.
+when rolling out or mitigating upstream WebSocket issues. The default
+five-minute inter-turn idle timeout intentionally closes reusable sessions;
+clients should reconnect for the next turn. If Redis is unavailable and new
+WebSocket sessions must be restored immediately, set
+`max_ingress_connections_per_api_key: 0` as an emergency rollback, accepting
+that the distributed connection cap is disabled until Redis recovers.
+
+#### Payment API compatibility
+
+The deprecated public `GET /api/v1/payment/channels` endpoint has been removed
+because it exposed internal provider configuration. Public payment clients must
+use `GET /api/v1/payment/checkout-info`, which returns only checkout-safe method
+and limit data. Admin provider management remains under `/api/v1/admin/payment`.
 
 #### ⚠️ Important: Creating the Admin Account
 

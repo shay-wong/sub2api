@@ -201,6 +201,11 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
 
+### 兼容性与运维说明
+
+- OpenAI Responses WebSocket 默认在完成一轮请求后空闲 5 分钟关闭，客户端应在下一轮自动重连。连接数上限依赖 Redis 分布式租约；Redis 故障且必须紧急恢复新连接时，可暂时设置 `gateway.openai_ws.max_ingress_connections_per_api_key: 0`，代价是临时关闭分布式连接数保护。
+- 已移除会泄露内部支付渠道配置的废弃公开接口 `GET /api/v1/payment/channels`。外部支付客户端应迁移到 `GET /api/v1/payment/checkout-info`；管理端支付渠道接口仍位于 `/api/v1/admin/payment`。
+
 ## 生态项目
 
 围绕 Sub2API 的社区扩展与集成项目：

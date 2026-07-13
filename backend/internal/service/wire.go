@@ -247,8 +247,8 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
-	svc := NewConcurrencyService(cache)
+func ProvideConcurrencyService(cache RuntimeConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+	svc := NewRuntimeConcurrencyService(cache)
 	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 	}

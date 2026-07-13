@@ -6,8 +6,6 @@ api.sub2api.com {
 	# =========================================================================
 	@static {
 		path /assets/*
-		path /logo.png
-		path /favicon.ico
 	}
 	header @static {
 		Cache-Control "public, max-age=31536000, immutable"

@@ -1186,6 +1186,7 @@ export interface UpdateAccountRequest {
   notes?: string | null
   type?: AccountType
   credentials?: Record<string, unknown>
+  clear_plan_type?: boolean
   extra?: Record<string, unknown>
   proxy_id?: number | null
   concurrency?: number

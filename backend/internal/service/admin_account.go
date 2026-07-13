@@ -265,6 +265,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 	}
+	if input.ClearPlanType && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsCredentialShadow() {
+		delete(account.Credentials, "plan_type")
+	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
 	if input.Extra != nil {

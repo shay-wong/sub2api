@@ -140,6 +140,26 @@ describe('DataTable', () => {
     expect(instance.options.getItemKey(5)).toBe(105)
   })
 
+  it('keys the mobile virtualizer size cache by row identity', async () => {
+    stubDesktopMatchMedia(false)
+    const data = Array.from({ length: 12 }, (_, i) => ({ id: 200 + i, name: `Row ${i + 1}` }))
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data,
+        rowKey: 'id',
+        virtualizeMobile: true
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    const exposed = (wrapper.vm as any).mobileVirtualizer
+    const instance = exposed?.value ?? exposed
+    expect(instance.options.getItemKey(0)).toBe(200)
+    expect(instance.options.getItemKey(5)).toBe(205)
+  })
+
   it('emits rowClick from a clickable desktop row', async () => {
     const wrapper = mount(DataTable, {
       props: {

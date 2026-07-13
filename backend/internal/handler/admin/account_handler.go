@@ -136,6 +136,7 @@ type UpdateAccountRequest struct {
 	Notes                   *string        `json:"notes"`
 	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
 	Credentials             map[string]any `json:"credentials"`
+	ClearPlanType           bool           `json:"clear_plan_type"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`
 	Concurrency             *int           `json:"concurrency"`
@@ -1022,6 +1023,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		Notes:                 req.Notes,
 		Type:                  req.Type,
 		Credentials:           req.Credentials,
+		ClearPlanType:         req.ClearPlanType,
 		Extra:                 req.Extra,
 		ProxyID:               req.ProxyID,
 		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供

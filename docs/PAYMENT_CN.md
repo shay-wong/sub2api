@@ -2,6 +2,10 @@
 
 Sub2API 内置支付系统，支持用户自助充值，无需部署独立的支付服务。
 
+> API 兼容性说明：已移除会暴露内部支付渠道配置的废弃公开接口
+> `GET /api/v1/payment/channels`。公开客户端必须改用
+> `GET /api/v1/payment/checkout-info`。
+
 ---
 
 ## 目录

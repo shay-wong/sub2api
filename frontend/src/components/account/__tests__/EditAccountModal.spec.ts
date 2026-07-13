@@ -468,6 +468,33 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('submits an explicit plan type clear without resending redacted OAuth tokens', async () => {
+    const account = {
+      ...buildAccount(),
+      type: 'oauth',
+      credentials: { plan_type: 'pro' },
+      credentials_status: { has_access_token: true, has_refresh_token: true }
+    } as any
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const planTypeSelect = wrapper
+      .findAll('select')
+      .find((select) => (select.element as HTMLSelectElement).value === 'pro')
+    expect(planTypeSelect).toBeTruthy()
+
+    await planTypeSelect!.setValue('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.clear_plan_type).toBe(true)
+    expect(payload?.credentials).toEqual({})
+  })
+
   it('submits OpenAI APIKey Responses support override mode', async () => {
     const account = buildAccount()
     account.extra = {

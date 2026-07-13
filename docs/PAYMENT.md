@@ -2,6 +2,10 @@
 
 Sub2API has a built-in payment system that enables user self-service top-up without deploying a separate payment service.
 
+> API compatibility: the deprecated public `GET /api/v1/payment/channels`
+> endpoint has been removed because it exposed internal provider configuration.
+> Public clients must use `GET /api/v1/payment/checkout-info`.
+
 ---
 
 ## Table of Contents

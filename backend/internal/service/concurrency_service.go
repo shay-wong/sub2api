@@ -70,6 +70,14 @@ type OpenAIWSIngressLeaseCache interface {
 	ReleaseOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) error
 }
 
+// RuntimeConcurrencyCache is the production cache contract. WebSocket ingress
+// protection is enabled by default, so production wiring must provide lease
+// support at compile time rather than discovering it on the request path.
+type RuntimeConcurrencyCache interface {
+	ConcurrencyCache
+	OpenAIWSIngressLeaseCache
+}
+
 const (
 	openAIWSIngressLeaseTTL             = 60 * time.Second
 	openAIWSIngressLeaseRefreshInterval = 20 * time.Second
@@ -229,7 +237,8 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	cache                     ConcurrencyCache
+	openAIWSIngressLeaseCache OpenAIWSIngressLeaseCache
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -244,9 +253,21 @@ type cachedAccountLoadBatch struct {
 
 // NewConcurrencyService 创建并发控制服务。
 func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
+	leaseCache, _ := cache.(OpenAIWSIngressLeaseCache)
+	return newConcurrencyService(cache, leaseCache)
+}
+
+// NewRuntimeConcurrencyService creates the production service with an explicit
+// compile-time WebSocket ingress lease dependency.
+func NewRuntimeConcurrencyService(cache RuntimeConcurrencyCache) *ConcurrencyService {
+	return newConcurrencyService(cache, cache)
+}
+
+func newConcurrencyService(cache ConcurrencyCache, leaseCache OpenAIWSIngressLeaseCache) *ConcurrencyService {
 	svc := &ConcurrencyService{
-		cache:            cache,
-		accountLoadCache: make(map[string]cachedAccountLoadBatch),
+		cache:                     cache,
+		openAIWSIngressLeaseCache: leaseCache,
+		accountLoadCache:          make(map[string]cachedAccountLoadBatch),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
@@ -258,13 +279,10 @@ func (s *ConcurrencyService) AcquireOpenAIWSIngressLease(ctx context.Context, ap
 	if maxConnections <= 0 {
 		return nil, true, nil
 	}
-	if s == nil || s.cache == nil || apiKeyID <= 0 {
+	if s == nil || s.openAIWSIngressLeaseCache == nil || apiKeyID <= 0 {
 		return nil, false, errors.New("openai websocket ingress lease cache is unavailable")
 	}
-	cache, ok := s.cache.(OpenAIWSIngressLeaseCache)
-	if !ok {
-		return nil, false, errors.New("openai websocket ingress lease cache is unsupported")
-	}
+	cache := s.openAIWSIngressLeaseCache
 	leaseID := generateRequestID()
 	baseCtx := context.Background()
 	if ctx != nil {
