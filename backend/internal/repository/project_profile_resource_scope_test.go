@@ -185,6 +185,65 @@ func TestAccountRepositoryListUsesActiveProjectProfileScope(t *testing.T) {
 	require.ElementsMatch(t, []int64{bound.ID, unbound.ID, foreign.ID}, ids)
 }
 
+func TestAccountRepositorySetRateLimitedIfLaterUsesActiveProjectProfileScope(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+
+	project, err := client.Project.Create().
+		SetName("Rate Limit Project").
+		SetSlug("rate-limit-project").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	bound, err := client.Account.Create().
+		SetProjectID(project.ID).
+		SetName("bound-rate-limit-account").
+		SetPlatform(service.PlatformGrok).
+		SetType("oauth").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	unbound, err := client.Account.Create().
+		SetProjectID(project.ID).
+		SetName("unbound-rate-limit-account").
+		SetPlatform(service.PlatformGrok).
+		SetType("oauth").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	profile, err := client.ProjectProfile.Create().
+		SetProjectID(project.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = client.ProjectProfileBinding.Create().
+		SetProjectProfileID(profile.ID).
+		SetResourceType(service.ProjectResourceTypeAccount).
+		SetResourceID(bound.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	repo := newAccountRepositoryWithSQL(client, nil, nil)
+	projectCtx := service.WithProjectID(ctx, project.ID)
+	resetAt := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+
+	require.NoError(t, repo.SetRateLimitedIfLater(projectCtx, bound.ID, resetAt))
+	require.NoError(t, repo.SetRateLimitedIfLater(projectCtx, unbound.ID, resetAt))
+
+	boundAfter, err := client.Account.Get(ctx, bound.ID)
+	require.NoError(t, err)
+	require.NotNil(t, boundAfter.RateLimitResetAt)
+	require.WithinDuration(t, resetAt, *boundAfter.RateLimitResetAt, time.Second)
+
+	unboundAfter, err := client.Account.Get(ctx, unbound.ID)
+	require.NoError(t, err)
+	require.Nil(t, unboundAfter.RateLimitedAt)
+	require.Nil(t, unboundAfter.RateLimitResetAt)
+}
+
 func TestAccountRepositoryListShadowsByParentBypassesActiveProjectProfileScope(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()

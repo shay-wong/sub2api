@@ -1408,14 +1408,16 @@ func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetA
 // later reset boundary observed by another request or instance.
 func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64, resetAt time.Time) error {
 	now := time.Now()
+	predicates := []dbpredicate.Account{
+		dbaccount.IDEQ(id),
+		dbaccount.Or(
+			dbaccount.RateLimitResetAtIsNil(),
+			dbaccount.RateLimitResetAtLT(resetAt),
+		),
+	}
+	predicates = append(predicates, projectScopedAccountPredicate(ctx)...)
 	updated, err := r.client.Account.Update().
-		Where(
-			dbaccount.IDEQ(id),
-			dbaccount.Or(
-				dbaccount.RateLimitResetAtIsNil(),
-				dbaccount.RateLimitResetAtLT(resetAt),
-			),
-		).
+		Where(predicates...).
 		SetRateLimitedAt(now).
 		SetRateLimitResetAt(resetAt).
 		Save(ctx)
