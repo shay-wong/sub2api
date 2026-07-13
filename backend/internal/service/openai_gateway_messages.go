@@ -555,6 +555,15 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	return s.readOpenAICompatBufferedTerminalWithOptions(resp, logPrefix, requestID, false)
+}
+
+func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminalWithOptions(
+	resp *http.Response,
+	logPrefix string,
+	requestID string,
+	returnProtocolErrors bool,
+) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
 	acc := apicompat.NewBufferedResponseAccumulator()
 	var usage OpenAIUsage
 	if resp == nil || resp.Body == nil {
@@ -646,6 +655,8 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 							}
 							return event.Response, usage, acc, nil
 						}
+					} else if returnProtocolErrors {
+						return nil, usage, acc, newOpenAIResponsesBridgeProtocolError("malformed_sse_event", err)
 					}
 				}
 				return nil, usage, acc, nil
@@ -676,6 +687,9 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					zap.Error(err),
 					zap.String("request_id", requestID),
 				)
+				if returnProtocolErrors {
+					return nil, usage, acc, newOpenAIResponsesBridgeProtocolError("malformed_sse_event", err)
+				}
 				continue
 			}
 

@@ -277,6 +277,11 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if shouldFallbackGrokChatResponsesToRaw(resp.StatusCode, upstreamMsg, respBody) &&
+			c != nil && c.Writer != nil && !c.Writer.Written() {
+			_ = resp.Body.Close()
+			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		}
 		if upstreamMsg == "" {
 			upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
 		}
@@ -304,9 +309,33 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 
 	var result *OpenAIForwardResult
 	if clientStream {
-		result, err = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
+		result, err = s.handleChatStreamingResponseWithOptions(
+			resp,
+			c,
+			account,
+			originalModel,
+			billingModel,
+			upstreamModel,
+			startTime,
+			len(body),
+			chatResponsesHandlingOptions{returnProtocolErrors: true},
+		)
 	} else {
-		result, err = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
+		result, err = s.handleChatBufferedStreamingResponseWithOptions(
+			resp,
+			c,
+			account,
+			originalModel,
+			billingModel,
+			upstreamModel,
+			startTime,
+			chatResponsesHandlingOptions{returnProtocolErrors: true},
+		)
+	}
+	var protocolErr *openAIResponsesBridgeProtocolError
+	if errors.As(err, &protocolErr) && c != nil && c.Writer != nil && !c.Writer.Written() {
+		_ = resp.Body.Close()
+		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 	if result != nil {
 		result.UpstreamEndpoint = grokChatResponsesEndpoint
@@ -317,4 +346,35 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		result.ReasoningEffort = extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
 	}
 	return result, err
+}
+
+func shouldFallbackGrokChatResponsesToRaw(statusCode int, upstreamMessage string, responseBody []byte) bool {
+	if statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed {
+		return true
+	}
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
+		return false
+	}
+
+	message := strings.ToLower(strings.TrimSpace(upstreamMessage))
+	if message == "" {
+		message = strings.ToLower(strings.TrimSpace(string(responseBody)))
+	}
+	for _, marker := range []string{
+		"unsupported parameter",
+		"unknown parameter",
+		"invalid parameter",
+		"invalid type",
+		"tool_choice",
+		"tools",
+		"responses api",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }

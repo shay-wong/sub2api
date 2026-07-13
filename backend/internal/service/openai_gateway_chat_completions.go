@@ -376,6 +376,39 @@ func openAICompatFailedResponseMessage(resp *apicompat.ResponsesResponse) string
 	return strings.TrimSpace(resp.Error.Message)
 }
 
+type openAIResponsesBridgeProtocolError struct {
+	reason string
+	cause  error
+}
+
+func (e *openAIResponsesBridgeProtocolError) Error() string {
+	if e == nil {
+		return "openai responses bridge protocol error"
+	}
+	if e.cause != nil {
+		return fmt.Sprintf("openai responses bridge protocol error (%s): %v", e.reason, e.cause)
+	}
+	return fmt.Sprintf("openai responses bridge protocol error (%s)", e.reason)
+}
+
+func (e *openAIResponsesBridgeProtocolError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func newOpenAIResponsesBridgeProtocolError(reason string, cause error) error {
+	return &openAIResponsesBridgeProtocolError{
+		reason: strings.TrimSpace(reason),
+		cause:  cause,
+	}
+}
+
+type chatResponsesHandlingOptions struct {
+	returnProtocolErrors bool
+}
+
 // handleChatCompletionsErrorResponse reads an upstream error and returns it in
 // OpenAI Chat Completions error format.
 func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
@@ -399,14 +432,44 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	return s.handleChatBufferedStreamingResponseWithOptions(
+		resp,
+		c,
+		account,
+		originalModel,
+		billingModel,
+		upstreamModel,
+		startTime,
+		chatResponsesHandlingOptions{},
+	)
+}
+
+func (s *OpenAIGatewayService) handleChatBufferedStreamingResponseWithOptions(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	originalModel string,
+	billingModel string,
+	upstreamModel string,
+	startTime time.Time,
+	options chatResponsesHandlingOptions,
+) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminalWithOptions(
+		resp,
+		"openai chat_completions buffered",
+		requestID,
+		options.returnProtocolErrors,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	if finalResponse == nil {
+		if options.returnProtocolErrors {
+			return nil, newOpenAIResponsesBridgeProtocolError("missing_terminal_event", nil)
+		}
 		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
 		return nil, fmt.Errorf("upstream stream ended without terminal event")
 	}
@@ -490,6 +553,30 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
+	return s.handleChatStreamingResponseWithOptions(
+		resp,
+		c,
+		account,
+		originalModel,
+		billingModel,
+		upstreamModel,
+		startTime,
+		requestBodyLen,
+		chatResponsesHandlingOptions{},
+	)
+}
+
+func (s *OpenAIGatewayService) handleChatStreamingResponseWithOptions(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	originalModel string,
+	billingModel string,
+	upstreamModel string,
+	startTime time.Time,
+	requestBodyLen int,
+	options chatResponsesHandlingOptions,
+) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
@@ -508,6 +595,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
 	var streamNonFailoverErr error
+	var streamProtocolErr error
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 
@@ -551,11 +639,22 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
+			if options.returnProtocolErrors && !clientOutputStarted && (c == nil || c.Writer == nil || !c.Writer.Written()) {
+				streamProtocolErr = newOpenAIResponsesBridgeProtocolError("malformed_sse_event", err)
+				return true
+			}
 			return false
 		}
 		refusalDetector.ObservePayload([]byte(payload))
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		terminalType := strings.TrimSpace(event.Type)
+		if isTerminalEvent && terminalType != "response.failed" && event.Response == nil &&
+			options.returnProtocolErrors && !clientOutputStarted &&
+			(c == nil || c.Writer == nil || !c.Writer.Written()) {
+			streamProtocolErr = newOpenAIResponsesBridgeProtocolError("terminal_event_missing_response", nil)
+			return true
+		}
 		if isTerminalEvent {
 			if event.Usage != nil {
 				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
@@ -564,7 +663,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
 			}
 		}
-		if strings.TrimSpace(event.Type) == "response.failed" {
+		if terminalType == "response.failed" {
 			payloadBytes := []byte(payload)
 			message := extractOpenAISSEErrorMessage(payloadBytes)
 			if hit, code, msg := detectOpenAICyberPolicy(payloadBytes); hit {
@@ -688,6 +787,12 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	finalizeStream := func() (*OpenAIForwardResult, error) {
+		if streamProtocolErr != nil {
+			if c == nil || c.Writer == nil || !c.Writer.Written() {
+				return nil, streamProtocolErr
+			}
+			return resultWithUsage(), streamProtocolErr
+		}
 		if streamFailoverErr != nil {
 			if c == nil || c.Writer == nil || !c.Writer.Written() {
 				return nil, streamFailoverErr
@@ -779,6 +884,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 	}
 	missingTerminalErr := func() (*OpenAIForwardResult, error) {
+		if options.returnProtocolErrors && (c == nil || c.Writer == nil || !c.Writer.Written()) {
+			return nil, newOpenAIResponsesBridgeProtocolError("missing_terminal_event", nil)
+		}
 		return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
