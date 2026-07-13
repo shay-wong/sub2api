@@ -26,6 +26,9 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 		collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
 		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+	case ContentModerationProtocolOpenAIAlphaSearch:
+		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		collectAlphaSearchQueries(gjson.GetBytes(body, "commands.search_query"), &parts)
 	case ContentModerationProtocolGemini:
 		collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
@@ -42,6 +45,22 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	}
 	out.Normalize()
 	return out
+}
+
+func collectAlphaSearchQueries(queries gjson.Result, parts *[]string) {
+	if !queries.Exists() {
+		return
+	}
+	if queries.IsArray() {
+		queries.ForEach(func(_, query gjson.Result) bool {
+			addModerationText(parts, query.Get("q").String())
+			return true
+		})
+		return
+	}
+	if queries.IsObject() {
+		addModerationText(parts, queries.Get("q").String())
+	}
 }
 
 func collectLastRoleMessage(messages gjson.Result, role string, parts *[]string, images *[]string) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -23,7 +24,16 @@ type CyberSessionBlockStore interface {
 // sha256。无显式标识返回空串——调用方必须放行（粒度决策：不退化到
 // user/apikey/内容派生）。
 func CyberSessionBlockKey(apiKeyID int64, c *gin.Context, body []byte) string {
+	return CyberSessionBlockKeyWithFallback(apiKeyID, c, body, "")
+}
+
+// CyberSessionBlockKeyWithFallback accepts an endpoint-specific explicit
+// session identifier when the common OpenAI headers/body fields are absent.
+func CyberSessionBlockKeyWithFallback(apiKeyID int64, c *gin.Context, body []byte, fallbackSessionID string) string {
 	raw := explicitOpenAISessionID(c, body)
+	if raw == "" {
+		raw = strings.TrimSpace(fallbackSessionID)
+	}
 	if raw == "" {
 		return ""
 	}

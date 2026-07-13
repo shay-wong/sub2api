@@ -37,6 +37,9 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
 
+	// groups: per-call Alpha Search pricing (migration 174)
+	requireColumn(t, tx, "groups", "web_search_price_per_call", "numeric", 0, true)
+
 	// batch_image_jobs: project scope for public batch image ownership.
 	requireColumn(t, tx, "batch_image_jobs", "project_id", "bigint", 0, false)
 	requireIndex(t, tx, "batch_image_jobs", "batch_image_jobs_project_user_created_at_idx")

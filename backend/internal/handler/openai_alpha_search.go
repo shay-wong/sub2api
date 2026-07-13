@@ -77,7 +77,18 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", requestedModel))
 	setOpsRequestContext(c, requestedModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 
+	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIAlphaSearch, requestedModel, body); decision != nil && decision.Blocked {
+		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+		return
+	}
+	if h.rejectIfCyberSessionBlockedWithFallback(c, apiKey, body, searchID, requestedModel, cyberBlockFormatResponses) {
+		return
+	}
+
+	// Channel mapping belongs to the API key's requested group. A fallback
+	// selection group changes billing and rate-limit attribution, not model intent.
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestedModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -91,7 +102,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		defer userRelease()
 	}
 
-	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -107,7 +117,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			requestedModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportHTTPSSE,
-			service.OpenAIEndpointCapabilityChatCompletions,
+			service.OpenAIEndpointCapabilityAlphaSearch,
 			false,
 			false,
 			service.PlatformOpenAI,
@@ -165,6 +175,22 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			}
 			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
 		}()
+		cyberBlockKey := ""
+		if service.GetOpsCyberPolicy(c) != nil {
+			cyberBlockKey = service.CyberSessionBlockKeyWithFallback(apiKey.ID, c, body, searchID)
+		}
+		h.recordCyberPolicyIfMarked(
+			c,
+			apiKey,
+			selection,
+			account,
+			subscription,
+			requestedModel,
+			err != nil,
+			cyberBlockKey,
+			channelMapping.ToUsageFields(requestedModel, ""),
+			service.HashUsageRequestPayload(body),
+		)
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
@@ -185,7 +211,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return
 		}
 
-		h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+		h.gatewayService.ReportOpenAIAccountScheduleFailover(account.ID, failoverErr)
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
 			return

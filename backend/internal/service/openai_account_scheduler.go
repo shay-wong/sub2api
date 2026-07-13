@@ -1854,6 +1854,13 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64
 	scheduler.ReportResult(accountID, success, firstTokenMs)
 }
 
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleFailover(accountID int64, failoverErr *UpstreamFailoverError) {
+	if failoverErr != nil && failoverErr.NeutralForAccountHealth {
+		return
+	}
+	s.ReportOpenAIAccountScheduleResult(accountID, false, nil)
+}
+
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {

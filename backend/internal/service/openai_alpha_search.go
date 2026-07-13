@@ -69,13 +69,33 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) {
+		if hit, code, cyberMessage := detectOpenAICyberPolicy(respBody); hit {
+			MarkOpsCyberPolicy(c, CyberPolicyMark{
+				Code:           code,
+				Message:        cyberMessage,
+				Body:           truncateString(string(respBody), 4096),
+				UpstreamStatus: resp.StatusCode,
+			})
+			setOpsUpstreamError(c, resp.StatusCode, cyberMessage, truncateString(string(respBody), 2048))
+			writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+			contentType := resp.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = "application/json"
+			}
+			c.Data(resp.StatusCode, contentType, respBody)
+			return nil, fmt.Errorf("openai cyber_policy: %s", cyberMessage)
+		}
+		if s.shouldFailoverOpenAIAlphaSearchResponse(resp.StatusCode, upstreamMessage, respBody) {
+			endpointUnavailable := isOpenAIAlphaSearchEndpointUnavailable(resp.StatusCode, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+			if !endpointUnavailable {
+				s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+			}
 			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				StatusCode:              resp.StatusCode,
+				ResponseBody:            respBody,
+				RetryableOnSameAccount:  account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+				NeutralForAccountHealth: endpointUnavailable,
 			}
 		}
 	}
@@ -91,7 +111,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	c.Data(resp.StatusCode, contentType, respBody)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		// 非 2xx（错误/重定向）已原样透传给客户端：不是一次成功的搜索，不计费。
-		return nil, nil
+		return nil, fmt.Errorf("alpha search upstream error: %d", resp.StatusCode)
 	}
 	return &OpenAIForwardResult{
 		RequestID:      strings.TrimSpace(resp.Header.Get("x-request-id")),
@@ -100,6 +120,17 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		Duration:       time.Since(upstreamStart),
 		WebSearchCalls: 1,
 	}, nil
+}
+
+func (s *OpenAIGatewayService) shouldFailoverOpenAIAlphaSearchResponse(statusCode int, upstreamMessage string, upstreamBody []byte) bool {
+	return statusCode == http.StatusNotFound ||
+		isOpenAIAlphaSearchEndpointUnavailable(statusCode, upstreamBody) ||
+		s.shouldFailoverOpenAIUpstreamResponse(statusCode, upstreamMessage, upstreamBody)
+}
+
+func isOpenAIAlphaSearchEndpointUnavailable(statusCode int, upstreamBody []byte) bool {
+	return statusCode == http.StatusMethodNotAllowed ||
+		(statusCode == http.StatusNotFound && !isUpstreamModelNotFoundError(statusCode, upstreamBody))
 }
 
 func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {

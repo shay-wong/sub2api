@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -538,6 +539,90 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabled_Embeddi
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabled_AlphaSearchSkipsUnsupportedCustomAPIKey(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		available Account
+	}{
+		{
+			name: "selects OAuth",
+			available: Account{
+				ID:          36042,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    5,
+			},
+		},
+		{
+			name: "selects explicitly enabled custom API key",
+			available: Account{
+				ID:          36043,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Priority:    5,
+				Credentials: map[string]any{
+					"base_url":            "https://search.example/v1",
+					"openai_capabilities": []any{"alpha_search"},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+			ctx := context.Background()
+			groupID := int64(10114)
+			accounts := []Account{
+				{
+					ID:          36041,
+					Platform:    PlatformOpenAI,
+					Type:        AccountTypeAPIKey,
+					Status:      StatusActive,
+					Schedulable: true,
+					Concurrency: 1,
+					Priority:    0,
+					Credentials: map[string]any{
+						"base_url": "https://compat.example/v1",
+					},
+				},
+				tc.available,
+			}
+			cfg := &config.Config{}
+			cfg.Gateway.Scheduling.LoadBatchEnabled = false
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+				cache:              &schedulerTestGatewayCache{},
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+			}
+
+			selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+				ctx,
+				&groupID,
+				"",
+				"",
+				"gpt-5.1",
+				nil,
+				OpenAIUpstreamTransportHTTPSSE,
+				OpenAIEndpointCapabilityAlphaSearch,
+				false,
+				false,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, tc.available.ID, selection.Account.ID)
+			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+		})
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabled_AllowsGrokChatAccount(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -1037,6 +1122,27 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics_DisabledNoOp(t *test
 
 	snapshot := svc.SnapshotOpenAIAccountSchedulerMetrics()
 	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{}, snapshot)
+}
+
+func TestOpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsNeutralCapabilityMiss(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	svc := &OpenAIGatewayService{
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true"),
+	}
+	accountID := int64(37031)
+
+	svc.ReportOpenAIAccountScheduleFailover(accountID, &UpstreamFailoverError{
+		StatusCode:              http.StatusNotFound,
+		NeutralForAccountHealth: true,
+	})
+	require.Nil(t, svc.openaiAccountStats)
+
+	svc.ReportOpenAIAccountScheduleFailover(accountID, &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests})
+	require.NotNil(t, svc.openaiAccountStats)
+	errorRate, _, _ := svc.openaiAccountStats.snapshot(accountID)
+	require.InDelta(t, 0.2, errorRate, 0.0001)
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimitedAccountFallsBackToFreshCandidate(t *testing.T) {

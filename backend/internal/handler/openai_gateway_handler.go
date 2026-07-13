@@ -2397,6 +2397,10 @@ const (
 // written + ops entry enqueued). Fail-open: disabled switch / empty key /
 // store error → false.
 func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKey *service.APIKey, body []byte, model string, format cyberSessionBlockFormat) bool {
+	return h.rejectIfCyberSessionBlockedWithFallback(c, apiKey, body, "", model, format)
+}
+
+func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlockedWithFallback(c *gin.Context, apiKey *service.APIKey, body []byte, fallbackSessionID string, model string, format cyberSessionBlockFormat) bool {
 	if h == nil || h.gatewayService == nil || apiKey == nil {
 		return false
 	}
@@ -2404,7 +2408,7 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	if enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context()); !enabled {
 		return false
 	}
-	key := service.CyberSessionBlockKey(apiKey.ID, c, body)
+	key := service.CyberSessionBlockKeyWithFallback(apiKey.ID, c, body, fallbackSessionID)
 	if key == "" {
 		return false
 	}

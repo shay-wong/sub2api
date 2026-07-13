@@ -988,6 +988,21 @@ func TestExtractContentModerationInput_OpenAIResponsesCodexPayloadUsesLastUserMe
 	require.NotContains(t, input.Text, "first user prompt")
 }
 
+func TestExtractContentModerationInput_OpenAIAlphaSearchIncludesInputAndQueries(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"search context"}]}
+		],
+		"commands":{"search_query":[{"q":"first alpha query"},{"q":"second alpha query"}]}
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIAlphaSearch, body)
+
+	require.Contains(t, input.Text, "search context")
+	require.Contains(t, input.Text, "first alpha query")
+	require.Contains(t, input.Text, "second alpha query")
+}
+
 func TestContentModerationCheck_OpenAIResponsesRecordsNonHitForCodexPayload(t *testing.T) {
 	var moderationRequest moderationAPIRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

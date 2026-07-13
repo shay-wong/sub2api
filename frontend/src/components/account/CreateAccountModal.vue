@@ -3469,6 +3469,10 @@ import {
 } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import {
+  inferOpenAIEndpointCapabilities,
+  normalizeOpenAIEndpointCapabilities
+} from '@/utils/openaiEndpointCapabilities'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -3679,6 +3683,7 @@ const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
+const openAIEndpointCapabilitiesTouched = ref(false)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -3757,17 +3762,12 @@ const openAITextEndpointCapabilityLabel = computed(() => {
 })
 const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapability; label: string }[]>(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
-  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') }
+  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
+  { value: 'alpha_search', label: t('admin.accounts.openai.capabilityAlphaSearch') }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
 )
-
-const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
-  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings']
-  const selected = allowed.filter((value) => values.includes(value))
-  return selected.length > 0 ? selected : allowed
-}
 
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
   if (openAIEndpointCapabilities.value.includes(capability)) {
@@ -3776,6 +3776,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
       if (input) input.checked = true
       return
     }
+    openAIEndpointCapabilitiesTouched.value = true
     openAIEndpointCapabilities.value = openAIEndpointCapabilities.value.filter(
       (value) => value !== capability
     )
@@ -3784,6 +3785,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
     }
     return
   }
+  openAIEndpointCapabilitiesTouched.value = true
   openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities([
     ...openAIEndpointCapabilities.value,
     capability
@@ -3791,11 +3793,11 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
-  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
-  if (capabilities.length === 2) {
+  if (!openAIEndpointCapabilitiesTouched.value) {
     delete credentials.openai_capabilities
     return
   }
+  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
   credentials.openai_capabilities = capabilities
 }
 
@@ -4071,6 +4073,11 @@ watch(
           : newPlatform === 'grok'
             ? 'https://api.x.ai/v1'
             : 'https://api.anthropic.com'
+    openAIEndpointCapabilitiesTouched.value = false
+    openAIEndpointCapabilities.value =
+      newPlatform === 'openai'
+        ? inferOpenAIEndpointCapabilities(apiKeyBaseUrl.value)
+        : ['chat_completions', 'embeddings']
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -4121,7 +4128,6 @@ watch(
     }
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
-      openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
@@ -4145,6 +4151,12 @@ watch(
     grokOAuth.resetState()
   }
 )
+
+watch(apiKeyBaseUrl, (baseURL) => {
+  if (form.platform === 'openai' && !openAIEndpointCapabilitiesTouched.value) {
+    openAIEndpointCapabilities.value = inferOpenAIEndpointCapabilities(baseURL)
+  }
+})
 
 // Gemini AI Studio OAuth availability (requires operator-configured OAuth client)
 watch(
@@ -4533,6 +4545,7 @@ const resetForm = () => {
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+  openAIEndpointCapabilitiesTouched.value = false
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false

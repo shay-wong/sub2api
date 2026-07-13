@@ -530,6 +530,71 @@ describe('EditAccountModal', () => {
     ])
   })
 
+  it('preserves inherited official Alpha Search support on unrelated saves', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    const alphaSearchCheckbox = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-alpha_search"]'
+    )
+    expect(alphaSearchCheckbox.element.checked).toBe(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
+      'openai_capabilities'
+    )
+  })
+
+  it('persists an explicit Alpha Search opt-out', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    await wrapper
+      .get<HTMLInputElement>('[data-testid="openai-endpoint-capability-alpha_search"]')
+      .setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
+      'chat_completions',
+      'embeddings'
+    ])
+  })
+
+  it('infers missing Alpha Search capability from a custom base URL', async () => {
+    const account = buildAccount()
+    account.credentials.base_url = 'https://compat.example/v1'
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    expect(
+      wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-alpha_search"]')
+        .element.checked
+    ).toBe(false)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
+      'openai_capabilities'
+    )
+  })
+
 	it('submits OpenAI quota auto-pause thresholds in extra', async () => {
 	  const account = buildAccount()
 	  account.extra = {
@@ -588,19 +653,26 @@ describe('EditAccountModal', () => {
     const embeddingsCheckbox = wrapper.get<HTMLInputElement>(
       '[data-testid="openai-endpoint-capability-embeddings"]'
     )
+    const alphaSearchCheckbox = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-alpha_search"]'
+    )
 
     expect(chatCheckbox.element.checked).toBe(true)
     expect(embeddingsCheckbox.element.checked).toBe(true)
+    expect(alphaSearchCheckbox.element.checked).toBe(true)
 
     await embeddingsCheckbox.setValue(false)
+    await alphaSearchCheckbox.setValue(false)
 
     expect(chatCheckbox.element.checked).toBe(true)
     expect(embeddingsCheckbox.element.checked).toBe(false)
+    expect(alphaSearchCheckbox.element.checked).toBe(false)
 
     await chatCheckbox.setValue(false)
 
     expect(chatCheckbox.element.checked).toBe(true)
     expect(embeddingsCheckbox.element.checked).toBe(false)
+    expect(alphaSearchCheckbox.element.checked).toBe(false)
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 

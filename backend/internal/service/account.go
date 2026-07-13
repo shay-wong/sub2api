@@ -87,6 +87,7 @@ type OpenAIEndpointCapability string
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
 )
 
 const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
@@ -1393,12 +1394,23 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		if a.Type != AccountTypeAPIKey {
 			return false
 		}
+	case OpenAIEndpointCapabilityAlphaSearch:
+		if a.Type == AccountTypeOAuth {
+			return true
+		}
+		if a.Type != AccountTypeAPIKey {
+			return false
+		}
 	default:
 		return false
 	}
 
 	configured, found := a.openAIEndpointCapabilitySet()
 	if !found {
+		if capability == OpenAIEndpointCapabilityAlphaSearch {
+			baseURL, err := url.Parse(strings.TrimSpace(a.GetOpenAIBaseURL()))
+			return err == nil && strings.EqualFold(baseURL.Hostname(), "api.openai.com")
+		}
 		return true
 	}
 	return configured[string(capability)]

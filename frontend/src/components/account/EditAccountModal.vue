@@ -2553,6 +2553,12 @@ import {
 } from '@/components/account/credentialsBuilder'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import {
+  hasExplicitOpenAIEndpointCapabilities,
+  inferOpenAIEndpointCapabilities,
+  normalizeOpenAIEndpointCapabilities,
+  readOpenAIEndpointCapabilities
+} from '@/utils/openaiEndpointCapabilities'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -2765,6 +2771,8 @@ const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
+const openAIEndpointCapabilitiesExplicit = ref(false)
+const openAIEndpointCapabilitiesTouched = ref(false)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -2912,37 +2920,12 @@ const openAITextEndpointCapabilityLabel = computed(() => {
 })
 const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapability; label: string }[]>(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
-  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') }
+  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
+  { value: 'alpha_search', label: t('admin.accounts.openai.capabilityAlphaSearch') }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
 )
-
-const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
-  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings']
-  const selected = allowed.filter((value) => values.includes(value))
-  return selected.length > 0 ? selected : allowed
-}
-
-const readOpenAIEndpointCapabilities = (credentials?: Record<string, unknown>): OpenAIEndpointCapability[] => {
-  const raw = credentials?.openai_capabilities
-  if (Array.isArray(raw)) {
-    return normalizeOpenAIEndpointCapabilities(
-      raw.filter((value): value is OpenAIEndpointCapability =>
-        value === 'chat_completions' || value === 'embeddings'
-      )
-    )
-  }
-  if (raw !== null && typeof raw === 'object') {
-    const capabilityMap = raw as Record<string, unknown>
-    return normalizeOpenAIEndpointCapabilities(
-      openAIEndpointCapabilityOptions.value
-        .map((option) => option.value)
-        .filter((value) => capabilityMap[value] === true)
-    )
-  }
-  return ['chat_completions', 'embeddings']
-}
 
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
   if (openAIEndpointCapabilities.value.includes(capability)) {
@@ -2951,6 +2934,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
       if (input) input.checked = true
       return
     }
+    openAIEndpointCapabilitiesTouched.value = true
     openAIEndpointCapabilities.value = openAIEndpointCapabilities.value.filter(
       (value) => value !== capability
     )
@@ -2959,6 +2943,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
     }
     return
   }
+  openAIEndpointCapabilitiesTouched.value = true
   openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities([
     ...openAIEndpointCapabilities.value,
     capability
@@ -2966,11 +2951,11 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
-  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
-  if (capabilities.length === 2) {
+  if (!openAIEndpointCapabilitiesExplicit.value && !openAIEndpointCapabilitiesTouched.value) {
     delete credentials.openai_capabilities
     return
   }
+  const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
   credentials.openai_capabilities = capabilities
 }
 const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
@@ -3192,6 +3177,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+  openAIEndpointCapabilitiesExplicit.value = false
+  openAIEndpointCapabilitiesTouched.value = false
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -3206,8 +3193,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+      const apiKeyCredentials = newAccount.credentials as Record<string, unknown> | undefined
+      const openAIBaseURL = apiKeyCredentials?.base_url || 'https://api.openai.com'
+      openAIEndpointCapabilitiesExplicit.value = hasExplicitOpenAIEndpointCapabilities(apiKeyCredentials)
       openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
-        newAccount.credentials as Record<string, unknown> | undefined
+        apiKeyCredentials,
+        openAIBaseURL
       )
       if (!openAITextGenerationCapabilityEnabled.value) {
         openAIResponsesMode.value = 'auto'
@@ -3464,6 +3455,19 @@ watch(
   },
   { immediate: true }
 )
+
+watch(editBaseUrl, (baseURL) => {
+  if (
+    props.account?.platform === 'openai' &&
+    props.account?.type === 'apikey' &&
+    !openAIEndpointCapabilitiesExplicit.value &&
+    !openAIEndpointCapabilitiesTouched.value
+  ) {
+    openAIEndpointCapabilities.value = inferOpenAIEndpointCapabilities(
+      baseURL || defaultBaseUrl.value
+    )
+  }
+})
 
 // Model mapping helpers
 const addModelMapping = () => {

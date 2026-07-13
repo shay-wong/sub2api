@@ -56,6 +56,21 @@ func TestCyberSessionBlockKey(t *testing.T) {
 	require.Equal(t, k6, CyberSessionBlockKey(101, c6b, b6b), "conversation_id key must be stable")
 }
 
+func TestCyberSessionBlockKeyWithFallback(t *testing.T) {
+	c, body := newCyberBlockTestCtx(nil, `{}`)
+	fallbackKey := CyberSessionBlockKeyWithFallback(101, c, body, "  alpha-search-id  ")
+	require.NotEmpty(t, fallbackKey)
+	require.Equal(t, fallbackKey, CyberSessionBlockKeyWithFallback(101, c, body, "alpha-search-id"))
+
+	headerCtx, headerBody := newCyberBlockTestCtx(map[string]string{"session_id": "header-session"}, `{}`)
+	require.Equal(
+		t,
+		CyberSessionBlockKey(101, headerCtx, headerBody),
+		CyberSessionBlockKeyWithFallback(101, headerCtx, headerBody, "alpha-search-id"),
+		"common explicit session signals must take precedence over the endpoint fallback",
+	)
+}
+
 // --- fakes ---
 
 type fakeCyberBlockStore struct {
