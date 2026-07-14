@@ -50,6 +50,7 @@ export default {
         timeRange: '时间范围',
         startTime: '开始时间（可选）',
         endTime: '结束时间（可选）',
+        host: '主机',
         component: '组件',
         componentPlaceholder: '例如 http.access',
         keyId: 'KEY ID',

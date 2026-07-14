@@ -29,6 +29,10 @@ describe('ops locale key completeness', () => {
       expect(enKeys).toContain(key)
     })
   }
+
+  it('translates the system log host label in zh locale', () => {
+    expect(zh.admin.ops.systemLogs.host).toBe('主机')
+  })
 })
 
 describe('groups locale key completeness', () => {

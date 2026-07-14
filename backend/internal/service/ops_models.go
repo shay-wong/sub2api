@@ -9,6 +9,7 @@ type OpsSystemLog struct {
 	ID              int64          `json:"id"`
 	ProjectID       int64          `json:"project_id,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
+	Host            string         `json:"host"`
 	Level           string         `json:"level"`
 	Component       string         `json:"component"`
 	Message         string         `json:"message"`

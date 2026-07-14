@@ -1,4 +1,5 @@
 import { buildApiUrl } from '@/api/url'
+import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 
 export interface AccountTestEvent {
   type: string
@@ -47,7 +48,8 @@ export async function runAccountConnectionTest(
   options: RunAccountConnectionTestOptions
 ): Promise<AccountConnectionTestResult> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    [ADMIN_UI_REQUEST_HEADER]: '1'
   }
   if (options.authToken) {
     headers.Authorization = `Bearer ${options.authToken}`

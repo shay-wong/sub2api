@@ -48,7 +48,8 @@ describe('runAccountConnectionTest', () => {
       method: 'POST',
       headers: expect.objectContaining({
         Authorization: 'Bearer admin-token',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Admin-UI-Request': '1'
       }),
       body: '{}'
     }))

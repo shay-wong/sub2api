@@ -34,6 +34,9 @@ type stubAdminService struct {
 	createSparkShadowErr                error
 	updateAccountErr                    error
 	bulkUpdateAccountErr                error
+	getAccountResult                    *service.Account
+	updateAccountCalls                  int
+	updateAccountExtraCalls             int
 	checkMixedErr                       error
 	hideMissingAccounts                 bool
 	lastMixedCheck                      struct {
@@ -486,6 +489,9 @@ func stubAccountInAnyGroup(account service.Account, groupSet map[int64]struct{})
 }
 
 func (s *stubAdminService) GetAccount(ctx context.Context, id int64) (*service.Account, error) {
+	if s.getAccountResult != nil {
+		return s.getAccountResult, nil
+	}
 	for i := range s.accounts {
 		if s.accounts[i].ID == id {
 			return &s.accounts[i], nil
@@ -523,6 +529,7 @@ func (s *stubAdminService) CreateAccount(ctx context.Context, input *service.Cre
 }
 
 func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *service.UpdateAccountInput) (*service.Account, error) {
+	s.updateAccountCalls++
 	if s.updateAccountErr != nil {
 		return nil, s.updateAccountErr
 	}
@@ -531,6 +538,7 @@ func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *s
 }
 
 func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	s.updateAccountExtraCalls++
 	return nil
 }
 
