@@ -823,13 +823,6 @@ func resolveCodexImportExpiry(req CodexSessionImportRequest, item *codexImportAc
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		requestExpiresAt = &t
 	}
-	if item.IsAgentIdentity {
-		if requestExpiresAt == nil {
-			return nil, nil, req.AutoPauseOnExpired, nil, nil
-		}
-		expiresAtUnix := requestExpiresAt.Unix()
-		return &expiresAtUnix, nil, req.AutoPauseOnExpired, nil, nil
-	}
 
 	var accountExpiresAt *time.Time
 	var credentialExpiresAt *time.Time
