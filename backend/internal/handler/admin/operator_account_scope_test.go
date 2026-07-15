@@ -154,7 +154,7 @@ func newOperatorAccountScopeRouter(adminSvc *stubAdminService, groupIDs []int64)
 		operatorUserRepoStub{},
 		operatorGroupRepoStub{},
 	)
-	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, permissionSvc)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, permissionSvc)
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleOperator)

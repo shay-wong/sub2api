@@ -302,7 +302,7 @@ func TestProjectAdminWithOpsReadCanReadGrokRuntimeSanity(t *testing.T) {
 
 	RegisterAdminRoutes(
 		v1,
-		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil)}},
+		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
@@ -328,7 +328,7 @@ func TestProjectAdminWithoutOpsReadCannotReadGrokRuntimeSanity(t *testing.T) {
 
 	RegisterAdminRoutes(
 		v1,
-		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil)}},
+		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
@@ -341,6 +341,32 @@ func TestProjectAdminWithoutOpsReadCannotReadGrokRuntimeSanity(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/grok/runtime-sanity", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestProjectAdminWithoutAccountsWriteCannotReconcileGrokOAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	v1 := router.Group("/api/v1")
+
+	RegisterAdminRoutes(
+		v1,
+		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
+		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
+			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 1))
+			c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionDashboardRead}))
+			c.Next()
+		}),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/grok/oauth/reconcile", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
@@ -643,7 +669,7 @@ func TestProjectAdminCanReadAccountProxyOptionsWithAccountsWrite(t *testing.T) {
 
 	RegisterAdminRoutes(
 		v1,
-		&handler.Handlers{Admin: &handler.AdminHandlers{Account: adminhandler.NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}},
+		&handler.Handlers{Admin: &handler.AdminHandlers{Account: adminhandler.NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 7})
 			c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)

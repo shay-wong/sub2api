@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -24,6 +25,7 @@ type GrokOAuthHandler struct {
 	permissionService *service.PermissionService
 	quotaService      *service.GrokQuotaService
 	importProber      grokUsageProber
+	reconciler        service.GrokOAuthReconciler
 }
 
 func NewGrokOAuthHandler(
@@ -31,6 +33,7 @@ func NewGrokOAuthHandler(
 	adminService service.AdminService,
 	permissionService *service.PermissionService,
 	quotaService *service.GrokQuotaService,
+	reconciler service.GrokOAuthReconciler,
 ) *GrokOAuthHandler {
 	return &GrokOAuthHandler{
 		grokOAuthService:  grokOAuthService,
@@ -38,6 +41,7 @@ func NewGrokOAuthHandler(
 		permissionService: permissionService,
 		quotaService:      quotaService,
 		importProber:      quotaService,
+		reconciler:        reconciler,
 	}
 }
 
@@ -200,6 +204,50 @@ func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 	response.Success(c, dto.AccountFromService(scope.accountForResponse(updatedAccount)))
+}
+
+type GrokOAuthReconcileRequest struct {
+	DryRun               *bool `json:"dry_run"`
+	Apply                bool  `json:"apply"`
+	AfterID              int64 `json:"after_id"`
+	Limit                int   `json:"limit"`
+	RefreshWindowSeconds int64 `json:"refresh_window_seconds"`
+}
+
+func (h *GrokOAuthHandler) ReconcileOAuthAccounts(c *gin.Context) {
+	var req GrokOAuthReconcileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	dryRun := true
+	if req.DryRun != nil {
+		dryRun = *req.DryRun
+	}
+	if req.Apply == dryRun {
+		response.ErrorFrom(c, service.ErrGrokOAuthReconcileMode)
+		return
+	}
+	if req.RefreshWindowSeconds < 0 || req.RefreshWindowSeconds > int64((24*time.Hour)/time.Second) {
+		response.ErrorFrom(c, service.ErrGrokOAuthReconcileWindow)
+		return
+	}
+	if h.reconciler == nil {
+		response.InternalError(c, "Grok OAuth reconciliation service is unavailable")
+		return
+	}
+	result, err := h.reconciler.ReconcileGrokOAuth(c.Request.Context(), service.GrokOAuthReconcileInput{
+		DryRun:        dryRun,
+		Apply:         req.Apply,
+		AfterID:       req.AfterID,
+		Limit:         req.Limit,
+		RefreshWindow: time.Duration(req.RefreshWindowSeconds) * time.Second,
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {

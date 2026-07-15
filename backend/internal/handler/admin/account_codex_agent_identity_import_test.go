@@ -37,7 +37,7 @@ func TestNormalizeCodexImportEntryAcceptsAgentIdentityAuthJSON(t *testing.T) {
 
 func TestImportCodexAgentIdentityWithoutExpiryCreatesAccount(t *testing.T) {
 	svc := newCodexImportMemoryAdminService(nil)
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	result, err := handler.importCodexSessions(
 		context.Background(),
@@ -79,7 +79,7 @@ func TestImportCodexAgentIdentityReplacesExistingOAuthCredentials(t *testing.T) 
 		},
 	}
 	svc := newCodexImportMemoryAdminService([]service.Account{existing})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	result, err := handler.importCodexSessions(
 		context.Background(),
