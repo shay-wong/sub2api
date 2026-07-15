@@ -837,6 +837,7 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
@@ -1112,6 +1113,7 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
+					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
@@ -1373,7 +1375,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
