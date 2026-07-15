@@ -146,4 +146,16 @@ func TestIdempotencyRepo_StatusTransition_ToSucceeded(t *testing.T) {
 	require.NotNil(t, got.ResponseBody)
 	require.Equal(t, `{"ok":true}`, *got.ResponseBody)
 	require.Nil(t, got.LockedUntil)
+
+	require.NoError(t, repo.MarkFailedRetryable(
+		ctx,
+		record.ID,
+		"STALE_WORKER_FAILURE",
+		now.Add(time.Minute),
+		now.Add(24*time.Hour),
+	))
+	got, err = repo.GetByScopeAndKeyHash(ctx, record.Scope, record.IdempotencyKeyHash)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, service.IdempotencyStatusSucceeded, got.Status, "a stale worker must not downgrade a committed success")
 }

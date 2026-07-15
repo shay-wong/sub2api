@@ -196,20 +196,22 @@ func (r *idempotencyRepository) MarkSucceeded(ctx context.Context, id int64, res
 
 func (r *idempotencyRepository) MarkFailedRetryable(ctx context.Context, id int64, errorReason string, lockedUntil, expiresAt time.Time) error {
 	query := `
-		UPDATE idempotency_records
-		SET status = $2,
-			error_reason = $3,
-			locked_until = $4,
-			expires_at = $5,
-			updated_at = NOW()
-		WHERE id = $1
-	`
+			UPDATE idempotency_records
+			SET status = $2,
+				error_reason = $3,
+				locked_until = $4,
+				expires_at = $5,
+				updated_at = NOW()
+			WHERE id = $1
+				AND status = $6
+		`
 	_, err := r.sql.ExecContext(ctx, query,
 		id,
 		service.IdempotencyStatusFailedRetryable,
 		errorReason,
 		lockedUntil,
 		expiresAt,
+		service.IdempotencyStatusProcessing,
 	)
 	return err
 }

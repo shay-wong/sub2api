@@ -281,6 +281,61 @@ func TestIdempotencyCoordinator_ReclaimExpiredSucceededRecord(t *testing.T) {
 	require.GreaterOrEqual(t, metrics.ReplayTotal, uint64(1))
 }
 
+func TestIdempotencyCoordinator_ReclaimsStaleProcessingOnlyWhenOperationHasDurableFence(t *testing.T) {
+	repo := newInMemoryIdempotencyRepo()
+	cfg := DefaultIdempotencyConfig()
+	coordinator := NewIdempotencyCoordinator(repo, cfg)
+	opts := IdempotencyExecuteOptions{
+		Scope:          "admin.accounts.duplicate:project:7",
+		Method:         "POST",
+		Route:          "/api/v1/admin/accounts/42/duplicate",
+		ActorScope:     "admin:1:project:7",
+		RequireKey:     true,
+		IdempotencyKey: "duplicate-crash-recovery",
+		Payload:        map[string]any{"account_id": 42},
+	}
+	fingerprint, err := BuildIdempotencyFingerprint(opts.Method, opts.Route, opts.ActorScope, opts.Payload)
+	require.NoError(t, err)
+	lockedUntil := time.Now().Add(-time.Second)
+	record := &IdempotencyRecord{
+		Scope:              opts.Scope,
+		IdempotencyKeyHash: HashIdempotencyKey(opts.IdempotencyKey),
+		RequestFingerprint: fingerprint,
+		Status:             IdempotencyStatusProcessing,
+		LockedUntil:        &lockedUntil,
+		ExpiresAt:          time.Now().Add(23 * time.Hour),
+	}
+	owner, err := repo.CreateProcessing(context.Background(), record)
+	require.NoError(t, err)
+	require.True(t, owner)
+
+	executed := 0
+	_, err = coordinator.Execute(context.Background(), opts, func(context.Context) (any, error) {
+		executed++
+		return map[string]any{"id": 84}, nil
+	})
+	require.ErrorIs(t, err, ErrIdempotencyInProgress)
+	require.Zero(t, executed, "generic idempotent operations must remain fail-closed after a lost lease")
+
+	opts.ReclaimStaleProcessing = true
+	result, err := coordinator.Execute(context.Background(), opts, func(context.Context) (any, error) {
+		executed++
+		return map[string]any{"id": 84}, nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Replayed)
+	require.Equal(t, 1, executed)
+
+	replayed, err := coordinator.Execute(context.Background(), opts, func(context.Context) (any, error) {
+		executed++
+		return map[string]any{"id": 85}, nil
+	})
+	require.NoError(t, err)
+	require.True(t, replayed.Replayed)
+	require.Equal(t, 1, executed)
+}
+
 func TestIdempotencyCoordinator_SameKeyDifferentPayloadConflict(t *testing.T) {
 	resetIdempotencyMetricsForTest()
 	repo := newInMemoryIdempotencyRepo()

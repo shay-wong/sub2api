@@ -224,15 +224,14 @@ func (s *adminServiceImpl) findDuplicateByOperationID(ctx context.Context, opera
 	if operationID == "" {
 		return nil, nil
 	}
-	accounts, err := s.accountRepo.FindByExtraField(ctx, duplicateAccountOperationIDExtraKey, operationID)
+	if s.accountDuplicateRepo == nil {
+		return nil, errors.New("account duplicate repository is not configured")
+	}
+	accounts, err := s.accountDuplicateRepo.FindDuplicateByOperationID(ctx, operationID)
 	if err != nil {
 		return nil, fmt.Errorf("find duplicate account operation: %w", err)
 	}
-	if len(accounts) == 0 {
-		return nil, nil
-	}
-	account := accounts[0]
-	return &account, nil
+	return accounts, nil
 }
 
 // RecoverDuplicateAccount performs a read-only lookup for an already committed duplicate.
@@ -351,6 +350,13 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		return nil, errors.New("account duplicate repository is not configured")
 	}
 	if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, duplicate, groups); err != nil {
+		committed, recoverErr := s.findDuplicateByOperationID(ctx, operationID)
+		if recoverErr != nil {
+			return nil, errors.Join(fmt.Errorf("create duplicate account: %w", err), recoverErr)
+		}
+		if committed != nil {
+			return committed, nil
+		}
 		return nil, fmt.Errorf("create duplicate account: %w", err)
 	}
 	for i := range groups {

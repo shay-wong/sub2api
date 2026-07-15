@@ -79,14 +79,15 @@ func DefaultIdempotencyConfig() IdempotencyConfig {
 }
 
 type IdempotencyExecuteOptions struct {
-	Scope          string
-	ActorScope     string
-	Method         string
-	Route          string
-	IdempotencyKey string
-	Payload        any
-	TTL            time.Duration
-	RequireKey     bool
+	Scope                  string
+	ActorScope             string
+	Method                 string
+	Route                  string
+	IdempotencyKey         string
+	Payload                any
+	TTL                    time.Duration
+	RequireKey             bool
+	ReclaimStaleProcessing bool
 }
 
 type IdempotencyExecuteResult struct {
@@ -287,36 +288,46 @@ func (c *IdempotencyCoordinator) Execute(
 			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "existing->fingerprint_mismatch", false, nil)
 			return nil, ErrIdempotencyKeyConflict
 		}
-		reclaimedByExpired := false
+		reclaimedExisting := false
+		reclaimMode := ""
 		if !existing.ExpiresAt.After(now) {
+			reclaimMode = "expired_reclaim"
+		} else if opts.ReclaimStaleProcessing &&
+			existing.Status == IdempotencyStatusProcessing &&
+			(existing.LockedUntil == nil || !existing.LockedUntil.After(now)) {
+			// Only operations backed by a durable business-level uniqueness fence may
+			// opt in. Generic writes stay fail-closed after a worker loses its lease.
+			reclaimMode = "stale_processing_reclaim"
+		}
+		if reclaimMode != "" {
 			taken, reclaimErr := c.repo.TryReclaim(ctx, existing.ID, existing.Status, now, lockedUntil, expiresAt)
 			if reclaimErr != nil {
-				RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "try_reclaim_expired_error")
+				RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "try_reclaim_existing_error")
 				logIdempotencyAudit(opts.Route, opts.Scope, keyHash, existing.Status+"->store_unavailable", false, map[string]string{
-					"operation": "try_reclaim_expired",
+					"operation": "try_reclaim_existing",
 				})
 				return nil, ErrIdempotencyStoreUnavail.WithCause(reclaimErr)
 			}
 			if taken {
-				reclaimedByExpired = true
-				recordIdempotencyClaim(opts.Route, opts.Scope, map[string]string{"mode": "expired_reclaim"})
+				reclaimedExisting = true
+				recordIdempotencyClaim(opts.Route, opts.Scope, map[string]string{"mode": reclaimMode})
 				logIdempotencyAudit(opts.Route, opts.Scope, keyHash, existing.Status+"->processing", false, map[string]string{
-					"claim_mode": "expired_reclaim",
+					"claim_mode": reclaimMode,
 				})
 				record.ID = existing.ID
 			} else {
 				latest, latestErr := c.repo.GetByScopeAndKeyHash(ctx, opts.Scope, keyHash)
 				if latestErr != nil {
-					RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "get_existing_after_expired_reclaim_error")
+					RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "get_existing_after_reclaim_error")
 					logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "unknown->store_unavailable", false, map[string]string{
-						"operation": "get_existing_after_expired_reclaim",
+						"operation": "get_existing_after_reclaim",
 					})
 					return nil, ErrIdempotencyStoreUnavail.WithCause(latestErr)
 				}
 				if latest == nil {
-					RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "missing_existing_after_expired_reclaim")
+					RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "missing_existing_after_reclaim")
 					logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "unknown->store_unavailable", false, map[string]string{
-						"operation": "missing_existing_after_expired_reclaim",
+						"operation": "missing_existing_after_reclaim",
 					})
 					return nil, ErrIdempotencyStoreUnavail
 				}
@@ -329,7 +340,7 @@ func (c *IdempotencyCoordinator) Execute(
 			}
 		}
 
-		if !reclaimedByExpired {
+		if !reclaimedExisting {
 			switch existing.Status {
 			case IdempotencyStatusSucceeded:
 				data, parseErr := c.decodeStoredResponse(existing.ResponseBody)

@@ -2587,6 +2587,37 @@ func (r *accountRepository) FindByExtraField(ctx context.Context, key string, va
 	return r.accountsToService(ctx, accounts)
 }
 
+func (r *accountRepository) FindDuplicateByOperationID(ctx context.Context, operationID string) (*service.Account, error) {
+	operationID = strings.TrimSpace(operationID)
+	if operationID == "" {
+		return nil, nil
+	}
+	preds := []dbpredicate.Account{
+		dbaccount.DeletedAtIsNil(),
+		func(s *entsql.Selector) {
+			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, operationID, sqljson.Path("duplicate_operation_id")))
+		},
+	}
+	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
+		preds = append(preds, dbaccount.ProjectIDEQ(projectID))
+	}
+	account, err := r.client.Account.Query().Where(preds...).First(ctx)
+	if dbent.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	accounts, err := r.accountsToService(ctx, []*dbent.Account{account})
+	if err != nil {
+		return nil, err
+	}
+	if len(accounts) == 0 {
+		return nil, nil
+	}
+	return &accounts[0], nil
+}
+
 // nowUTC is a SQL expression to generate a UTC RFC3339 timestamp string.
 const nowUTC = `to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
 

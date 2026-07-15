@@ -1000,7 +1000,7 @@ func (h *AccountHandler) Duplicate(c *gin.Context) {
 	}
 	actorScope := adminActorScope(c)
 
-	result, err := executeAdminIdempotent(
+	result, err := executeAdminIdempotentWithStaleProcessingRecovery(
 		c,
 		"admin.accounts.duplicate",
 		struct {

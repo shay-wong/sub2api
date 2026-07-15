@@ -17,8 +17,11 @@ func TestCreateWithAccountGroupsPersistsPausedCopyAtomically(t *testing.T) {
 	client := testEntClient(t)
 	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
 	suffix := time.Now().UnixNano()
+	projectID, err := ensureDefaultProject(ctx, integrationDB)
+	require.NoError(t, err)
 
 	group, err := client.Group.Create().
+		SetProjectID(projectID).
 		SetName(fmt.Sprintf("duplicate-atomic-%d", suffix)).
 		SetPlatform(service.PlatformAnthropic).
 		Save(ctx)
@@ -79,4 +82,42 @@ func TestCreateWithAccountGroupsPersistsPausedCopyAtomically(t *testing.T) {
 	require.Zero(t, accountCount)
 	require.Zero(t, groupCount)
 	require.Zero(t, failedOutboxCount)
+}
+
+func TestCreateWithAccountGroupsEnforcesDuplicateOperationUniqueness(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	operationID := fmt.Sprintf("duplicate-operation-%d", time.Now().UnixNano())
+	newCopy := func(name string) *service.Account {
+		return &service.Account{
+			Name:        name,
+			Platform:    service.PlatformAnthropic,
+			Type:        service.AccountTypeAPIKey,
+			Status:      service.StatusActive,
+			Schedulable: false,
+			Credentials: map[string]any{"api_key": "secret"},
+			Extra:       map[string]any{"duplicate_operation_id": operationID},
+		}
+	}
+
+	first := newCopy(fmt.Sprintf("duplicate-operation-first-%d", time.Now().UnixNano()))
+	require.NoError(t, repo.CreateWithAccountGroups(ctx, first, nil))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id = $1", first.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM project_profile_bindings WHERE resource_type = 'account' AND resource_id = $1", first.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", first.ID)
+	})
+
+	second := newCopy(fmt.Sprintf("duplicate-operation-second-%d", time.Now().UnixNano()))
+	err := repo.CreateWithAccountGroups(ctx, second, nil)
+	require.Error(t, err)
+
+	var count int
+	require.NoError(t, integrationDB.QueryRowContext(
+		ctx,
+		"SELECT COUNT(*) FROM accounts WHERE deleted_at IS NULL AND extra->>'duplicate_operation_id' = $1",
+		operationID,
+	).Scan(&count))
+	require.Equal(t, 1, count)
 }

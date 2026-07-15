@@ -94,6 +94,9 @@ type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.
 	CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error
+	// FindDuplicateByOperationID is project-bound but intentionally independent of
+	// the active project profile so an ambiguous committed write remains recoverable.
+	FindDuplicateByOperationID(ctx context.Context, operationID string) (*Account, error)
 }
 
 // AdminAccountRepository makes the account-duplication write capability an explicit

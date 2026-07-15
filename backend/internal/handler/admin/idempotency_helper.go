@@ -28,6 +28,27 @@ func executeAdminIdempotent(
 	ttl time.Duration,
 	execute func(context.Context) (any, error),
 ) (*service.IdempotencyExecuteResult, error) {
+	return executeAdminIdempotentWithOptions(c, scope, payload, ttl, false, execute)
+}
+
+func executeAdminIdempotentWithStaleProcessingRecovery(
+	c *gin.Context,
+	scope string,
+	payload any,
+	ttl time.Duration,
+	execute func(context.Context) (any, error),
+) (*service.IdempotencyExecuteResult, error) {
+	return executeAdminIdempotentWithOptions(c, scope, payload, ttl, true, execute)
+}
+
+func executeAdminIdempotentWithOptions(
+	c *gin.Context,
+	scope string,
+	payload any,
+	ttl time.Duration,
+	reclaimStaleProcessing bool,
+	execute func(context.Context) (any, error),
+) (*service.IdempotencyExecuteResult, error) {
 	coordinator := service.DefaultIdempotencyCoordinator()
 	if coordinator == nil {
 		data, err := execute(c.Request.Context())
@@ -45,14 +66,15 @@ func executeAdminIdempotent(
 	}
 
 	return coordinator.Execute(c.Request.Context(), service.IdempotencyExecuteOptions{
-		Scope:          recordScope,
-		ActorScope:     actorScope,
-		Method:         c.Request.Method,
-		Route:          c.FullPath(),
-		IdempotencyKey: c.GetHeader("Idempotency-Key"),
-		Payload:        payload,
-		RequireKey:     true,
-		TTL:            ttl,
+		Scope:                  recordScope,
+		ActorScope:             actorScope,
+		Method:                 c.Request.Method,
+		Route:                  c.FullPath(),
+		IdempotencyKey:         c.GetHeader("Idempotency-Key"),
+		Payload:                payload,
+		RequireKey:             true,
+		TTL:                    ttl,
+		ReclaimStaleProcessing: reclaimStaleProcessing,
 	}, execute)
 }
 

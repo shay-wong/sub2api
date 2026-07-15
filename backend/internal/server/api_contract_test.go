@@ -1726,6 +1726,10 @@ func (s *stubAccountRepo) CreateWithAccountGroups(ctx context.Context, account *
 	return errors.New("not implemented")
 }
 
+func (s *stubAccountRepo) FindDuplicateByOperationID(ctx context.Context, operationID string) (*service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (s *stubAccountRepo) GetByID(ctx context.Context, id int64) (*service.Account, error) {
 	return nil, service.ErrAccountNotFound
 }

@@ -17,8 +17,9 @@ import (
 
 type duplicateAccountRepoStub struct {
 	*sparkShadowRepoStub
-	atomicCreateErr error
-	accountGroupsOf map[int64][]AccountGroup
+	atomicCreateErr         error
+	concurrentCommittedCopy *Account
+	accountGroupsOf         map[int64][]AccountGroup
 }
 
 type duplicateAccountGroupRepoStub struct {
@@ -60,6 +61,11 @@ func newDuplicateAccountRepoStub() *duplicateAccountRepoStub {
 
 func (s *duplicateAccountRepoStub) CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error {
 	if s.atomicCreateErr != nil {
+		if s.concurrentCommittedCopy != nil {
+			committed := *s.concurrentCommittedCopy
+			s.accounts[committed.ID] = &committed
+			s.mockAccountRepoForGemini.accountsByID[committed.ID] = &committed
+		}
 		return s.atomicCreateErr
 	}
 	groupIDs := make([]int64, 0, len(groups))
@@ -98,6 +104,50 @@ func (s *duplicateAccountRepoStub) FindByExtraField(_ context.Context, key strin
 		}
 	}
 	return matches, nil
+}
+
+func (s *duplicateAccountRepoStub) FindDuplicateByOperationID(ctx context.Context, operationID string) (*Account, error) {
+	matches, err := s.FindByExtraField(ctx, duplicateAccountOperationIDExtraKey, operationID)
+	if err != nil || len(matches) == 0 {
+		return nil, err
+	}
+	account := matches[0]
+	return &account, nil
+}
+
+func TestDuplicateAccountRecoversConcurrentCommitAfterUniqueFenceRejectsStaleWorker(t *testing.T) {
+	ctx := WithProjectID(context.Background(), 7)
+	repo := newDuplicateAccountRepoStub()
+	svc := newDuplicateAccountService(repo)
+	source := &Account{
+		Name:        "source",
+		ProjectID:   7,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Credentials: map[string]any{"api_key": "secret"},
+	}
+	require.NoError(t, repo.Create(ctx, source))
+
+	operationKey := "stale-worker-race"
+	operationID := duplicateAccountOperationID(source.ID, "admin:1:project:7", operationKey)
+	repo.atomicCreateErr = errors.New("duplicate key value violates unique constraint uq_accounts_duplicate_operation_id")
+	repo.concurrentCommittedCopy = &Account{
+		ID:          9001,
+		ProjectID:   7,
+		Name:        "source (Copy)",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: false,
+		Extra:       map[string]any{duplicateAccountOperationIDExtraKey: operationID},
+	}
+
+	duplicate, err := svc.DuplicateAccount(ctx, source.ID, "admin:1:project:7", operationKey)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(9001), duplicate.ID)
+	require.Len(t, repo.accounts, 2, "the stale worker must return the concurrent commit instead of creating another copy")
 }
 
 func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) {
