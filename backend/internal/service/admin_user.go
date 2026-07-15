@@ -573,8 +573,11 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 }
 
 func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+	user, err := s.getAdminScopedUser(ctx, userID, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -639,7 +642,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 }
 
 func (s *adminServiceImpl) tryAccrueAffiliateRebateForAdminRecharge(ctx context.Context, userID int64, operation string, amount float64) {
-	if operation != "add" || amount <= 0 || s.settingService == nil || s.affiliateService == nil {
+	if _, projectScoped := ProjectIDFromContext(ctx); projectScoped || operation != "add" || amount <= 0 || s.settingService == nil || s.affiliateService == nil {
 		return
 	}
 	if !s.settingService.IsAffiliateAdminRechargeEnabled(ctx) {

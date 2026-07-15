@@ -128,11 +128,12 @@ func TestAdminService_UpdateUserBalance_NoChangeNoInvalidate(t *testing.T) {
 
 func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.T) {
 	tests := []struct {
-		name      string
-		enabled   bool
-		operation string
-		amount    float64
-		wantCalls []adminRechargeAffiliateAccrual
+		name          string
+		enabled       bool
+		projectScoped bool
+		operation     string
+		amount        float64
+		wantCalls     []adminRechargeAffiliateAccrual
 	}{
 		{
 			name:      "disabled by default",
@@ -158,6 +159,13 @@ func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.
 			operation: "subtract",
 			amount:    5,
 		},
+		{
+			name:          "project scoped add",
+			enabled:       true,
+			projectScoped: true,
+			operation:     "add",
+			amount:        5,
+		},
 	}
 
 	for _, tt := range tests {
@@ -173,7 +181,13 @@ func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.
 				affiliateService: affiliate,
 			}
 
-			_, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, tt.operation, "")
+			ctx := context.Background()
+			if tt.projectScoped {
+				ctx = WithProjectID(ctx, 42)
+				svc.userRepo = &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 7, Role: RoleUser, Balance: 10}}}
+			}
+
+			_, err := svc.UpdateUserBalance(ctx, 7, tt.amount, tt.operation, "")
 			require.NoError(t, err)
 			require.Equal(t, tt.wantCalls, affiliate.calls)
 		})
@@ -197,4 +211,39 @@ func TestAdminService_UpdateUserBalance_AffiliateFailureDoesNotRollbackRecharge(
 	require.Equal(t, 15.0, user.Balance)
 	require.Equal(t, []adminRechargeAffiliateAccrual{{userID: 7, amount: 5}}, affiliate.calls)
 	require.Len(t, redeemRepo.created, 1)
+}
+
+func TestAdminService_UpdateUserBalance_ProjectAdminRejectsOutOfScopeAndAdminTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		scopedUsers []User
+		wantErr     error
+	}{
+		{name: "out of scope", wantErr: ErrUserNotFound},
+		{
+			name:        "project admin",
+			scopedUsers: []User{{ID: 7, Role: RoleUser, ProjectRole: ProjectRoleAdmin, Balance: 10}},
+			wantErr:     ErrProjectAdminCannotManageAdminUser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &scopedAdminUserRepoStub{scopedUsers: tt.scopedUsers}
+			affiliate := &adminRechargeAffiliateAccruerStub{}
+			svc := &adminServiceImpl{
+				userRepo:         repo,
+				settingService:   adminRechargeSettingService(true),
+				affiliateService: affiliate,
+			}
+			ctx := WithAdminRole(WithProjectID(context.Background(), 42), RoleAdmin)
+
+			_, err := svc.UpdateUserBalance(ctx, 7, 5, "add", "")
+
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Empty(t, repo.getByIDCalls)
+			require.Empty(t, repo.updated)
+			require.Empty(t, affiliate.calls)
+		})
+	}
 }
