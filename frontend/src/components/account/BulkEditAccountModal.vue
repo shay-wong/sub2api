@@ -83,7 +83,7 @@
       </div>
 
       <!-- Base URL (API Key only) -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="canEditBaseUrl" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-base-url-label"
@@ -1264,6 +1264,13 @@ const targetPreviewCount = computed(() => props.target?.previewCount ?? props.ac
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
 const isMixedPlatform = computed(() => targetSelectedPlatforms.value.length > 1)
+const canEditBaseUrl = computed(() => {
+  if (authStore.isAdmin) return true
+  return !(
+    targetSelectedPlatforms.value.includes('grok') &&
+    targetSelectedTypes.value.includes('oauth')
+  )
+})
 
 const allOpenAIPassthroughCapable = computed(() => {
   return (
@@ -1568,7 +1575,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.group_ids = groupIds.value
   }
 
-  if (enableBaseUrl.value) {
+  if (canEditBaseUrl.value && enableBaseUrl.value) {
     const baseUrlValue = baseUrl.value.trim()
     if (baseUrlValue) {
       credentials.base_url = baseUrlValue
@@ -1746,7 +1753,7 @@ const handleSubmit = async () => {
   }
 
   const hasAnyFieldEnabled =
-    enableBaseUrl.value ||
+    (canEditBaseUrl.value && enableBaseUrl.value) ||
     enableOpenAIPassthrough.value ||
     enableModelRestriction.value ||
     enableCustomErrorCodes.value ||
@@ -1775,7 +1782,7 @@ const handleSubmit = async () => {
 
   // base_url 现在也会作用于 Grok OAuth 订阅账号的转发端点；坏值会让请求期
   // 校验失败、账号请求全挂，因此保存前强制格式校验（与单账号编辑一致）。
-  if (enableBaseUrl.value) {
+  if (canEditBaseUrl.value && enableBaseUrl.value) {
     const trimmedBaseUrl = baseUrl.value.trim()
     if (trimmedBaseUrl && !/^https?:\/\//i.test(trimmedBaseUrl)) {
       appStore.showError(t('admin.accounts.grokCustomBaseUrl.invalid'))

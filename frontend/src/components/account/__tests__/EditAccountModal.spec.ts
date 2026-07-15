@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, authIsAdmin } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
-  authIsSimpleMode: { value: true }
+  authIsSimpleMode: { value: true },
+  authIsAdmin: { value: true }
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -20,6 +21,9 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     get isSimpleMode() {
       return authIsSimpleMode.value
+    },
+    get isAdmin() {
+      return authIsAdmin.value
     }
   })
 }))
@@ -314,6 +318,7 @@ function mountModal(account = buildAccount()) {
 describe('EditAccountModal', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
+    authIsAdmin.value = true
   })
 
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
@@ -521,6 +526,16 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       grok: 'grok-build-0.1'
     })
+  })
+
+  it.each([
+    ['super admin', true, true],
+    ['project admin', false, false]
+  ])('%s Grok OAuth custom upstream visibility matches backend permission', (_name, isAdmin, visible) => {
+    authIsAdmin.value = isAdmin
+    const wrapper = mountModal(buildGrokOAuthAccount())
+
+    expect(wrapper.find('[data-testid="grok-custom-base-url-toggle"]').exists()).toBe(visible)
   })
 
   it('uses the official xAI base URL when a Grok API-key account omits base_url', async () => {

@@ -1906,7 +1906,7 @@
 
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
-        v-if="form.platform === 'grok' && isOAuthFlow"
+        v-if="form.platform === 'grok' && isOAuthFlow && authStore.isAdmin"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">

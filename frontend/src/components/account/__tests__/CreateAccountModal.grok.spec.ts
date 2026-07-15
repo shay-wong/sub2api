@@ -20,7 +20,7 @@ describe('CreateAccountModal Grok account types', () => {
   it('exposes custom upstream URL and header override for the OAuth create flow', () => {
     expect(source).toContain('data-testid="grok-custom-base-url-toggle"')
     expect(source).toContain('data-testid="grok-custom-base-url-input"')
-    expect(source).toContain('form.platform === \'grok\' && isOAuthFlow')
+    expect(source).toContain("form.platform === 'grok' && isOAuthFlow && authStore.isAdmin")
   })
 
   it('validates and applies upstream config on all three Grok OAuth create paths', () => {

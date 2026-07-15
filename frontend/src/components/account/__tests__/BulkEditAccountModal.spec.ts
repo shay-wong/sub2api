@@ -4,6 +4,10 @@ import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
 
+const { authIsAdmin } = vi.hoisted(() => ({
+  authIsAdmin: { value: true }
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
@@ -14,7 +18,9 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    isAdmin: true
+    get isAdmin() {
+      return authIsAdmin.value
+    }
   })
 }))
 
@@ -81,6 +87,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 
 describe('BulkEditAccountModal', () => {
   beforeEach(() => {
+    authIsAdmin.value = true
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()
 
@@ -182,6 +189,20 @@ describe('BulkEditAccountModal', () => {
     })
 
     expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
+  })
+
+  it.each([
+    ['super admin editing Grok OAuth', true, ['grok'], ['oauth'], true],
+    ['project admin editing Grok OAuth', false, ['grok'], ['oauth'], false],
+    ['project admin editing Grok API key', false, ['grok'], ['apikey'], true]
+  ])('%s base URL visibility matches backend permission', (_name, isAdmin, platforms, types, visible) => {
+    authIsAdmin.value = isAdmin
+    const wrapper = mountModal({
+      selectedPlatforms: platforms,
+      selectedTypes: types
+    })
+
+    expect(wrapper.find('#bulk-edit-base-url-enabled').exists()).toBe(visible)
   })
 
   it('OpenAI OAuth 批量编辑应提交 codex_cli_only 字段', async () => {

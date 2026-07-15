@@ -183,6 +183,17 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   it.each([
+    ['super admin', true, true],
+    ['project admin', false, false],
+  ])('%s Grok OAuth custom upstream visibility matches backend permission', async (_name, isAdmin, visible) => {
+    authStoreMock.isAdmin = isAdmin
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Grok')
+
+    expect(wrapper.find('[data-testid="grok-custom-base-url-toggle"]').exists()).toBe(visible)
+  })
+
+  it.each([
     ['camelCase', { authMode: 'agentIdentity', agentIdentity: { agentRuntimeId: 'runtime' } }],
     ['nested identity without auth_mode', { agent_identity: { agent_runtime_id: 'runtime' } }],
   ])('accepts backend-compatible %s Agent Identity imports', async (_name, content) => {
