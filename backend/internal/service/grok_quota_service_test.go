@@ -734,6 +734,53 @@ func TestGrokQuotaServiceProbeFlightsDeduplicateBillingAndSeparateActive(t *test
 	require.Equal(t, 1, activeCalls)
 }
 
+func TestGrokQuotaServiceProbeFlightsPreserveAndSeparateProjectContext(t *testing.T) {
+	t.Parallel()
+
+	svc := &GrokQuotaService{}
+	started := make(chan int64, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseAll := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseAll)
+
+	type probeOutcome struct {
+		result *GrokQuotaProbeResult
+		err    error
+	}
+	outcomes := make(chan probeOutcome, 2)
+	probe := func(ctx context.Context) (*GrokQuotaProbeResult, error) {
+		projectID, _ := ProjectIDFromContext(ctx)
+		started <- projectID
+		<-release
+		return &GrokQuotaProbeResult{StatusCode: int(projectID)}, nil
+	}
+	for _, projectID := range []int64{101, 202} {
+		go func() {
+			result, err := svc.runProbeFlight(WithProjectID(context.Background(), projectID), "billing:55", probe)
+			outcomes <- probeOutcome{result: result, err: err}
+		}()
+	}
+
+	seenProjects := map[int64]bool{}
+	for range 2 {
+		select {
+		case projectID := <-started:
+			seenProjects[projectID] = true
+		case <-time.After(time.Second):
+			t.Fatal("project-scoped Grok quota probes shared one singleflight")
+		}
+	}
+	require.Equal(t, map[int64]bool{101: true, 202: true}, seenProjects)
+
+	releaseAll()
+	for range 2 {
+		outcome := <-outcomes
+		require.NoError(t, outcome.err)
+		require.True(t, seenProjects[int64(outcome.result.StatusCode)])
+	}
+}
+
 func TestGrokQuotaServiceBilling429DoesNotPauseModelScheduling(t *testing.T) {
 	t.Parallel()
 

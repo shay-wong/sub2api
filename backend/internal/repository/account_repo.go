@@ -1602,13 +1602,13 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 // from erasing a later clear/re-arm generation with an equal or shorter reset.
 func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
 	updated, err := r.client.Account.Update().
-		Where(
+		Where(append([]dbpredicate.Account{
 			dbaccount.IDEQ(id),
 			dbaccount.PlatformEQ(service.PlatformGrok),
 			dbaccount.TypeEQ(service.AccountTypeOAuth),
 			dbaccount.RateLimitedAtEQ(observedLimitedAt),
 			dbaccount.RateLimitResetAtEQ(observedResetAt),
-		).
+		}, projectScopedAccountPredicate(ctx)...)...).
 		ClearRateLimitedAt().
 		ClearRateLimitResetAt().
 		Save(ctx)

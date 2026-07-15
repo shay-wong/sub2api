@@ -185,6 +185,64 @@ func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing
 	require.Contains(t, string(redacted), "[redacted]")
 }
 
+func TestOpenAIAgentIdentityShadowErrorRedactionSurvivesCanceledContext(t *testing.T) {
+	parentID := int64(25)
+	parent := &Account{
+		ID:       parentID,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"auth_mode":         OpenAIAuthModeAgentIdentity,
+			"agent_runtime_id":  "runtime-secret",
+			"agent_private_key": "private-secret",
+			"task_id":           "task-secret",
+		},
+	}
+	shadow := &Account{
+		ID:              26,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+	}
+	repo := &agentIdentityRedactionRepo{getByID: func(ctx context.Context, id int64) (*Account, error) {
+		require.NoError(t, ctx.Err())
+		_, hasDeadline := ctx.Deadline()
+		require.True(t, hasDeadline)
+		require.Equal(t, parentID, id)
+		return parent, nil
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	redacted := (&OpenAIGatewayService{accountRepo: repo}).redactAgentIdentitySensitiveBody(
+		ctx,
+		shadow,
+		[]byte(`{"message":"runtime-secret task-secret AgentAssertion assertion-secret"}`),
+	)
+
+	require.NotContains(t, string(redacted), "runtime-secret")
+	require.NotContains(t, string(redacted), "task-secret")
+	require.NotContains(t, string(redacted), "assertion-secret")
+}
+
+func TestOpenAIAgentIdentityErrorRedactionStripsAssertionWhenShadowResolutionFails(t *testing.T) {
+	parentID := int64(25)
+	shadow := &Account{ID: 26, ParentAccountID: &parentID}
+	repo := &agentIdentityRedactionRepo{getByID: func(context.Context, int64) (*Account, error) {
+		return nil, context.Canceled
+	}}
+
+	redacted := redactAgentIdentitySensitiveBodyForAccount(
+		context.Background(),
+		repo,
+		shadow,
+		[]byte(`{"message":"AgentAssertion assertion-secret"}`),
+	)
+
+	require.NotContains(t, string(redacted), "assertion-secret")
+	require.Contains(t, string(redacted), "AgentAssertion [redacted]")
+}
+
 func TestOpenAIAuthenticationHeadersPreserveOAuthPATAndAPIKeyBearerModes(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	tests := []struct {
@@ -456,6 +514,15 @@ func decodeAgentAssertionTask(t *testing.T, header string) string {
 type agentIdentityForwardRepo struct {
 	AccountRepository
 	account *Account
+}
+
+type agentIdentityRedactionRepo struct {
+	AccountRepository
+	getByID func(context.Context, int64) (*Account, error)
+}
+
+func (r *agentIdentityRedactionRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	return r.getByID(ctx, id)
 }
 
 type agentIdentityWSInvalidationRecorder struct {

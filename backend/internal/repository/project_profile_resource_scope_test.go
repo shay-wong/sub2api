@@ -185,7 +185,7 @@ func TestAccountRepositoryListUsesActiveProjectProfileScope(t *testing.T) {
 	require.ElementsMatch(t, []int64{bound.ID, unbound.ID, foreign.ID}, ids)
 }
 
-func TestAccountRepositorySetRateLimitedIfLaterUsesActiveProjectProfileScope(t *testing.T) {
+func TestAccountRepositoryGrokRateLimitMutationsUseActiveProjectProfileScope(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()
 
@@ -242,6 +242,32 @@ func TestAccountRepositorySetRateLimitedIfLaterUsesActiveProjectProfileScope(t *
 	require.NoError(t, err)
 	require.Nil(t, unboundAfter.RateLimitedAt)
 	require.Nil(t, unboundAfter.RateLimitResetAt)
+
+	observedLimitedAt := time.Now().UTC().Truncate(time.Second)
+	observedResetAt := observedLimitedAt.Add(30 * time.Minute)
+	for _, accountID := range []int64{bound.ID, unbound.ID} {
+		_, err = client.Account.UpdateOneID(accountID).
+			SetRateLimitedAt(observedLimitedAt).
+			SetRateLimitResetAt(observedResetAt).
+			Save(ctx)
+		require.NoError(t, err)
+	}
+
+	cleared, err := repo.ClearRateLimitIfObserved(projectCtx, bound.ID, observedLimitedAt, observedResetAt)
+	require.NoError(t, err)
+	require.True(t, cleared)
+	cleared, err = repo.ClearRateLimitIfObserved(projectCtx, unbound.ID, observedLimitedAt, observedResetAt)
+	require.NoError(t, err)
+	require.False(t, cleared)
+
+	boundAfter, err = client.Account.Get(ctx, bound.ID)
+	require.NoError(t, err)
+	require.Nil(t, boundAfter.RateLimitedAt)
+	require.Nil(t, boundAfter.RateLimitResetAt)
+	unboundAfter, err = client.Account.Get(ctx, unbound.ID)
+	require.NoError(t, err)
+	require.NotNil(t, unboundAfter.RateLimitedAt)
+	require.NotNil(t, unboundAfter.RateLimitResetAt)
 }
 
 func TestAccountRepositoryListShadowsByParentBypassesActiveProjectProfileScope(t *testing.T) {

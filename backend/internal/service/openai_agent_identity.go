@@ -25,6 +25,7 @@ const (
 	OpenAIAuthModeAgentIdentity          = "agentIdentity"
 	agentIdentityAuthAPIBaseURL          = "https://auth.openai.com/api/accounts"
 	agentIdentityTaskRegistrationTimeout = 30 * time.Second
+	agentIdentityRedactionLookupTimeout  = 2 * time.Second
 )
 
 var openAIAgentIdentityAuthAPIBaseURL = agentIdentityAuthAPIBaseURL
@@ -468,34 +469,10 @@ func (s *OpenAIGatewayService) isAgentIdentityAccount(ctx context.Context, accou
 // Identity responses should not echo these values, but keeping this boundary
 // defensive prevents accidental disclosure if an upstream error does.
 func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo AccountRepository, account *Account, body []byte) []byte {
-	if account == nil || len(body) == 0 {
-		return body
-	}
-	credAccount := account
-	if account != nil && account.IsShadow() {
-		if resolved, err := resolveCredentialAccount(ctx, repo, account); err == nil && resolved != nil {
-			credAccount = resolved
-		}
-	}
-	if credAccount == nil || !credAccount.IsOpenAIAgentIdentity() {
+	if len(body) == 0 {
 		return body
 	}
 	redacted := string(body)
-	for _, key := range []string{
-		"agent_private_key",
-		"agent_runtime_id",
-		"task_id",
-		"access_token",
-		"refresh_token",
-		"id_token",
-		"api_key",
-		"session_key",
-		"cookie",
-	} {
-		if value := strings.TrimSpace(credAccount.GetCredential(key)); value != "" {
-			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
-		}
-	}
 	const assertionPrefix = "AgentAssertion "
 	for offset := 0; offset < len(redacted); {
 		relativeStart := strings.Index(redacted[offset:], assertionPrefix)
@@ -511,12 +488,38 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 		redacted = redacted[:valueStart] + "[redacted]" + redacted[end:]
 		offset = valueStart + len("[redacted]")
 	}
+	if account == nil {
+		return []byte(redacted)
+	}
+	credAccount := account
+	if account.IsShadow() {
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentIdentityRedactionLookupTimeout)
+		defer cancel()
+		if resolved, err := resolveCredentialAccount(lookupCtx, repo, account); err == nil && resolved != nil {
+			credAccount = resolved
+		}
+	}
+	if credAccount == nil || !credAccount.IsOpenAIAgentIdentity() {
+		return []byte(redacted)
+	}
+	for _, key := range []string{
+		"agent_private_key",
+		"agent_runtime_id",
+		"task_id",
+		"access_token",
+		"refresh_token",
+		"id_token",
+		"api_key",
+		"session_key",
+		"cookie",
+	} {
+		if value := strings.TrimSpace(credAccount.GetCredential(key)); value != "" {
+			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+		}
+	}
 	return []byte(redacted)
 }
 
 func (s *OpenAIGatewayService) redactAgentIdentitySensitiveBody(ctx context.Context, account *Account, body []byte) []byte {
-	if !s.isAgentIdentityAccount(ctx, account) {
-		return body
-	}
 	return redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, account, body)
 }
