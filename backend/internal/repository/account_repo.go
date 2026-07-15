@@ -876,39 +876,41 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	// 健康账号：temp_unschedulable_until=NULL）也排除，导致后台 token
 	// 刷新工作器漏掉所有正常账号 → access_token 到期后请求开始 401。
 	query := `
-		SELECT id
-		FROM accounts
-		WHERE deleted_at IS NULL
-			AND platform = ANY($1)
-			AND id > $2`
+		SELECT a.id
+		FROM accounts AS a
+		WHERE a.deleted_at IS NULL
+			AND a.platform = ANY($1)
+			AND a.id > $2`
 	if options.ActiveOnly {
 		query += `
-			AND status = 'active'`
+			AND a.status = 'active'`
 	}
 	if options.IncludeSetupToken {
 		query += `
-			AND type IN ('oauth', 'setup-token')`
+			AND a.type IN ('oauth', 'setup-token')`
 	} else {
 		query += `
-			AND type = 'oauth'`
+			AND a.type = 'oauth'`
 	}
 	if options.RequireRefreshToken {
 		query += `
-			AND credentials ? 'refresh_token'
-			AND btrim(credentials->>'refresh_token') <> ''`
+			AND a.credentials ? 'refresh_token'
+			AND btrim(a.credentials->>'refresh_token') <> ''`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `
 			AND (
-				temp_unschedulable_until > NOW()
-				AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
+				a.temp_unschedulable_until > NOW()
+				AND a.temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
 			) IS NOT TRUE`
 	}
+	args := []any{pq.Array(options.Platforms), options.AfterID, options.Limit}
+	query += buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
 	query += `
-		ORDER BY id ASC
+		ORDER BY a.id ASC
 		LIMIT $3`
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(options.Platforms), options.AfterID, options.Limit)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1113,7 +1115,18 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 	if err != nil {
 		return false, err
 	}
-	result, err := r.sql.ExecContext(ctx, `
+	args := []any{
+		service.StatusError,
+		errorMsg,
+		id,
+		service.PlatformGrok,
+		service.AccountTypeOAuth,
+		service.StatusActive,
+		string(expectedJSON),
+		service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET status = $1,
@@ -1127,20 +1140,13 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.status = $6
 			AND a.credentials = $7::jsonb
 			AND NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL
+	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
 		SELECT $8, updated.id, NULL, NULL FROM updated
-	`,
-		service.StatusError,
-		errorMsg,
-		id,
-		service.PlatformGrok,
-		service.AccountTypeOAuth,
-		service.StatusActive,
-		string(expectedJSON),
-		service.SchedulerOutboxEventAccountChanged,
-	)
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
@@ -1178,7 +1184,17 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 	if err != nil {
 		return false, err
 	}
-	result, err := r.sql.ExecContext(ctx, `
+	args := []any{
+		string(credentialsJSON),
+		id,
+		service.PlatformGrok,
+		service.AccountTypeOAuth,
+		string(expectedJSON),
+		expectedProxyID,
+		service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET credentials = $1::jsonb,
@@ -1189,19 +1205,13 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			AND a.type = $4
 			AND a.credentials = $5::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $6
+	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
 		SELECT $7, updated.id, NULL, NULL FROM updated
-	`,
-		string(credentialsJSON),
-		id,
-		service.PlatformGrok,
-		service.AccountTypeOAuth,
-		string(expectedJSON),
-		expectedProxyID,
-		service.SchedulerOutboxEventAccountChanged,
-	)
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
@@ -1234,7 +1244,19 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 	if err != nil {
 		return false, err
 	}
-	result, err := r.sql.ExecContext(ctx, `
+	args := []any{
+		service.StatusError,
+		errorMsg,
+		id,
+		service.PlatformGrok,
+		service.AccountTypeOAuth,
+		service.StatusActive,
+		string(expectedJSON),
+		expectedProxyID,
+		service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET status = $1,
@@ -1248,21 +1270,13 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			AND a.status = $6
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
+	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
 		SELECT $9, updated.id, NULL, NULL FROM updated
-	`,
-		service.StatusError,
-		errorMsg,
-		id,
-		service.PlatformGrok,
-		service.AccountTypeOAuth,
-		service.StatusActive,
-		string(expectedJSON),
-		expectedProxyID,
-		service.SchedulerOutboxEventAccountChanged,
-	)
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
@@ -1295,7 +1309,19 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 	if err != nil {
 		return false, err
 	}
-	result, err := r.sql.ExecContext(ctx, `
+	args := []any{
+		until,
+		reason,
+		id,
+		service.PlatformGrok,
+		service.AccountTypeOAuth,
+		service.StatusActive,
+		string(expectedJSON),
+		expectedProxyID,
+		service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET temp_unschedulable_until = $1,
@@ -1309,21 +1335,13 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1)
+	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
 		SELECT $9, updated.id, NULL, NULL FROM updated
-	`,
-		until,
-		reason,
-		id,
-		service.PlatformGrok,
-		service.AccountTypeOAuth,
-		service.StatusActive,
-		string(expectedJSON),
-		expectedProxyID,
-		service.SchedulerOutboxEventAccountChanged,
-	)
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}

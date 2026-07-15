@@ -246,6 +246,28 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_AppliedWrites
 	require.Contains(t, normalized, "SELECT $8, updated.id, NULL, NULL FROM updated")
 }
 
+func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RespectsProjectProfileScope(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	applied, err := repo.SetGrokOAuthErrorIfCredentialsUnchanged(
+		service.WithProjectID(context.Background(), 7),
+		42,
+		map[string]any{"access_token": "observed"},
+		"missing refresh token",
+	)
+
+	require.NoError(t, err)
+	require.False(t, applied)
+	require.Len(t, exec.execQueries, 1)
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.Contains(t, normalized, "FROM project_profiles pp")
+	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = a.id")
+	require.Contains(t, normalized, "pp.project_id = 7")
+}
+
 func TestAccountRepository_SetGrokOAuthRefreshErrorIfCredentialsUnchanged_UsesAttemptCredentialsAndProxy(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
@@ -324,6 +346,58 @@ func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemp
 	require.Equal(t, &proxyID, exec.execArgs[0][5])
 }
 
+func TestAccountRepository_GrokOAuthRefreshConditionalMutationsRespectProjectProfileScope(t *testing.T) {
+	ctx := service.WithProjectID(context.Background(), 7)
+	proxyID := int64(29)
+	expected := map[string]any{"refresh_token": "attempted", "_token_version": int64(9)}
+	tests := []struct {
+		name   string
+		mutate func(*accountRepository) error
+	}{
+		{
+			name: "credentials",
+			mutate: func(repo *accountRepository) error {
+				_, err := repo.UpdateGrokOAuthCredentialsIfUnchanged(
+					ctx, 42, expected, &proxyID, map[string]any{"refresh_token": "rotated"},
+				)
+				return err
+			},
+		},
+		{
+			name: "permanent error",
+			mutate: func(repo *accountRepository) error {
+				_, err := repo.SetGrokOAuthRefreshErrorIfCredentialsUnchanged(ctx, 42, expected, &proxyID, "revoked")
+				return err
+			},
+		},
+		{
+			name: "temporary quarantine",
+			mutate: func(repo *accountRepository) error {
+				_, err := repo.SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged(
+					ctx, 42, expected, &proxyID, time.Now().Add(time.Minute), "retry exhausted",
+				)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+			repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+			require.NoError(t, tt.mutate(repo))
+			require.Len(t, exec.execQueries, 1)
+			normalized := normalizeSQLWhitespace(exec.execQueries[0])
+			require.Contains(t, normalized, "FROM project_profiles pp")
+			require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+			require.Contains(t, normalized, "ppb.resource_type = 'account'")
+			require.Contains(t, normalized, "ppb.resource_id = a.id")
+			require.Contains(t, normalized, "pp.project_id = 7")
+		})
+	}
+}
+
 func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
@@ -331,7 +405,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 
 	var capturedSQL string
 	var capturedArgs []any
-	mock.ExpectQuery("SELECT id").
+	mock.ExpectQuery("SELECT a.id").
 		WillReturnRows(sqlmock.NewRows([]string{"id"})).
 		WillDelayFor(0)
 
@@ -358,7 +432,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.NotContains(t, normalized, "platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
 	require.Contains(t, normalized, "credentials ? 'refresh_token'")
-	require.Contains(t, normalized, "btrim(credentials->>'refresh_token') <> ''")
+	require.Contains(t, normalized, "btrim(a.credentials->>'refresh_token') <> ''")
 	require.Contains(t, normalized, "temp_unschedulable_until > NOW()")
 	require.Contains(t, normalized, "temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'")
 	require.Contains(t, normalized, "IS NOT TRUE",
@@ -366,7 +440,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.NotContains(t, normalized, "AND NOT (",
 		"plain NOT (...) excludes NULL temp_unschedulable_until rows (the common healthy case)")
 	require.Contains(t, normalized, "id > $2")
-	require.Contains(t, normalized, "ORDER BY id ASC")
+	require.Contains(t, normalized, "ORDER BY a.id ASC")
 	require.Contains(t, normalized, "LIMIT $3")
 	require.NotContains(t, normalized, "credentials->>'expires_at'")
 	require.Len(t, capturedArgs, 3)
@@ -386,7 +460,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesA
 	defer func() { _ = db.Close() }()
 
 	var capturedSQL string
-	mock.ExpectQuery("SELECT id").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("SELECT a.id").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	repo := newAccountRepositoryWithSQL(nil, captureQuerySQL{db: db, captured: &capturedSQL}, nil)
 
 	page, err := repo.ListOAuthRefreshCandidatePage(context.Background(), service.OAuthRefreshPageOptions{
@@ -403,7 +477,38 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesA
 	require.NotContains(t, normalized, "type = 'api-key'")
 	require.NotContains(t, normalized, "credentials ? 'refresh_token'",
 		"reconciliation must be able to find structurally invalid OAuth rows")
-	require.Contains(t, normalized, "ORDER BY id ASC")
+	require.Contains(t, normalized, "ORDER BY a.id ASC")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAccountRepository_ListOAuthRefreshCandidatePage_RespectsProjectProfileScopeBeforeLimit(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	var capturedSQL string
+	mock.ExpectQuery("SELECT a.id").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	repo := newAccountRepositoryWithSQL(nil, captureQuerySQL{db: db, captured: &capturedSQL}, nil)
+
+	page, err := repo.ListOAuthRefreshCandidatePage(
+		service.WithProjectID(context.Background(), 7),
+		service.OAuthRefreshPageOptions{
+			Platforms: []string{service.PlatformGrok},
+			AfterID:   100,
+			Limit:     50,
+		},
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, page.Accounts)
+	normalized := normalizeSQLWhitespace(capturedSQL)
+	require.Contains(t, normalized, "FROM project_profiles pp")
+	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
+	require.Contains(t, normalized, "ppb.resource_type = 'account'")
+	require.Contains(t, normalized, "ppb.resource_id = a.id")
+	require.Contains(t, normalized, "pp.project_id = 7")
+	require.Less(t, strings.Index(normalized, "FROM project_profiles pp"), strings.Index(normalized, "ORDER BY a.id ASC"))
+	require.Less(t, strings.Index(normalized, "FROM project_profiles pp"), strings.Index(normalized, "LIMIT $3"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
