@@ -454,7 +454,7 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		grok.POST("/oauth/create-from-oauth", accountWrite, h.Admin.GrokOAuth.CreateAccountFromOAuth)
 		grok.POST("/sso-to-oauth", accountWrite, h.Admin.GrokOAuth.CreateAccountsFromSSO)
 		grok.POST("/oauth/reconcile", accountWrite, h.Admin.GrokOAuth.ReconcileOAuthAccounts)
-		grok.POST("/accounts/:id/refresh", accountWrite, h.Admin.GrokOAuth.RefreshAccountToken)
+		grok.POST("/accounts/:id/refresh", accountWrite, h.Admin.Account.RefreshGrok)
 		grok.GET("/accounts/:id/quota", accountWrite, h.Admin.GrokOAuth.QueryQuota)
 		grok.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.GrokOAuth.ResetQuota)
 		grok.GET("/runtime-sanity", opsRead, h.Admin.GrokOAuth.RuntimeSanity)

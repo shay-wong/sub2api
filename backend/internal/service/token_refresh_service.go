@@ -678,10 +678,6 @@ func (s *TokenRefreshService) processProviderAccounts(
 					results <- refreshResult{accountID: account.ID, err: errRefreshSkipped}
 					continue
 				}
-				if state.isTripped() {
-					results <- refreshResult{accountID: account.ID, err: errRefreshSkipped}
-					continue
-				}
 				err := s.refreshWithRetryWithRateGate(ctx, account, state.registration.refresher, state.registration.executor, refreshWindow, state)
 				state.recordResult(err)
 				results <- refreshResult{accountID: account.ID, err: err}

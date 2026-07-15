@@ -158,54 +158,6 @@ func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
-	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
-	if scopeErr != nil {
-		response.ErrorFrom(c, scopeErr)
-		return
-	}
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.BadRequest(c, "Invalid account ID")
-		return
-	}
-	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
-		return
-	}
-	if account.Platform != service.PlatformGrok {
-		response.BadRequest(c, "Account platform does not match Grok OAuth endpoint")
-		return
-	}
-	if !account.IsOAuth() {
-		response.BadRequest(c, "Cannot refresh non-OAuth account credentials")
-		return
-	}
-	tokenInfo, err := h.grokOAuthService.RefreshAccountToken(c.Request.Context(), account)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	newCredentials := h.grokOAuthService.BuildAccountCredentials(tokenInfo)
-	newCredentials = service.MergeCredentials(account.Credentials, newCredentials)
-	if baseURL := strings.TrimSpace(account.GetCredential("base_url")); baseURL != "" {
-		newCredentials["base_url"] = baseURL
-	}
-	updatedAccount, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, dto.AccountFromService(scope.accountForResponse(updatedAccount)))
-}
-
 type GrokOAuthReconcileRequest struct {
 	DryRun               *bool `json:"dry_run"`
 	Apply                bool  `json:"apply"`

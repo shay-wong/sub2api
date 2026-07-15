@@ -71,6 +71,11 @@ type AccountHandler struct {
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	permissionService       *service.PermissionService
 	grokImportProber        grokUsageProber
+	grokOAuthAccountRefresh func(context.Context, *service.Account) (*service.Account, error)
+}
+
+func (h *AccountHandler) SetGrokOAuthAccountRefresher(refresh func(context.Context, *service.Account) (*service.Account, error)) {
+	h.grokOAuthAccountRefresh = refresh
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -1454,18 +1459,14 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			}
 		}
 	} else if account.Platform == service.PlatformGrok {
-		if h.grokOAuthService == nil {
-			return nil, "", fmt.Errorf("grok oauth service is not configured")
+		if h.grokOAuthAccountRefresh == nil {
+			return nil, "", fmt.Errorf("grok OAuth refresh service is not configured")
 		}
-		tokenInfo, err := h.grokOAuthService.RefreshAccountToken(ctx, account)
+		updatedAccount, err := h.grokOAuthAccountRefresh(ctx, account)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to refresh Grok credentials: %w", err)
 		}
-
-		newCredentials = service.MergeCredentials(account.Credentials, h.grokOAuthService.BuildAccountCredentials(tokenInfo))
-		if baseURL := strings.TrimSpace(account.GetCredential("base_url")); baseURL != "" {
-			newCredentials["base_url"] = baseURL
-		}
+		return updatedAccount, "", nil
 	} else {
 		// Use Anthropic/Claude OAuth service to refresh token
 		tokenInfo, err := h.oauthService.RefreshAccountToken(ctx, account)
@@ -1517,6 +1518,16 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 // Refresh handles refreshing account credentials
 // POST /api/v1/admin/accounts/:id/refresh
 func (h *AccountHandler) Refresh(c *gin.Context) {
+	h.refreshAccount(c, "")
+}
+
+// RefreshGrok preserves the Grok-specific route contract while using the
+// shared account refresh authority.
+func (h *AccountHandler) RefreshGrok(c *gin.Context) {
+	h.refreshAccount(c, service.PlatformGrok)
+}
+
+func (h *AccountHandler) refreshAccount(c *gin.Context, requiredPlatform string) {
 	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
 	if scopeErr != nil {
 		response.ErrorFrom(c, scopeErr)
@@ -1531,11 +1542,15 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 	// Get account
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
-		response.NotFound(c, "Account not found")
+		response.ErrorFrom(c, err)
 		return
 	}
 	if !scope.accountVisible(account) {
 		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		return
+	}
+	if requiredPlatform != "" && account.Platform != requiredPlatform {
+		response.BadRequest(c, "Account platform does not match Grok OAuth endpoint")
 		return
 	}
 

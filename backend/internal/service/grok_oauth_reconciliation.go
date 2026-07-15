@@ -49,6 +49,10 @@ var (
 		"GROK_OAUTH_RECONCILE_WINDOW_INVALID",
 		"refresh_window_seconds is outside the allowed range",
 	)
+	ErrGrokOAuthRefreshInProgress = infraerrors.Conflict(
+		"GROK_OAUTH_REFRESH_IN_PROGRESS",
+		"Grok OAuth credentials are already being refreshed",
+	)
 )
 
 // GrokOAuthReconciler is the narrow admin-facing reconciliation port.
@@ -270,11 +274,6 @@ func (s *TokenRefreshService) ReconcileGrokOAuth(ctx context.Context, input Grok
 				result.Skipped++
 				break
 			}
-			if providerState.isTripped() {
-				item.Outcome = GrokOAuthReconcileOutcomeSkipped
-				result.Skipped++
-				break
-			}
 			refreshErr := s.refreshWithRetryWithRateGate(ctx, account, registration.refresher, registration.executor, refreshWindow, providerState)
 			providerState.recordResult(refreshErr)
 			var permanentErr *accountPermanentRefreshError
@@ -305,6 +304,49 @@ func (s *TokenRefreshService) ReconcileGrokOAuth(ctx context.Context, input Grok
 		result.Items = append(result.Items, item)
 	}
 	return result, nil
+}
+
+// RefreshGrokOAuthAccount is the shared authority for explicit admin refreshes.
+// It reuses the background service's provider gates and OAuthRefreshAPI locks/CAS.
+func (s *TokenRefreshService) RefreshGrokOAuthAccount(ctx context.Context, account *Account) (*Account, error) {
+	if s == nil || s.refreshAPI == nil {
+		return nil, errors.New("grok OAuth refresh service is not configured")
+	}
+	if account == nil || !account.IsGrokOAuth() {
+		return nil, errors.New("account is not a Grok OAuth account")
+	}
+	registration, ok := s.grokRegistration()
+	if !ok || registration.executor == nil {
+		return nil, errors.New("grok OAuth refresher is not registered")
+	}
+
+	release, err := s.providerConcurrencyGate(PlatformGrok).acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	executor := &rateLimitedOAuthRefreshExecutor{
+		OAuthRefreshExecutor: registration.executor,
+		acquireRate:          s.providerRateGate(PlatformGrok).acquire,
+	}
+	result, err := s.refreshAPI.Refresh(ctx, account, executor)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.LockHeld {
+		return nil, ErrGrokOAuthRefreshInProgress
+	}
+	if result.Account == nil {
+		return nil, errors.New("grok OAuth refresh returned no account state")
+	}
+	if result.Refreshed {
+		if ctx.Err() != nil {
+			s.postRefreshStateSyncWithCleanup(ctx, result.Account)
+		} else {
+			s.postRefreshActions(ctx, result.Account)
+		}
+	}
+	return result.Account, nil
 }
 
 func (s *TokenRefreshService) grokOAuthReconcileMaxPageSize() int {

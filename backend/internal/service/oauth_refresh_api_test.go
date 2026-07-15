@@ -394,10 +394,11 @@ func TestRefreshIfNeeded_GrokSuccessCASLetsConcurrentReauthorizationWin(t *testi
 
 func TestRefreshIfNeeded_GrokSuccessPersistenceFailureIsProviderContainment(t *testing.T) {
 	account := &Account{
-		ID:       71,
-		Platform: PlatformGrok,
-		Type:     AccountTypeOAuth,
-		Status:   StatusActive,
+		ID:          71,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
 		Credentials: map[string]any{
 			"access_token":  "attempted-access",
 			"refresh_token": "attempted-refresh",
@@ -633,8 +634,11 @@ func TestRefreshIfNeeded_RequestPathDBRereadMissingGrokRefreshCredentialReturnsP
 	require.Zero(t, repo.updateCalls)
 }
 
-func TestRefreshIfNeeded_LateSuccessAfterDeadlineDoesNotPersist(t *testing.T) {
-	account := &Account{ID: 85, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive}
+func TestRefreshIfNeeded_LateGrokSuccessAfterDeadlineCompletesCAS(t *testing.T) {
+	account := &Account{
+		ID: 85, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "old-access", "refresh_token": "old-refresh"},
+	}
 	repo := &refreshAPIAccountRepo{account: account}
 	executor := &refreshAPIExecutorStub{
 		needsRefresh: true,
@@ -647,9 +651,135 @@ func TestRefreshIfNeeded_LateSuccessAfterDeadlineDoesNotPersist(t *testing.T) {
 
 	result, err := api.RefreshIfNeeded(ctx, account, executor, time.Hour)
 
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Refreshed)
+	require.Equal(t, 1, repo.updateCredentialsCalls, "a consumed Grok refresh token must reach the exact-state CAS")
+	require.Equal(t, "late-token", result.Account.GetGrokAccessToken())
+}
+
+func TestRefreshIfNeeded_LateNonGrokSuccessStillHonorsDeadline(t *testing.T) {
+	account := &Account{ID: 89, Platform: PlatformGemini, Type: AccountTypeOAuth, Status: StatusActive}
+	repo := &refreshAPIAccountRepo{account: account}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: true,
+		credentials:  map[string]any{"access_token": "late-token"},
+		delay:        30 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	result, err := NewOAuthRefreshAPI(repo, nil).RefreshIfNeeded(ctx, account, executor, time.Hour)
+
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Nil(t, result)
-	require.Zero(t, repo.updateCredentialsCalls, "late credentials must not cross the unified API persistence boundary")
+	require.Zero(t, repo.updateCredentialsCalls)
+}
+
+func TestRefresh_ForcesGrokRefreshWhenCredentialsAreNotNearExpiry(t *testing.T) {
+	account := &Account{
+		ID:          86,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusError,
+		Schedulable: false,
+		Credentials: map[string]any{
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	executor := &refreshAPIExecutorStub{
+		needsRefresh: false,
+		credentials: map[string]any{
+			"access_token":  "new-access",
+			"refresh_token": "new-refresh",
+		},
+	}
+
+	result, err := NewOAuthRefreshAPI(repo, nil).Refresh(context.Background(), account, executor)
+
+	require.NoError(t, err)
+	require.True(t, result.Refreshed)
+	require.Equal(t, 1, executor.refreshCalls)
+	require.Equal(t, "new-refresh", result.Account.GetGrokRefreshToken())
+}
+
+func TestTokenRefreshService_ManualGrokRefreshPreservesConcurrentReauthorization(t *testing.T) {
+	account := &Account{
+		ID:          87,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"access_token":  "old-access",
+			"refresh_token": "old-refresh",
+		},
+	}
+	repo := &refreshAPIAccountRepo{account: account}
+	repo.beforeSuccessCAS = func(repo *refreshAPIAccountRepo) {
+		repo.account.Credentials = map[string]any{
+			"access_token":  "reauthorized-access",
+			"refresh_token": "reauthorized-refresh",
+		}
+	}
+	executor := &refreshAPIExecutorStub{credentials: map[string]any{
+		"access_token":  "stale-provider-access",
+		"refresh_token": "stale-provider-refresh",
+	}}
+	svc := &TokenRefreshService{
+		accountRepo: repo,
+		refreshAPI:  NewOAuthRefreshAPI(repo, nil),
+		registrations: []tokenRefreshRegistration{{
+			platform: PlatformGrok, refresher: executor, executor: executor,
+		}},
+	}
+
+	updated, err := svc.RefreshGrokOAuthAccount(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "reauthorized-refresh", updated.GetGrokRefreshToken())
+	require.Zero(t, repo.updateCredentialsCalls, "the stale provider result must lose the exact-state CAS")
+}
+
+func TestTokenRefreshService_BackgroundAndManualGrokRefreshShareSameAccountLock(t *testing.T) {
+	account := grokPoolAccount(88)
+	account.Schedulable = true
+	repo := &productionPathRateRepo{accounts: map[int64]*Account{account.ID: snapshotOAuthRefreshAccount(&account)}}
+	executor := &poolHealthRefresher{delay: 30 * time.Millisecond}
+	svc := &TokenRefreshService{
+		accountRepo: repo,
+		refreshAPI:  NewOAuthRefreshAPI(repo, nil),
+		registrations: []tokenRefreshRegistration{{
+			platform: PlatformGrok, refresher: executor, executor: executor,
+		}},
+	}
+	state := &tokenRefreshProviderState{
+		service:      svc,
+		registration: svc.registrations[0],
+		rateGate:     svc.providerRateGate(PlatformGrok),
+		poolGate:     svc.providerConcurrencyGate(PlatformGrok),
+	}
+	backgroundAccount := snapshotOAuthRefreshAccount(&account)
+	manualAccount := snapshotOAuthRefreshAccount(&account)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		errs <- svc.refreshWithRetryWithRateGate(context.Background(), backgroundAccount, executor, executor, time.Hour, state)
+	}()
+	go func() {
+		<-start
+		_, err := svc.RefreshGrokOAuthAccount(context.Background(), manualAccount)
+		errs <- err
+	}()
+	close(start)
+
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	require.Equal(t, int64(2), executor.calls.Load())
+	require.Equal(t, int64(1), executor.maxActive.Load(), "the shared OAuth lock must serialize the same account")
 }
 
 func TestRefreshIfNeeded_NilCredentials(t *testing.T) {
@@ -1002,11 +1132,12 @@ func TestRefreshIfNeeded_ReleasesDistributedLockWithCleanupContext(t *testing.T)
 
 	result, err := api.RefreshIfNeeded(ctx, account, executor, 3*time.Minute)
 
-	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, result)
-	require.Zero(t, repo.updateCalls)
-	require.Equal(t, "old-access", account.GetGrokAccessToken())
-	require.Zero(t, account.GetCredentialAsInt64("_token_version"))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Refreshed)
+	require.Equal(t, 1, repo.updateCalls)
+	require.Equal(t, "new-at", account.GetGrokAccessToken())
+	require.NotZero(t, account.GetCredentialAsInt64("_token_version"))
 	require.Equal(t, 1, cache.releaseCalls)
 	require.NoError(t, cache.releaseCtxErr)
 }
