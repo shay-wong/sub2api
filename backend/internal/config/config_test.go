@@ -9,7 +9,22 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
+
+func TestExampleConfigIsValidYAML(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "config.example.yaml"))
+	require.NoError(t, err)
+
+	var document map[string]any
+	require.NoError(t, yaml.Unmarshal(data, &document))
+
+	gateway, ok := document["gateway"].(map[string]any)
+	require.True(t, ok)
+	openAIWS, ok := gateway["openai_ws"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 30, openAIWS["client_first_message_timeout_seconds"])
+}
 
 func resetViperWithJWTSecret(t *testing.T) {
 	t.Helper()
