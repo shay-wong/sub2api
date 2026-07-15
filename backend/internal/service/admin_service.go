@@ -351,6 +351,7 @@ type UpdateAccountInput struct {
 	Notes                 *string
 	Type                  string // Account type: oauth, setup-token, apikey
 	Credentials           map[string]any
+	ReplaceCredentials    bool // Replace the full map instead of preserving omitted sensitive keys.
 	ClearPlanType         bool
 	Extra                 map[string]any
 	ProxyID               *int64

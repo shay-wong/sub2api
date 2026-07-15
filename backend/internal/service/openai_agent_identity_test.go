@@ -197,6 +197,38 @@ func TestEnsureAgentIdentityTaskSharesLockAcrossServicesForSameAccount(t *testin
 	require.Equal(t, "task-shared", repo.account.GetCredential("task_id"))
 }
 
+func TestRecoverAgentIdentityTaskResolvesCredentialShadow(t *testing.T) {
+	key, privateKey := newTestAgentIdentityKey(t)
+	parentID := int64(9002)
+	parent := &Account{ID: parentID, Type: AccountTypeOAuth, Platform: PlatformOpenAI, Credentials: map[string]any{
+		"auth_mode":         OpenAIAuthModeAgentIdentity,
+		"agent_runtime_id":  key.runtimeID,
+		"agent_private_key": privateKey,
+		"task_id":           "task-shadow-old",
+	}}
+	shadow := &Account{
+		ID:              9003,
+		Type:            AccountTypeOAuth,
+		Platform:        PlatformOpenAI,
+		ParentAccountID: &parentID,
+		Credentials:     map[string]any{},
+	}
+	repo := &agentIdentityCredentialsRepo{account: parent}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"task_id":"task-shadow-new"}`))
+	}))
+	defer server.Close()
+	oldBase := openAIAgentIdentityAuthAPIBaseURL
+	openAIAgentIdentityAuthAPIBaseURL = server.URL
+	t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = oldBase })
+
+	service := &OpenAIGatewayService{accountRepo: repo}
+	require.NoError(t, service.recoverAgentIdentityTask(context.Background(), shadow, shadow.GetCredential("task_id")))
+	require.Equal(t, "task-shadow-new", parent.GetCredential("task_id"))
+	require.Equal(t, "task-shadow-new", repo.credentials["task_id"])
+	require.Empty(t, shadow.Credentials)
+}
+
 func cloneAgentIdentityTestAccount(account *Account) *Account {
 	copy := *account
 	copy.Credentials = shallowCopyMap(account.Credentials)

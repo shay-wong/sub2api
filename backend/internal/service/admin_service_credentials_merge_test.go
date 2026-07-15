@@ -91,6 +91,44 @@ func TestUpdateAccount_ExplicitNewTokenOverwrites(t *testing.T) {
 	require.Equal(t, "sk-old", repo.account.Credentials["api_key"])
 }
 
+func TestUpdateAccount_ReplaceCredentialsDoesNotRestoreSensitiveValues(t *testing.T) {
+	accountID := int64(208)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"access_token":  "stale-access",
+				"refresh_token": "stale-refresh",
+				"id_token":      "stale-id",
+				"plan_type":     "pro",
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Credentials: map[string]any{
+			"auth_mode":        OpenAIAuthModeAgentIdentity,
+			"agent_runtime_id": "runtime-replacement",
+			"model_mapping":    map[string]any{"gpt-old": "gpt-new"},
+		},
+		ReplaceCredentials: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateCalls)
+	require.Equal(t, updated.Credentials, repo.account.Credentials)
+	require.Equal(t, OpenAIAuthModeAgentIdentity, repo.account.Credentials["auth_mode"])
+	require.NotContains(t, repo.account.Credentials, "access_token")
+	require.NotContains(t, repo.account.Credentials, "refresh_token")
+	require.NotContains(t, repo.account.Credentials, "id_token")
+	require.NotContains(t, repo.account.Credentials, "plan_type")
+	require.Contains(t, repo.account.Credentials, "model_mapping")
+}
+
 func TestUpdateAccount_EmptyCredentialsSkipsUpdate(t *testing.T) {
 	accountID := int64(204)
 	repo := &updateAccountCredsRepoStub{

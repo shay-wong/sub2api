@@ -441,12 +441,18 @@ func (s *OpenAIGatewayService) refreshOpenAIAgentIdentityHeaders(ctx context.Con
 }
 
 func (s *OpenAIGatewayService) recoverAgentIdentityTask(ctx context.Context, account *Account, expectedTaskID string) error {
+	credentialAccount := account
 	if account != nil && account.IsShadow() {
-		if resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account); err == nil && resolved != nil && strings.TrimSpace(expectedTaskID) == "" {
-			expectedTaskID = strings.TrimSpace(resolved.GetCredential("task_id"))
+		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return err
+		}
+		credentialAccount = resolved
+		if strings.TrimSpace(expectedTaskID) == "" {
+			expectedTaskID = strings.TrimSpace(credentialAccount.GetCredential("task_id"))
 		}
 	}
-	return s.ensureAgentIdentityTask(ctx, account, expectedTaskID)
+	return s.ensureAgentIdentityTask(ctx, credentialAccount, expectedTaskID)
 }
 
 func (s *OpenAIGatewayService) isAgentIdentityAccount(ctx context.Context, account *Account) bool {

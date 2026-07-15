@@ -255,7 +255,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 
 		var stableIdentityKeys []string
 		stableIdentitySeen := false
-		if item.RefreshToken == "" {
+		if !item.IsAgentIdentity && item.RefreshToken == "" {
 			stableIdentityKeys = buildCodexAccessOnlyStableIdentityKeys(item.AccountID, item.UserID)
 			_, stableIdentitySeen = firstSeenCodexIdentity(
 				seenAccessOnlyStableIdentity,
@@ -266,7 +266,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
 		usedStableFallback := false
-		if existing == nil && item.RefreshToken == "" && !stableIdentitySeen {
+		if existing == nil && !item.IsAgentIdentity && item.RefreshToken == "" && !stableIdentitySeen {
 			existing, matchedKey = index.FindRefreshCapableByStableIdentity(item.AccountID, item.UserID)
 			usedStableFallback = existing != nil
 		}
@@ -279,7 +279,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 					Message: "已有账号未记录 chatgpt_user_id，已按共享的 chatgpt_account_id 匹配并回填，请确认两者属于同一用户",
 				})
 			}
-			preserveExistingRefresh := item.RefreshToken == "" &&
+			preserveExistingRefresh := !item.IsAgentIdentity && item.RefreshToken == "" &&
 				codexCredentialString(existing.Credentials, "refresh_token") != ""
 			if preserveExistingRefresh {
 				result.Warnings = append(result.Warnings, CodexSessionImportMessage{
@@ -294,6 +294,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
+				ReplaceCredentials: item.IsAgentIdentity,
 				Extra:              mergedExtra,
 				Concurrency:        req.Concurrency,
 				Priority:           req.Priority,
@@ -335,8 +336,8 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				accountID = updated.ID
 				index.Add(*updated)
 			}
-			if usedStableFallback || item.RefreshToken != "" ||
-				(item.RefreshToken == "" && codexCredentialString(existing.Credentials, "refresh_token") != "") {
+			if !item.IsAgentIdentity && (usedStableFallback || item.RefreshToken != "" ||
+				(item.RefreshToken == "" && codexCredentialString(existing.Credentials, "refresh_token") != "")) {
 				if stableIdentityKeys == nil {
 					stableIdentityKeys = buildCodexAccessOnlyStableIdentityKeys(item.AccountID, item.UserID)
 				}
@@ -810,6 +811,13 @@ func resolveCodexImportExpiry(req CodexSessionImportRequest, item *codexImportAc
 		t := time.Unix(*req.ExpiresAt, 0).UTC()
 		requestExpiresAt = &t
 	}
+	if item.IsAgentIdentity {
+		if requestExpiresAt == nil {
+			return nil, nil, req.AutoPauseOnExpired, nil, nil
+		}
+		expiresAtUnix := requestExpiresAt.Unix()
+		return &expiresAtUnix, nil, req.AutoPauseOnExpired, nil, nil
+	}
 
 	var accountExpiresAt *time.Time
 	var credentialExpiresAt *time.Time
@@ -1113,6 +1121,21 @@ func mergeCodexImportMap(existing, incoming map[string]any) map[string]any {
 func mergeCodexImportCredentials(existing, incoming map[string]any, item *codexImportAccount) map[string]any {
 	out := mergeCodexImportMap(existing, incoming)
 	if item == nil {
+		return out
+	}
+	if item.IsAgentIdentity {
+		for _, key := range []string{
+			"access_token",
+			"refresh_token",
+			"id_token",
+			"expires_at",
+			"client_id",
+			"openai_auth_mode",
+			"token_type",
+			"scope",
+		} {
+			delete(out, key)
+		}
 		return out
 	}
 	if strings.TrimSpace(item.RefreshToken) == "" {
