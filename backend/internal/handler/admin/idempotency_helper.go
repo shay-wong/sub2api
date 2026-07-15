@@ -37,13 +37,12 @@ func executeAdminIdempotent(
 		return &service.IdempotencyExecuteResult{Data: data}, nil
 	}
 
-	actorScope := "admin:0"
-	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
-		actorScope = "admin:" + strconv.FormatInt(subject.UserID, 10)
+	actorScope := adminActorScope(c)
+	recordScope := scope
+	if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
+		projectScope := ":project:" + strconv.FormatInt(projectID, 10)
+		recordScope += projectScope
 	}
-	projectID, _ := service.ProjectIDFromContext(c.Request.Context())
-	actorScope += ":project:" + strconv.FormatInt(projectID, 10)
-	recordScope := scope + ":project:" + strconv.FormatInt(projectID, 10)
 
 	return coordinator.Execute(c.Request.Context(), service.IdempotencyExecuteOptions{
 		Scope:          recordScope,
@@ -55,6 +54,17 @@ func executeAdminIdempotent(
 		RequireKey:     true,
 		TTL:            ttl,
 	}, execute)
+}
+
+func adminActorScope(c *gin.Context) string {
+	actorScope := "admin:0"
+	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
+		actorScope = "admin:" + strconv.FormatInt(subject.UserID, 10)
+	}
+	if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
+		actorScope += ":project:" + strconv.FormatInt(projectID, 10)
+	}
+	return actorScope
 }
 
 func executeAdminIdempotentJSON(

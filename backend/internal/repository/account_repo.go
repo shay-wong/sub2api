@@ -73,6 +73,12 @@ func NewAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache se
 	return newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
 }
 
+// NewAdminAccountRepository exposes the account repository's atomic duplication capability
+// as an explicit dependency of the admin service.
+func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCache service.SchedulerCache) service.AdminAccountRepository {
+	return newAccountRepositoryWithSQL(client, sqlDB, schedulerCache)
+}
+
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
 // 这种设计便于单元测试时注入 mock 对象。
 func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedulerCache service.SchedulerCache) *accountRepository {
@@ -80,13 +86,23 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
+	if err := createAccountRecord(ctx, r.client, r.sql, account); err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
+	}
+	return nil
+}
+
+func createAccountRecord(ctx context.Context, client *dbent.Client, sqlq sqlExecutor, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
 	projectID := account.ProjectID
 	if account.ParentAccountID == nil || projectID <= 0 {
 		var err error
-		projectID, err = resolveProjectIDForCreate(ctx, r.sql, account.ProjectID)
+		projectID, err = resolveProjectIDForCreate(ctx, sqlq, account.ProjectID)
 		if err != nil {
 			return err
 		}
@@ -95,7 +111,7 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	// workspace context may only be the profile that made the parent visible.
 	account.ProjectID = projectID
 
-	builder := r.client.Account.Create().
+	builder := client.Account.Create().
 		SetProjectID(projectID).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -158,11 +174,61 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
-	if err := bindResourceToActiveProjectProfile(ctx, r.sql, projectID, service.ProjectResourceTypeAccount, account.ID); err != nil {
+	if err := bindResourceToActiveProjectProfile(ctx, sqlq, projectID, service.ProjectResourceTypeAccount, account.ID); err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
+	return nil
+}
+
+// CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
+// and the scheduler outbox event used to publish the new routing snapshot.
+func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	if account == nil {
+		return service.ErrAccountNilInput
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+
+	var txClient *dbent.Client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		txClient = tx.Client()
+	} else {
+		// Reuse a caller-owned transaction when this repository is already transactional.
+		txClient = r.client
+	}
+
+	if err := createAccountRecord(ctx, txClient, txClient, account); err != nil {
+		return err
+	}
+	groupIDs := make([]int64, 0, len(groups))
+	if len(groups) > 0 {
+		builders := make([]*dbent.AccountGroupCreate, 0, len(groups))
+		for i := range groups {
+			groups[i].AccountID = account.ID
+			groupIDs = append(groupIDs, groups[i].GroupID)
+			builders = append(builders, txClient.AccountGroup.Create().
+				SetAccountID(account.ID).
+				SetGroupID(groups[i].GroupID).
+				SetPriority(groups[i].Priority),
+			)
+		}
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
+	}
+	account.GroupIDs = groupIDs
+	account.AccountGroups = append([]service.AccountGroup(nil), groups...)
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(groupIDs)); err != nil {
+		return err
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -933,6 +999,60 @@ func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg str
 	return nil
 }
 
+func (r *accountRepository) SetGrokCredentialErrorIfMatch(
+	ctx context.Context,
+	id int64,
+	snapshot service.GrokCredentialMutationSnapshot,
+	errorMsg string,
+) (bool, error) {
+	args := []any{
+		service.StatusError, errorMsg, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
+		snapshot.CredentialsJSON, snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
+		service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
+		WITH updated AS (
+		UPDATE accounts AS a
+		SET status = $1,
+			error_message = $2,
+			schedulable = false,
+			updated_at = NOW()
+		WHERE a.id = $3
+			AND a.deleted_at IS NULL
+			AND a.status = $4
+			AND a.platform = $5
+			AND a.type = $6
+			AND a.schedulable IS TRUE
+			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
+			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
+			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
+			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
+			AND a.credentials = $7::jsonb
+			AND a.proxy_id IS NOT DISTINCT FROM $8
+	` + projectScope + `
+			AND ($2 <> $9 OR (
+				a.proxy_id IS NOT NULL AND NOT EXISTS (
+					SELECT 1 FROM proxies p WHERE p.id = a.proxy_id AND p.deleted_at IS NULL
+				)
+			))
+		RETURNING a.id
+		)
+		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $10, updated.id, NULL, NULL FROM updated
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return false, err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return true, nil
+}
+
 // syncSchedulerAccountSnapshot 在账号状态变更时主动同步快照到调度器缓存。
 // 当账号被设置为错误、禁用、不可调度或临时不可调度时调用，
 // 确保调度器和粘性会话逻辑能及时感知账号的最新状态，避免继续使用不可用账号。
@@ -953,6 +1073,16 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
 		logger.LegacyPrintf("repository.account", "[Scheduler] sync account snapshot write failed: id=%d err=%v", accountID, err)
 	}
+}
+
+func (r *accountRepository) syncSchedulerAccountSnapshotDetached(ctx context.Context, accountID int64) {
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
+	}
+	propagationCtx, cancel := context.WithTimeout(base, 2*time.Second)
+	defer cancel()
+	r.syncSchedulerAccountSnapshot(propagationCtx, accountID)
 }
 
 func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, accountID int64) {
@@ -1152,7 +1282,41 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 }
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {
-	now := time.Now()
+	accounts, err := r.schedulableAccountsQuery(ctx, time.Now()).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
+func (r *accountRepository) ListSchedulableAccountLoads(ctx context.Context) ([]service.AccountWithConcurrency, error) {
+	accounts, err := r.schedulableAccountsQuery(ctx, time.Now()).
+		Select(
+			dbaccount.FieldID,
+			dbaccount.FieldConcurrency,
+			dbaccount.FieldLoadFactor,
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	loads := make([]service.AccountWithConcurrency, 0, len(accounts))
+	for _, account := range accounts {
+		projection := service.Account{
+			ID:          account.ID,
+			Concurrency: account.Concurrency,
+			LoadFactor:  account.LoadFactor,
+		}
+		loads = append(loads, service.AccountWithConcurrency{
+			ID:             account.ID,
+			MaxConcurrency: projection.EffectiveLoadFactor(),
+		})
+	}
+	return loads, nil
+}
+
+func (r *accountRepository) schedulableAccountsQuery(ctx context.Context, now time.Time) *dbent.AccountQuery {
 	preds := []dbpredicate.Account{
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
@@ -1162,14 +1326,9 @@ func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Acco
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
 	preds = append(preds, projectScopedAccountPredicate(ctx)...)
-	accounts, err := r.client.Account.Query().
+	return r.client.Account.Query().
 		Where(preds...).
-		Order(dbent.Asc(dbaccount.FieldPriority)).
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return r.accountsToService(ctx, accounts)
+		Order(dbent.Asc(dbaccount.FieldPriority))
 }
 
 func (r *accountRepository) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {
@@ -1438,6 +1597,35 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 	return nil
 }
 
+// ClearRateLimitIfObserved clears exactly the Grok rate-limit generation seen
+// by a successful request. Matching both timestamps prevents a stale success
+// from erasing a later clear/re-arm generation with an equal or shorter reset.
+func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
+	updated, err := r.client.Account.Update().
+		Where(
+			dbaccount.IDEQ(id),
+			dbaccount.PlatformEQ(service.PlatformGrok),
+			dbaccount.TypeEQ(service.AccountTypeOAuth),
+			dbaccount.RateLimitedAtEQ(observedLimitedAt),
+			dbaccount.RateLimitResetAtEQ(observedResetAt),
+		).
+		ClearRateLimitedAt().
+		ClearRateLimitResetAt().
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue observed rate-limit clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error {
 	if scope == "" {
 		return nil
@@ -1531,6 +1719,57 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
+}
+
+func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
+	ctx context.Context,
+	id int64,
+	snapshot service.GrokCredentialMutationSnapshot,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	args := []any{
+		until, reason, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
+		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged,
+	}
+	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query := `
+		WITH updated AS (
+		UPDATE accounts AS a
+		SET temp_unschedulable_until = CASE
+				WHEN a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1 THEN $1
+				ELSE a.temp_unschedulable_until
+			END,
+			temp_unschedulable_reason = $2,
+			updated_at = NOW()
+		WHERE a.id = $3
+			AND a.deleted_at IS NULL
+			AND a.status = $4
+			AND a.platform = $5
+			AND a.type = $6
+			AND a.schedulable IS TRUE
+			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW())
+			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
+			AND (a.overload_until IS NULL OR a.overload_until <= NOW())
+			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
+			AND a.credentials = $7::jsonb
+			AND a.proxy_id IS NOT DISTINCT FROM $8
+	` + projectScope + `
+		RETURNING a.id
+		)
+		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $9, updated.id, NULL, NULL FROM updated
+	`
+	result, err := r.sql.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return false, err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return true, nil
 }
 
 func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64) error {
@@ -2298,46 +2537,48 @@ func itoa(v int) string {
 // FindByExtraField finds accounts by key-value pairs in the extra field.
 // Uses PostgreSQL JSONB @> operator for efficient queries (requires GIN index).
 func (r *accountRepository) FindByExtraField(ctx context.Context, key string, value any) ([]service.Account, error) {
-	accounts, err := r.client.Account.Query().
-		Where(
-			dbaccount.DeletedAtIsNil(),
-			func(s *entsql.Selector) {
-				path := sqljson.Path(key)
-				switch v := value.(type) {
-				case string:
-					preds := []*entsql.Predicate{sqljson.ValueEQ(dbaccount.FieldExtra, v, path)}
-					if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
-						preds = append(preds, sqljson.ValueEQ(dbaccount.FieldExtra, parsed, path))
-					}
-					if len(preds) == 1 {
-						s.Where(preds[0])
-					} else {
-						s.Where(entsql.Or(preds...))
-					}
-				case int:
-					s.Where(entsql.Or(
-						sqljson.ValueEQ(dbaccount.FieldExtra, v, path),
-						sqljson.ValueEQ(dbaccount.FieldExtra, strconv.Itoa(v), path),
-					))
-				case int64:
-					s.Where(entsql.Or(
-						sqljson.ValueEQ(dbaccount.FieldExtra, v, path),
-						sqljson.ValueEQ(dbaccount.FieldExtra, strconv.FormatInt(v, 10), path),
-					))
-				case json.Number:
-					if parsed, err := v.Int64(); err == nil {
-						s.Where(entsql.Or(
-							sqljson.ValueEQ(dbaccount.FieldExtra, parsed, path),
-							sqljson.ValueEQ(dbaccount.FieldExtra, v.String(), path),
-						))
-					} else {
-						s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, v.String(), path))
-					}
-				default:
-					s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, value, path))
+	preds := []dbpredicate.Account{
+		dbaccount.DeletedAtIsNil(),
+		func(s *entsql.Selector) {
+			path := sqljson.Path(key)
+			switch v := value.(type) {
+			case string:
+				valuePredicates := []*entsql.Predicate{sqljson.ValueEQ(dbaccount.FieldExtra, v, path)}
+				if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+					valuePredicates = append(valuePredicates, sqljson.ValueEQ(dbaccount.FieldExtra, parsed, path))
 				}
-			},
-		).
+				if len(valuePredicates) == 1 {
+					s.Where(valuePredicates[0])
+				} else {
+					s.Where(entsql.Or(valuePredicates...))
+				}
+			case int:
+				s.Where(entsql.Or(
+					sqljson.ValueEQ(dbaccount.FieldExtra, v, path),
+					sqljson.ValueEQ(dbaccount.FieldExtra, strconv.Itoa(v), path),
+				))
+			case int64:
+				s.Where(entsql.Or(
+					sqljson.ValueEQ(dbaccount.FieldExtra, v, path),
+					sqljson.ValueEQ(dbaccount.FieldExtra, strconv.FormatInt(v, 10), path),
+				))
+			case json.Number:
+				if parsed, err := v.Int64(); err == nil {
+					s.Where(entsql.Or(
+						sqljson.ValueEQ(dbaccount.FieldExtra, parsed, path),
+						sqljson.ValueEQ(dbaccount.FieldExtra, v.String(), path),
+					))
+				} else {
+					s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, v.String(), path))
+				}
+			default:
+				s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, value, path))
+			}
+		},
+	}
+	preds = append(preds, projectScopedAccountPredicate(ctx)...)
+	accounts, err := r.client.Account.Query().
+		Where(preds...).
 		All(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)

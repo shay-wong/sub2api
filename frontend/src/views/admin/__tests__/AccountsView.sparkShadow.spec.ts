@@ -16,6 +16,7 @@ const {
   getAccountOptions,
   getAllGroups,
   exportData,
+  duplicateAccount,
   createSparkShadow,
   showSuccess,
   showWarning,
@@ -28,6 +29,7 @@ const {
   getAccountOptions: vi.fn(),
   getAllGroups: vi.fn(),
   exportData: vi.fn(),
+  duplicateAccount: vi.fn(),
   createSparkShadow: vi.fn(),
   showSuccess: vi.fn(),
   showWarning: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('@/api/admin', () => ({
       listWithEtag,
       getBatchTodayStats,
       exportData,
+      duplicate: duplicateAccount,
       createSparkShadow,
       delete: vi.fn(),
       batchClearError: vi.fn(),
@@ -109,7 +112,7 @@ const mountView = () =>
 describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, createSparkShadow, showSuccess, showWarning, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, duplicateAccount, createSparkShadow, showSuccess, showWarning, showError]) {
       fn.mockReset()
     }
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
@@ -119,11 +122,57 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     getAccountOptions.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
     exportData.mockResolvedValue({ type: 'cpa-auth-files', exported_at: '2026-07-01T00:00:00Z', accounts: [], skipped_shadows: 1 })
+    duplicateAccount.mockResolvedValue({ id: 998, name: 'parent-acc (Copy)' })
     createSparkShadow.mockResolvedValue({ id: 999, name: 'parent-acc (Spark)' })
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('AccountActionMenu 的 duplicate 事件一键复制账号并刷新列表', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    wrapper.findComponent(AccountActionMenu).vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
+    await flushPromises()
+
+    expect(duplicateAccount).toHaveBeenCalledTimes(1)
+    expect(duplicateAccount).toHaveBeenCalledWith(42)
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.duplicateSuccess')
+    expect(listAccounts.mock.calls.length).toBeGreaterThan(1)
+    wrapper.unmount()
+  })
+
+  it('同一账号复制请求未完成时忽略重复点击', async () => {
+    let resolveDuplicate!: (account: { id: number; name: string }) => void
+    duplicateAccount.mockImplementationOnce(() => new Promise(resolve => { resolveDuplicate = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const menu = wrapper.findComponent(AccountActionMenu)
+    menu.vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
+    menu.vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
+    await flushPromises()
+
+    expect(duplicateAccount).toHaveBeenCalledTimes(1)
+    resolveDuplicate({ id: 998, name: 'parent-acc (Copy)' })
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('复制失败时显示后端错误', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    duplicateAccount.mockRejectedValueOnce(new Error('duplicate failed'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    wrapper.findComponent(AccountActionMenu).vm.$emit('duplicate', { id: 42, name: 'parent-acc' })
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('duplicate failed')
+    consoleError.mockRestore()
+    wrapper.unmount()
   })
 
   it('AccountActionMenu 的 create-spark-shadow 事件触发 createSparkShadow API + 成功提示', async () => {
@@ -278,7 +327,7 @@ const mountViewWithRow = () =>
 describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, createSparkShadow, showSuccess, showWarning, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAccountOptions, getAllGroups, exportData, duplicateAccount, createSparkShadow, showSuccess, showWarning, showError]) {
       fn.mockReset()
     }
     listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })

@@ -769,6 +769,7 @@ export default {
       public: 'Public',
       columns: {
         name: 'Name',
+        id: 'ID',
         platform: 'Platform',
         rateMultiplier: 'Rate Multiplier',
         rateLimit5h: '5h Limit',
