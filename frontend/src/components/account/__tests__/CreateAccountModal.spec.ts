@@ -6,10 +6,12 @@ const {
   createAccountMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
+  authStoreMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
+  authStoreMock: { isSimpleMode: true, isAdmin: true },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -21,7 +23,7 @@ vi.mock('@/stores/app', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ isSimpleMode: true }),
+  useAuthStore: () => authStoreMock,
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -136,6 +138,7 @@ async function openCodexImportStep(toggleClicks = 0) {
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
+    authStoreMock.isAdmin = true
     createAccountMock.mockReset().mockResolvedValue({})
     importCodexSessionMock.mockReset().mockResolvedValue({
       created: 1,
@@ -167,6 +170,16 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('showAgentIdentityOption')).toBe(true)
     expect(flow.props('showCodexPatOption')).toBe(true)
     expect(flow.props('initialInputMethod')).toBe('manual')
+  })
+
+  it('hides super-admin-only Codex imports from project admins', async () => {
+    authStoreMock.isAdmin = false
+    const wrapper = await openCodexImportStep()
+
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    expect(flow.props('showCodexSessionImportOption')).toBe(false)
+    expect(flow.props('showAgentIdentityOption')).toBe(false)
+    expect(flow.props('showCodexPatOption')).toBe(true)
   })
 
   it.each([
