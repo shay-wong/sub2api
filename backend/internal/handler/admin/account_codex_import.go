@@ -290,6 +290,12 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				effectiveExpiresAt = nil
 				autoPauseOnExpired = nil
 			}
+			if item.IsAgentIdentity && effectiveExpiresAt == nil {
+				clearExpiresAt := int64(0)
+				disableAutoPause := false
+				effectiveExpiresAt = &clearExpiresAt
+				autoPauseOnExpired = &disableAutoPause
+			}
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{

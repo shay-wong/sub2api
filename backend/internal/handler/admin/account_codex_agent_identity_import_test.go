@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -55,11 +56,14 @@ func TestImportCodexAgentIdentityWithoutExpiryCreatesAccount(t *testing.T) {
 }
 
 func TestImportCodexAgentIdentityReplacesExistingOAuthCredentials(t *testing.T) {
+	expiresAt := time.Now().Add(-time.Hour)
 	existing := service.Account{
-		ID:       71,
-		Name:     "existing-oauth",
-		Platform: service.PlatformOpenAI,
-		Type:     service.AccountTypeOAuth,
+		ID:                 71,
+		Name:               "existing-oauth",
+		Platform:           service.PlatformOpenAI,
+		Type:               service.AccountTypeOAuth,
+		ExpiresAt:          &expiresAt,
+		AutoPauseOnExpired: true,
 		Credentials: map[string]any{
 			"chatgpt_account_id": "account-update",
 			"chatgpt_user_id":    "user-update",
@@ -89,6 +93,10 @@ func TestImportCodexAgentIdentityReplacesExistingOAuthCredentials(t *testing.T) 
 	require.Len(t, svc.updatedAccounts, 1)
 	credentials := svc.updatedAccounts[0].input.Credentials
 	require.True(t, svc.updatedAccounts[0].input.ReplaceCredentials)
+	require.NotNil(t, svc.updatedAccounts[0].input.ExpiresAt)
+	require.Zero(t, *svc.updatedAccounts[0].input.ExpiresAt)
+	require.NotNil(t, svc.updatedAccounts[0].input.AutoPauseOnExpired)
+	require.False(t, *svc.updatedAccounts[0].input.AutoPauseOnExpired)
 	require.Equal(t, service.OpenAIAuthModeAgentIdentity, credentials["auth_mode"])
 	for _, key := range []string{"access_token", "refresh_token", "id_token", "expires_at", "client_id", "openai_auth_mode", "token_type", "scope"} {
 		require.NotContains(t, credentials, key)

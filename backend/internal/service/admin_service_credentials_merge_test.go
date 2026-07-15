@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -93,12 +94,15 @@ func TestUpdateAccount_ExplicitNewTokenOverwrites(t *testing.T) {
 
 func TestUpdateAccount_ReplaceCredentialsDoesNotRestoreSensitiveValues(t *testing.T) {
 	accountID := int64(208)
+	expiresAt := time.Now().Add(-time.Hour)
 	repo := &updateAccountCredsRepoStub{
 		account: &Account{
-			ID:       accountID,
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeOAuth,
-			Status:   StatusActive,
+			ID:                 accountID,
+			Platform:           PlatformOpenAI,
+			Type:               AccountTypeOAuth,
+			Status:             StatusActive,
+			ExpiresAt:          &expiresAt,
+			AutoPauseOnExpired: true,
 			Credentials: map[string]any{
 				"access_token":  "stale-access",
 				"refresh_token": "stale-refresh",
@@ -108,6 +112,8 @@ func TestUpdateAccount_ReplaceCredentialsDoesNotRestoreSensitiveValues(t *testin
 		},
 	}
 	svc := &adminServiceImpl{accountRepo: repo}
+	clearExpiresAt := int64(0)
+	disableAutoPause := false
 
 	updated, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
 		Credentials: map[string]any{
@@ -116,6 +122,8 @@ func TestUpdateAccount_ReplaceCredentialsDoesNotRestoreSensitiveValues(t *testin
 			"model_mapping":    map[string]any{"gpt-old": "gpt-new"},
 		},
 		ReplaceCredentials: true,
+		ExpiresAt:          &clearExpiresAt,
+		AutoPauseOnExpired: &disableAutoPause,
 	})
 
 	require.NoError(t, err)
@@ -127,6 +135,8 @@ func TestUpdateAccount_ReplaceCredentialsDoesNotRestoreSensitiveValues(t *testin
 	require.NotContains(t, repo.account.Credentials, "id_token")
 	require.NotContains(t, repo.account.Credentials, "plan_type")
 	require.Contains(t, repo.account.Credentials, "model_mapping")
+	require.Nil(t, repo.account.ExpiresAt)
+	require.False(t, repo.account.AutoPauseOnExpired)
 }
 
 func TestUpdateAccount_EmptyCredentialsSkipsUpdate(t *testing.T) {
