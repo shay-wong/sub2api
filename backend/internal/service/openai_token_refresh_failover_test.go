@@ -94,6 +94,7 @@ func TestOpenAITokenProvider_PermanentRefreshFailureDisablesAccount(t *testing.T
 		ID:       4509,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
 		Credentials: map[string]any{
 			"access_token":  "expired-access-token",
 			"refresh_token": "refresh-token",
@@ -129,6 +130,7 @@ func TestOpenAIGatewayService_GetAccessTokenPermanentRefreshFailureReturnsFailov
 		ID:       4510,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
 		Credentials: map[string]any{
 			"access_token":  "expired-access-token",
 			"refresh_token": "refresh-token",
