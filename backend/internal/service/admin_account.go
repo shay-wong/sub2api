@@ -17,7 +17,20 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
+
+var ErrProjectAdminGrokOAuthCustomBaseURL = infraerrors.Forbidden(
+	"PROJECT_ADMIN_GROK_OAUTH_CUSTOM_BASE_URL_FORBIDDEN",
+	"project admins cannot route Grok OAuth credentials to a custom base URL",
+)
+
+func ensureProjectAdminGrokOAuthBaseURL(ctx context.Context, platform, accountType, baseURL string) error {
+	if !isProjectAdminContext(ctx) || platform != PlatformGrok || accountType != AccountTypeOAuth || xai.IsOfficialBaseURL(baseURL) {
+		return nil
+	}
+	return ErrProjectAdminGrokOAuthCustomBaseURL
+}
 
 // Account management implementations
 func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
@@ -521,6 +534,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
+		return nil, err
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -565,6 +581,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	previousAccountType := account.Type
+	previousGrokBaseURL := strings.TrimSpace(account.GetCredential("base_url"))
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
@@ -625,6 +643,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
+			return nil, err
+		}
+	}
+	if account.Type != previousAccountType || strings.TrimSpace(account.GetCredential("base_url")) != previousGrokBaseURL {
+		if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
 			return nil, err
 		}
 	}
@@ -889,6 +912,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 校验并规范化请求头覆写配置（批量路径为 JSONB 顶层 key 合并，直接校验增量即可）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
+	}
+	if rawBaseURL, changesBaseURL := input.Credentials["base_url"]; changesBaseURL {
+		for _, account := range cachedTargets {
+			if account == nil || strings.TrimSpace(account.GetCredential("base_url")) == strings.TrimSpace(fmt.Sprint(rawBaseURL)) {
+				continue
+			}
+			if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, fmt.Sprint(rawBaseURL)); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Prepare bulk updates for columns and JSONB fields.

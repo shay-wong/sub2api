@@ -249,7 +249,7 @@ func TestAdminServiceCreateAccount_ProjectContextRejectsOutOfScopeProxyBeforeCre
 	proxyRepo := &proxyRepoStubForAccountProxyScope{getErr: ErrProxyNotFound}
 	svc := &adminServiceImpl{
 		accountRepo: repo,
-		proxyRepo:  proxyRepo,
+		proxyRepo:   proxyRepo,
 	}
 
 	_, err := svc.CreateAccount(WithProjectID(context.Background(), 7), &CreateAccountInput{
@@ -273,12 +273,12 @@ func TestAdminServiceBulkUpdateAccounts_ProjectContextRejectsOutOfScopeProxyBefo
 	proxyRepo := &proxyRepoStubForAccountProxyScope{getErr: ErrProxyNotFound}
 	svc := &adminServiceImpl{
 		accountRepo: repo,
-		proxyRepo:  proxyRepo,
+		proxyRepo:   proxyRepo,
 	}
 
 	result, err := svc.BulkUpdateAccounts(WithProjectID(context.Background(), 7), &BulkUpdateAccountsInput{
 		AccountIDs: []int64{1, 2},
-		ProxyID:   &proxyID,
+		ProxyID:    &proxyID,
 	})
 
 	require.Nil(t, result)
@@ -307,6 +307,59 @@ func TestAdminServiceBulkUpdateAccounts_ProjectContextRequiresVisibleExplicitAcc
 	require.Equal(t, []int64{1, 2}, repo.getByIDsIDs)
 	require.Empty(t, repo.bulkUpdateIDs)
 	require.Empty(t, repo.bindGroupsCalls)
+}
+
+func TestAdminServiceCreateAccount_ProjectAdminRejectsCustomGrokOAuthBaseURL(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{}
+	svc := &adminServiceImpl{accountRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.CreateAccount(ctx, &CreateAccountInput{
+		Name:                 "blocked",
+		Platform:             PlatformGrok,
+		Type:                 AccountTypeOAuth,
+		Credentials:          map[string]any{"base_url": "https://attacker.example/v1"},
+		SkipDefaultGroupBind: true,
+	})
+
+	require.ErrorIs(t, err, ErrProjectAdminGrokOAuthCustomBaseURL)
+}
+
+func TestAdminServiceUpdateAccount_ProjectAdminRejectsCustomGrokOAuthBaseURL(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{
+		1: {ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	_, err := svc.UpdateAccount(ctx, 1, &UpdateAccountInput{
+		Credentials: map[string]any{"base_url": "https://attacker.example/v1"},
+	})
+
+	require.ErrorIs(t, err, ErrProjectAdminGrokOAuthCustomBaseURL)
+}
+
+func TestAdminServiceBulkUpdateAccounts_ProjectAdminRejectsCustomGrokOAuthBaseURLBeforeWrite(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
+		{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+
+	result, err := svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{
+		AccountIDs:  []int64{1},
+		Credentials: map[string]any{"base_url": "https://attacker.example/v1"},
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrProjectAdminGrokOAuthCustomBaseURL)
+	require.Empty(t, repo.bulkUpdateIDs)
+}
+
+func TestProjectAdminGrokOAuthBaseURLPolicyAllowsOfficialHosts(t *testing.T) {
+	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	require.NoError(t, ensureProjectAdminGrokOAuthBaseURL(ctx, PlatformGrok, AccountTypeOAuth, "https://api.x.ai/v1"))
+	require.NoError(t, ensureProjectAdminGrokOAuthBaseURL(ctx, PlatformGrok, AccountTypeOAuth, "https://cli-chat-proxy.grok.com/v1"))
 }
 
 // TestAdminService_BulkUpdateAccounts_MixedChannelPreCheckBlocksOnExistingConflict verifies
