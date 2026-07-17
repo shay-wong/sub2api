@@ -111,7 +111,7 @@ func RegisterAdminRoutes(
 		registerContentModerationRoutes(adminOnly, h)
 
 		// 独立提示词输入审计
-		registerPromptAuditRoutes(admin, h)
+		registerPromptAuditRoutes(adminOnly, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(adminOnly, h)

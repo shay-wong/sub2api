@@ -217,12 +217,15 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledWith()
   })
 
-  it('keeps the real risk-control route unavailable to project admins', async () => {
+  it.each([
+    '/admin/risk-control',
+    '/admin/prompt-audit',
+  ])('keeps %s unavailable to project admins', async (path) => {
     authStore.canAccessAdminConsole = true
     authStore.hasAdminPermission.mockReturnValue(true)
 
-    const meta = getRouteMeta('/admin/risk-control')
-    const { navigation, next } = runGuard(meta, '/admin/risk-control')
+    const meta = getRouteMeta(path)
+    const { navigation, next } = runGuard(meta, path)
     await navigation
 
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()

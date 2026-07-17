@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -132,5 +133,39 @@ func TestPromptAuditAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testi
 			router.ServeHTTP(recorder, request)
 			require.Equal(t, tc.wantStatus, recorder.Code)
 		})
+	}
+}
+
+func TestPromptAuditAdminRoutesRequireSuperAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handlers := &handler.Handlers{Admin: &handler.AdminHandlers{
+		PromptAudit: securityaudit.NewPromptAdminHandler(nil),
+	}}
+	adminAuth := servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Next()
+	})
+	passthrough := func(c *gin.Context) { c.Next() }
+	RegisterAdminRoutes(
+		router.Group("/api/v1"),
+		handlers,
+		adminAuth,
+		servermiddleware.AuditLogMiddleware(passthrough),
+		servermiddleware.StepUpAuthMiddleware(passthrough),
+		nil,
+	)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/admin/prompt-audit/config"},
+		{method: http.MethodPut, path: "/api/v1/admin/prompt-audit/config"},
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(tc.method, tc.path, nil)
+		router.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusForbidden, recorder.Code)
 	}
 }
