@@ -47,12 +47,30 @@ func (s *totpVMSettingRepoStub) GetValue(ctx context.Context, key string) (strin
 func newTotpVMService(t *testing.T, user *User, emailVerifyEnabled bool) (*TotpService, *totpVMUserRepoStub) {
 	t.Helper()
 	userRepo := &totpVMUserRepoStub{user: user}
-	values := map[string]string{}
+	values := map[string]string{SettingKeyTotpEnabled: "true"}
 	if emailVerifyEnabled {
 		values[SettingKeyEmailVerifyEnabled] = "true"
 	}
 	settingSvc := NewSettingService(&totpVMSettingRepoStub{values: values}, nil)
 	return NewTotpService(userRepo, nil, nil, settingSvc, nil, nil), userRepo
+}
+
+func TestTotpSuperAdminAlwaysUsesPassword(t *testing.T) {
+	admin := &User{ID: 3, Email: "root@example.com", Role: RoleSuperAdmin}
+	require.NoError(t, admin.SetPassword("correct-password"))
+	svc, userRepo := newTotpVMService(t, admin, true)
+
+	method, err := svc.GetVerificationMethod(context.Background(), admin.ID)
+	require.NoError(t, err)
+	require.Equal(t, "password", method.Method)
+
+	_, err = svc.InitiateSetup(context.Background(), admin.ID, "", "")
+	require.ErrorIs(t, err, ErrPasswordRequired)
+
+	admin.TotpEnabled = true
+	err = svc.Disable(context.Background(), admin.ID, "", "correct-password")
+	require.NoError(t, err)
+	require.True(t, userRepo.disableCalled)
 }
 
 func TestGetVerificationMethodAdminAlwaysPassword(t *testing.T) {
