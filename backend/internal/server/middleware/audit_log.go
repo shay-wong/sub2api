@@ -205,6 +205,9 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
 			extra["query"] = q
 		}
+		for key, value := range sessionBindingAuditMetadata(service.SessionBindingFromContext(c.Request.Context())) {
+			extra[key] = value
+		}
 		if len(extra) > 0 {
 			entry.Extra = extra
 		}

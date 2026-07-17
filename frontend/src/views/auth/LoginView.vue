@@ -308,8 +308,14 @@ watch(validationToastMessage, (value, previousValue) => {
 onMounted(async () => {
   const expiredFlag = sessionStorage.getItem('auth_expired')
   if (expiredFlag) {
+    const expiredReason = sessionStorage.getItem('auth_expired_reason')
     sessionStorage.removeItem('auth_expired')
-    const message = t('auth.reloginRequired')
+    sessionStorage.removeItem('auth_expired_reason')
+    const message = t(
+      expiredReason === 'session_binding'
+        ? 'auth.sessionBindingChanged'
+        : 'auth.reloginRequired'
+    )
     errorMessage.value = message
     appStore.showWarning(message)
   }

@@ -236,6 +236,7 @@ export default {
     loginSuccess: '登录成功！欢迎回来。',
     accountCreatedSuccess: '账户创建成功！欢迎使用 {siteName}。',
     reloginRequired: '会话已过期，请重新登录。',
+    sessionBindingChanged: '检测到网络或浏览器环境发生变化，请重新登录。',
     turnstileExpired: '验证已过期，请重试',
     turnstileFailed: '验证失败，请重试',
     completeVerification: '请完成验证',

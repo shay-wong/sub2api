@@ -128,7 +128,7 @@ export default {
       },
       security: {
         sessionBinding: '会话 IP/UA 绑定',
-        sessionBindingHint: '将登录会话与客户端 IP 和 User-Agent 绑定，任一变化即强制该会话失效并需重新登录（提升被盗凭证的利用门槛）。',
+        sessionBindingHint: '将会话绑定到可信客户端 IP 和 User-Agent。请先配置可信代理；该功能默认关闭，指纹不一致会立即撤销会话。',
         auditRetention: '操作日志保留天数',
         auditRetentionHint: '超过该天数的操作日志将被自动清理；填 0 表示永久保留（仅支持手动清空）。'
       },
@@ -146,10 +146,10 @@ export default {
       },
       apiKeyAcl: {
         title: 'API Key IP 访问控制',
-        description: '控制 API Key 白/黑名单、操作审计日志与会话 IP/UA 绑定使用哪个客户端 IP 判断',
+        description: '控制 API Key IP 白名单和黑名单使用哪个客户端 IP 判断',
         trustForwardedIp: '信任反代传递的客户端 IP',
         trustForwardedIpHint:
-          '默认关闭。仅在源站只允许 Cloudflare 或 Nginx 反代访问时开启；开启后 API Key IP 白/黑名单、操作审计日志与会话 IP/UA 绑定会使用 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For，与使用记录中的请求 IP 保持一致。切换本开关会改变已登录会话的 IP 指纹，开启会话绑定时现有会话需重新登录。'
+          '默认关闭。仅在源站只允许 Cloudflare 或 Nginx 反代访问时开启；开启后 API Key IP 白名单和黑名单会使用 CF-Connecting-IP、X-Real-IP 或 X-Forwarded-For。操作审计与会话绑定始终使用 server.trusted_proxies 验证后的客户端 IP。'
       },
       linuxdo: {
         title: 'LinuxDo Connect 登录',

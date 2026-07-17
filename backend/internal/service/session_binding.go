@@ -16,8 +16,38 @@ var ErrSessionBindingMismatch = infraerrors.Unauthorized("SESSION_BINDING_MISMAT
 // 会话绑定开启时，两者任一变化即导致会话失效（防止凭证被盗后异地重放）。
 type SessionBinding struct {
 	IP        string
+	IPSource  SessionBindingIPSource
+	PeerIP    string
 	UserAgent string
+
+	mismatchReason SessionBindingMismatch
 }
+
+type SessionBindingIPSource string
+
+const (
+	SessionBindingIPSourcePeer             SessionBindingIPSource = "peer"
+	SessionBindingIPSourceTrustedForwarded SessionBindingIPSource = "trusted_forwarded"
+)
+
+type SessionBindingFingerprint struct {
+	Hash           string // 旧版合并指纹，仅用于兼容已签发 token/Redis 数据。
+	ClientIPHash   string
+	ClientIPSource SessionBindingIPSource
+	UserAgentHash  string
+}
+
+type SessionBindingMismatch string
+
+const (
+	SessionBindingMatch                        SessionBindingMismatch = ""
+	SessionBindingClientIPMismatch             SessionBindingMismatch = "client_ip"
+	SessionBindingPeerIPMismatch               SessionBindingMismatch = "transport_peer_ip"
+	SessionBindingUserAgentMismatch            SessionBindingMismatch = "user_agent"
+	SessionBindingClientIPAndUserAgentMismatch SessionBindingMismatch = "client_ip_and_user_agent"
+	SessionBindingPeerIPAndUserAgentMismatch   SessionBindingMismatch = "transport_peer_ip_and_user_agent"
+	SessionBindingLegacyMismatch               SessionBindingMismatch = "legacy_fingerprint"
+)
 
 // Hash 计算绑定指纹哈希（IP 与 UA 合并，任一变化哈希即变化）。
 func (b *SessionBinding) Hash() string {
@@ -30,6 +60,75 @@ func (b *SessionBinding) Hash() string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(ip + "\n" + ua))
+	return hex.EncodeToString(sum[:16])
+}
+
+func (b *SessionBinding) Fingerprint() SessionBindingFingerprint {
+	if b == nil {
+		return SessionBindingFingerprint{}
+	}
+	return SessionBindingFingerprint{
+		Hash:           b.Hash(),
+		ClientIPHash:   hashSessionBindingPart(b.IP),
+		ClientIPSource: b.IPSource,
+		UserAgentHash:  hashSessionBindingPart(b.UserAgent),
+	}
+}
+
+// Compare 比较当前请求与已签发指纹，并保存结果供请求结束后的审计日志使用。
+func (b *SessionBinding) Compare(expected SessionBindingFingerprint) SessionBindingMismatch {
+	mismatch := b.Mismatch(expected)
+	if b != nil {
+		b.mismatchReason = mismatch
+	}
+	return mismatch
+}
+
+// Mismatch 只计算指纹差异，不修改请求状态。
+func (b *SessionBinding) Mismatch(expected SessionBindingFingerprint) SessionBindingMismatch {
+	current := b.Fingerprint()
+	ipMismatch := expected.ClientIPHash != "" && expected.ClientIPHash != current.ClientIPHash
+	uaMismatch := expected.UserAgentHash != "" && expected.UserAgentHash != current.UserAgentHash
+
+	ipMismatchReason := SessionBindingClientIPMismatch
+	if expected.ClientIPSource != SessionBindingIPSourceTrustedForwarded ||
+		current.ClientIPSource != SessionBindingIPSourceTrustedForwarded {
+		ipMismatchReason = SessionBindingPeerIPMismatch
+	}
+
+	switch {
+	case ipMismatch && uaMismatch:
+		if ipMismatchReason == SessionBindingPeerIPMismatch {
+			return SessionBindingPeerIPAndUserAgentMismatch
+		}
+		return SessionBindingClientIPAndUserAgentMismatch
+	case ipMismatch:
+		return ipMismatchReason
+	case uaMismatch:
+		return SessionBindingUserAgentMismatch
+	case expected.ClientIPHash != "" || expected.UserAgentHash != "":
+		return SessionBindingMatch
+	case expected.Hash != "" && expected.Hash != current.Hash:
+		return SessionBindingLegacyMismatch
+	default:
+		return SessionBindingMatch
+	}
+}
+
+// MismatchReason 返回本请求最近一次 Compare 的结果。
+func (b *SessionBinding) MismatchReason() SessionBindingMismatch {
+	if b == nil {
+		return SessionBindingMatch
+	}
+	return b.mismatchReason
+}
+
+func hashSessionBindingPart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:16])
 }
 
@@ -52,7 +151,10 @@ func SessionBindingFromContext(ctx context.Context) *SessionBinding {
 	return binding
 }
 
-// sessionBindingHashFromContext 提取指纹哈希，缺失时返回空串。
-func sessionBindingHashFromContext(ctx context.Context) string {
-	return SessionBindingFromContext(ctx).Hash()
+func sessionBindingFingerprintFromContext(ctx context.Context) SessionBindingFingerprint {
+	return SessionBindingFromContext(ctx).Fingerprint()
+}
+
+func sessionBindingMismatchFromContext(ctx context.Context, expected SessionBindingFingerprint) SessionBindingMismatch {
+	return SessionBindingFromContext(ctx).Compare(expected)
 }

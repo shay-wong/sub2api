@@ -71,7 +71,10 @@ type defaultSubscriptionAssignerStub struct {
 	err   error
 }
 
-type refreshTokenCacheStub struct{}
+type refreshTokenCacheStub struct {
+	tokens          map[string]*RefreshTokenData
+	deletedFamilies []string
+}
 
 type userPlatformQuotaRepoStub struct {
 	bulkInsertCalls [][]UserPlatformQuotaRecord
@@ -119,15 +122,26 @@ func (s *defaultSubscriptionAssignerStub) AssignOrExtendSubscription(_ context.C
 	return &UserSubscription{UserID: input.UserID, GroupID: input.GroupID}, false, nil
 }
 
-func (s *refreshTokenCacheStub) StoreRefreshToken(context.Context, string, *RefreshTokenData, time.Duration) error {
+func (s *refreshTokenCacheStub) StoreRefreshToken(_ context.Context, tokenHash string, data *RefreshTokenData, _ time.Duration) error {
+	if s.tokens == nil {
+		s.tokens = make(map[string]*RefreshTokenData)
+	}
+	cloned := *data
+	s.tokens[tokenHash] = &cloned
 	return nil
 }
 
-func (s *refreshTokenCacheStub) GetRefreshToken(context.Context, string) (*RefreshTokenData, error) {
-	return nil, ErrRefreshTokenNotFound
+func (s *refreshTokenCacheStub) GetRefreshToken(_ context.Context, tokenHash string) (*RefreshTokenData, error) {
+	data, ok := s.tokens[tokenHash]
+	if !ok {
+		return nil, ErrRefreshTokenNotFound
+	}
+	cloned := *data
+	return &cloned, nil
 }
 
-func (s *refreshTokenCacheStub) DeleteRefreshToken(context.Context, string) error {
+func (s *refreshTokenCacheStub) DeleteRefreshToken(_ context.Context, tokenHash string) error {
+	delete(s.tokens, tokenHash)
 	return nil
 }
 
@@ -135,7 +149,13 @@ func (s *refreshTokenCacheStub) DeleteUserRefreshTokens(context.Context, int64) 
 	return nil
 }
 
-func (s *refreshTokenCacheStub) DeleteTokenFamily(context.Context, string) error {
+func (s *refreshTokenCacheStub) DeleteTokenFamily(_ context.Context, familyID string) error {
+	s.deletedFamilies = append(s.deletedFamilies, familyID)
+	for tokenHash, data := range s.tokens {
+		if data.FamilyID == familyID {
+			delete(s.tokens, tokenHash)
+		}
+	}
 	return nil
 }
 

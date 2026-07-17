@@ -179,14 +179,14 @@ func (s *SettingService) IsTotpEncryptionKeyConfigured() bool {
 	return s.cfg.Totp.EncryptionKeyConfigured
 }
 
-// IsSessionBindingEnabled 检查会话 IP/UA 绑定是否启用（默认开启）。
+// IsSessionBindingEnabled 检查会话 IP/UA 绑定是否启用（默认关闭）。
 // 开启时会话与登录时的 IP/User-Agent 绑定，任一变化立即失效并撤销该会话。
 func (s *SettingService) IsSessionBindingEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeySessionBindingEnabled)
 	if err != nil {
-		return true // 默认开启
+		return false
 	}
-	return value != "false"
+	return value == "true"
 }
 
 // defaultAuditLogRetentionDays 审计日志默认保留天数。

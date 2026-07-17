@@ -151,24 +151,49 @@ func TestRedactAuditBody_TruncatedUnicodeRemainsValidUTF8(t *testing.T) {
 }
 
 func TestSessionBindingHash(t *testing.T) {
-	a := &SessionBinding{IP: "1.2.3.4", UserAgent: "Mozilla/5.0"}
-	b := &SessionBinding{IP: "1.2.3.4", UserAgent: "Mozilla/5.0"}
+	a := &SessionBinding{IP: "1.2.3.4", IPSource: SessionBindingIPSourceTrustedForwarded, PeerIP: "172.24.149.226", UserAgent: "Mozilla/5.0"}
+	b := &SessionBinding{IP: "1.2.3.4", IPSource: SessionBindingIPSourceTrustedForwarded, PeerIP: "172.24.149.227", UserAgent: "Mozilla/5.0"}
 	if a.Hash() != b.Hash() {
-		t.Fatalf("identical bindings must hash equal")
+		t.Fatalf("proxy peer changes must not change the client binding hash")
 	}
 	if a.Hash() == "" {
 		t.Fatalf("non-empty binding must produce non-empty hash")
 	}
-
-	// IP 变化 → 哈希变化。
-	c := &SessionBinding{IP: "5.6.7.8", UserAgent: "Mozilla/5.0"}
-	if a.Hash() == c.Hash() {
-		t.Fatalf("changing IP must change hash")
+	if mismatch := b.Mismatch(a.Fingerprint()); mismatch != SessionBindingMatch {
+		t.Fatalf("proxy peer changes must match, got %q", mismatch)
 	}
-	// UA 变化 → 哈希变化。
-	d := &SessionBinding{IP: "1.2.3.4", UserAgent: "curl/8.0"}
-	if a.Hash() == d.Hash() {
-		t.Fatalf("changing UA must change hash")
+
+	// 可信客户端 IP 变化与 UA 变化必须可以分别诊断。
+	c := &SessionBinding{IP: "5.6.7.8", IPSource: SessionBindingIPSourceTrustedForwarded, UserAgent: "Mozilla/5.0"}
+	if mismatch := c.Mismatch(a.Fingerprint()); mismatch != SessionBindingClientIPMismatch {
+		t.Fatalf("client IP change mismatch = %q, want %q", mismatch, SessionBindingClientIPMismatch)
+	}
+	d := &SessionBinding{IP: "1.2.3.4", IPSource: SessionBindingIPSourceTrustedForwarded, UserAgent: "curl/8.0"}
+	if mismatch := d.Mismatch(a.Fingerprint()); mismatch != SessionBindingUserAgentMismatch {
+		t.Fatalf("user agent change mismatch = %q, want %q", mismatch, SessionBindingUserAgentMismatch)
+	}
+	missingIP := &SessionBinding{IPSource: SessionBindingIPSourceTrustedForwarded, UserAgent: "Mozilla/5.0"}
+	if mismatch := missingIP.Mismatch(a.Fingerprint()); mismatch != SessionBindingClientIPMismatch {
+		t.Fatalf("missing client IP mismatch = %q, want %q", mismatch, SessionBindingClientIPMismatch)
+	}
+	missingUserAgent := &SessionBinding{IP: "1.2.3.4", IPSource: SessionBindingIPSourceTrustedForwarded}
+	if mismatch := missingUserAgent.Mismatch(a.Fingerprint()); mismatch != SessionBindingUserAgentMismatch {
+		t.Fatalf("missing user agent mismatch = %q, want %q", mismatch, SessionBindingUserAgentMismatch)
+	}
+
+	peerIssued := &SessionBinding{IP: "172.24.149.226", IPSource: SessionBindingIPSourcePeer, UserAgent: "Mozilla/5.0"}
+	peerCurrent := &SessionBinding{IP: "172.24.149.227", IPSource: SessionBindingIPSourcePeer, UserAgent: "Mozilla/5.0"}
+	if mismatch := peerCurrent.Mismatch(peerIssued.Fingerprint()); mismatch != SessionBindingPeerIPMismatch {
+		t.Fatalf("peer IP change mismatch = %q, want %q", mismatch, SessionBindingPeerIPMismatch)
+	}
+
+	// 旧版只有合并哈希时，仅允许未变化的会话继续并在 refresh 时迁移。
+	legacyExpected := SessionBindingFingerprint{Hash: peerIssued.Hash()}
+	if mismatch := peerIssued.Mismatch(legacyExpected); mismatch != SessionBindingMatch {
+		t.Fatalf("unchanged legacy fingerprint must match, got %q", mismatch)
+	}
+	if mismatch := peerCurrent.Mismatch(legacyExpected); mismatch != SessionBindingLegacyMismatch {
+		t.Fatalf("changed legacy fingerprint mismatch = %q, want %q", mismatch, SessionBindingLegacyMismatch)
 	}
 
 	// 空指纹 → 空哈希（旧 token 兼容）。

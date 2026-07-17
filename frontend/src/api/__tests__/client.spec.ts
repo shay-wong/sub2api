@@ -12,6 +12,7 @@ describe('API Client', () => {
 
   beforeEach(async () => {
     localStorage.clear()
+    sessionStorage.clear()
     window.history.replaceState({}, '', '/')
     // 每次测试重新导入以获取干净的模块状态
     vi.resetModules()
@@ -364,6 +365,54 @@ describe('API Client', () => {
       expect(localStorage.getItem('auth_token')).toBeNull()
 
       // 恢复 location
+      Object.defineProperty(window, 'location', {
+        value: originalLocation,
+        writable: true,
+      })
+    })
+
+    it('会话绑定不匹配时保留明确的重新登录原因', async () => {
+      localStorage.setItem('auth_token', 'bound-token')
+
+      const originalLocation = window.location
+      Object.defineProperty(window, 'location', {
+        value: { ...originalLocation, pathname: '/dashboard', href: '/dashboard' },
+        writable: true,
+      })
+
+      apiClient.defaults.adapter = vi.fn().mockRejectedValue({
+        response: {
+          status: 401,
+          data: {
+            code: 'SESSION_BINDING_MISMATCH',
+            message: 'Session client network changed, please login again',
+          },
+        },
+        config: {
+          url: '/auth/me',
+          headers: { Authorization: 'Bearer bound-token' },
+        },
+        code: 'ERR_BAD_REQUEST',
+      })
+
+      await expect(apiClient.get('/auth/me')).rejects.toBeDefined()
+      expect(sessionStorage.getItem('auth_expired_reason')).toBe('session_binding')
+
+      apiClient.defaults.adapter = vi.fn().mockRejectedValue({
+        response: {
+          status: 401,
+          data: { code: 'TOKEN_EXPIRED', message: 'Token expired' },
+        },
+        config: {
+          url: '/dashboard/stats',
+          headers: { Authorization: 'Bearer bound-token' },
+        },
+        code: 'ERR_BAD_REQUEST',
+      })
+
+      await expect(apiClient.get('/dashboard/stats')).rejects.toBeDefined()
+      expect(sessionStorage.getItem('auth_expired_reason')).toBe('session_binding')
+
       Object.defineProperty(window, 'location', {
         value: originalLocation,
         writable: true,

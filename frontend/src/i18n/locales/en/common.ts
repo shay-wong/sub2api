@@ -237,6 +237,7 @@ export default {
     loginSuccess: 'Login successful! Welcome back.',
     accountCreatedSuccess: 'Account created successfully! Welcome to {siteName}.',
     reloginRequired: 'Session expired. Please log in again.',
+    sessionBindingChanged: 'Your network or browser environment changed. Please log in again.',
     turnstileExpired: 'Verification expired, please try again',
     turnstileFailed: 'Verification failed, please try again',
     completeVerification: 'Please complete the verification',

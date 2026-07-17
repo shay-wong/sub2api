@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 
@@ -13,30 +14,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 反代场景：RemoteAddr 为 127.0.0.1，真实客户端 IP 在 X-Real-IP 中。
-// 会话绑定注入与审计 IP 必须与 API Key IP 限制共用「信任反代传递的客户端 IP」开关语义。
-func TestSessionBindingContextHonorsTrustForwardedToggle(t *testing.T) {
+type enabledSessionBindingSettingRepo struct {
+	service.SettingRepository
+}
+
+func (enabledSessionBindingSettingRepo) GetValue(context.Context, string) (string, error) {
+	return "true", nil
+}
+
+// 会话绑定只接受 trusted_proxies 已验证代理链中的转发 IP；
+// 直连请求即使开启 API Key 转发 IP 开关也不能伪造绑定地址。
+func TestSessionBindingContextUsesOnlyTrustedProxyHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, tc := range []struct {
 		name           string
-		trustForwarded bool
+		trustedProxies []string
+		peerIP         string
+		wantPeerIP     string
 		wantIP         string
+		wantSource     service.SessionBindingIPSource
 	}{
-		{name: "trust disabled records proxy address", trustForwarded: false, wantIP: "127.0.0.1"},
-		{name: "trust enabled records forwarded client IP", trustForwarded: true, wantIP: "1.2.3.4"},
+		{
+			name:       "untrusted direct peer cannot spoof forwarded IP",
+			peerIP:     "9.9.9.9:54321",
+			wantPeerIP: "9.9.9.9",
+			wantIP:     "9.9.9.9",
+			wantSource: service.SessionBindingIPSourcePeer,
+		},
+		{
+			name:           "trusted proxy forwards browser IP",
+			trustedProxies: []string{"172.24.149.0/24"},
+			peerIP:         "172.24.149.226:54321",
+			wantPeerIP:     "172.24.149.226",
+			wantIP:         "1.2.3.4",
+			wantSource:     service.SessionBindingIPSourceTrustedForwarded,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{}
-			cfg.SetTrustForwardedIPForAPIKeyACL(tc.trustForwarded)
-
 			r := gin.New()
-			require.NoError(t, r.SetTrustedProxies(nil))
-			r.Use(SessionBindingContext(cfg))
+			require.NoError(t, r.SetTrustedProxies(tc.trustedProxies))
+			r.Use(SessionBindingContext())
 			r.GET("/t", func(c *gin.Context) {
 				binding := service.SessionBindingFromContext(c.Request.Context())
 				require.NotNil(t, binding)
 				require.Equal(t, tc.wantIP, binding.IP)
+				require.Equal(t, tc.wantSource, binding.IPSource)
+				require.Equal(t, tc.wantPeerIP, binding.PeerIP)
 				require.Equal(t, "test-agent", binding.UserAgent)
 				require.Equal(t, tc.wantIP, SecurityClientIP(c))
 				c.Status(200)
@@ -44,12 +68,78 @@ func TestSessionBindingContextHonorsTrustForwardedToggle(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/t", nil)
-			req.RemoteAddr = "127.0.0.1:54321"
+			req.RemoteAddr = tc.peerIP
 			req.Header.Set("X-Real-IP", "1.2.3.4")
 			req.Header.Set("User-Agent", "test-agent")
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, 200, w.Code)
+		})
+	}
+}
+
+func TestSessionBindingContextKeepsProxyPeerOutOfFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var fingerprints []service.SessionBindingFingerprint
+	r := gin.New()
+	require.NoError(t, r.SetTrustedProxies([]string{"172.24.149.0/24"}))
+	r.Use(SessionBindingContext())
+	r.GET("/t", func(c *gin.Context) {
+		fingerprints = append(fingerprints, service.SessionBindingFromContext(c.Request.Context()).Fingerprint())
+		c.Status(200)
+	})
+
+	for _, peer := range []string{"172.24.149.226:1234", "172.24.149.227:5678"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/t", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Real-IP", "203.0.113.10")
+		req.Header.Set("User-Agent", "test-agent")
+		r.ServeHTTP(w, req)
+		require.Equal(t, 200, w.Code)
+	}
+
+	require.Len(t, fingerprints, 2)
+	require.Equal(t, fingerprints[0], fingerprints[1])
+}
+
+func TestEnforceSessionBindingUsesSeparatedClientFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	settings := service.NewSettingService(enabledSessionBindingSettingRepo{}, cfg)
+	issued := (&service.SessionBinding{IP: "203.0.113.10", IPSource: service.SessionBindingIPSourceTrustedForwarded, UserAgent: "test-agent"}).Fingerprint()
+	claims := &service.JWTClaims{
+		BindingClientIPHash:  issued.ClientIPHash,
+		BindingIPSource:      issued.ClientIPSource,
+		BindingUserAgentHash: issued.UserAgentHash,
+	}
+
+	for _, tc := range []struct {
+		name       string
+		clientIP   string
+		peerIP     string
+		wantStatus int
+	}{
+		{name: "proxy peer changed", clientIP: "203.0.113.10", peerIP: "172.24.149.227:1234", wantStatus: 204},
+		{name: "browser client changed", clientIP: "203.0.113.11", peerIP: "172.24.149.226:1234", wantStatus: 401},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			require.NoError(t, r.SetTrustedProxies([]string{"172.24.149.0/24"}))
+			r.Use(SessionBindingContext())
+			r.GET("/t", func(c *gin.Context) {
+				if enforceSessionBinding(c, nil, settings, nil, claims) {
+					c.Status(204)
+				}
+			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/t", nil)
+			req.RemoteAddr = tc.peerIP
+			req.Header.Set("X-Real-IP", tc.clientIP)
+			req.Header.Set("User-Agent", "test-agent")
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.wantStatus, w.Code)
 		})
 	}
 }
@@ -75,17 +165,14 @@ func TestSecurityClientIPFallsBackWithoutInjectedBinding(t *testing.T) {
 	require.Equal(t, "9.9.9.9", w.Body.String())
 }
 
-// requestSessionBinding 优先取注入值：开关开启时校验哈希必须基于注入的转发 IP 计算，
-// 与 token 签发路径取值一致，否则同一客户端会被误判为指纹变化。
+// requestSessionBinding 优先取注入值：可信代理解析结果必须与 token 签发路径一致，
+// 否则同一客户端会被误判为指纹变化。
 func TestRequestSessionBindingPrefersInjectedBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	cfg := &config.Config{}
-	cfg.SetTrustForwardedIPForAPIKeyACL(true)
-
 	r := gin.New()
-	require.NoError(t, r.SetTrustedProxies(nil))
-	r.Use(SessionBindingContext(cfg))
+	require.NoError(t, r.SetTrustedProxies([]string{"127.0.0.1"}))
+	r.Use(SessionBindingContext())
 	r.GET("/t", func(c *gin.Context) {
 		issued := &service.SessionBinding{IP: "1.2.3.4", UserAgent: "test-agent"}
 		require.Equal(t, issued.Hash(), requestSessionBinding(c).Hash())

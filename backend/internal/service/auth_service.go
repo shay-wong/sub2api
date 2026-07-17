@@ -59,8 +59,11 @@ type JWTClaims struct {
 	TokenVersion int64  `json:"token_version"` // Used to invalidate tokens on password change
 	// SessionID 会话 ID（与 refresh token family 对应），用于单会话撤销与 step-up 授权绑定。
 	SessionID string `json:"sid,omitempty"`
-	// BindingHash 会话指纹哈希（IP+UA），会话绑定开启时校验；空值表示旧 token（平滑升级）。
-	BindingHash string `json:"bnd,omitempty"`
+	// BindingHash 保留旧版合并指纹；新 token 使用分项指纹诊断具体变化来源。
+	BindingHash          string                 `json:"bnd,omitempty"`
+	BindingClientIPHash  string                 `json:"bip,omitempty"`
+	BindingIPSource      SessionBindingIPSource `json:"bis,omitempty"`
+	BindingUserAgentHash string                 `json:"bua,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -1196,11 +1199,11 @@ func (s *AuthService) GenerateToken(ctx context.Context, user *User) (string, er
 	if err != nil {
 		return "", fmt.Errorf("generate session id: %w", err)
 	}
-	return s.generateAccessToken(user, sessionID, sessionBindingHashFromContext(ctx))
+	return s.generateAccessToken(user, sessionID, sessionBindingFingerprintFromContext(ctx))
 }
 
 // generateAccessToken 生成带会话 ID 与绑定指纹的 access token。
-func (s *AuthService) generateAccessToken(user *User, sessionID, bindingHash string) (string, error) {
+func (s *AuthService) generateAccessToken(user *User, sessionID string, binding SessionBindingFingerprint) (string, error) {
 	now := time.Now()
 	var expiresAt time.Time
 	if s.cfg.JWT.AccessTokenExpireMinutes > 0 {
@@ -1211,12 +1214,15 @@ func (s *AuthService) generateAccessToken(user *User, sessionID, bindingHash str
 	}
 
 	claims := &JWTClaims{
-		UserID:       user.ID,
-		Email:        user.Email,
-		Role:         user.Role,
-		TokenVersion: resolvedTokenVersion(user),
-		SessionID:    sessionID,
-		BindingHash:  bindingHash,
+		UserID:               user.ID,
+		Email:                user.Email,
+		Role:                 user.Role,
+		TokenVersion:         resolvedTokenVersion(user),
+		SessionID:            sessionID,
+		BindingHash:          binding.Hash,
+		BindingClientIPHash:  binding.ClientIPHash,
+		BindingIPSource:      binding.ClientIPSource,
+		BindingUserAgentHash: binding.UserAgentHash,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -1287,8 +1293,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 	}
 
 	// 会话绑定检查：指纹变化的旧 token 不允许换发新 token。
-	if s.settingService != nil && s.settingService.IsSessionBindingEnabled(ctx) && claims.BindingHash != "" {
-		if current := sessionBindingHashFromContext(ctx); current != "" && current != claims.BindingHash {
+	if s.settingService != nil && s.settingService.IsSessionBindingEnabled(ctx) {
+		expected := SessionBindingFingerprint{
+			Hash:           claims.BindingHash,
+			ClientIPHash:   claims.BindingClientIPHash,
+			ClientIPSource: claims.BindingIPSource,
+			UserAgentHash:  claims.BindingUserAgentHash,
+		}
+		if sessionBindingMismatchFromContext(ctx, expected) != SessionBindingMatch {
 			_ = s.RevokeSessionFamily(ctx, claims.SessionID)
 			return "", ErrSessionBindingMismatch
 		}
@@ -1485,13 +1497,14 @@ func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyI
 	}
 
 	// 生成Access Token（携带会话ID与绑定指纹）
-	accessToken, err := s.generateAccessToken(user, familyID, sessionBindingHashFromContext(ctx))
+	binding := sessionBindingFingerprintFromContext(ctx)
+	accessToken, err := s.generateAccessToken(user, familyID, binding)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
 	// 生成Refresh Token
-	refreshToken, err := s.generateRefreshToken(ctx, user, familyID)
+	refreshToken, err := s.generateRefreshToken(ctx, user, familyID, binding)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -1504,7 +1517,12 @@ func (s *AuthService) GenerateTokenPair(ctx context.Context, user *User, familyI
 }
 
 // generateRefreshToken 生成并存储Refresh Token
-func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, familyID string) (string, error) {
+func (s *AuthService) generateRefreshToken(
+	ctx context.Context,
+	user *User,
+	familyID string,
+	binding SessionBindingFingerprint,
+) (string, error) {
 	// 生成随机Token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -1528,12 +1546,15 @@ func (s *AuthService) generateRefreshToken(ctx context.Context, user *User, fami
 	ttl := time.Duration(s.cfg.JWT.RefreshTokenExpireDays) * 24 * time.Hour
 
 	data := &RefreshTokenData{
-		UserID:       user.ID,
-		TokenVersion: resolvedTokenVersion(user),
-		FamilyID:     familyID,
-		BindingHash:  sessionBindingHashFromContext(ctx),
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(ttl),
+		UserID:               user.ID,
+		TokenVersion:         resolvedTokenVersion(user),
+		FamilyID:             familyID,
+		BindingHash:          binding.Hash,
+		BindingClientIPHash:  binding.ClientIPHash,
+		BindingIPSource:      binding.ClientIPSource,
+		BindingUserAgentHash: binding.UserAgentHash,
+		CreatedAt:            now,
+		ExpiresAt:            now.Add(ttl),
 	}
 
 	// 存储Token数据
@@ -1616,10 +1637,15 @@ func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)
 		return nil, ErrTokenRevoked
 	}
 
-	// 会话绑定检查：IP/UA 任一变化即撤销整个会话家族。
-	// data.BindingHash 为空表示功能开启前签发的旧会话，放行并在轮转时补齐绑定。
-	if s.settingService != nil && s.settingService.IsSessionBindingEnabled(ctx) && data.BindingHash != "" {
-		if current := sessionBindingHashFromContext(ctx); current != "" && current != data.BindingHash {
+	// 会话绑定检查：分项指纹严格校验；旧合并指纹未变化时在轮转中迁移。
+	if s.settingService != nil && s.settingService.IsSessionBindingEnabled(ctx) {
+		expected := SessionBindingFingerprint{
+			Hash:           data.BindingHash,
+			ClientIPHash:   data.BindingClientIPHash,
+			ClientIPSource: data.BindingIPSource,
+			UserAgentHash:  data.BindingUserAgentHash,
+		}
+		if sessionBindingMismatchFromContext(ctx, expected) != SessionBindingMatch {
 			_ = s.refreshTokenCache.DeleteTokenFamily(ctx, data.FamilyID)
 			logger.LegacyPrintf("service.auth", "[Auth] Session binding mismatch on refresh for user %d, family revoked", data.UserID)
 			return nil, ErrSessionBindingMismatch

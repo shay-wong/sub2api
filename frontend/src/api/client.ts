@@ -54,6 +54,15 @@ function onTokenRefreshed(token: string): void {
   refreshSubscribers = []
 }
 
+function markAuthExpired(reasonCode?: unknown): void {
+  sessionStorage.setItem('auth_expired', '1')
+  if (reasonCode === 'SESSION_BINDING_MISMATCH') {
+    sessionStorage.setItem('auth_expired_reason', 'session_binding')
+  } else if (sessionStorage.getItem('auth_expired_reason') !== 'session_binding') {
+    sessionStorage.removeItem('auth_expired_reason')
+  }
+}
+
 // ==================== Request Interceptor ====================
 
 // Get user's timezone
@@ -308,7 +317,12 @@ apiClient.interceptors.response.use(
             localStorage.removeItem('refresh_token')
             localStorage.removeItem('auth_user')
             localStorage.removeItem('token_expires_at')
-            sessionStorage.setItem('auth_expired', '1')
+            const refreshReason = axios.isAxiosError(refreshError)
+              ? (refreshError.response?.data as { code?: unknown } | undefined)?.code
+              : undefined
+            markAuthExpired(
+              apiData.code === 'SESSION_BINDING_MISMATCH' ? apiData.code : refreshReason
+            )
 
             if (!window.location.pathname.includes('/login')) {
               window.location.href = '/login'
@@ -338,7 +352,7 @@ apiClient.interceptors.response.use(
         localStorage.removeItem('auth_user')
         localStorage.removeItem('token_expires_at')
         if ((hasToken || sentAuth) && !isAuthEndpoint) {
-          sessionStorage.setItem('auth_expired', '1')
+          markAuthExpired(apiData.code)
         }
         // Only redirect if not already on login page
         if (!window.location.pathname.includes('/login')) {

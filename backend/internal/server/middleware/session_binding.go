@@ -1,9 +1,9 @@
 package middleware
 
 import (
+	"net"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -12,14 +12,16 @@ import (
 
 // SessionBindingContext 全局中间件：将请求的客户端 IP 与 User-Agent 注入
 // request context，供 token 签发路径（登录 / 刷新 / OAuth 回调）读取并写入会话绑定，
-// 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。
-// IP 取值与 API Key IP 限制共用「信任反代传递的客户端 IP」系统开关：
-// 开启时信任反代转发头（CF-Connecting-IP / X-Real-IP / X-Forwarded-For），
-// 关闭时走 trusted_proxies 解析链，避免不可信头伪造绕过绑定。
-func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
+// 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。转发 IP 只通过
+// server.trusted_proxies 验证链读取，避免直连请求伪造转发头绕过绑定。
+func SessionBindingContext() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		peerIP := requestPeerIP(c)
+		clientIP := ip.GetTrustedClientIP(c)
 		binding := &service.SessionBinding{
-			IP:        ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL()),
+			IP:        clientIP,
+			IPSource:  sessionBindingIPSource(clientIP, peerIP),
+			PeerIP:    peerIP,
 			UserAgent: c.Request.UserAgent(),
 		}
 		c.Request = c.Request.WithContext(service.WithSessionBinding(c.Request.Context(), binding))
@@ -34,14 +36,35 @@ func requestSessionBinding(c *gin.Context) *service.SessionBinding {
 	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil {
 		return binding
 	}
+	peerIP := requestPeerIP(c)
+	clientIP := ip.GetTrustedClientIP(c)
 	return &service.SessionBinding{
-		IP:        ip.GetTrustedClientIP(c),
+		IP:        clientIP,
+		IPSource:  sessionBindingIPSource(clientIP, peerIP),
+		PeerIP:    peerIP,
 		UserAgent: c.Request.UserAgent(),
 	}
 }
 
-// SecurityClientIP 返回当前请求用于安全敏感记录（审计日志等）的客户端 IP。
-// 与会话绑定、API Key IP 限制共用同一套「信任反代传递的客户端 IP」开关语义。
+func sessionBindingIPSource(clientIP, peerIP string) service.SessionBindingIPSource {
+	if clientIP != "" && clientIP != peerIP {
+		return service.SessionBindingIPSourceTrustedForwarded
+	}
+	return service.SessionBindingIPSourcePeer
+}
+
+func requestPeerIP(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	remoteAddr := strings.TrimSpace(c.Request.RemoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
+// SecurityClientIP 返回当前请求用于审计日志的可信客户端 IP。
 func SecurityClientIP(c *gin.Context) string {
 	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil &&
 		strings.TrimSpace(binding.IP) != "" {
@@ -54,8 +77,8 @@ func SecurityClientIP(c *gin.Context) string {
 // 指纹不匹配时：撤销该会话家族的所有 refresh token、写入审计安全事件、返回 401。
 // 返回 false 表示请求已被中断。
 //
-// 兼容性：claims.BindingHash 为空（功能上线前签发的旧 token）时放行，
-// 该会话在下一次 refresh 轮转时会自动获得绑定。
+// 兼容性：只有旧版 BindingHash 的会话在哈希未变化时允许 refresh 迁移；
+// 所有指纹均为空的更早会话同样放行。
 func enforceSessionBinding(
 	c *gin.Context,
 	authService *service.AuthService,
@@ -66,12 +89,18 @@ func enforceSessionBinding(
 	if settingService == nil || !settingService.IsSessionBindingEnabled(c.Request.Context()) {
 		return true
 	}
-	if claims == nil || claims.BindingHash == "" {
+	if claims == nil {
 		return true
 	}
 	binding := requestSessionBinding(c)
-	current := binding.Hash()
-	if current == "" || current == claims.BindingHash {
+	expected := service.SessionBindingFingerprint{
+		Hash:           claims.BindingHash,
+		ClientIPHash:   claims.BindingClientIPHash,
+		ClientIPSource: claims.BindingIPSource,
+		UserAgentHash:  claims.BindingUserAgentHash,
+	}
+	mismatch := binding.Compare(expected)
+	if mismatch == service.SessionBindingMatch {
 		return true
 	}
 
@@ -95,8 +124,37 @@ func enforceSessionBinding(
 			ClientIP:    binding.IP,
 			UserAgent:   c.Request.UserAgent(),
 			StatusCode:  401,
+			Extra:       sessionBindingAuditMetadata(binding),
 		})
 	}
-	AbortWithError(c, 401, "SESSION_BINDING_MISMATCH", "Session network fingerprint changed, please login again")
+	AbortWithError(c, 401, "SESSION_BINDING_MISMATCH", sessionBindingMismatchMessage(mismatch))
 	return false
+}
+
+func sessionBindingAuditMetadata(binding *service.SessionBinding) map[string]any {
+	if binding == nil || binding.MismatchReason() == service.SessionBindingMatch {
+		return nil
+	}
+	return map[string]any{
+		"mismatch_reason":  string(binding.MismatchReason()),
+		"client_ip_source": string(binding.IPSource),
+		"peer_ip":          binding.PeerIP,
+	}
+}
+
+func sessionBindingMismatchMessage(mismatch service.SessionBindingMismatch) string {
+	switch mismatch {
+	case service.SessionBindingClientIPMismatch:
+		return "Session client network changed, please login again"
+	case service.SessionBindingUserAgentMismatch:
+		return "Session browser identity changed, please login again"
+	case service.SessionBindingClientIPAndUserAgentMismatch:
+		return "Session client network and browser identity changed, please login again"
+	case service.SessionBindingPeerIPMismatch:
+		return "Session transport peer changed, please check trusted proxy configuration"
+	case service.SessionBindingPeerIPAndUserAgentMismatch:
+		return "Session transport peer and browser identity changed, please login again"
+	default:
+		return "Session network fingerprint changed, please login again"
+	}
 }
