@@ -27,6 +27,7 @@ func TestUserRoutesRegisterBatchImageAllKeyHistory(t *testing.T) {
 		middleware.JWTAuthMiddleware(func(c *gin.Context) {
 			c.AbortWithStatus(http.StatusTeapot)
 		}),
+		middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		nil,
 	)
 
@@ -71,6 +72,7 @@ func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
 			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 169))
 			c.Next()
 		}),
+		middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		nil,
 	)
 

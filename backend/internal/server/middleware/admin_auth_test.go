@@ -43,13 +43,13 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	userService := service.NewUserService(userRepo, nil, nil, nil)
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, nil)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, nil, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
 	t.Run("token_version_mismatch_rejected", func(t *testing.T) {
-		token, err := authService.GenerateToken(&service.User{
+		token, err := authService.GenerateToken(context.Background(), &service.User{
 			ID:           admin.ID,
 			Email:        admin.Email,
 			Role:         admin.Role,
@@ -67,7 +67,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	})
 
 	t.Run("token_version_match_allows", func(t *testing.T) {
-		token, err := authService.GenerateToken(&service.User{
+		token, err := authService.GenerateToken(context.Background(), &service.User{
 			ID:           admin.ID,
 			Email:        admin.Email,
 			Role:         admin.Role,
@@ -84,7 +84,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	})
 
 	t.Run("websocket_token_version_mismatch_rejected", func(t *testing.T) {
-		token, err := authService.GenerateToken(&service.User{
+		token, err := authService.GenerateToken(context.Background(), &service.User{
 			ID:           admin.ID,
 			Email:        admin.Email,
 			Role:         admin.Role,
@@ -104,7 +104,7 @@ func TestAdminAuthJWTValidatesTokenVersion(t *testing.T) {
 	})
 
 	t.Run("websocket_token_version_match_allows", func(t *testing.T) {
-		token, err := authService.GenerateToken(&service.User{
+		token, err := authService.GenerateToken(context.Background(), &service.User{
 			ID:           admin.ID,
 			Email:        admin.Email,
 			Role:         admin.Role,
@@ -159,7 +159,7 @@ func TestAdminAuthJWTUsesProjectIDQueryForWebSocket(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
 		require.True(t, ok)
@@ -170,7 +170,7 @@ func TestAdminAuthJWTUsesProjectIDQueryForWebSocket(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token, err := authService.GenerateToken(&service.User{
+	token, err := authService.GenerateToken(context.Background(), &service.User{
 		ID:           projectMember.ID,
 		Email:        projectMember.Email,
 		Role:         projectMember.Role,
@@ -226,7 +226,7 @@ func TestAdminAuthJWTDefaultsToFirstProjectAdminMembership(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
 		require.True(t, ok)
@@ -237,7 +237,7 @@ func TestAdminAuthJWTDefaultsToFirstProjectAdminMembership(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token, err := authService.GenerateToken(&service.User{
+	token, err := authService.GenerateToken(context.Background(), &service.User{
 		ID:           projectMember.ID,
 		Email:        projectMember.Email,
 		Role:         projectMember.Role,
@@ -289,12 +289,12 @@ func TestAdminAuthJWTRejectsLegacyOperatorWithoutProjectAdminMembership(t *testi
 	})
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token, err := authService.GenerateToken(&service.User{
+	token, err := authService.GenerateToken(context.Background(), &service.User{
 		ID:           operator.ID,
 		Email:        operator.Email,
 		Role:         operator.Role,
@@ -347,12 +347,12 @@ func TestAdminAuthJWTRejectsLegacyOperatorWithProjectAdminMembership(t *testing.
 	})
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token, err := authService.GenerateToken(&service.User{
+	token, err := authService.GenerateToken(context.Background(), &service.User{
 		ID:           operator.ID,
 		Email:        operator.Email,
 		Role:         operator.Role,
@@ -400,12 +400,12 @@ func TestAdminAuthJWTRejectsDisabledProjectMember(t *testing.T) {
 	})
 
 	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService)))
+	router.Use(gin.HandlerFunc(NewAdminAuthMiddleware(authService, userService, nil, projectService, nil)))
 	router.GET("/t", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	token, err := authService.GenerateToken(&service.User{
+	token, err := authService.GenerateToken(context.Background(), &service.User{
 		ID:           projectMember.ID,
 		Email:        projectMember.Email,
 		Role:         projectMember.Role,
@@ -601,6 +601,9 @@ func (s *stubUserRepo) UpdateConcurrency(ctx context.Context, id int64, amount i
 
 func (s *stubUserRepo) BatchSetConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }
 func (s *stubUserRepo) BatchAddConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }
+func (s *stubUserRepo) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+	return 0, nil
+}
 
 func (s *stubUserRepo) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	panic("unexpected ExistsByEmail call")

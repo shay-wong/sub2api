@@ -148,10 +148,14 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 }
 
 func (s *adminAccessScope) accountForResponse(account *service.Account) *service.Account {
-	if account == nil || s == nil || s.Unrestricted || s.ProjectScoped {
+	if account == nil || s == nil || s.Unrestricted {
 		return account
 	}
 	out := *account
+	out.Extra = copyAccountExtraWithoutUpstreamBillingProbe(account.Extra)
+	if s.ProjectScoped {
+		return &out
+	}
 
 	if len(account.GroupIDs) > 0 {
 		out.GroupIDs = make([]int64, 0, len(account.GroupIDs))
@@ -181,6 +185,33 @@ func (s *adminAccessScope) accountForResponse(account *service.Account) *service
 	}
 
 	return &out
+}
+
+func copyAccountExtraWithoutUpstreamBillingProbe(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	out := make(map[string]any, len(extra))
+	for key, value := range extra {
+		if key == service.UpstreamBillingProbeEnabledExtraKey || key == service.UpstreamBillingProbeExtraKey {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func (s *adminAccessScope) ensureUpstreamBillingProbeExtraMutation(extra map[string]any) error {
+	if s == nil || s.Unrestricted || len(extra) == 0 {
+		return nil
+	}
+	if _, ok := extra[service.UpstreamBillingProbeEnabledExtraKey]; ok {
+		return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+	}
+	if _, ok := extra[service.UpstreamBillingProbeExtraKey]; ok {
+		return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+	}
+	return nil
 }
 
 func (s *adminAccessScope) dashboardGroupIDs(groupID int64) ([]int64, error) {

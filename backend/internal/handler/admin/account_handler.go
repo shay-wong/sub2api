@@ -72,10 +72,16 @@ type AccountHandler struct {
 	permissionService       *service.PermissionService
 	grokImportProber        grokUsageProber
 	grokOAuthAccountRefresh func(context.Context, *service.Account) (*service.Account, error)
+	upstreamBillingProbe    *service.UpstreamBillingProbeService
 }
 
 func (h *AccountHandler) SetGrokOAuthAccountRefresher(refresh func(context.Context, *service.Account) (*service.Account, error)) {
 	h.grokOAuthAccountRefresh = refresh
+}
+
+// SetUpstreamBillingProbeService attaches the optional remote billing probe service.
+func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
+	h.upstreamBillingProbe = probe
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -914,6 +920,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
+	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
 	if err := scope.ensureProxyMutation(req.ProxyID); err != nil {
@@ -1081,6 +1091,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
+	}
+	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)
@@ -1626,6 +1640,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		return
 	}
 	if err := service.ValidateOpenAILongContextBillingExtra(existing.Platform, req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -2249,6 +2267,10 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 				return
 			}
 		}
+	}
+	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 	// base_rpm 输入校验：负值归零，超过 10000 截断
 	sanitizeExtraBaseRPM(req.Extra)

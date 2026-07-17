@@ -356,6 +356,9 @@ func (subscriptionUserRepoNoop) EnableTotp(context.Context, int64) error {
 func (subscriptionUserRepoNoop) DisableTotp(context.Context, int64) error {
 	panic("unexpected DisableTotp call")
 }
+func (subscriptionUserRepoNoop) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+	panic("unexpected BatchUpdateLimits call")
+}
 
 type subscriptionUserRepoStub struct {
 	subscriptionUserRepoNoop

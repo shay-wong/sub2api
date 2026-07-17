@@ -54,6 +54,9 @@ func (operatorUserRepoStub) GetByEmail(context.Context, string) (*service.User, 
 func (operatorUserRepoStub) GetFirstAdmin(context.Context) (*service.User, error) { return nil, nil }
 func (operatorUserRepoStub) Update(context.Context, *service.User) error          { return nil }
 func (operatorUserRepoStub) Delete(context.Context, int64) error                  { return nil }
+func (operatorUserRepoStub) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+	return 0, nil
+}
 func (operatorUserRepoStub) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
 	return nil, nil
 }
@@ -168,6 +171,24 @@ func newOperatorAccountScopeRouter(adminSvc *stubAdminService, groupIDs []int64)
 	return router
 }
 
+func newProjectAdminAccountScopeRouter(adminSvc *stubAdminService, projectID int64) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
+		c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), service.RoleAdmin))
+		c.Next()
+	})
+	router.GET("/api/v1/admin/accounts", handler.List)
+	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	router.PUT("/api/v1/admin/accounts/:id", handler.Update)
+	router.POST("/api/v1/admin/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
+	return router
+}
+
 func TestOperatorAccountRoutesRejectLegacyRole(t *testing.T) {
 	adminSvc := newStubAdminService()
 	router := newOperatorAccountScopeRouter(adminSvc, []int64{10})
@@ -201,4 +222,61 @@ func TestOperatorAccountRoutesRejectLegacyRole(t *testing.T) {
 	}
 	require.Empty(t, adminSvc.createdAccounts)
 	require.Nil(t, adminSvc.lastBulkUpdateInput)
+}
+
+func TestProjectAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{
+		ID:       1,
+		Name:     "project-account",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Status:   service.StatusActive,
+		Extra: map[string]any{
+			"visible": "kept",
+			service.UpstreamBillingProbeEnabledExtraKey: true,
+			service.UpstreamBillingProbeExtraKey:        map[string]any{"status": "ok"},
+		},
+	}}
+	router := newProjectAdminAccountScopeRouter(adminSvc, 7)
+
+	for _, path := range []string{
+		"/api/v1/admin/accounts?page=1&page_size=20",
+		"/api/v1/admin/accounts/1",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), `"visible":"kept"`)
+		require.NotContains(t, rec.Body.String(), service.UpstreamBillingProbeEnabledExtraKey)
+		require.NotContains(t, rec.Body.String(), service.UpstreamBillingProbeExtraKey)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewBufferString(`{
+		"extra": {"upstream_billing_probe_enabled": true}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "UPSTREAM_BILLING_PROBE_FORBIDDEN")
+	require.Zero(t, adminSvc.updateAccountCalls)
+
+	adminSvc.accounts[0].Type = service.AccountTypeOAuth
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/1/apply-oauth-credentials", bytes.NewBufferString(`{
+		"type": "oauth",
+		"credentials": {"access_token": "new-token"},
+		"extra": {"upstream_billing_probe_enabled": true}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "UPSTREAM_BILLING_PROBE_FORBIDDEN")
+	require.Zero(t, adminSvc.updateAccountCalls)
+	require.Zero(t, adminSvc.updateAccountExtraCalls)
 }

@@ -630,6 +630,46 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_responses_supported).toBe(false)
   })
 
+  it('submits the account upstream billing auto-probe setting', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="upstream-billing-auto-probe"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.upstream_billing_probe_enabled).toBe(true)
+  })
+
+	 it('hides and strips managed upstream billing probe state for project admins', async () => {
+	   authIsAdmin.value = false
+	   const account = buildAccount()
+	   account.extra = {
+	     upstream_billing_probe_enabled: true,
+	     upstream_billing_probe: { status: 'ok', rate_multiplier: 0.5 }
+	   }
+	   updateAccountMock.mockReset()
+	   checkMixedChannelRiskMock.mockReset()
+	   checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+	   updateAccountMock.mockResolvedValue(account)
+
+	   const wrapper = mountModal(account)
+
+	   expect(wrapper.find('[data-testid="upstream-billing-auto-probe"]').exists()).toBe(false)
+	   await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+	   expect(updateAccountMock).toHaveBeenCalledTimes(1)
+	   expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('upstream_billing_probe_enabled')
+	   expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('upstream_billing_probe')
+	 })
+
   it('clears OpenAI APIKey Responses override when set back to auto', async () => {
     const account = buildAccount()
     account.extra = {
@@ -867,6 +907,10 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexImageTool')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexImageToolDesc')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexImageToolEnabledDesc')
+
     await wrapper.get('button[data-testid="codex-image-tool-enabled"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
@@ -904,6 +948,9 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
+
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexImageToolBlock')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexImageToolBlockDesc')
 
     await wrapper.get('button[data-testid="codex-image-tool-block"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')

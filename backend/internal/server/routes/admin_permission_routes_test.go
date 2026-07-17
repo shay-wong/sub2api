@@ -45,12 +45,50 @@ func (s *routeOpsRepoStub) ListJobHeartbeats(ctx context.Context) ([]*service.Op
 	return nil, nil
 }
 
+func registerAdminRoutesForTest(
+	router *gin.RouterGroup,
+	handlers *handler.Handlers,
+	auth servermiddleware.AdminAuthMiddleware,
+	settingService *service.SettingService,
+) {
+	passthrough := func(c *gin.Context) { c.Next() }
+	RegisterAdminRoutes(
+		router,
+		handlers,
+		auth,
+		servermiddleware.AuditLogMiddleware(passthrough),
+		servermiddleware.StepUpAuthMiddleware(passthrough),
+		settingService,
+	)
+}
+
+func registerPaymentRoutesForTest(
+	router *gin.RouterGroup,
+	paymentHandler *handler.PaymentHandler,
+	webhookHandler *handler.PaymentWebhookHandler,
+	adminPaymentHandler *adminhandler.PaymentHandler,
+	jwtAuth servermiddleware.JWTAuthMiddleware,
+	adminAuth servermiddleware.AdminAuthMiddleware,
+	settingService *service.SettingService,
+) {
+	RegisterPaymentRoutes(
+		router,
+		paymentHandler,
+		webhookHandler,
+		adminPaymentHandler,
+		jwtAuth,
+		adminAuth,
+		servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
+		settingService,
+	)
+}
+
 func TestPaymentAdminRoutesRequireAdminOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 
-	RegisterPaymentRoutes(
+	registerPaymentRoutesForTest(
 		v1,
 		&handler.PaymentHandler{},
 		&handler.PaymentWebhookHandler{},
@@ -78,7 +116,7 @@ func TestProjectAdminCanListOwnProjectsForProjectSwitcher(t *testing.T) {
 		listUserProjects: []service.ProjectSummary{{ID: 1, Name: "Default", Slug: "default", Role: service.ProjectRoleAdmin}},
 	})
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -103,7 +141,7 @@ func TestProjectCreateStillRequiresSuperAdmin(t *testing.T) {
 	repo := &projectRouteRepoStub{}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -133,7 +171,7 @@ func TestProjectAdminCanUpdateScopedAPIKey(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -163,7 +201,7 @@ func TestProjectAdminCannotUpdateAPIKeyWithoutAccountPermission(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -191,7 +229,7 @@ func TestProjectAdminCannotTransferAPIKeyProjectWithAccountPermission(t *testing
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -220,7 +258,7 @@ func TestProjectAdminCannotTransferAPIKeyProjectWithoutAccountPermission(t *test
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -248,7 +286,7 @@ func TestSuperAdminCanTransferAPIKeyProject(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -275,7 +313,7 @@ func TestUserCannotUpdateAdminAPIKey(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := &apiKeyRouteAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{APIKey: adminhandler.NewAdminAPIKeyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -300,7 +338,7 @@ func TestProjectAdminWithOpsReadCanReadGrokRuntimeSanity(t *testing.T) {
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -326,7 +364,7 @@ func TestProjectAdminWithoutOpsReadCannotReadGrokRuntimeSanity(t *testing.T) {
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -351,7 +389,7 @@ func TestProjectAdminWithoutAccountsWriteCannotReconcileGrokOAuth(t *testing.T) 
 	router := gin.New()
 	v1 := router.Group("/api/v1")
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{GrokOAuth: adminhandler.NewGrokOAuthHandler(nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -378,7 +416,7 @@ func TestProjectAdminWithOpsReadCannotReadUsageRecordRuntime(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	opsSvc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -404,7 +442,7 @@ func TestSuperAdminCanReadUsageRecordRuntime(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	opsSvc := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -456,7 +494,7 @@ func TestProjectAdminOpsDashboardOverviewOmitsGlobalRuntimeHealth(t *testing.T) 
 	}
 	opsSvc := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Ops: adminhandler.NewOpsHandler(opsSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -494,7 +532,7 @@ func TestProjectAdminCanManageProjectProxiesWithPermission(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -521,7 +559,7 @@ func TestProjectAdminProxyReadsDoNotExposePasswords(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -561,7 +599,7 @@ func TestSuperAdminProxyReadsCanExposePasswords(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -586,7 +624,7 @@ func TestProjectAdminCannotExportProxyData(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -614,7 +652,7 @@ func TestSuperAdminCanExportProxyData(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -640,7 +678,7 @@ func TestProjectAdminCannotManageProjectProxiesWithoutPermission(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := newProxyRouteAdminServiceStub()
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Proxy: adminhandler.NewProxyHandler(adminSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -667,7 +705,7 @@ func TestProjectAdminCanReadAccountProxyOptionsWithAccountsWrite(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	adminSvc := &accountProxyOptionsAdminServiceStub{}
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Account: adminhandler.NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -697,7 +735,7 @@ func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 	repo := &projectRouteRepoStub{}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -836,7 +874,7 @@ func TestProjectAdminCanUpdateRegularProjectMemberStatus(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -871,7 +909,7 @@ func TestProjectAdminCannotChangeProjectMemberRole(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -903,7 +941,7 @@ func TestSuperAdminCanUpdateExistingProjectMemberWithoutRebindingScope(t *testin
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -933,7 +971,7 @@ func TestProjectAdminCannotAccessDifferentProjectPath(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	projectSvc := service.NewProjectService(&projectRouteRepoStub{})
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -964,7 +1002,7 @@ func TestSuperAdminCannotSetProjectProfileUnrestrictedMode(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1003,7 +1041,7 @@ func TestSuperAdminCannotEditInternalUnrestrictedProjectProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1032,7 +1070,7 @@ func TestProjectAdminCannotCreateProjectProfile(t *testing.T) {
 	repo := &projectRouteRepoStub{}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1061,7 +1099,7 @@ func TestSuperAdminCannotCreateUnrestrictedProjectProfile(t *testing.T) {
 	repo := &projectRouteRepoStub{}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1100,7 +1138,7 @@ func TestProjectAdminCannotActivateProjectProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1138,7 +1176,7 @@ func TestSuperAdminCannotActivateInternalUnrestrictedProjectProfile(t *testing.T
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1176,7 +1214,7 @@ func TestSuperAdminCanActivateUnrestrictedProjectScope(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1214,7 +1252,7 @@ func TestProjectAdminCannotDeleteProjectProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1252,7 +1290,7 @@ func TestProjectAdminCannotSetBindingsForUnrestrictedProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1292,7 +1330,7 @@ func TestProjectAdminCannotBindResourcesIntoProjectProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1333,7 +1371,7 @@ func TestProjectAdminProfileBindingScopeValidationIsNotReached(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1373,7 +1411,7 @@ func TestSuperAdminCanBindGlobalResourcesIntoProjectProfile(t *testing.T) {
 	}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {
@@ -1401,7 +1439,7 @@ func TestSuperAdminSearchesScopedCandidatesThroughProjectPath(t *testing.T) {
 	repo := &projectRouteRepoStub{}
 	projectSvc := service.NewProjectService(repo)
 
-	RegisterAdminRoutes(
+	registerAdminRoutesForTest(
 		v1,
 		&handler.Handlers{Admin: &handler.AdminHandlers{Project: adminhandler.NewProjectHandler(projectSvc)}},
 		servermiddleware.AdminAuthMiddleware(func(c *gin.Context) {

@@ -31,6 +31,21 @@ func newProjectProfileResourceScopeSQLite(t *testing.T) *dbent.Client {
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(drv)))
 	t.Cleanup(func() { _ = client.Close() })
+	_, err = db.Exec(`
+		CREATE TABLE scheduler_outbox (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_type TEXT NOT NULL,
+			account_id INTEGER,
+			group_id INTEGER,
+			payload BLOB,
+			dedup_key TEXT,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE UNIQUE INDEX scheduler_outbox_dedup_key
+			ON scheduler_outbox (dedup_key)
+			WHERE dedup_key IS NOT NULL;
+	`)
+	require.NoError(t, err)
 	return client
 }
 

@@ -169,6 +169,7 @@ func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) 
 	sessionWindowEnd := time.Now().Add(2 * time.Hour)
 
 	source := &Account{
+		ProjectID:             77,
 		Name:                  "primary",
 		Notes:                 &notes,
 		Platform:              PlatformAnthropic,
@@ -220,12 +221,15 @@ func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) 
 		SessionWindowEnd:        &sessionWindowEnd,
 		SessionWindowStatus:     "active",
 	}
+	source.Extra[UpstreamBillingProbeEnabledExtraKey] = true
+	source.Extra[UpstreamBillingProbeExtraKey] = map[string]any{"status": "ok"}
 	require.NoError(t, repo.Create(ctx, source))
 
 	duplicate, err := svc.DuplicateAccount(ctx, source.ID, "admin:1", "")
 
 	require.NoError(t, err)
 	require.NotEqual(t, source.ID, duplicate.ID)
+	require.Equal(t, source.ProjectID, duplicate.ProjectID)
 	require.Equal(t, "primary (Copy)", duplicate.Name)
 	require.Equal(t, source.Platform, duplicate.Platform)
 	require.Equal(t, source.Type, duplicate.Type)

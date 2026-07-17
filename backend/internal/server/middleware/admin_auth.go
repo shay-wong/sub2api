@@ -19,8 +19,9 @@ func NewAdminAuthMiddleware(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	projectService *service.ProjectService,
+	auditService *service.AuditLogService,
 ) AdminAuthMiddleware {
-	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, projectService))
+	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, projectService, auditService))
 }
 
 // adminAuth 管理员认证中间件实现
@@ -32,6 +33,7 @@ func adminAuth(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	projectService *service.ProjectService,
+	auditService *service.AuditLogService,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// WebSocket upgrade requests cannot set Authorization headers in browsers.
@@ -40,7 +42,7 @@ func adminAuth(
 		//   Sec-WebSocket-Protocol: sub2api-admin, jwt.<token>
 		if isWebSocketUpgradeRequest(c) {
 			if token := extractJWTFromWebSocketSubprotocol(c); token != "" {
-				if !validateJWTForAdmin(c, token, authService, userService, projectService) {
+				if !validateJWTForAdmin(c, token, authService, userService, projectService, settingService, auditService) {
 					return
 				}
 				c.Next()
@@ -68,7 +70,7 @@ func adminAuth(
 					AbortWithError(c, 401, "UNAUTHORIZED", "Authorization required")
 					return
 				}
-				if !validateJWTForAdmin(c, token, authService, userService, projectService) {
+				if !validateJWTForAdmin(c, token, authService, userService, projectService, settingService, auditService) {
 					return
 				}
 				c.Next()
@@ -185,6 +187,7 @@ func applyAdminProjectContext(c *gin.Context, user *service.User, projectService
 		Concurrency: user.Concurrency,
 	})
 	c.Set(string(ContextKeyUserRole), effectiveRole)
+	c.Set(ContextKeyAuthEmail, user.Email)
 	c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), effectiveRole))
 	c.Set("auth_method", authMethod)
 	return true
@@ -197,6 +200,8 @@ func validateJWTForAdmin(
 	authService *service.AuthService,
 	userService *service.UserService,
 	projectService *service.ProjectService,
+	settingService *service.SettingService,
+	auditService *service.AuditLogService,
 ) bool {
 	// 验证 JWT token
 	claims, err := authService.ValidateToken(token)
@@ -228,6 +233,11 @@ func validateJWTForAdmin(
 		return false
 	}
 
+	// 会话绑定校验：IP/UA 任一变化即撤销会话（功能可在系统设置中关闭）
+	if !enforceSessionBinding(c, authService, settingService, auditService, claims) {
+		return false
+	}
+
 	// 检查管理控制台访问权限；具体页面/API 权限由后续 route middleware 控制。
 	if !user.CanAccessAdminConsole() {
 		if projectService == nil {
@@ -236,7 +246,11 @@ func validateJWTForAdmin(
 		}
 	}
 
-	return applyAdminProjectContext(c, user, projectService, "jwt")
+	if !applyAdminProjectContext(c, user, projectService, "jwt") {
+		return false
+	}
+	c.Set(ContextKeySessionID, claims.SessionID)
+	return true
 }
 
 func parseRequestedProjectID(c *gin.Context) (int64, bool) {

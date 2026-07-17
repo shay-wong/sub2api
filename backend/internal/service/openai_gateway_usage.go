@@ -106,6 +106,18 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 	}
 }
 
+// ResolveUserGroupRateMultiplier resolves the same cached multiplier used by OpenAI usage billing.
+func (s *OpenAIGatewayService) ResolveUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
+	if s == nil {
+		return groupDefaultMultiplier
+	}
+	resolver := s.userGroupRateResolver
+	if resolver == nil {
+		resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
+	}
+	return resolver.Resolve(ctx, userID, groupID, groupDefaultMultiplier)
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -270,6 +282,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		OutputTokens:        result.Usage.OutputTokens,
 		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
 		CacheReadTokens:     result.Usage.CacheReadInputTokens,
+		ImageInputTokens:    result.Usage.ImageInputTokens,
 		ImageOutputTokens:   result.Usage.ImageOutputTokens,
 		ImageCount:          result.ImageCount,
 		ImageSize:           optionalTrimmedStringPtr(result.ImageSize),
@@ -287,6 +300,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
+		usageLog.ImageInputCost = cost.ImageInputCost
 		usageLog.OutputCost = cost.OutputCost
 		usageLog.ImageOutputCost = cost.ImageOutputCost
 		usageLog.CacheCreationCost = cost.CacheCreationCost
