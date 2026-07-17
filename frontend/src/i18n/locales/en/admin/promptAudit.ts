@@ -1,7 +1,7 @@
 export default {
   promptAudit: {
     title: 'Prompt Audit',
-    description: 'Review user input asynchronously or block it synchronously through OpenAI-compatible Qwen3Guard nodes. Full prompts are stored with events for admin review.',
+    description: 'Review user input asynchronously or block it synchronously through OpenAI-compatible Qwen3Guard nodes. Stored events contain only redacted prompt previews.',
     configVersion: 'Config version v{version}',
     tabs: { config: 'Configuration', events: 'Events' },
     actions: { refresh: 'Refresh runtime', retry: 'Retry', Allow: 'Allow', Warn: 'Warn', Block: 'Block' },
@@ -62,7 +62,7 @@ export default {
       confirm: 'I understand; enable it',
     },
     events: {
-      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; the detail view shows the full prompt.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', keyword: 'Keyword',
+      title: 'Audit events', description: 'Review events by identity, route, risk, hash, and time; details contain only redacted prompt data.', decision: 'Decision', risk: 'Risk level', endpoint: 'Endpoint', groupId: 'Group ID', userId: 'User ID', apiKeyId: 'API Key ID', keyword: 'Keyword',
       startAt: 'Start time', endAt: 'End time', deleteSelected: 'Delete selected ({count})', deleteByFilter: 'Delete by filter',
       filterDeleteDialogTitle: 'Delete audit events by filter', filterDeleteDialogDesc: 'Choose the time range and risk criteria, then delete directly. Deletion is permanent. Generate a preview first if you want to see the match count.',
       filterTimeRange: 'Deletion time range', filterTimeRangeHint: 'Deletes events created before the selected cutoff. Events created after the preview are not affected.',
@@ -74,8 +74,8 @@ export default {
       selectAll: 'Select all events on this page', selectEvent: 'Select event {id}', time: 'Time', identity: 'User / email / API Key', user: 'Username', email: 'User email', apiKey: 'API Key name', group: 'Group', route: 'Endpoint / model', result: 'Decision / risk', preview: 'Redacted preview', empty: 'No matching events.',
       passEventsDisabled: '“Store safe events” is off. Safe requests are still audited but do not appear in this list; Flag and Critical risk events are still stored.', openConfiguration: 'Open configuration',
       detailTitle: 'Prompt audit event details', tabs: { summary: 'Audit summary', risks: 'Specific risks', technical: 'Technical details' },
-      promptFull: 'Full prompt (unredacted)',
-      promptFullHint: 'The full prompt is stored with this event for admin review only. Treat it as sensitive data and do not share it.',
+      promptPreview: 'Redacted prompt preview',
+      promptPreviewHint: 'The original prompt is not stored. This preview is redacted, truncated, and safe for audit review.',
       guardReturn: 'Model audit return',
       guardReturnHint: 'Normalized Guard result (decision, categories, scores, and redacted evidence). Raw response bodies are not stored.',
       riskSummaries: 'Risk summaries',

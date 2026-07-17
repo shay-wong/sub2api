@@ -43,7 +43,7 @@ func openPromptAuditIntegrationDB(t *testing.T) *sql.DB {
 		);
 	`)
 	require.NoError(t, err)
-	for _, name := range []string{"181_prompt_audit.sql", "182_prompt_audit_full_prompt.sql"} {
+	for _, name := range []string{"181_prompt_audit.sql", "182_prompt_audit_full_prompt.sql", "183_drop_prompt_audit_full_prompt.sql"} {
 		migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		require.NoError(t, err)
 		// The migration runner can retry an interrupted deployment; the migration
@@ -109,7 +109,7 @@ func TestPromptAuditMigrationSchemaAndLeakageGate(t *testing.T) {
 		WHERE table_schema='public' AND table_name IN ('prompt_audit_jobs','prompt_audit_events')`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
-	forbidden := []string{"raw_prompt", "raw_request", "payload", "token", "authorization", "credential", "ciphertext"}
+	forbidden := []string{"raw_prompt", "full_prompt", "raw_request", "payload", "token", "authorization", "credential", "ciphertext"}
 	for rows.Next() {
 		var tableName, columnName string
 		require.NoError(t, rows.Scan(&tableName, &columnName))
@@ -151,7 +151,7 @@ func TestPromptAuditMigrationSchemaAndLeakageGate(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestPromptAuditDatabasePersistsFullPromptOnEventsOnly(t *testing.T) {
+func TestPromptAuditDatabaseDoesNotPersistFullPrompt(t *testing.T) {
 	db := openPromptAuditIntegrationDB(t)
 	repo := NewPostgreSQLRepository(db)
 	ctx := context.Background()
@@ -164,27 +164,37 @@ func TestPromptAuditDatabasePersistsFullPromptOnEventsOnly(t *testing.T) {
 	snapshot, err := ExtractPromptSnapshot(request)
 	require.NoError(t, err)
 	require.NotContains(t, snapshot.RedactedPreview, promptCanary)
-	require.Contains(t, snapshot.FullPrompt, promptCanary)
+	redactedJSON, err := json.Marshal(snapshot.Redacted())
+	require.NoError(t, err)
+	require.NotContains(t, string(redactedJSON), promptCanary)
+	require.NotContains(t, string(redactedJSON), "full_prompt")
 	event, err := repo.RecordBlocking(ctx, snapshot.Redacted(), 1, integrationResult(EventCritical), true)
 	require.NoError(t, err)
-	// The event intentionally retains the full prompt for admin review; the
-	// redacted preview and transient job row still never contain it.
 	adminJSON, err := json.Marshal(event)
 	require.NoError(t, err)
-	require.Contains(t, string(adminJSON), promptCanary)
+	require.NotContains(t, string(adminJSON), promptCanary)
+	require.NotContains(t, string(adminJSON), "full_prompt")
 	require.NotContains(t, event.Snapshot.RedactedPreview, promptCanary)
 
-	var storedFullPrompt string
-	require.NoError(t, db.QueryRow(`SELECT full_prompt FROM prompt_audit_events WHERE id=$1`, event.ID).Scan(&storedFullPrompt))
-	require.Contains(t, storedFullPrompt, promptCanary)
+	var fullPromptColumnExists bool
+	require.NoError(t, db.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public' AND table_name='prompt_audit_events' AND column_name='full_prompt'
+	)`).Scan(&fullPromptColumnExists))
+	require.False(t, fullPromptColumnExists)
 
 	detail, err := repo.GetEvent(ctx, event.ID)
 	require.NoError(t, err)
-	require.Contains(t, detail.Snapshot.FullPrompt, promptCanary)
+	detailJSON, err := json.Marshal(detail)
+	require.NoError(t, err)
+	require.NotContains(t, string(detailJSON), promptCanary)
+	require.NotContains(t, string(detailJSON), "full_prompt")
 
-	var jobJSON string
+	var jobJSON, eventJSON string
 	require.NoError(t, db.QueryRow(`SELECT row_to_json(j)::text FROM prompt_audit_jobs j WHERE id=$1`, event.JobID).Scan(&jobJSON))
+	require.NoError(t, db.QueryRow(`SELECT row_to_json(e)::text FROM prompt_audit_events e WHERE id=$1`, event.ID).Scan(&eventJSON))
 	require.NotContains(t, jobJSON, promptCanary)
+	require.NotContains(t, eventJSON, promptCanary)
 
 	failedJob, err := repo.CreateStagingWithCapacity(ctx, integrationSnapshot("error"), 1, 3, 10)
 	require.NoError(t, err)

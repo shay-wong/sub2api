@@ -51,35 +51,12 @@ func TestSnapshotRedactsCanariesAndPreservesHashOfScanText(t *testing.T) {
 	require.NotEqual(t, snapshot.ScanText, snapshot.RedactedPreview)
 	digest := sha256.Sum256([]byte(metadataTextForTest(snapshot.ScanText)))
 	require.Equal(t, hex.EncodeToString(digest[:]), snapshot.PromptHash)
-	require.Empty(t, snapshot.Redacted().ScanText)
-}
-
-func TestSnapshotFullPromptKeepsUnredactedText(t *testing.T) {
-	body := `{"messages":[{"role":"user","content":"PROMPT_CANARY_ABC123 email@example.com sk-secretvalue123"}]}`
-	snapshot, err := ExtractPromptSnapshot(Request{Protocol: "openai_chat_completions", Body: []byte(body)})
+	redacted := snapshot.Redacted()
+	require.Empty(t, redacted.ScanText)
+	encoded, err := json.Marshal(redacted)
 	require.NoError(t, err)
-	// The full prompt is stored verbatim for admin review, unlike the preview.
-	require.Contains(t, snapshot.FullPrompt, "PROMPT_CANARY_ABC123 email@example.com sk-secretvalue123")
-	require.NotContains(t, snapshot.RedactedPreview, "PROMPT_CANARY_ABC123")
-	require.Equal(t, snapshot.FullPrompt, snapshot.Redacted().FullPrompt)
-}
-
-func TestBuildFullPromptStripsNULAndTruncates(t *testing.T) {
-	require.Equal(t, "abcd", BuildFullPrompt("ab\x00cd", 0))
-	long := strings.Repeat("长", DefaultFullPromptMaxRunes+10)
-	trimmed := BuildFullPrompt(long, DefaultFullPromptMaxRunes)
-	require.Equal(t, DefaultFullPromptMaxRunes+1, utf8.RuneCountInString(trimmed))
-	require.True(t, strings.HasSuffix(trimmed, "…"))
-}
-
-func TestFullPromptFromScanTextRestoresMultiSegmentLayout(t *testing.T) {
-	scanText, metadataText := buildPrioritizedScanText([]string{"latest user", "system policy", "earlier user"})
-	require.Contains(t, scanText, promptAuditPrioritySeparator)
-	require.Equal(t, metadataText, FullPromptFromScanText(scanText))
-
-	singleScan, singleMeta := buildPrioritizedScanText([]string{"only"})
-	require.NotContains(t, singleScan, promptAuditPrioritySeparator)
-	require.Equal(t, singleMeta, FullPromptFromScanText(singleScan))
+	require.NotContains(t, string(encoded), "PROMPT_CANARY_ABC123")
+	require.NotContains(t, string(encoded), "full_prompt")
 }
 
 func TestSplitRunesDoesNotSplitUTF8(t *testing.T) {
