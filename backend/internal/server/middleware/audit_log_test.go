@@ -34,10 +34,17 @@ func TestDeriveAuditAction(t *testing.T) {
 }
 
 type auditCaptureRepository struct {
-	mu   sync.Mutex
-	logs []*service.AuditLog
+	mu     sync.Mutex
+	nextID int64
+	logs   []*service.AuditLog
 }
 
+func (r *auditCaptureRepository) NextID(context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID++
+	return r.nextID, nil
+}
 func (r *auditCaptureRepository) BatchInsert(_ context.Context, logs []*service.AuditLog) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -55,6 +62,9 @@ func (r *auditCaptureRepository) List(context.Context, *service.AuditLogFilter) 
 }
 func (r *auditCaptureRepository) GetByID(context.Context, int64) (*service.AuditLog, error) {
 	return nil, service.ErrAuditLogNotFound
+}
+func (r *auditCaptureRepository) ClearAll(context.Context, *service.AuditLog) (int64, error) {
+	return 0, nil
 }
 func (r *auditCaptureRepository) Count(context.Context) (int64, error) { return 0, nil }
 func (r *auditCaptureRepository) TruncateAll(context.Context) error    { return nil }
