@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	auditLogQueueCapacity = 4096
-	auditLogBatchSize     = 100
-	auditLogFlushInterval = time.Second
+	auditLogQueueCapacity   = 4096
+	auditLogBatchSize       = 100
+	auditLogFlushInterval   = time.Second
+	auditLogSequenceTimeout = time.Second
 
 	auditRetentionCheckInterval = 24 * time.Hour
 	auditRetentionStartupDelay  = 5 * time.Minute
@@ -20,7 +21,7 @@ const (
 )
 
 // AuditLogService 管理面操作审计日志服务。
-// 写入端为非阻塞异步批量落库（不拖慢管理请求）；
+// 写入端同步领取数据库全局序列后，非阻塞异步批量落库；
 // 读取端提供分页查询；清空端点由 handler 层做 TOTP 强校验后调用 ClearAll。
 type AuditLogService struct {
 	repo           AuditLogRepository
@@ -83,21 +84,32 @@ func (s *AuditLogService) Stop() {
 	s.wg.Wait()
 }
 
-// Record 非阻塞入队一条审计记录；队列打满时丢弃并计数（管理面流量下几乎不可能发生）。
+// Record 领取全局序列后非阻塞入队；序列领取失败或队列打满时丢弃并计数。
 func (s *AuditLogService) Record(entry *AuditLog) {
-	if s == nil || entry == nil {
+	if s == nil || s.repo == nil || entry == nil {
 		return
-	}
-	if entry.CreatedAt.IsZero() {
-		entry.CreatedAt = time.Now().UTC()
 	}
 	select {
 	case <-s.ctx.Done():
 		return
 	default:
 	}
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now().UTC()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), auditLogSequenceTimeout)
+	id, err := s.repo.NextID(ctx)
+	cancel()
+	if err != nil {
+		atomic.AddUint64(&s.droppedCount, 1)
+		_, _ = fmt.Fprintf(os.Stderr, "time=%s level=WARN msg=\"audit log sequence reservation failed\" err=%v\n",
+			time.Now().Format(time.RFC3339Nano), err)
+		return
+	}
+	entry.ID = id
 	select {
 	case s.queue <- auditLogQueueItem{entry: entry}:
+	case <-s.ctx.Done():
 	default:
 		atomic.AddUint64(&s.droppedCount, 1)
 	}
@@ -118,14 +130,18 @@ func (s *AuditLogService) GetByID(ctx context.Context, id int64) (*AuditLog, err
 //  1. 等待此前已入队的记录落库
 //  2. 在同一事务中统计、清空全表并写入 "audit_log.clear" 留痕记录
 func (s *AuditLogService) ClearAll(ctx context.Context, trace *AuditLog) (int64, error) {
-	if trace != nil {
-		trace.Action = AuditActionAuditLogClear
-		if trace.CreatedAt.IsZero() {
-			trace.CreatedAt = time.Now().UTC()
-		}
-		if trace.Extra == nil {
-			trace.Extra = map[string]any{}
-		}
+	if s == nil || s.repo == nil {
+		return 0, fmt.Errorf("audit log repository is not configured")
+	}
+	if trace == nil {
+		return 0, fmt.Errorf("audit log clear trace is required")
+	}
+	trace.Action = AuditActionAuditLogClear
+	if trace.CreatedAt.IsZero() {
+		trace.CreatedAt = time.Now().UTC()
+	}
+	if trace.Extra == nil {
+		trace.Extra = map[string]any{}
 	}
 
 	result := make(chan auditLogClearResult, 1)

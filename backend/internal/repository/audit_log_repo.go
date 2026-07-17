@@ -24,8 +24,8 @@ func NewAuditLogRepository(db *sql.DB) service.AuditLogRepository {
 }
 
 const auditLogInsertColumns = `created_at, actor_user_id, actor_email, actor_role, auth_method,
-credential_masked, action, method, path, request_id, client_ip, user_agent,
-request_body, status_code, latency_ms, extra`
+    credential_masked, action, method, path, request_id, client_ip, user_agent,
+    request_body, status_code, latency_ms, extra, id`
 
 func auditLogInsertValues(log *service.AuditLog) []any {
 	createdAt := log.CreatedAt
@@ -55,7 +55,19 @@ func auditLogInsertValues(log *service.AuditLog) []any {
 		log.StatusCode,
 		log.LatencyMs,
 		extraJSON,
+		log.ID,
 	}
+}
+
+func (r *auditLogRepository) NextID(ctx context.Context) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("nil audit log repository")
+	}
+	var id int64
+	if err := r.db.QueryRowContext(ctx, "SELECT nextval('audit_logs_id_seq')").Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.AuditLog) (int64, error) {
@@ -70,11 +82,22 @@ func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.Au
 	if err != nil {
 		return 0, err
 	}
+	if _, err := tx.ExecContext(ctx, "LOCK TABLE audit_logs IN ROW EXCLUSIVE MODE"); err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("lock audit logs for insert: %w", err)
+	}
+	var lastClearedID int64
+	if err := tx.QueryRowContext(ctx,
+		"SELECT COALESCE((SELECT clear_id FROM audit_log_state WHERE singleton = TRUE), 0)",
+	).Scan(&lastClearedID); err != nil {
+		_ = tx.Rollback()
+		return 0, fmt.Errorf("load audit log clear watermark: %w", err)
+	}
 	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
 		"audit_logs",
 		"created_at", "actor_user_id", "actor_email", "actor_role", "auth_method",
 		"credential_masked", "action", "method", "path", "request_id", "client_ip", "user_agent",
-		"request_body", "status_code", "latency_ms", "extra",
+		"request_body", "status_code", "latency_ms", "extra", "id",
 	))
 	if err != nil {
 		_ = tx.Rollback()
@@ -84,6 +107,14 @@ func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.Au
 	var inserted int64
 	for _, log := range logs {
 		if log == nil {
+			continue
+		}
+		if log.ID <= 0 {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			return inserted, fmt.Errorf("audit log id is required")
+		}
+		if log.ID <= lastClearedID {
 			continue
 		}
 		if _, err := stmt.ExecContext(ctx, auditLogInsertValues(log)...); err != nil {
@@ -113,6 +144,9 @@ func (r *auditLogRepository) ClearAll(ctx context.Context, trace *service.AuditL
 	if r == nil || r.db == nil {
 		return 0, fmt.Errorf("nil audit log repository")
 	}
+	if trace == nil {
+		return 0, fmt.Errorf("audit log clear trace is required")
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -127,23 +161,31 @@ func (r *auditLogRepository) ClearAll(ctx context.Context, trace *service.AuditL
 	if _, err := tx.ExecContext(ctx, "LOCK TABLE audit_logs IN ACCESS EXCLUSIVE MODE"); err != nil {
 		return 0, fmt.Errorf("lock audit logs: %w", err)
 	}
+	if err := tx.QueryRowContext(ctx, "SELECT nextval('audit_logs_id_seq')").Scan(&trace.ID); err != nil {
+		return 0, fmt.Errorf("reserve audit log clear id: %w", err)
+	}
 	var deleted int64
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&deleted); err != nil {
-		return 0, fmt.Errorf("count audit logs: %w", err)
+		return 0, fmt.Errorf("count deleted audit logs: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, "TRUNCATE TABLE audit_logs"); err != nil {
 		return 0, fmt.Errorf("truncate audit logs: %w", err)
 	}
-	if trace != nil {
-		if trace.Extra == nil {
-			trace.Extra = map[string]any{}
-		}
-		trace.Extra["deleted_rows"] = deleted
-		query := `INSERT INTO audit_logs (` + auditLogInsertColumns + `)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
-		if _, err := tx.ExecContext(ctx, query, auditLogInsertValues(trace)...); err != nil {
-			return 0, fmt.Errorf("insert audit log clear trace: %w", err)
-		}
+	if trace.Extra == nil {
+		trace.Extra = map[string]any{}
+	}
+	trace.Extra["deleted_rows"] = deleted
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO audit_log_state (singleton, clear_id)
+VALUES (TRUE, $1)
+ON CONFLICT (singleton) DO UPDATE
+SET clear_id = GREATEST(audit_log_state.clear_id, EXCLUDED.clear_id)`, trace.ID); err != nil {
+		return 0, fmt.Errorf("store audit log clear watermark: %w", err)
+	}
+	query := `INSERT INTO audit_logs (` + auditLogInsertColumns + `)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
+	if _, err := tx.ExecContext(ctx, query, auditLogInsertValues(trace)...); err != nil {
+		return 0, fmt.Errorf("insert audit log clear trace: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit audit log clear: %w", err)

@@ -89,6 +89,7 @@ type AuditLogList struct {
 // AuditLogRepository 审计日志持久化端口。
 // 注意：接口刻意不提供单条删除能力——审计日志只允许追加与全量清空。
 type AuditLogRepository interface {
+	NextID(ctx context.Context) (int64, error)
 	BatchInsert(ctx context.Context, logs []*AuditLog) (int64, error)
 	// ClearAll 在同一事务中统计、清空并写入留痕记录。
 	ClearAll(ctx context.Context, trace *AuditLog) (int64, error)
