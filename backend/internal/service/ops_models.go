@@ -76,8 +76,7 @@ type OpsErrorLog struct {
 	APIKeyName    string `json:"api_key_name,omitempty"`
 	APIKeyDeleted bool   `json:"api_key_deleted,omitempty"`
 
-	// 已删除 KEY 所有者（INVALID_API_KEY 且该 key 曾存在时的归因快照）。
-	// 认证失败行 user_id 为空，列表用户列以此回退显示所有者。
+	// 已删除 key 所有者。认证失败行 user_id 为空时，列表用户列以此回退显示。
 	DeletedKeyOwnerUserID *int64 `json:"deleted_key_owner_user_id,omitempty"`
 	DeletedKeyOwnerEmail  string `json:"deleted_key_owner_email,omitempty"`
 }
@@ -103,8 +102,7 @@ type OpsErrorLogDetail struct {
 	// vNext metric semantics
 	IsBusinessLimited bool `json:"is_business_limited"`
 
-	// Deleted key owner info (populated when INVALID_API_KEY and key was previously deleted).
-	// OwnerUserID/OwnerEmail 已上移到 OpsErrorLog（列表用户列回退需要）。
+	// Deleted key attribution populated for INVALID_API_KEY attempts.
 	AttemptedKeyPrefix string `json:"attempted_key_prefix,omitempty"`
 	DeletedKeyName     string `json:"deleted_key_name,omitempty"`
 
@@ -140,9 +138,8 @@ type OpsErrorLogFilter struct {
 	UserID   *int64
 	APIKeyID *int64
 
-	// MatchDeletedKeyOwner: 用户侧专用。UserID 设置且为 true 时,归属从 user_id=UserID
-	// 放宽为 (user_id=UserID OR deleted_key_owner_user_id=UserID),使原所有者能看到
-	// 自己「已删除 key 认证失败」的记录。admin 路径不设此开关 → 行为不变。
+	// MatchDeletedKeyOwner lets user-facing queries include invalid-auth rows
+	// attributed to one of the user's previously deleted keys.
 	MatchDeletedKeyOwner bool
 
 	// Model matches against requested_model first, then model.

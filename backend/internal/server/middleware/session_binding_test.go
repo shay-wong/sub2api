@@ -5,9 +5,11 @@ package middleware
 import (
 	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -24,11 +26,12 @@ func (enabledSessionBindingSettingRepo) GetValue(context.Context, string) (strin
 
 // 会话绑定只接受 trusted_proxies 已验证代理链中的转发 IP；
 // 直连请求即使开启 API Key 转发 IP 开关也不能伪造绑定地址。
-func TestSessionBindingContextUsesOnlyTrustedProxyHeaders(t *testing.T) {
+func TestSessionBindingContextUsesTrustedProxyClientIP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, tc := range []struct {
 		name           string
+		trustForwarded bool
 		trustedProxies []string
 		peerIP         string
 		wantPeerIP     string
@@ -36,11 +39,12 @@ func TestSessionBindingContextUsesOnlyTrustedProxyHeaders(t *testing.T) {
 		wantSource     service.SessionBindingIPSource
 	}{
 		{
-			name:       "untrusted direct peer cannot spoof forwarded IP",
-			peerIP:     "9.9.9.9:54321",
-			wantPeerIP: "9.9.9.9",
-			wantIP:     "9.9.9.9",
-			wantSource: service.SessionBindingIPSourcePeer,
+			name:           "forwarded switch does not let direct peer spoof binding IP",
+			trustForwarded: true,
+			peerIP:         "9.9.9.9:54321",
+			wantPeerIP:     "9.9.9.9",
+			wantIP:         "9.9.9.9",
+			wantSource:     service.SessionBindingIPSourcePeer,
 		},
 		{
 			name:           "trusted proxy forwards browser IP",
@@ -52,9 +56,12 @@ func TestSessionBindingContextUsesOnlyTrustedProxyHeaders(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.SetTrustForwardedIPForAPIKeyACL(tc.trustForwarded)
+
 			r := gin.New()
 			require.NoError(t, r.SetTrustedProxies(tc.trustedProxies))
-			r.Use(SessionBindingContext())
+			r.Use(SessionBindingContext(cfg))
 			r.GET("/t", func(c *gin.Context) {
 				binding := service.SessionBindingFromContext(c.Request.Context())
 				require.NotNil(t, binding)
@@ -144,6 +151,56 @@ func TestEnforceSessionBindingUsesSeparatedClientFingerprint(t *testing.T) {
 	}
 }
 
+func TestSessionBindingContextSnapshotsForwardedModeAndHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.SetForwardedClientIPSettings(true, []string{"X-Initial-IP"})
+
+	r := gin.New()
+	require.NoError(t, r.SetTrustedProxies(nil))
+	r.Use(SessionBindingContext(cfg))
+	r.GET("/t", func(c *gin.Context) {
+		binding := service.SessionBindingFromContext(c.Request.Context())
+		require.NotNil(t, binding)
+		require.Equal(t, "9.9.9.9", binding.IP)
+
+		cfg.SetForwardedClientIPSettings(false, []string{"X-Changed-IP"})
+		require.Equal(t, "1.2.3.4", ip.GetSecurityClientIP(c, false))
+		c.Status(200)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/t", nil)
+	req.RemoteAddr = "9.9.9.9:12345"
+	req.Header.Set("X-Initial-IP", "1.2.3.4")
+	req.Header.Set("X-Changed-IP", "4.4.4.4")
+	req.Header.Set("X-Real-IP", "8.8.8.8")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, 200, w.Code)
+	runtimeSettings := cfg.ForwardedClientIPSettings()
+	require.False(t, runtimeSettings.TrustForwardedIP)
+	require.Equal(t, []string{"X-Changed-IP"}, runtimeSettings.Headers)
+}
+
+func TestSessionBindingContextBoundsPersistedUserAgent(t *testing.T) {
+	cfg := &config.Config{}
+	r := gin.New()
+	r.Use(SessionBindingContext(cfg))
+	r.GET("/t", func(c *gin.Context) {
+		binding := service.SessionBindingFromContext(c.Request.Context())
+		require.Len(t, binding.UserAgent, maxPersistentUserAgentBytes)
+		require.Equal(t, binding.UserAgent, c.Request.UserAgent())
+		c.Status(200)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/t", nil)
+	req.Header.Set("User-Agent", strings.Repeat("u", 2048))
+	r.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code)
+}
+
 // 未经过 SessionBindingContext 注入时（异常挂载顺序/单测直调），回退 trusted_proxies 链，
 // 等价于开关关闭时的历史行为。
 func TestSecurityClientIPFallsBackWithoutInjectedBinding(t *testing.T) {
@@ -170,9 +227,10 @@ func TestSecurityClientIPFallsBackWithoutInjectedBinding(t *testing.T) {
 func TestRequestSessionBindingPrefersInjectedBinding(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	cfg := &config.Config{}
 	r := gin.New()
 	require.NoError(t, r.SetTrustedProxies([]string{"127.0.0.1"}))
-	r.Use(SessionBindingContext())
+	r.Use(SessionBindingContext(cfg))
 	r.GET("/t", func(c *gin.Context) {
 		issued := &service.SessionBinding{IP: "1.2.3.4", UserAgent: "test-agent"}
 		require.Equal(t, issued.Hash(), requestSessionBinding(c).Hash())

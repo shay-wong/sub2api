@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -12,17 +13,28 @@ import (
 
 // SessionBindingContext 全局中间件：将请求的客户端 IP 与 User-Agent 注入
 // request context，供 token 签发路径（登录 / 刷新 / OAuth 回调）读取并写入会话绑定，
-// 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。转发 IP 只通过
-// server.trusted_proxies 验证链读取，避免直连请求伪造转发头绕过绑定。
-func SessionBindingContext() gin.HandlerFunc {
+// 同时作为审计日志、会话绑定校验的统一客户端 IP 来源。
+// 会话绑定的客户端 IP 只通过 server.trusted_proxies 验证链读取，避免绑定到
+// 瞬时 Docker / 反代 hop IP，也避免直连请求伪造原始转发头。
+func SessionBindingContext(configs ...*config.Config) gin.HandlerFunc {
+	var cfg *config.Config
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	return func(c *gin.Context) {
+		if cfg != nil {
+			forwardedIPSettings := cfg.ForwardedClientIPSettings()
+			ip.SetForwardedIPSettings(c, forwardedIPSettings.TrustForwardedIP, forwardedIPSettings.Headers)
+		}
 		peerIP := requestPeerIP(c)
 		clientIP := ip.GetTrustedClientIP(c)
+		userAgent := normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes)
+		c.Request.Header.Set("User-Agent", userAgent)
 		binding := &service.SessionBinding{
 			IP:        clientIP,
 			IPSource:  sessionBindingIPSource(clientIP, peerIP),
 			PeerIP:    peerIP,
-			UserAgent: c.Request.UserAgent(),
+			UserAgent: userAgent,
 		}
 		c.Request = c.Request.WithContext(service.WithSessionBinding(c.Request.Context(), binding))
 		c.Next()
@@ -30,8 +42,7 @@ func SessionBindingContext() gin.HandlerFunc {
 }
 
 // requestSessionBinding 返回当前请求的会话指纹，优先取 SessionBindingContext
-// 注入的解析结果（保证与 token 签发路径取值一致）；注入缺失时按 trusted_proxies
-// 链回退兜底（等价于开关关闭时的行为）。
+// 注入的解析结果（保证与 token 签发路径取值一致）；注入缺失时使用安全回退。
 func requestSessionBinding(c *gin.Context) *service.SessionBinding {
 	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil {
 		return binding
@@ -42,7 +53,7 @@ func requestSessionBinding(c *gin.Context) *service.SessionBinding {
 		IP:        clientIP,
 		IPSource:  sessionBindingIPSource(clientIP, peerIP),
 		PeerIP:    peerIP,
-		UserAgent: c.Request.UserAgent(),
+		UserAgent: normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes),
 	}
 }
 
@@ -64,7 +75,8 @@ func requestPeerIP(c *gin.Context) string {
 	return remoteAddr
 }
 
-// SecurityClientIP 返回当前请求用于审计日志的可信客户端 IP。
+// SecurityClientIP 返回当前请求用于安全敏感记录（审计日志等）的客户端 IP。
+// 与会话绑定、API Key IP 限制共用同一套客户端 IP 来源。
 func SecurityClientIP(c *gin.Context) string {
 	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil &&
 		strings.TrimSpace(binding.IP) != "" {
@@ -122,7 +134,7 @@ func enforceSessionBinding(
 			Method:      c.Request.Method,
 			Path:        path,
 			ClientIP:    binding.IP,
-			UserAgent:   c.Request.UserAgent(),
+			UserAgent:   normalizePersistentText(c.Request.UserAgent(), maxPersistentUserAgentBytes),
 			StatusCode:  401,
 			Extra:       sessionBindingAuditMetadata(binding),
 		})

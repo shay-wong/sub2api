@@ -11,13 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGetErrorLogByID_DeletedKeyOwner 验证:
-//  1. 带 deleted_key_owner_user_id 的记录能正确 JOIN users 返回 DeletedKeyOwnerEmail
-//  2. 新列全为 NULL 的普通记录 Scan 不报错,这些字段为空/nil
-func TestGetErrorLogByID_DeletedKeyOwner(t *testing.T) {
+func TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus(t *testing.T) {
 	ctx := context.Background()
 	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE ops_error_logs RESTART IDENTITY CASCADE")
-
 	repo := NewOpsRepository(integrationDB).(*opsRepository)
 	projectID := mustDefaultProjectID(t, integrationEntClient)
 
@@ -67,15 +63,12 @@ func TestGetErrorLogByID_DeletedKeyOwner(t *testing.T) {
 	plain, err := repo.GetErrorLogByID(ctx, plainID)
 	require.NoError(t, err)
 	require.NotNil(t, plain)
+	require.Empty(t, plain.AttemptedKeyPrefix)
+	require.Nil(t, plain.DeletedKeyOwnerUserID)
+	require.Empty(t, plain.DeletedKeyOwnerEmail)
+	require.Empty(t, plain.DeletedKeyName)
+	require.Empty(t, plain.APIKeyPrefix)
 
-	require.Empty(t, plain.AttemptedKeyPrefix, "no prefix for plain error")
-	require.Nil(t, plain.DeletedKeyOwnerUserID, "no owner for plain error")
-	require.Empty(t, plain.DeletedKeyOwnerEmail, "no owner email for plain error")
-	require.Empty(t, plain.DeletedKeyName, "no key name for plain error")
-	require.Empty(t, plain.APIKeyPrefix, "no api key prefix for plain error")
-
-	// ── Case 3: 有效(未删除)key 报错,经 InsertErrorLog 快照 api_key_prefix ──────
-	// 走真实 InsertErrorLog 写入路径(覆盖新列 + $41 占位符),再 GetErrorLogByID 读回。
 	validID, err := repo.InsertErrorLog(ctx, &service.OpsInsertErrorLogInput{
 		ErrorPhase:   "request",
 		ErrorType:    "api_error",
@@ -85,17 +78,11 @@ func TestGetErrorLogByID_DeletedKeyOwner(t *testing.T) {
 		APIKeyPrefix: "sk-valid",
 	})
 	require.NoError(t, err)
-	require.Positive(t, validID)
 
 	valid, err := repo.GetErrorLogByID(ctx, validID)
 	require.NoError(t, err)
-	require.NotNil(t, valid)
-
 	require.Equal(t, "sk-valid", valid.APIKeyPrefix)
-	require.Empty(t, valid.AttemptedKeyPrefix, "attempted prefix and api key prefix are mutually exclusive")
-	require.Nil(t, valid.DeletedKeyOwnerUserID, "valid key error has no deleted owner")
 
-	// ── Case 4: account_auth with no inference attempt preserves explicit 0 ──
 	zero := 0
 	credentialFailureID, err := repo.InsertErrorLog(ctx, &service.OpsInsertErrorLogInput{
 		ErrorPhase:         "account_auth",

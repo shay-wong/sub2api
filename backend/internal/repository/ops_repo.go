@@ -419,16 +419,12 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			v := int16(requestType.Int64)
 			item.RequestType = &v
 		}
-		// Key 名称：优先关联到的 ak.name（已软删的 key name 仍保留）；
-		// 关联不到（api_key_id 为空 / 历史硬删）时回退错误记录里快照的 deleted_key_name。
 		if apiKeyName != "" {
 			item.APIKeyName = apiKeyName
 		} else {
 			item.APIKeyName = deletedKeyName
 		}
-		// 已删除：ak.deleted_at 非空（软删），或仅命中 deleted_key_name 兜底。
 		item.APIKeyDeleted = apiKeyDeletedAt.Valid || (apiKeyName == "" && deletedKeyName != "")
-		// 已删除 KEY 所有者快照:认证失败行 user_id 为空,列表用户列以此回退。
 		if deletedKeyOwnerID.Valid {
 			v := deletedKeyOwnerID.Int64
 			item.DeletedKeyOwnerUserID = &v
@@ -657,13 +653,11 @@ LIMIT 1`
 		v := deletedKeyOwnerUserID.Int64
 		out.DeletedKeyOwnerUserID = &v
 	}
-	// Key 名称：优先关联到的 ak.name；关联不到时回退快照的 deleted_key_name。
 	if detailAPIKeyName != "" {
 		out.APIKeyName = detailAPIKeyName
 	} else {
 		out.APIKeyName = out.DeletedKeyName
 	}
-	// 已删除：ak.deleted_at 非空（软删），或仅命中 deleted_key_name 兜底。
 	out.APIKeyDeleted = detailAPIKeyDeletedAt.Valid || (detailAPIKeyName == "" && out.DeletedKeyName != "")
 
 	// Normalize upstream_errors to empty string when stored as JSON null.
@@ -1132,7 +1126,6 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		args = append(args, *filter.UserID)
 		n := itoa(len(args))
 		if filter.MatchDeletedKeyOwner {
-			// 用户侧:把「删 key 后认证失败」(user_id=NULL,靠 deleted_key_owner 归因)的记录也纳入。
 			clauses = append(clauses, "(e.user_id = $"+n+" OR e.deleted_key_owner_user_id = $"+n+")")
 		} else {
 			clauses = append(clauses, "e.user_id = $"+n)

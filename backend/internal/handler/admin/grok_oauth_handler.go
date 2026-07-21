@@ -24,7 +24,7 @@ type GrokOAuthHandler struct {
 	adminService      service.AdminService
 	permissionService *service.PermissionService
 	quotaService      *service.GrokQuotaService
-	importProber      grokUsageProber
+	importProber      grokImportProber
 	reconciler        service.GrokOAuthReconciler
 }
 

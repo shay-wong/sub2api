@@ -42,6 +42,13 @@ func (m *opsRepoMock) GetErrorLogByID(ctx context.Context, id int64) (*OpsErrorL
 	return &OpsErrorLogDetail{}, nil
 }
 
+func (m *opsRepoMock) LookupDeletedKeyAudit(ctx context.Context, key string) (*DeletedKeyAuditResult, error) {
+	if m.LookupDeletedKeyAuditFn != nil {
+		return m.LookupDeletedKeyAuditFn(ctx, key)
+	}
+	return nil, nil
+}
+
 func (m *opsRepoMock) ListRequestDetails(ctx context.Context, filter *OpsRequestDetailFilter) ([]*OpsRequestDetail, int64, error) {
 	return []*OpsRequestDetail{}, 0, nil
 }
@@ -204,13 +211,6 @@ func (m *opsRepoMock) GetLatestHourlyBucketStart(ctx context.Context) (time.Time
 
 func (m *opsRepoMock) GetLatestDailyBucketDate(ctx context.Context) (time.Time, bool, error) {
 	return time.Time{}, false, nil
-}
-
-func (m *opsRepoMock) LookupDeletedKeyAudit(ctx context.Context, key string) (*DeletedKeyAuditResult, error) {
-	if m.LookupDeletedKeyAuditFn != nil {
-		return m.LookupDeletedKeyAuditFn(ctx, key)
-	}
-	return nil, nil
 }
 
 var _ OpsRepository = (*opsRepoMock)(nil)
