@@ -75,14 +75,11 @@ func requestPeerIP(c *gin.Context) string {
 	return remoteAddr
 }
 
-// SecurityClientIP 返回当前请求用于安全敏感记录（审计日志等）的客户端 IP。
-// 与会话绑定、API Key IP 限制共用同一套客户端 IP 来源。
+// SecurityClientIP 返回当前请求用于审计、入口拒绝和无效认证限流的客户端 IP。
+// 该元数据路径遵循请求开始时快照的转发 IP 兼容设置；会话绑定仍独立使用
+// server.trusted_proxies 验证链，避免原始转发头改变会话指纹。
 func SecurityClientIP(c *gin.Context) string {
-	if binding := service.SessionBindingFromContext(c.Request.Context()); binding != nil &&
-		strings.TrimSpace(binding.IP) != "" {
-		return binding.IP
-	}
-	return ip.GetTrustedClientIP(c)
+	return ip.GetSecurityClientIP(c, false)
 }
 
 // enforceSessionBinding 校验 access token 的会话指纹（IP/UA 绑定）。

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,52 @@ func TestDeriveAuditAction(t *testing.T) {
 		if got := deriveAuditAction(tc.method, tc.path); got != tc.want {
 			t.Fatalf("deriveAuditAction(%q, %q) = %q, want %q", tc.method, tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestAuditMetadataHonorsForwardedIPSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name           string
+		trustForwarded bool
+		wantClientIP   string
+	}{
+		{name: "compatibility enabled", trustForwarded: true, wantClientIP: "203.0.113.10"},
+		{name: "compatibility disabled", trustForwarded: false, wantClientIP: "172.24.149.226"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.SetTrustForwardedIPForAPIKeyACL(tc.trustForwarded)
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			router.Use(SessionBindingContext(cfg))
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.POST("/api/v1/auth/login", func(c *gin.Context) {
+				binding := service.SessionBindingFromContext(c.Request.Context())
+				require.NotNil(t, binding)
+				require.Equal(t, "172.24.149.226", binding.IP)
+				c.Status(http.StatusOK)
+			})
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+			request.RemoteAddr = "172.24.149.226:54321"
+			request.Header.Set("X-Real-IP", "203.0.113.10")
+			router.ServeHTTP(recorder, request)
+			auditService.Stop()
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			repository.mu.Lock()
+			logs := append([]*service.AuditLog(nil), repository.logs...)
+			repository.mu.Unlock()
+			require.Len(t, logs, 1)
+			require.Equal(t, tc.wantClientIP, logs[0].ClientIP)
+		})
 	}
 }
 

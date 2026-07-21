@@ -36,6 +36,7 @@ func TestSessionBindingContextUsesTrustedProxyClientIP(t *testing.T) {
 		peerIP         string
 		wantPeerIP     string
 		wantIP         string
+		wantSecurityIP string
 		wantSource     service.SessionBindingIPSource
 	}{
 		{
@@ -44,6 +45,7 @@ func TestSessionBindingContextUsesTrustedProxyClientIP(t *testing.T) {
 			peerIP:         "9.9.9.9:54321",
 			wantPeerIP:     "9.9.9.9",
 			wantIP:         "9.9.9.9",
+			wantSecurityIP: "1.2.3.4",
 			wantSource:     service.SessionBindingIPSourcePeer,
 		},
 		{
@@ -52,6 +54,7 @@ func TestSessionBindingContextUsesTrustedProxyClientIP(t *testing.T) {
 			peerIP:         "172.24.149.226:54321",
 			wantPeerIP:     "172.24.149.226",
 			wantIP:         "1.2.3.4",
+			wantSecurityIP: "1.2.3.4",
 			wantSource:     service.SessionBindingIPSourceTrustedForwarded,
 		},
 	} {
@@ -69,7 +72,7 @@ func TestSessionBindingContextUsesTrustedProxyClientIP(t *testing.T) {
 				require.Equal(t, tc.wantSource, binding.IPSource)
 				require.Equal(t, tc.wantPeerIP, binding.PeerIP)
 				require.Equal(t, "test-agent", binding.UserAgent)
-				require.Equal(t, tc.wantIP, SecurityClientIP(c))
+				require.Equal(t, tc.wantSecurityIP, SecurityClientIP(c))
 				c.Status(200)
 			})
 

@@ -128,6 +128,62 @@ func TestInvalidAuthAbuseDoesNotCountValidOrOperationalFailures(t *testing.T) {
 	require.Equal(t, uint64(1), svc.InvalidAuthAbuseHealth().Recorded)
 }
 
+type securityMetadataIPCapture struct {
+	invalidAuthIP string
+	ingressIP     string
+}
+
+func (c *securityMetadataIPCapture) RecordInvalidAuthFailure(clientIP string) {
+	c.invalidAuthIP = clientIP
+}
+
+func (c *securityMetadataIPCapture) RecordIngressReject(_, _, _, clientIP string, _, _ int64) {
+	c.ingressIP = clientIP
+}
+
+func TestIngressAndInvalidAuthMetadataHonorForwardedIPSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name           string
+		trustForwarded bool
+		wantMetadataIP string
+	}{
+		{name: "compatibility enabled", trustForwarded: true, wantMetadataIP: "203.0.113.10"},
+		{name: "compatibility disabled", trustForwarded: false, wantMetadataIP: "172.24.149.226"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := invalidAuthAbuseTestConfig(10)
+			cfg.SetTrustForwardedIPForAPIKeyACL(tc.trustForwarded)
+			capture := &securityMetadataIPCapture{}
+			SetIngressRejectRecorder(capture)
+			t.Cleanup(func() { SetIngressRejectRecorder(nil) })
+
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			router.Use(SessionBindingContext(cfg))
+			router.POST("/v1/messages", func(c *gin.Context) {
+				binding := service.SessionBindingFromContext(c.Request.Context())
+				require.NotNil(t, binding)
+				require.Equal(t, "172.24.149.226", binding.IP)
+				recordInvalidAuthFailure(c, capture)
+				recordIngressReject(c, IngressRejectInvalidAPIKey)
+				c.Status(http.StatusUnauthorized)
+			})
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			request.RemoteAddr = "172.24.149.226:54321"
+			request.Header.Set("X-Real-IP", "203.0.113.10")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusUnauthorized, recorder.Code)
+			require.Equal(t, tc.wantMetadataIP, capture.invalidAuthIP)
+			require.Equal(t, tc.wantMetadataIP, capture.ingressIP)
+		})
+	}
+}
+
 func TestNormalizeIngressRejectIPGroupsIPv6By64(t *testing.T) {
 	require.Equal(t, "2001:db8:abcd:1234::", normalizeIngressRejectIP("2001:db8:abcd:1234:1111::1"))
 	require.Equal(t, normalizeIngressRejectIP("2001:db8:abcd:1234:1111::1"), normalizeIngressRejectIP("2001:db8:abcd:1234:ffff::2"))
