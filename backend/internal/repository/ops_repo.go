@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -669,17 +670,18 @@ LIMIT 1`
 	return &out, nil
 }
 
-// LookupDeletedKeyAudit 按明文 key 反查最近一条已删除 key 审计。
+// LookupDeletedKeyAudit 按不可逆 key 摘要反查最近一条已删除 key 审计。
 // 同一 key 可能有多条历史(反复创建/删除),取 deleted_at 最近一条(id 作同毫秒 tiebreaker)。
 // 未命中返回 (nil, nil)。
 func (r *opsRepository) LookupDeletedKeyAudit(ctx context.Context, key string) (*service.DeletedKeyAuditResult, error) {
 	var res service.DeletedKeyAuditResult
+	keyDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 	err := r.db.QueryRowContext(ctx, `
 		SELECT user_id, key_name
 		FROM deleted_api_key_audits
-		WHERE key = $1
+		WHERE key_digest = $1
 		ORDER BY deleted_at DESC, id DESC
-		LIMIT 1`, key).Scan(&res.UserID, &res.KeyName)
+		LIMIT 1`, keyDigest).Scan(&res.UserID, &res.KeyName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

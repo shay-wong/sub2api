@@ -422,8 +422,8 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 }
 
 // DeleteWithAudit keeps the legacy method name for rolling-upgrade compatibility.
-// It atomically tombstones and soft-deletes the key without retaining credential
-// material. Tombstoning releases the unique key value for safe reuse.
+// It atomically records an irreversible key digest, tombstones the credential,
+// and soft-deletes the key. Tombstoning releases the unique value for safe reuse.
 func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error {
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 
@@ -452,6 +452,17 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 }
 
 func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.Client, id int64, tombstoneKey string) error {
+	auditArgs := []any{id}
+	auditQuery := `
+		INSERT INTO deleted_api_key_audits (key_digest, api_key_id, user_id, key_name, deleted_at)
+		SELECT encode(sha256(convert_to(key, 'UTF8')), 'hex'), id, user_id, name, NOW()
+		FROM api_keys
+		WHERE id = $1 AND deleted_at IS NULL`
+	auditQuery, auditArgs = appendProjectProfileScopedQuery(ctx, auditQuery, auditArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
+	if _, err := exec.ExecContext(ctx, auditQuery, auditArgs...); err != nil {
+		return err
+	}
+
 	updateArgs := []any{tombstoneKey, id}
 	updateQuery := `
 		UPDATE api_keys

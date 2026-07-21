@@ -652,7 +652,7 @@ func TestIncrementQuotaUsed_Concurrent(t *testing.T) {
 		"并发递增后总和应为 %v，实际为 %v", float64(goroutines)*increment, got.QuotaUsed)
 }
 
-func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesWithoutRetainingCredential() {
+func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesAndRetainsOnlyDigest() {
 	user := s.mustCreateUser("delwithaudit@test.com")
 	key := &service.APIKey{
 		UserID: user.ID,
@@ -677,14 +677,17 @@ func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesWithoutRetainingCredenti
 	s.Require().NotEqual("sk-del-audit-1", tombstone)
 	s.Require().Contains(tombstone, "__deleted__")
 
-	var auditCount int
+	var retainedKey, keyDigest string
 	auditRows, err := s.repo.sql.QueryContext(s.ctx,
-		`SELECT COUNT(*) FROM deleted_api_key_audits WHERE api_key_id = $1`, key.ID)
+		`SELECT key, key_digest FROM deleted_api_key_audits WHERE api_key_id = $1`, key.ID)
 	s.Require().NoError(err)
 	s.Require().True(auditRows.Next())
-	s.Require().NoError(auditRows.Scan(&auditCount))
+	s.Require().NoError(auditRows.Scan(&retainedKey, &keyDigest))
+	s.Require().False(auditRows.Next())
 	s.Require().NoError(auditRows.Close())
-	s.Require().Zero(auditCount, "deleted credentials must not be retained")
+	s.Require().Empty(retainedKey, "deleted credentials must not be retained")
+	s.Require().Len(keyDigest, 64)
+	s.Require().NotEqual("sk-del-audit-1", keyDigest)
 }
 
 func (s *APIKeyRepoSuite) TestDeleteWithAuditRejectsProfileBoundAPIKeyFromDifferentProject() {

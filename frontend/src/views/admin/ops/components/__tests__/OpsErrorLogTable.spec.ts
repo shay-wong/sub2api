@@ -73,6 +73,23 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     expect(wrapper.text()).toContain('old-key')
     expect(wrapper.text()).toContain('admin.ops.errorLog.keyDeletedBadge')
   })
+
+  it('attributes an invalid deleted key to its former owner', () => {
+    const wrapper = mountTable({
+      phase: 'auth',
+      type: 'INVALID_API_KEY',
+      error_owner: 'client',
+      error_source: 'client_request',
+      status_code: 401,
+      user_id: null,
+      user_email: '',
+      deleted_key_owner_user_id: 23,
+      deleted_key_owner_email: 'former-owner@test.com',
+    })
+
+    expect(wrapper.text()).toContain('former-owner@test.com')
+    expect(wrapper.text()).toContain('#23')
+  })
 })
 
 // 防回归:组件用 admin.ops.errorLog.* 命名空间。若 i18n 键写错命名空间(如误放到

@@ -91,5 +91,10 @@ func TestUserRepository_DeleteUser_AtomicWithAPIKeys(t *testing.T) {
 
 	require.NoError(t, integrationDB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM deleted_api_key_audits WHERE user_id = $1`, user.ID).Scan(&auditCount))
-	require.Zero(t, auditCount, "提交后也不得保留被删 Key 的凭据材料")
+	require.Equal(t, 2, auditCount, "提交后应保留不可逆摘要归因记录")
+
+	var plaintextCount int
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM deleted_api_key_audits WHERE user_id = $1 AND key <> ''`, user.ID).Scan(&plaintextCount))
+	require.Zero(t, plaintextCount, "提交后不得保留被删 Key 的明文凭据")
 }

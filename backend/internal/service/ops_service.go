@@ -733,7 +733,7 @@ func (s *OpsService) GetUserErrorRequestDetail(ctx context.Context, userID, id i
 	return ToUserErrorRequestDetail(detail), nil
 }
 
-// LookupDeletedKeyAudit 按明文 key 反查已删除 key 的原所有者;未命中或未启用返回 (nil, nil)。
+// LookupDeletedKeyAudit 按不可逆 key 摘要反查已删除 key 的原所有者;未命中或未启用返回 (nil, nil)。
 func (s *OpsService) LookupDeletedKeyAudit(ctx context.Context, key string) (*DeletedKeyAuditResult, error) {
 	if s.opsRepo == nil {
 		return nil, nil
