@@ -343,6 +343,25 @@ func EffectiveGroupRateLimitGroup(selection *service.AccountSelectionResult, api
 	return nil
 }
 
+// EffectiveOpenAIReasoningEffortPolicy returns the reasoning policy owned by
+// the group that actually handles the request. Selection wins so fallback
+// routing cannot apply the API key group's policy to another group's account.
+func EffectiveOpenAIReasoningEffortPolicy(selection *service.AccountSelectionResult, apiKey *service.APIKey) (string, []service.ReasoningEffortMapping) {
+	group := EffectiveGroupRateLimitGroup(selection, apiKey)
+	if group == nil || group.Platform != service.PlatformOpenAI {
+		return "", nil
+	}
+	return group.MaxReasoningEffort, group.ReasoningEffortMappings
+}
+
+func ApplyEffectiveOpenAIReasoningEffortPolicy(body []byte, selection *service.AccountSelectionResult, apiKey *service.APIKey) ([]byte, bool) {
+	maxEffort, mappings := EffectiveOpenAIReasoningEffortPolicy(selection, apiKey)
+	if maxEffort == "" && len(mappings) == 0 {
+		return body, false
+	}
+	return service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings)
+}
+
 func EffectiveQuotaPlatform(ctx context.Context, selection *service.AccountSelectionResult, apiKey *service.APIKey) string {
 	if forced := service.QuotaPlatform(ctx, nil); forced != "" {
 		return forced

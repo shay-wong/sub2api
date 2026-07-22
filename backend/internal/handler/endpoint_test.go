@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
@@ -450,6 +451,86 @@ func TestEffectiveGroupRateLimitGroup_DoesNotUseAPIKeyGroupForDifferentSelection
 	)
 
 	require.Nil(t, got)
+}
+
+// Fallback routing must enforce the selected group's policy, not the API key group's policy.
+func TestApplyEffectiveOpenAIReasoningEffortPolicy_SelectionGroupWins(t *testing.T) {
+	apiKeyGroup := &service.Group{
+		ID:                 10,
+		Platform:           service.PlatformOpenAI,
+		MaxReasoningEffort: "xhigh",
+	}
+	selectionGroup := &service.Group{
+		ID:                 20,
+		Platform:           service.PlatformOpenAI,
+		MaxReasoningEffort: "medium",
+	}
+
+	got, changed := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		[]byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`),
+		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
+		&service.APIKey{GroupID: &apiKeyGroup.ID, Group: apiKeyGroup},
+	)
+
+	require.True(t, changed)
+	require.Equal(t, "medium", gjson.GetBytes(got, "reasoning.effort").String())
+	require.NotEqual(t, service.HashUsageRequestPayload([]byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`)), service.HashUsageRequestPayload(got))
+}
+
+// Each failover attempt starts from the client payload so one group's rewrite cannot leak into the next.
+func TestApplyEffectiveOpenAIReasoningEffortPolicy_FailoverReappliesFromOriginalBody(t *testing.T) {
+	original := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`)
+	firstGroup := &service.Group{
+		ID:       20,
+		Platform: service.PlatformOpenAI,
+		ReasoningEffortMappings: []service.ReasoningEffortMapping{
+			{From: "high", To: "low"},
+		},
+	}
+	secondGroup := &service.Group{
+		ID:                 30,
+		Platform:           service.PlatformOpenAI,
+		MaxReasoningEffort: "medium",
+	}
+
+	first, firstChanged := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		original,
+		&service.AccountSelectionResult{GroupID: &firstGroup.ID, Group: firstGroup},
+		nil,
+	)
+	second, secondChanged := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		original,
+		&service.AccountSelectionResult{GroupID: &secondGroup.ID, Group: secondGroup},
+		nil,
+	)
+
+	require.True(t, firstChanged)
+	require.True(t, secondChanged)
+	require.Equal(t, "low", gjson.GetBytes(first, "reasoning.effort").String())
+	require.Equal(t, "medium", gjson.GetBytes(second, "reasoning.effort").String())
+}
+
+// A missing selected-group snapshot must not silently fall back to a different group's policy.
+func TestApplyEffectiveOpenAIReasoningEffortPolicy_DoesNotUseWrongGroupSnapshot(t *testing.T) {
+	apiKeyGroupID := int64(10)
+	selectionGroupID := int64(20)
+	body := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`)
+
+	got, changed := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		body,
+		&service.AccountSelectionResult{GroupID: &selectionGroupID},
+		&service.APIKey{
+			GroupID: &apiKeyGroupID,
+			Group: &service.Group{
+				ID:                 apiKeyGroupID,
+				Platform:           service.PlatformOpenAI,
+				MaxReasoningEffort: "low",
+			},
+		},
+	)
+
+	require.False(t, changed)
+	require.Equal(t, body, got)
 }
 
 func TestEffectiveQuotaPlatform_SelectionGroupWinsOverAPIKeyGroup(t *testing.T) {
