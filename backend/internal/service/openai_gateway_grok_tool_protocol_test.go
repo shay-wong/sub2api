@@ -168,10 +168,35 @@ func TestForwardGrokResponsesClientToolNameConflictReturns400(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
 	require.Equal(t, "tools", gjson.Get(recorder.Body.String(), "error.param").String())
 	require.Contains(t, gjson.Get(recorder.Body.String(), "error.message").String(), "conflicts")
 	require.Empty(t, upstream.requests, "an ambiguous request must not reach xAI")
+}
+
+func TestForwardGrokResponsesInvalidJSONReturnsSingleCommittedErrorWithoutParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"grok","input":"hello"} {"ignored":true}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := grokProtocolAPIKeyAccount(7105)
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok", false, time.Now())
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.True(t, IsResponseCommitted(c))
+	require.True(t, json.Valid(recorder.Body.Bytes()))
+	require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
+	require.False(t, gjson.Get(recorder.Body.String(), "error.param").Exists())
+	require.NotContains(t, recorder.Body.String(), "response.failed")
+	require.Empty(t, upstream.requests, "malformed JSON must not reach xAI")
 }
 
 func TestForwardGrokResponsesOAuthRestoresClientToolsNonStreaming(t *testing.T) {

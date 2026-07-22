@@ -62,6 +62,85 @@ func TestAdaptResponsesClientTools_LowersDeclarationsHistoryChoiceAndNamespaces(
 	require.Equal(t, "team__send", namespaceCall["name"])
 }
 
+func TestAdaptResponsesClientTools_LowersOutputOnlyContinuationHistory(t *testing.T) {
+	req := map[string]any{
+		"previous_response_id": "resp_prev",
+		"input": []any{
+			map[string]any{"type": "custom_tool_call_output", "call_id": "custom_call", "output": map[string]any{"ok": true}},
+			map[string]any{"type": "tool_search_output", "call_id": "search_call", "output": map[string]any{"groups": []string{"github"}}},
+			map[string]any{"type": "message", "role": "user", "content": "continue"},
+		},
+	}
+
+	mapping, changed, err := AdaptResponsesClientTools(req)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Empty(t, mapping.CustomTools)
+	require.False(t, mapping.ToolSearch)
+	require.Empty(t, mapping.NamespaceTools)
+
+	input := requireResponsesClientToolValue[[]any](t, req["input"])
+	customOutput := requireResponsesClientToolValue[map[string]any](t, input[0])
+	require.Equal(t, "function_call_output", customOutput["type"])
+	require.JSONEq(t, `{"ok":true}`, requireResponsesClientToolValue[string](t, customOutput["output"]))
+	searchOutput := requireResponsesClientToolValue[map[string]any](t, input[1])
+	require.Equal(t, "function_call_output", searchOutput["type"])
+	require.JSONEq(t, `{"groups":["github"]}`, requireResponsesClientToolValue[string](t, searchOutput["output"]))
+	_, hasTools := req["tools"]
+	require.False(t, hasTools)
+}
+
+func TestAdaptResponsesClientTools_LowersRemovedClientToolFullHistoryWithoutRestoreMapping(t *testing.T) {
+	req := map[string]any{
+		"tools": []any{map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object"}}},
+		"input": []any{
+			map[string]any{"type": "custom_tool_call", "call_id": "custom_call", "name": "removed_exec", "input": "pwd"},
+			map[string]any{"type": "custom_tool_call_output", "call_id": "custom_call", "output": "ok"},
+			map[string]any{"type": "tool_search_call", "call_id": "search_call", "arguments": map[string]any{"query": "git"}, "execution": "client"},
+			map[string]any{"type": "tool_search_output", "call_id": "search_call", "output": map[string]any{"groups": []string{"git"}}},
+			map[string]any{"type": "message", "role": "user", "content": "continue"},
+		},
+	}
+
+	mapping, changed, err := AdaptResponsesClientTools(req)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Empty(t, mapping.CustomTools)
+	require.False(t, mapping.ToolSearch)
+
+	input := requireResponsesClientToolValue[[]any](t, req["input"])
+	customCall := requireResponsesClientToolValue[map[string]any](t, input[0])
+	require.Equal(t, "function_call", customCall["type"])
+	require.Equal(t, "removed_exec", customCall["name"])
+	require.JSONEq(t, `{"input":"pwd"}`, requireResponsesClientToolValue[string](t, customCall["arguments"]))
+	require.False(t, hasResponsesClientToolKey(customCall, "input"))
+	require.Equal(t, "function_call_output", requireResponsesClientToolValue[map[string]any](t, input[1])["type"])
+	searchCall := requireResponsesClientToolValue[map[string]any](t, input[2])
+	require.Equal(t, "function_call", searchCall["type"])
+	require.Equal(t, toolSearchProxyName, searchCall["name"])
+	require.JSONEq(t, `{"query":"git"}`, requireResponsesClientToolValue[string](t, searchCall["arguments"]))
+	require.False(t, hasResponsesClientToolKey(searchCall, "execution"))
+	searchOutput := requireResponsesClientToolValue[map[string]any](t, input[3])
+	require.Equal(t, "function_call_output", searchOutput["type"])
+	require.JSONEq(t, `{"groups":["git"]}`, requireResponsesClientToolValue[string](t, searchOutput["output"]))
+}
+
+func TestAdaptResponsesClientTools_NoClientOnlyItemsNoopWithoutTools(t *testing.T) {
+	req := map[string]any{"input": []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}}
+
+	mapping, changed, err := AdaptResponsesClientTools(req)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Empty(t, mapping.CustomTools)
+	require.False(t, mapping.ToolSearch)
+	require.Empty(t, mapping.NamespaceTools)
+}
+
+func hasResponsesClientToolKey(item map[string]any, key string) bool {
+	_, ok := item[key]
+	return ok
+}
+
 func requireResponsesClientToolValue[T any](t *testing.T, value any) T {
 	t.Helper()
 	typed, ok := value.(T)

@@ -16,6 +16,31 @@ type ResponsesClientToolMapping struct {
 	NamespaceTools map[string]ResponsesNamespaceName
 }
 
+// ResponsesClientToolAdaptError marks declaration-level adaptation failures so
+// callers can report the right OpenAI error param without parsing messages.
+type ResponsesClientToolAdaptError struct {
+	Param string
+	Err   error
+}
+
+func (e *ResponsesClientToolAdaptError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+func (e *ResponsesClientToolAdaptError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func responsesClientToolParamError(param string, err error) error {
+	return &ResponsesClientToolAdaptError{Param: param, Err: err}
+}
+
 // AdaptResponsesClientTools lowers Codex client-only tools in req to
 // ordinary function tools. It mutates req and returns the mapping required to
 // restore the upstream response.
@@ -23,14 +48,11 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if req == nil {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	tools, ok := req["tools"].([]any)
-	if !ok || len(tools) == 0 {
-		return ResponsesClientToolMapping{}, false, nil
-	}
 
 	adapter := ResponsesClientToolMapping{CustomTools: make(map[string]bool)}
 	functionNames := make(map[string]bool)
 	customNames := make(map[string]bool)
+	tools, _ := req["tools"].([]any)
 	for _, raw := range tools {
 		tool, ok := raw.(map[string]any)
 		if !ok {
@@ -52,22 +74,22 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	}
 	for name := range customNames {
 		if functionNames[name] {
-			return ResponsesClientToolMapping{}, false, fmt.Errorf("custom tool %q conflicts with a function tool of the same name; this upstream cannot disambiguate them, rename one of the tools", name)
+			return ResponsesClientToolMapping{}, false, responsesClientToolParamError("tools", fmt.Errorf("custom tool %q conflicts with a function tool of the same name; this upstream cannot disambiguate them, rename one of the tools", name))
 		}
 	}
 	if adapter.ToolSearch && (functionNames[toolSearchProxyName] || customNames[toolSearchProxyName]) {
-		return ResponsesClientToolMapping{}, false, fmt.Errorf("built-in tool_search conflicts with a declared tool named %q; this upstream cannot disambiguate them, rename the tool", toolSearchProxyName)
+		return ResponsesClientToolMapping{}, false, responsesClientToolParamError("tools", fmt.Errorf("built-in tool_search conflicts with a declared tool named %q; this upstream cannot disambiguate them, rename the tool", toolSearchProxyName))
 	}
 
 	// Namespace flattening also rewrites namespace-qualified history and choice.
 	names, flattened, err := FlattenResponsesNamespaces(req)
 	if err != nil {
-		return ResponsesClientToolMapping{}, false, err
+		return ResponsesClientToolMapping{}, false, responsesClientToolParamError("tools", err)
 	}
 	adapter.NamespaceTools = names
 	if adapter.ToolSearch {
 		if _, exists := names[toolSearchProxyName]; exists {
-			return ResponsesClientToolMapping{}, false, fmt.Errorf("built-in tool_search conflicts with namespace tool flattened as %q; this upstream cannot disambiguate them, rename the tool", toolSearchProxyName)
+			return ResponsesClientToolMapping{}, false, responsesClientToolParamError("tools", fmt.Errorf("built-in tool_search conflicts with namespace tool flattened as %q; this upstream cannot disambiguate them, rename the tool", toolSearchProxyName))
 		}
 	}
 
@@ -151,30 +173,24 @@ func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) bo
 			typ := strings.TrimSpace(stringValue(typed["type"]))
 			switch typ {
 			case "custom_tool_call":
-				if adapter.CustomTools[strings.TrimSpace(stringValue(typed["name"]))] {
-					typed["type"] = "function_call"
-					typed["arguments"] = customToolCallArguments(stringValue(typed["input"]))
-					delete(typed, "input")
-					changed = true
-				}
+				typed["type"] = "function_call"
+				typed["arguments"] = customToolCallArguments(stringValue(typed["input"]))
+				delete(typed, "input")
+				changed = true
 			case "custom_tool_call_output":
 				typed["type"] = "function_call_output"
 				normalizeClientToolOutput(typed)
 				changed = true
 			case "tool_search_call":
-				if adapter.ToolSearch {
-					typed["type"] = "function_call"
-					typed["name"] = toolSearchProxyName
-					typed["arguments"] = rawObjectString(typed["arguments"])
-					delete(typed, "execution")
-					changed = true
-				}
+				typed["type"] = "function_call"
+				typed["name"] = toolSearchProxyName
+				typed["arguments"] = rawObjectString(typed["arguments"])
+				delete(typed, "execution")
+				changed = true
 			case "tool_search_output":
-				if adapter.ToolSearch {
-					typed["type"] = "function_call_output"
-					normalizeClientToolOutput(typed)
-					changed = true
-				}
+				typed["type"] = "function_call_output"
+				normalizeClientToolOutput(typed)
+				changed = true
 			}
 			for _, child := range typed {
 				visit(child)

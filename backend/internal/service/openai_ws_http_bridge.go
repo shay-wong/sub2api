@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -188,13 +189,18 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	var upstreamReq *http.Request
+	var clientToolRestorer *apicompat.ResponsesClientToolStreamRestorer
 	if account.Platform == PlatformGrok {
 		upstreamModel := resolveGrokWSUpstreamModel(account, body, originalModel)
 		grokIntentSourceBody := body
-		body, err = patchGrokResponsesBody(body, upstreamModel)
+		var clientToolMapping apicompat.ResponsesClientToolMapping
+		body, clientToolMapping, err = patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 		if err != nil {
 			releaseUpstreamCtx()
 			return nil, err
+		}
+		if hasGrokResponsesClientToolMapping(clientToolMapping) {
+			clientToolRestorer = apicompat.NewResponsesClientToolStreamRestorer(clientToolMapping)
 		}
 		grokMixedCacheIntentBody := append([]byte(nil), body...)
 		body, err = applyGrokResponsesCacheIdentity(body, grokIntentSourceBody, grokCacheIdentity, account.IsGrokOAuth())
@@ -351,123 +357,138 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized
 		}
-		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
-		if responseID == "" && eventResponseID != "" {
-			responseID = eventResponseID
-		}
-		if eventType != "" {
-			eventCount++
-			if firstEventType == "" {
-				firstEventType = eventType
-			}
-			lastEventType = eventType
-		}
-		if isOpenAIWSTokenEvent(eventType) {
-			tokenEventCount++
-			if firstTokenMs == nil {
-				ms := int(time.Since(turnStart).Milliseconds())
-				firstTokenMs = &ms
+		upstreamMessages := [][]byte{upstreamMessage}
+		if clientToolRestorer != nil && json.Valid(upstreamMessage) {
+			var restoreErr error
+			upstreamMessages, _, restoreErr = clientToolRestorer.RestoreEvent(upstreamMessage)
+			if restoreErr != nil {
+				return resultWithUsage(), fmt.Errorf("restore Grok Responses client tool event: %w", restoreErr)
 			}
 		}
-		if openAIWSEventShouldParseUsage(eventType) {
-			parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
-		}
-		imageCounter.AddSSEData(upstreamMessage)
+		for _, upstreamMessage := range upstreamMessages {
+			trimmedMessage := strings.TrimSpace(string(upstreamMessage))
+			if trimmedMessage == "" {
+				continue
+			}
+			upstreamMessage = []byte(trimmedMessage)
+			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+			if responseID == "" && eventResponseID != "" {
+				responseID = eventResponseID
+			}
+			if eventType != "" {
+				eventCount++
+				if firstEventType == "" {
+					firstEventType = eventType
+				}
+				lastEventType = eventType
+			}
+			if isOpenAIWSTokenEvent(eventType) {
+				tokenEventCount++
+				if firstTokenMs == nil {
+					ms := int(time.Since(turnStart).Milliseconds())
+					firstTokenMs = &ms
+				}
+			}
+			if openAIWSEventShouldParseUsage(eventType) {
+				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
+			}
+			imageCounter.AddSSEData(upstreamMessage)
 
-		if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
-			upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
-		}
-		if s.toolCorrector != nil && openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {
-			if corrected, changed := s.toolCorrector.CorrectToolCallsInSSEBytes(upstreamMessage); changed {
-				upstreamMessage = corrected
+			if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedMessage, mappedModel) {
+				upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
 			}
-		}
-		replayCollector.AddEvent(eventType, upstreamMessage)
+			if s.toolCorrector != nil && openAIWSEventMayContainToolCalls(eventType) && openAIWSMessageLikelyContainsToolCalls(upstreamMessage) {
+				if corrected, changed := s.toolCorrector.CorrectToolCallsInSSEBytes(upstreamMessage); changed {
+					upstreamMessage = corrected
+				}
+			}
+			replayCollector.AddEvent(eventType, upstreamMessage)
 
-		var upstreamEventErr error
-		if eventType == "error" {
-			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
-			errMessage := strings.TrimSpace(errMsgRaw)
-			if errMessage == "" {
-				errMessage = "upstream error event"
+			var upstreamEventErr error
+			if eventType == "error" {
+				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
+				errMessage := strings.TrimSpace(errMsgRaw)
+				if errMessage == "" {
+					errMessage = "upstream error event"
+				}
+				statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
+				shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(statusCode, errMessage, upstreamMessage)
+				if account.Platform == PlatformGrok {
+					// SSE error events do not carry an HTTP status. The local status
+					// mapper therefore defaults unknown xAI codes (for example
+					// new_sensitive) to 502; classify the body as a request-scoped
+					// 403 before applying status-based failover or account state.
+					if isGrokContentPolicyRejection(http.StatusForbidden, upstreamMessage) {
+						shouldFailover = false
+					} else {
+						shouldFailover = s.shouldFailoverGrokUpstreamError(statusCode, upstreamMessage)
+						s.handleGrokAccountUpstreamError(ctx, account, statusCode, resp.Header, upstreamMessage)
+					}
+				} else if shouldFailover {
+					accountStatus := statusCode
+					if transientStatus := openAIWSPayloadTransientStatus(upstreamMessage); transientStatus != 0 {
+						accountStatus = transientStatus
+					}
+					canonicalModel := canonicalOpenAIAccountSchedulingModel(account, originalModel)
+					s.handleOpenAIAccountUpstreamError(ctx, account, accountStatus, resp.Header, upstreamMessage, canonicalModel)
+				}
+				if turn == 1 && !wroteDownstream && shouldFailover {
+					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
+				}
+				upstreamEventErr = errors.New(errMessage)
 			}
-			statusCode := openAIWSErrorHTTPStatusFromRaw(errCodeRaw, errTypeRaw)
-			shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(statusCode, errMessage, upstreamMessage)
-			if account.Platform == PlatformGrok {
-				// SSE error events do not carry an HTTP status. The local status
-				// mapper therefore defaults unknown xAI codes (for example
-				// new_sensitive) to 502; classify the body as a request-scoped
-				// 403 before applying status-based failover or account state.
-				if isGrokContentPolicyRejection(http.StatusForbidden, upstreamMessage) {
-					shouldFailover = false
+
+			if !clientDisconnected {
+				if err := writeClientMessage(upstreamMessage); err != nil {
+					if isOpenAIWSClientDisconnectError(err) {
+						clientDisconnected = true
+						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
+						logOpenAIWSModeInfo(
+							"ingress_ws_http_bridge_client_disconnected_drain account_id=%d turn=%d close_status=%s close_reason=%s",
+							account.ID,
+							turn,
+							closeStatus,
+							truncateOpenAIWSLogValue(closeReason, openAIWSHeaderValueMaxLen),
+						)
+					} else {
+						return nil, wrapOpenAIWSIngressTurnError(
+							"write_client",
+							fmt.Errorf("write client websocket event: %w", err),
+							wroteDownstream,
+						)
+					}
 				} else {
-					shouldFailover = s.shouldFailoverGrokUpstreamError(statusCode, upstreamMessage)
-					s.handleGrokAccountUpstreamError(ctx, account, statusCode, resp.Header, upstreamMessage)
+					wroteDownstream = true
 				}
-			} else if shouldFailover {
-				accountStatus := statusCode
-				if transientStatus := openAIWSPayloadTransientStatus(upstreamMessage); transientStatus != 0 {
-					accountStatus = transientStatus
-				}
-				canonicalModel := canonicalOpenAIAccountSchedulingModel(account, originalModel)
-				s.handleOpenAIAccountUpstreamError(ctx, account, accountStatus, resp.Header, upstreamMessage, canonicalModel)
 			}
-			if turn == 1 && !wroteDownstream && shouldFailover {
-				return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
-			}
-			upstreamEventErr = errors.New(errMessage)
-		}
 
-		if !clientDisconnected {
-			if err := writeClientMessage(upstreamMessage); err != nil {
-				if isOpenAIWSClientDisconnectError(err) {
-					clientDisconnected = true
-					closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
-					logOpenAIWSModeInfo(
-						"ingress_ws_http_bridge_client_disconnected_drain account_id=%d turn=%d close_status=%s close_reason=%s",
-						account.ID,
-						turn,
-						closeStatus,
-						truncateOpenAIWSLogValue(closeReason, openAIWSHeaderValueMaxLen),
-					)
-				} else {
-					return nil, wrapOpenAIWSIngressTurnError(
-						"write_client",
-						fmt.Errorf("write client websocket event: %w", err),
-						wroteDownstream,
-					)
+			if upstreamEventErr != nil {
+				return resultWithUsage(), upstreamEventErr
+			}
+			if isOpenAIWSTerminalEvent(eventType) {
+				upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
+				terminalEventCount++
+				firstTokenMsValue := -1
+				if firstTokenMs != nil {
+					firstTokenMsValue = *firstTokenMs
 				}
-			} else {
-				wroteDownstream = true
+				logOpenAIWSModeInfo(
+					"ingress_ws_http_bridge_turn_completed account_id=%d turn=%d response_id=%s payload_bytes=%d duration_ms=%d events=%d token_events=%d terminal_events=%d first_event=%s last_event=%s first_token_ms=%d client_disconnected=%v",
+					account.ID,
+					turn,
+					truncateOpenAIWSLogValue(responseID, openAIWSIDValueMaxLen),
+					payloadBytes,
+					time.Since(turnStart).Milliseconds(),
+					eventCount,
+					tokenEventCount,
+					terminalEventCount,
+					truncateOpenAIWSLogValue(firstEventType, openAIWSLogValueMaxLen),
+					truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
+					firstTokenMsValue,
+					clientDisconnected,
+				)
+				return resultWithUsage(), nil
 			}
-		}
-
-		if upstreamEventErr != nil {
-			return resultWithUsage(), upstreamEventErr
-		}
-		if isOpenAIWSTerminalEvent(eventType) {
-			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
-			terminalEventCount++
-			firstTokenMsValue := -1
-			if firstTokenMs != nil {
-				firstTokenMsValue = *firstTokenMs
-			}
-			logOpenAIWSModeInfo(
-				"ingress_ws_http_bridge_turn_completed account_id=%d turn=%d response_id=%s payload_bytes=%d duration_ms=%d events=%d token_events=%d terminal_events=%d first_event=%s last_event=%s first_token_ms=%d client_disconnected=%v",
-				account.ID,
-				turn,
-				truncateOpenAIWSLogValue(responseID, openAIWSIDValueMaxLen),
-				payloadBytes,
-				time.Since(turnStart).Milliseconds(),
-				eventCount,
-				tokenEventCount,
-				terminalEventCount,
-				truncateOpenAIWSLogValue(firstEventType, openAIWSLogValueMaxLen),
-				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
-				firstTokenMsValue,
-				clientDisconnected,
-			)
-			return resultWithUsage(), nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -493,7 +514,7 @@ func resolveGrokWSCacheIdentity(c *gin.Context, account *Account, payload []byte
 		return "", err
 	}
 	upstreamModel := resolveGrokWSUpstreamModel(account, body, originalModel)
-	body, err = patchGrokResponsesBody(body, upstreamModel)
+	body, _, err = patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 	if err != nil {
 		return "", err
 	}

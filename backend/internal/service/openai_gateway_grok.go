@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -55,9 +56,12 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	patchedBody, clientToolMapping, err := patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 	if err != nil {
 		setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-			"type": "invalid_request_error", "message": err.Error(), "param": "tools",
-		}})
+		MarkResponseCommitted(c)
+		errorBody := gin.H{"type": "invalid_request_error", "message": err.Error()}
+		if param := grokResponsesPreprocessErrorParam(err); param != "" {
+			errorBody["param"] = param
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": errorBody})
 		return nil, err
 	}
 	setGrokResponsesClientToolMapping(c, clientToolMapping)
@@ -403,6 +407,14 @@ func patchGrokResponsesBodyWithClientTools(body []byte, upstreamModel string) ([
 		return nil, apicompat.ResponsesClientToolMapping{}, err
 	}
 	return patched, mapping, nil
+}
+
+func grokResponsesPreprocessErrorParam(err error) string {
+	var adaptErr *apicompat.ResponsesClientToolAdaptError
+	if errors.As(err, &adaptErr) {
+		return strings.TrimSpace(adaptErr.Param)
+	}
+	return ""
 }
 
 func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, error) {
