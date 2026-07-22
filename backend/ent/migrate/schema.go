@@ -923,6 +923,8 @@ var (
 		{Name: "messages_dispatch_model_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
+		{Name: "max_reasoning_effort", Type: field.TypeString, Size: 20, Default: ""},
+		{Name: "reasoning_effort_mappings", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "project_id", Type: field.TypeInt64},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
@@ -933,7 +935,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_projects_groups",
-				Columns:    []*schema.Column{GroupsColumns[51]},
+				Columns:    []*schema.Column{GroupsColumns[53]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -947,7 +949,7 @@ var (
 			{
 				Name:    "group_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[51]},
+				Columns: []*schema.Column{GroupsColumns[53]},
 			},
 			{
 				Name:    "group_platform",
@@ -977,7 +979,7 @@ var (
 			{
 				Name:    "group_project_id_platform_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[51], GroupsColumns[15], GroupsColumns[13]},
+				Columns: []*schema.Column{GroupsColumns[53], GroupsColumns[15], GroupsColumns[13]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",
