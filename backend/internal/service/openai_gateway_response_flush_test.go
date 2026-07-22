@@ -453,7 +453,85 @@ func TestOpenAIResponseFlush_ClientDisconnectStillDrainsUsage(t *testing.T) {
 	require.Len(t, flushes, 1)
 }
 
+func TestOpenAIResponseFlush_GrokContentPolicyFailedBeforeOutputDoesNotFailover(t *testing.T) {
+	upstream := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"error":{"code":"new_sensitive","message":"text is sensitive"},"usage":{"input_tokens":6,"output_tokens":0}}}` + "\n\n"
+	recorder := newOpenAIResponseFlushRecorder()
+
+	result, err := runOpenAIResponseFlushTestWithAccount(
+		recorder,
+		io.NopCloser(strings.NewReader(upstream)),
+		config.GatewayConfig{},
+		&Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth},
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 6, result.usage.InputTokens)
+	gotBody, flushes := recorder.snapshot()
+	require.Contains(t, gotBody, "response.failed")
+	require.Contains(t, gotBody, "new_sensitive")
+	require.Contains(t, gotBody, "text is sensitive")
+	require.Len(t, flushes, 1)
+}
+
+func TestOpenAIResponseFlush_GrokContentPolicyFailedAfterOutputDoesNotFailover(t *testing.T) {
+	first := `data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"
+	failed := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"error":{"code":"new_sensitive","message":"image is sensitive"},"usage":{"input_tokens":7,"output_tokens":1}}}` + "\n\n"
+	recorder := newOpenAIResponseFlushRecorder()
+
+	result, err := runOpenAIResponseFlushTestWithAccount(
+		recorder,
+		io.NopCloser(strings.NewReader(first+failed)),
+		config.GatewayConfig{},
+		&Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth},
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.usage.InputTokens)
+	require.Equal(t, 1, result.usage.OutputTokens)
+	gotBody, flushes := recorder.snapshot()
+	require.Contains(t, gotBody, first)
+	require.Contains(t, gotBody, "response.failed")
+	require.Contains(t, gotBody, "new_sensitive")
+	require.Contains(t, gotBody, "image is sensitive")
+	require.Len(t, flushes, 2)
+}
+
+func TestOpenAIResponseFlush_GrokNonPolicyFailedBeforeOutputStillFailsOver(t *testing.T) {
+	upstream := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"upstream processing failed"}}}` + "\n\n"
+	recorder := newOpenAIResponseFlushRecorder()
+
+	_, err := runOpenAIResponseFlushTestWithAccount(
+		recorder,
+		io.NopCloser(strings.NewReader(upstream)),
+		config.GatewayConfig{},
+		&Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth},
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Empty(t, recorder.body.String())
+}
+
 func runOpenAIResponseFlushTest(recorder *openAIResponseFlushRecorder, body io.ReadCloser, gatewayCfg config.GatewayConfig) (*openaiStreamingResult, error) {
+	return runOpenAIResponseFlushTestWithAccount(
+		recorder,
+		body,
+		gatewayCfg,
+		&Account{ID: 1, Platform: PlatformOpenAI},
+	)
+}
+
+func runOpenAIResponseFlushTestWithAccount(recorder *openAIResponseFlushRecorder, body io.ReadCloser, gatewayCfg config.GatewayConfig, account *Account) (*openaiStreamingResult, error) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -466,7 +544,7 @@ func runOpenAIResponseFlushTest(recorder *openAIResponseFlushRecorder, body io.R
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       body,
 	}
-	return svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI}, time.Now(), "gpt-5", "gpt-5")
+	return svc.handleStreamingResponse(context.Background(), resp, c, account, time.Now(), "gpt-5", "gpt-5")
 }
 
 func runOpenAIResponseFlushTestAsync(recorder *openAIResponseFlushRecorder, body io.ReadCloser, gatewayCfg config.GatewayConfig) (<-chan *openaiStreamingResult, <-chan error) {

@@ -198,6 +198,14 @@ func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, r
 	return s.shouldFailoverUpstreamError(statusCode)
 }
 
+func (s *OpenAIGatewayService) shouldFailoverOpenAIStreamFailedEvent(account *Account, payload []byte, message string) bool {
+	if account != nil && account.IsGrok() &&
+		isGrokContentPolicyRejection(http.StatusForbidden, openAIStreamFailedEventPassthroughBody(payload, message)) {
+		return false
+	}
+	return openAIStreamFailedEventShouldFailover(payload, message)
+}
+
 // applyGrokForbiddenPolicy applies an administrator's existing temporary
 // unschedulable rules to a non-content 403. It reports true only when a rule
 // matched; unmatched responses retain the legacy entitlement cooldown.
