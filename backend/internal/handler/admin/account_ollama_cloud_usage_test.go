@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -261,6 +262,52 @@ func TestOllamaCloudUsageSharedStateMatchesListDetailAndSpecialEndpointWithoutLi
 		require.NotContains(t, body, "shared-secret-key")
 		require.NotContains(t, body, "ciphertext-secret")
 	}
+}
+
+func TestProjectScopedAccountResponsesDoNotResolveSharedOllamaCloudUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	shared := &service.Account{
+		ID: 7, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "shared-key"},
+		Extra: map[string]any{
+			service.OllamaCloudUsageSessionExtraKey: "ciphertext",
+			service.OllamaCloudUsageSnapshotExtraKey: &service.OllamaCloudUsageSnapshot{
+				Status: service.OllamaCloudUsageStatusOK,
+				Data:   &service.OllamaCloudUsageData{Plan: "cross-project"},
+			},
+		},
+	}
+	visible := &service.Account{
+		ID: 8, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "shared-key"},
+		Extra:       map[string]any{}, Status: service.StatusActive,
+	}
+	repo := &ollamaCloudUsageHandlerTestRepo{accounts: []*service.Account{shared, visible}}
+	adminService := newStubAdminService()
+	adminService.accounts = []service.Account{*visible}
+	adminService.getAccountResult = visible
+	usageService := service.NewOllamaCloudUsageService(repo, nil, nil, nil, true)
+	t.Cleanup(usageService.Stop)
+	handler := NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler.SetOllamaCloudUsageService(usageService)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 42))
+		c.Next()
+	})
+	router.GET("/accounts", handler.List)
+	router.GET("/accounts/:id", handler.GetByID)
+
+	// Project-scoped reads may expose the visible account's state, but must not aggregate siblings from other projects.
+	for _, target := range []string{"/accounts?page=1&page_size=20", "/accounts/8"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.NotContains(t, recorder.Body.String(), "cross-project")
+		require.NotContains(t, recorder.Body.String(), `"configured":true`)
+	}
+	require.Zero(t, repo.groupResolveCalls)
 }
 
 func TestGetOllamaCloudUsageSettingsHandlerSuccess(t *testing.T) {

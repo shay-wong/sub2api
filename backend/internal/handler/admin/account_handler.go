@@ -611,7 +611,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 			total = int64(len(accounts))
 		}
 	}
-	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
+	if scope.Unrestricted && h.ollamaCloudUsage != nil && len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
 			accountPointers[index] = &accounts[index]
@@ -863,7 +863,7 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
 		return
 	}
-	if h.ollamaCloudUsage != nil {
+	if scope.Unrestricted && h.ollamaCloudUsage != nil {
 		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
 			response.ErrorFrom(c, err)
 			return

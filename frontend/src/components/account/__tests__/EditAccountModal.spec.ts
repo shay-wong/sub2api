@@ -309,7 +309,10 @@ function mountModal(account = buildAccount()) {
         Icon: true,
         ProxySelector: true,
         GroupSelector: GroupSelectorStub,
-        ModelWhitelistSelector: ModelWhitelistSelectorStub
+        ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        OllamaCloudUsageSettings: {
+          template: '<div data-testid="ollama-cloud-usage-settings" />'
+        }
       }
     }
   })
@@ -536,6 +539,19 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(buildGrokOAuthAccount())
 
     expect(wrapper.find('[data-testid="grok-custom-base-url-toggle"]').exists()).toBe(visible)
+  })
+
+  it.each([
+    ['super admin', true, true],
+    ['project admin', false, false]
+  ])('%s Ollama Cloud controls visibility matches backend permission', (_name, isAdmin, visible) => {
+    authIsAdmin.value = isAdmin
+    const account = buildAccount()
+    account.ollama_cloud_usage = { eligible: true }
+
+    const wrapper = mountModal(account)
+
+    expect(wrapper.find('[data-testid="ollama-cloud-usage-settings"]').exists()).toBe(visible)
   })
 
   it('uses the official xAI base URL when a Grok API-key account omits base_url', async () => {

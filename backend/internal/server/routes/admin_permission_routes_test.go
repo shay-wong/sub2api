@@ -728,6 +728,40 @@ func TestProjectAdminCanReadAccountProxyOptionsWithAccountsWrite(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "username")
 }
 
+func TestProjectAdminCannotAccessSharedOllamaCloudUsageRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), []string{service.AdminPermissionAccountsWrite}))
+		c.Next()
+	})
+	registerAccountRoutes(
+		admin,
+		&handler.Handlers{Admin: &handler.AdminHandlers{Account: &adminhandler.AccountHandler{}}},
+		servermiddleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() }),
+	)
+
+	// Ollama sessions are shared by API key across projects, so only super admins may manage them.
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/admin/accounts/ollama-cloud-usage/settings"},
+		{http.MethodPut, "/api/v1/admin/accounts/ollama-cloud-usage/settings"},
+		{http.MethodGet, "/api/v1/admin/accounts/7/ollama-cloud-usage"},
+		{http.MethodPut, "/api/v1/admin/accounts/7/ollama-cloud-usage/session"},
+		{http.MethodDelete, "/api/v1/admin/accounts/7/ollama-cloud-usage/session"},
+		{http.MethodPut, "/api/v1/admin/accounts/7/ollama-cloud-usage/auto-refresh"},
+		{http.MethodPost, "/api/v1/admin/accounts/7/ollama-cloud-usage/refresh"},
+	} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(request.method, request.path, nil))
+		require.Equal(t, http.StatusForbidden, recorder.Code, "%s %s", request.method, request.path)
+	}
+}
+
 func TestSuperAdminCanCreateUnrestrictedProject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
