@@ -225,6 +225,34 @@ func openAIJSONToolsContainImageGeneration(tools gjson.Result) bool {
 	return found
 }
 
+func openAIJSONToolsContainImageGenerationForStrip(tools gjson.Result) bool {
+	if !tools.IsArray() {
+		return false
+	}
+	found := false
+	tools.ForEach(func(_, item gjson.Result) bool {
+		if isOpenAIImageGenerationType(openAIJSONString(item.Get("type"))) || isImageGenNamespaceTool(item) {
+			found = true
+			return false
+		}
+		if openAIJSONString(item.Get("type")) != "function" {
+			return true
+		}
+		found = isOpenAIImageGenFunctionReference(
+			openAIJSONString(item.Get("namespace")),
+			openAIJSONString(item.Get("name")),
+		)
+		if !found {
+			found = isOpenAIImageGenFunctionReference(
+				openAIJSONString(item.Get("function.namespace")),
+				openAIJSONString(item.Get("function.name")),
+			)
+		}
+		return !found
+	})
+	return found
+}
+
 func openAIJSONToolsContainNativeImageGeneration(tools gjson.Result) bool {
 	if !tools.IsArray() {
 		return false
@@ -271,6 +299,21 @@ func openAIJSONInputContainsImageGenTool(input gjson.Result) bool {
 	return found
 }
 
+func openAIJSONInputContainsImageGenToolForStrip(input gjson.Result) bool {
+	if !input.IsArray() {
+		return false
+	}
+	found := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		if openAIJSONString(item.Get("type")) != "additional_tools" {
+			return true
+		}
+		found = openAIJSONToolsContainImageGenerationForStrip(item.Get("tools"))
+		return !found
+	})
+	return found
+}
+
 func openAIRequestBodyHasImageGenerationDeclaration(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false
@@ -278,6 +321,40 @@ func openAIRequestBodyHasImageGenerationDeclaration(body []byte) bool {
 	return openAIJSONToolsContainImageGeneration(gjson.GetBytes(body, "tools")) ||
 		openAIJSONInputContainsImageGenTool(gjson.GetBytes(body, "input")) ||
 		openAIJSONToolChoiceSelectsImageGeneration(gjson.GetBytes(body, "tool_choice"))
+}
+
+func openAIRequestBodyHasImageGenerationDeclarationForStrip(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	return openAIJSONToolsContainImageGenerationForStrip(gjson.GetBytes(body, "tools")) ||
+		openAIJSONInputContainsImageGenToolForStrip(gjson.GetBytes(body, "input")) ||
+		openAIJSONToolChoiceSelectsExplicitImageGeneration(gjson.GetBytes(body, "tool_choice"))
+}
+
+func openAIRequestBodyHasNativeImageGenerationDeclaration(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	return openAIJSONToolsContainNativeImageGeneration(gjson.GetBytes(body, "tools")) ||
+		openAIJSONToolChoiceSelectsNativeImageGeneration(gjson.GetBytes(body, "tool_choice"))
+}
+
+func openAIJSONToolChoiceSelectsNativeImageGeneration(choice gjson.Result) bool {
+	if !choice.Exists() {
+		return false
+	}
+	if choice.Type == gjson.String {
+		return isOpenAIImageGenerationType(choice.String())
+	}
+	if !choice.IsObject() {
+		return false
+	}
+	if isOpenAIImageGenerationType(openAIJSONString(choice.Get("type"))) {
+		return true
+	}
+	tool := choice.Get("tool")
+	return tool.IsObject() && openAIJSONToolChoiceSelectsNativeImageGeneration(tool)
 }
 
 func openAIRequestBodyImageGenerationToolNeedsNormalization(body []byte) bool {
@@ -392,6 +469,24 @@ func openAIAnyToolChoiceSelectsImageGeneration(choice any) bool {
 		}
 	}
 	return false
+}
+
+func openAIAnyToolChoiceSelectsImageGenerationForStrip(choice any) bool {
+	if openAIAnyToolChoiceSelectsImageGeneration(choice) {
+		return true
+	}
+	v, ok := choice.(map[string]any)
+	if !ok {
+		return false
+	}
+	if isOpenAIImageGenFunctionReference(firstNonEmptyString(v["namespace"]), firstNonEmptyString(v["name"])) {
+		return true
+	}
+	if tool, ok := v["tool"].(map[string]any); ok && openAIAnyToolChoiceSelectsImageGenerationForStrip(tool) {
+		return true
+	}
+	fn, _ := v["function"].(map[string]any)
+	return isOpenAIImageGenFunctionReference(firstNonEmptyString(fn["namespace"]), firstNonEmptyString(fn["name"]))
 }
 
 func getAPIKeyFromContext(c interface{ Get(string) (any, bool) }) *APIKey {

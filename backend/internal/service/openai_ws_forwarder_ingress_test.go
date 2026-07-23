@@ -234,6 +234,50 @@ func TestStripOpenAIImageGenerationToolsFromRawPayload(t *testing.T) {
 		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
 	})
 
+	t.Run("function-style local image tools", func(t *testing.T) {
+		payload := []byte(`{
+			"type":"response.create",
+			"model":"gpt-5.5",
+			"tools":[
+				{"type":"function","name":"shell"},
+				{"type":"function","name":"image_gen.imagegen"},
+				{"type":"function","function":{"name":"image_gen__imagegen"}}
+			],
+			"tool_choice":{"type":"function","function":{"name":"image_gen.imagegen"}}
+		}`)
+
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.True(t, gjson.GetBytes(updated, `tools.#(name=="shell")`).Exists())
+		require.False(t, gjson.GetBytes(updated, `tools.#(name=="image_gen.imagegen")`).Exists())
+		require.False(t, gjson.GetBytes(updated, `tools.#(function.name=="image_gen__imagegen")`).Exists())
+		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
+	})
+
+	t.Run("removes generic required choice when no tools remain", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","tools":[{"type":"image_generation"}],"tool_choice":"required"}`)
+
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(updated, "tools").Exists())
+		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
+	})
+
+	t.Run("preserves generic required choice for unrelated tools", func(t *testing.T) {
+		payload := []byte(`{"type":"response.create","tools":[{"type":"function","name":"shell"},{"type":"image_generation"}],"tool_choice":"required"}`)
+
+		updated, changed, err := stripOpenAIImageGenerationToolsFromRawPayload(payload)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.True(t, gjson.GetBytes(updated, `tools.#(name=="shell")`).Exists())
+		require.Equal(t, "required", gjson.GetBytes(updated, "tool_choice").String())
+	})
+
 	t.Run("non-image namespace is unchanged", func(t *testing.T) {
 		payload := []byte(`{"type":"response.create","model":"gpt-5.5","tools":[{"type":"namespace","name":"code_tools"}]}`)
 

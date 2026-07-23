@@ -1537,6 +1537,33 @@
                 </span>
               </button>
             </div>
+            <div class="mt-2 flex items-center justify-between gap-4 rounded-md border border-sky-100 bg-sky-50/60 px-3 py-2 dark:border-sky-900/50 dark:bg-sky-950/20">
+              <div class="min-w-0">
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexImagePolicyAllowNonCodex') }}</label>
+                <p class="mt-1 text-xs leading-4 text-slate-500 dark:text-slate-400">
+                  {{ t('admin.accounts.openai.codexImagePolicyAllowNonCodexDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                data-testid="codex-image-policy-allow-non-codex"
+                :aria-label="t('admin.accounts.openai.codexImagePolicyAllowNonCodex')"
+                :aria-checked="codexImagePolicyAllowNonCodex"
+                @click="codexImagePolicyAllowNonCodex = !codexImagePolicyAllowNonCodex"
+                :class="[
+                  'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2',
+                  codexImagePolicyAllowNonCodex ? 'bg-sky-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    codexImagePolicyAllowNonCodex ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2849,6 +2876,7 @@ const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
+const codexImagePolicyAllowNonCodex = ref(false)
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
@@ -3262,6 +3290,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
   codexImageToolMode.value = 'inherit'
+  codexImagePolicyAllowNonCodex.value = false
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -3290,6 +3319,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
       ? extra.codex_image_generation_bridge
       : extra?.codex_image_generation_bridge_enabled
+    codexImagePolicyAllowNonCodex.value = extra?.codex_image_generation_policy_allow_non_codex === true
     if (extra?.codex_image_generation_explicit_tool_policy === 'strip') {
       codexImageToolMode.value = 'block'
     } else if (codexImageGenerationBridgeValue === true) {
@@ -4570,6 +4600,11 @@ const handleSubmit = async () => {
 		}
 
 		delete newExtra.codex_image_generation_bridge_enabled
+		if (codexImagePolicyAllowNonCodex.value) {
+			newExtra.codex_image_generation_policy_allow_non_codex = true
+		} else {
+			delete newExtra.codex_image_generation_policy_allow_non_codex
+		}
       switch (codexImageToolMode.value) {
         case 'enabled':
         case 'disabled':

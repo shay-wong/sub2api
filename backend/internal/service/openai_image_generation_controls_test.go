@@ -136,6 +136,187 @@ func TestOpenAIGatewayServiceForward_CodexImageInjectionRespectsGroupCapability(
 	}
 }
 
+func TestOpenAIGatewayServiceForward_NonCodexImageBridgeRequiresAccountOptIn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Non-Codex clients join the selected policy, while bridge injection still requires a native hosted tool.
+	tests := []struct {
+		name                   string
+		allowNonCodex          bool
+		inheritGlobalBridge    bool
+		body                   []byte
+		passthrough            bool
+		responsesLite          bool
+		toolPolicy             string
+		wantBridgeApplied      bool
+		wantHostedTool         bool
+		wantImageToolsStripped bool
+	}{
+		{
+			name:           "explicit image tool stays unbridged by default",
+			body:           []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			wantHostedTool: true,
+		},
+		{
+			name:           "block policy preserves non codex managed request without opt in",
+			body:           []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			toolPolicy:     codexImageGenerationExplicitToolPolicyStrip,
+			wantHostedTool: true,
+		},
+		{
+			name:           "block policy preserves non codex passthrough request without opt in",
+			body:           []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			passthrough:    true,
+			toolPolicy:     codexImageGenerationExplicitToolPolicyStrip,
+			wantHostedTool: true,
+		},
+		{
+			name:              "explicit image tool is bridged after opt in",
+			allowNonCodex:     true,
+			body:              []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			wantBridgeApplied: true,
+			wantHostedTool:    true,
+		},
+		{
+			name:                "opted in client inherits global bridge policy",
+			allowNonCodex:       true,
+			inheritGlobalBridge: true,
+			body:                []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			wantBridgeApplied:   true,
+			wantHostedTool:      true,
+		},
+		{
+			name:          "plain text request is not auto injected after opt in",
+			allowNonCodex: true,
+			body:          []byte(`{"model":"gpt-5.4","input":"write code","stream":false}`),
+		},
+		{
+			name:          "local image gen function does not enable hosted bridge",
+			allowNonCodex: true,
+			body:          []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tool_choice":{"type":"function","function":{"name":"image_gen.imagegen"}}}`),
+		},
+		{
+			name:          "custom function named image generation does not enable hosted bridge",
+			allowNonCodex: true,
+			body:          []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tool_choice":{"type":"function","function":{"name":"image_generation"}}}`),
+		},
+		{
+			name:           "responses lite remains unbridged after opt in",
+			allowNonCodex:  true,
+			body:           []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			responsesLite:  true,
+			wantHostedTool: true,
+		},
+		{
+			name:                   "block policy strips non codex managed request",
+			allowNonCodex:          true,
+			body:                   []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			toolPolicy:             codexImageGenerationExplicitToolPolicyStrip,
+			wantImageToolsStripped: true,
+		},
+		{
+			name:                   "block policy strips non codex passthrough request",
+			allowNonCodex:          true,
+			body:                   []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"image_generation"}],"tool_choice":"required"}`),
+			passthrough:            true,
+			toolPolicy:             codexImageGenerationExplicitToolPolicyStrip,
+			wantImageToolsStripped: true,
+		},
+		{
+			name:                   "block policy strips non codex local image tools",
+			allowNonCodex:          true,
+			body:                   []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]}],"tool_choice":{"type":"namespace","name":"image_gen"}}`),
+			toolPolicy:             codexImageGenerationExplicitToolPolicyStrip,
+			wantImageToolsStripped: true,
+		},
+		{
+			name:                   "block policy strips non codex local functions from managed request",
+			allowNonCodex:          true,
+			body:                   []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"function","name":"shell"},{"type":"function","name":"image_gen.imagegen"},{"type":"function","function":{"name":"image_gen__imagegen"}}],"tool_choice":{"type":"function","function":{"name":"image_gen.imagegen"}}}`),
+			toolPolicy:             codexImageGenerationExplicitToolPolicyStrip,
+			wantImageToolsStripped: true,
+		},
+		{
+			name:                   "block policy strips non codex local functions from passthrough request",
+			allowNonCodex:          true,
+			body:                   []byte(`{"model":"gpt-5.4","input":"draw","stream":false,"tools":[{"type":"function","name":"shell"},{"type":"function","name":"image_gen.imagegen"},{"type":"function","function":{"name":"image_gen__imagegen"}}],"tool_choice":{"type":"function","function":{"name":"image_gen.imagegen"}}}`),
+			passthrough:            true,
+			toolPolicy:             codexImageGenerationExplicitToolPolicyStrip,
+			wantImageToolsStripped: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{
+				resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"id":"resp_non_codex_image","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}`)),
+				},
+			}
+			svc := newOpenAIImageGenerationControlTestService(upstream)
+			if tt.inheritGlobalBridge {
+				svc.cfg.Gateway.CodexImageGenerationBridgeEnabled = true
+			}
+			c, _ := newOpenAIImageGenerationControlTestContext(true, "OpenAI/Python 2.47.0")
+			if tt.responsesLite {
+				c.Request.Header.Set(responsesLiteHeader, "true")
+			}
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Extra = map[string]any{
+				featureKeyCodexImageGenerationPolicyAllowNonCodex: tt.allowNonCodex,
+				featureKeyCodexImageGenerationExplicitToolPolicy:  tt.toolPolicy,
+				"openai_passthrough":                              tt.passthrough,
+			}
+			if !tt.inheritGlobalBridge {
+				account.Extra[featureKeyCodexImageGenerationBridge] = true
+			}
+
+			result, err := svc.Forward(context.Background(), c, account, tt.body)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
+			require.Equal(t, tt.wantBridgeApplied, strings.Contains(instructions, codexImageGenerationBridgeMarker))
+			hasImageTool := gjson.GetBytes(upstream.lastBody, `tools.#(type=="image_generation")`).Exists()
+			require.Equal(t, tt.wantHostedTool, hasImageTool)
+			if tt.wantBridgeApplied {
+				require.Equal(t, "required", gjson.GetBytes(upstream.lastBody, "tool_choice").String())
+			}
+			if tt.wantImageToolsStripped {
+				var forwarded map[string]any
+				require.NoError(t, json.Unmarshal(upstream.lastBody, &forwarded))
+				require.False(t, hasOpenAIImageGenerationTool(forwarded))
+				require.False(t, openAIRequestBodyHasImageGenerationDeclarationForStrip(upstream.lastBody))
+				require.False(t, gjson.GetBytes(upstream.lastBody, "tool_choice").Exists())
+			}
+		})
+	}
+}
+
+func TestAllowsCodexImageGenerationBridgeForRequest_PreservesOfficialClientAutoInjection(t *testing.T) {
+	// The shared non-Codex scope switch must never narrow the official Codex behavior.
+	tests := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{name: "scope absent"},
+		{name: "scope disabled", extra: map[string]any{featureKeyCodexImageGenerationPolicyAllowNonCodex: false}},
+		{name: "scope enabled", extra: map[string]any{featureKeyCodexImageGenerationPolicyAllowNonCodex: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := newOpenAIImageGenerationControlTestAccount()
+			account.Extra = tt.extra
+
+			require.True(t, allowsCodexImageGenerationBridgeForRequest(account, true, []byte(`{"model":"gpt-5.4","input":"write code"}`)))
+		})
+	}
+}
+
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughForwardsResponsesLiteHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.98.0")

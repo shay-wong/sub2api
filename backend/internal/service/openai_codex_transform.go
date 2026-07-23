@@ -700,6 +700,20 @@ func isOpenAIImageGenerationToolMap(tool map[string]any) bool {
 		isImageGenNamespaceToolMap(tool)
 }
 
+func isOpenAIImageGenerationToolMapForStrip(tool map[string]any) bool {
+	if isOpenAIImageGenerationToolMap(tool) {
+		return true
+	}
+	if strings.TrimSpace(firstNonEmptyString(tool["type"])) != "function" {
+		return false
+	}
+	if isOpenAIImageGenFunctionReference(firstNonEmptyString(tool["namespace"]), firstNonEmptyString(tool["name"])) {
+		return true
+	}
+	fn, _ := tool["function"].(map[string]any)
+	return isOpenAIImageGenFunctionReference(firstNonEmptyString(fn["namespace"]), firstNonEmptyString(fn["name"]))
+}
+
 func isImageGenNamespaceToolMap(tool map[string]any) bool {
 	return strings.TrimSpace(firstNonEmptyString(tool["type"])) == "namespace" &&
 		isOpenAIImageGenNamespaceName(firstNonEmptyString(tool["name"]))
@@ -731,15 +745,50 @@ func stripOpenAIImageGenerationTools(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false
 	}
-	modified := stripOpenAIImageGenerationToolList(reqBody, "tools")
+	toolsRemoved := stripOpenAIImageGenerationToolList(reqBody, "tools")
+	modified := toolsRemoved
 	if stripOpenAIImageGenerationToolsFromInput(reqBody) {
+		toolsRemoved = true
 		modified = true
 	}
-	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+	if openAIAnyToolChoiceSelectsImageGenerationForStrip(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
+		modified = true
+	} else if toolsRemoved && !hasOpenAIToolDeclarations(reqBody) && isOpenAIGenericRequiredToolChoice(reqBody["tool_choice"]) {
 		delete(reqBody, "tool_choice")
 		modified = true
 	}
 	return modified
+}
+
+func hasOpenAIToolDeclarations(reqBody map[string]any) bool {
+	if tools, ok := reqBody["tools"].([]any); ok && len(tools) > 0 {
+		return true
+	}
+	input, _ := reqBody["input"].([]any)
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if tools, ok := item["tools"].([]any); ok && len(tools) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func isOpenAIGenericRequiredToolChoice(choice any) bool {
+	value, ok := choice.(string)
+	if !ok {
+		return false
+	}
+	switch strings.TrimSpace(value) {
+	case "auto", "required":
+		return true
+	default:
+		return false
+	}
 }
 
 func stripOpenAIImageGenerationToolList(container map[string]any, key string) bool {
@@ -754,7 +803,7 @@ func stripOpenAIImageGenerationToolList(container map[string]any, key string) bo
 	filtered := make([]any, 0, len(tools))
 	removed := false
 	for _, rawTool := range tools {
-		if toolMap, ok := rawTool.(map[string]any); ok && isOpenAIImageGenerationToolMap(toolMap) {
+		if toolMap, ok := rawTool.(map[string]any); ok && isOpenAIImageGenerationToolMapForStrip(toolMap) {
 			removed = true
 			continue
 		}
@@ -805,7 +854,7 @@ func stripOpenAIImageGenerationToolsFromInput(reqBody map[string]any) bool {
 // stripOpenAIImageGenerationToolsFromRawPayload is the shared adapter for paths
 // that forward raw HTTP or WebSocket payloads without the normal request map.
 func stripOpenAIImageGenerationToolsFromRawPayload(payload []byte) ([]byte, bool, error) {
-	if !openAIRequestBodyHasImageGenerationDeclaration(payload) {
+	if !openAIRequestBodyHasImageGenerationDeclarationForStrip(payload) {
 		if json.Valid(payload) {
 			return payload, false, nil
 		}

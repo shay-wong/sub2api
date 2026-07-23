@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -435,6 +436,49 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCa
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridgeRespectsResponsesLite(t *testing.T) {
+	runOpenAIWSImageBridgeSession(
+		t,
+		"codex_cli_rs/0.98.0",
+		"",
+		false,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat"}`,
+		"auto",
+		true,
+		"",
+		true,
+	)
+}
+
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_NonCodexImageBridgeRespectsExplicitIntent(t *testing.T) {
+	runOpenAIWSImageBridgeSession(
+		t,
+		"OpenAI/Python 2.47.0",
+		"axonhub",
+		true,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+		"required",
+		true,
+		"",
+		true,
+	)
+}
+
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_NonCodexBlockPolicyStrips(t *testing.T) {
+	runOpenAIWSImageBridgeSession(
+		t,
+		"OpenAI/Python 2.47.0",
+		"axonhub",
+		true,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+		"",
+		false,
+		codexImageGenerationExplicitToolPolicyStrip,
+		false,
+	)
+}
+
+func runOpenAIWSImageBridgeSession(t *testing.T, userAgent string, originator string, allowNonCodex bool, firstPayload string, wantToolChoice string, wantHostedTool bool, toolPolicy string, wantBridgeApplied bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -494,8 +538,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 			"access_token": "test-token",
 		},
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-			"codex_image_generation_bridge":                true,
+			"openai_oauth_responses_websockets_v2_enabled":  true,
+			"codex_image_generation_bridge":                 true,
+			"codex_image_generation_policy_allow_non_codex": allowNonCodex,
+			"codex_image_generation_explicit_tool_policy":   toolPolicy,
 		},
 	}
 
@@ -516,7 +562,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		ginCtx, _ := gin.CreateTestContext(rec)
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
-		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+		req.Header.Set("User-Agent", userAgent)
+		if originator != "" {
+			req.Header.Set("Originator", originator)
+		}
 		ginCtx.Request = req
 		ginCtx.Set("api_key", apiKey)
 
@@ -545,7 +594,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat"}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(firstPayload))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -588,7 +637,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		"stream":false,
 		"previous_response_id":"resp_codex_image_lite",
 		"input":"draw a cat",
-		"tools":[{"type":"function","name":"image_gen.imagegen","parameters":{"type":"object"}}]
+		"tools":[
+			{"type":"function","name":"shell","parameters":{"type":"object"}},
+			{"type":"function","name":"image_gen.imagegen","parameters":{"type":"object"}},
+			{"type":"function","function":{"name":"image_gen__imagegen","parameters":{"type":"object"}}}
+		],
+		"tool_choice":{"type":"function","function":{"name":"image_gen.imagegen"}}
 	}`))
 	cancelWrite()
 	require.NoError(t, err)
@@ -611,10 +665,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 
 	require.Len(t, captureConn.writes, 3)
 	nonLitePayload := requestToJSONString(captureConn.writes[0])
-	require.True(t, gjson.Get(nonLitePayload, `tools.#(type=="image_generation")`).Exists())
-	require.Equal(t, "png", gjson.Get(nonLitePayload, `tools.#(type=="image_generation").output_format`).String())
-	require.Equal(t, "auto", gjson.Get(nonLitePayload, "tool_choice").String())
-	require.Contains(t, gjson.Get(nonLitePayload, "instructions").String(), "image_generation")
+	require.Equal(t, wantHostedTool, gjson.Get(nonLitePayload, `tools.#(type=="image_generation")`).Exists())
+	if wantHostedTool {
+		require.Equal(t, "png", gjson.Get(nonLitePayload, `tools.#(type=="image_generation").output_format`).String())
+	}
+	require.Equal(t, wantToolChoice, gjson.Get(nonLitePayload, "tool_choice").String())
+	require.Equal(t, wantBridgeApplied, strings.Contains(gjson.Get(nonLitePayload, "instructions").String(), codexImageGenerationBridgeMarker))
 	require.False(t, gjson.Get(nonLitePayload, "reasoning.context").Exists())
 
 	litePayload := requestToJSONString(captureConn.writes[1])
@@ -630,9 +686,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.Equal(t, "all_turns", gjson.Get(litePayload, "reasoning.context").String())
 
 	functionPayload := requestToJSONString(captureConn.writes[2])
-	require.True(t, gjson.Get(functionPayload, `tools.#(name=="image_gen.imagegen")`).Exists())
+	wantLocalImageFunctions := toolPolicy != codexImageGenerationExplicitToolPolicyStrip
+	require.Equal(t, wantLocalImageFunctions, gjson.Get(functionPayload, `tools.#(name=="image_gen.imagegen")`).Exists())
+	require.Equal(t, wantLocalImageFunctions, gjson.Get(functionPayload, `tools.#(function.name=="image_gen__imagegen")`).Exists())
+	require.Equal(t, wantLocalImageFunctions, gjson.Get(functionPayload, "tool_choice").Exists())
+	require.True(t, gjson.Get(functionPayload, `tools.#(name=="shell")`).Exists())
 	require.False(t, gjson.Get(functionPayload, `tools.#(type=="image_generation")`).Exists())
-	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
 }
 
@@ -954,6 +1013,216 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 		}
 	}
 
+}
+
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeAppliesNonCodexImagePolicy(t *testing.T) {
+	t.Run("bridge requires native intent on every turn", func(t *testing.T) {
+		writes := runOpenAIWSPassthroughImagePolicySession(
+			t,
+			true,
+			true,
+			"",
+			[]string{
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"write code"}`,
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw","client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},"tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+			},
+		)
+
+		require.Len(t, writes, 3)
+		require.True(t, gjson.GetBytes(writes[0], `tools.#(type=="image_generation")`).Exists())
+		require.Contains(t, gjson.GetBytes(writes[0], "instructions").String(), codexImageGenerationBridgeMarker)
+		require.Equal(t, "required", gjson.GetBytes(writes[0], "tool_choice").String())
+		require.False(t, gjson.GetBytes(writes[1], `tools.#(type=="image_generation")`).Exists())
+		require.NotContains(t, gjson.GetBytes(writes[1], "instructions").String(), codexImageGenerationBridgeMarker)
+		require.True(t, gjson.GetBytes(writes[2], `tools.#(type=="image_generation")`).Exists())
+		require.NotContains(t, gjson.GetBytes(writes[2], "instructions").String(), codexImageGenerationBridgeMarker)
+	})
+
+	t.Run("strip applies to first and subsequent turns", func(t *testing.T) {
+		writes := runOpenAIWSPassthroughImagePolicySession(
+			t,
+			true,
+			true,
+			codexImageGenerationExplicitToolPolicyStrip,
+			[]string{
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw","tools":[{"type":"image_generation"},{"type":"function","name":"image_gen.imagegen"}],"tool_choice":"required"}`,
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw","tools":[{"type":"namespace","name":"image_gen"},{"type":"function","function":{"name":"image_gen__imagegen"}}],"tool_choice":"auto"}`,
+			},
+		)
+
+		require.Len(t, writes, 2)
+		require.False(t, openAIRequestBodyHasImageGenerationDeclarationForStrip(writes[0]))
+		require.False(t, gjson.GetBytes(writes[0], "tools").Exists())
+		require.False(t, gjson.GetBytes(writes[0], "tool_choice").Exists())
+		require.False(t, openAIRequestBodyHasImageGenerationDeclarationForStrip(writes[1]))
+		require.False(t, gjson.GetBytes(writes[1], "tools").Exists())
+		require.False(t, gjson.GetBytes(writes[1], "tool_choice").Exists())
+	})
+
+	t.Run("scope disabled preserves non codex image tools", func(t *testing.T) {
+		writes := runOpenAIWSPassthroughImagePolicySession(
+			t,
+			false,
+			true,
+			codexImageGenerationExplicitToolPolicyStrip,
+			[]string{
+				`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw","tools":[{"type":"image_generation"},{"type":"function","name":"image_gen.imagegen"}],"tool_choice":"required"}`,
+			},
+		)
+
+		require.Len(t, writes, 1)
+		require.True(t, gjson.GetBytes(writes[0], `tools.#(type=="image_generation")`).Exists())
+		require.True(t, gjson.GetBytes(writes[0], `tools.#(name=="image_gen.imagegen")`).Exists())
+		require.Equal(t, "required", gjson.GetBytes(writes[0], "tool_choice").String())
+		require.NotContains(t, gjson.GetBytes(writes[0], "instructions").String(), codexImageGenerationBridgeMarker)
+	})
+}
+
+func runOpenAIWSPassthroughImagePolicySession(
+	t *testing.T,
+	allowNonCodex bool,
+	bridgeEnabled bool,
+	toolPolicy string,
+	payloads []string,
+) [][]byte {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	upstreamConn := newStagedPassthroughConn()
+	svc := &OpenAIGatewayService{
+		cfg:                       cfg,
+		httpUpstream:              &httpUpstreamRecorder{},
+		cache:                     &stubGatewayCache{},
+		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:             NewCodexToolCorrector(),
+		openaiWSPassthroughDialer: &stagedPassthroughDialer{conn: upstreamConn},
+	}
+
+	groupID := int64(991)
+	apiKey := &APIKey{
+		ID:      991,
+		UserID:  1,
+		GroupID: &groupID,
+		Group: &Group{
+			ID:                   groupID,
+			AllowImageGeneration: true,
+		},
+	}
+	account := &Account{
+		ID:          991,
+		Name:        "openai-image-policy-passthrough",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+		},
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_mode":      OpenAIWSIngressModePassthrough,
+			featureKeyCodexImageGenerationBridge:              bridgeEnabled,
+			featureKeyCodexImageGenerationPolicyAllowNonCodex: allowNonCodex,
+			featureKeyCodexImageGenerationExplicitToolPolicy:  toolPolicy,
+		},
+	}
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
+			CompressionMode: coderws.CompressionContextTakeover,
+		})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() {
+			_ = conn.CloseNow()
+		}()
+
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		req := r.Clone(r.Context())
+		req.Header = req.Header.Clone()
+		req.Header.Set("User-Agent", "OpenAI/Python 2.47.0")
+		req.Header.Set("Originator", "axonhub")
+		ginCtx.Request = req
+		ginCtx.Set("api_key", apiKey)
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+			serverErrCh <- errors.New("unsupported websocket client message type")
+			return
+		}
+
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() {
+		_ = clientConn.CloseNow()
+	}()
+
+	writes := make([][]byte, 0, len(payloads))
+	for i, payload := range payloads {
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(payload))
+		cancelWrite()
+		require.NoError(t, err)
+
+		select {
+		case upstreamWrite := <-upstreamConn.writes:
+			writes = append(writes, upstreamWrite)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("turn %d response.create was not forwarded upstream", i+1)
+		}
+
+		responseID := fmt.Sprintf("resp_image_policy_passthrough_%d", i+1)
+		upstreamConn.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":%q,"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`, responseID))
+
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		_, event, readErr := clientConn.Read(readCtx)
+		cancelRead()
+		require.NoError(t, readErr)
+		require.Equal(t, responseID, gjson.GetBytes(event, "response.id").String())
+	}
+
+	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+	select {
+	case serverErr := <-serverErrCh:
+		if serverErr != nil {
+			require.True(t,
+				strings.Contains(serverErr.Error(), "StatusNormalClosure") || errors.Is(serverErr, errOpenAIWSConnClosed),
+				"server error should only be a normal close or closed capture connection, got: %v", serverErr,
+			)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for passthrough websocket shutdown timed out")
+	}
+	return writes
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeadersUsePromptCacheAndTurnState(t *testing.T) {

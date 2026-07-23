@@ -711,6 +711,8 @@ export default {
         codexImageToolBadgeEnabled: 'Hosted 桥接已开启',
         codexImageToolBadgeDisabled: '不注入 Hosted 工具',
         codexImageToolBadgeBlock: '客户端图片工具已移除',
+        codexImagePolicyAllowNonCodex: '策略应用于非 Codex 客户端',
+        codexImagePolicyAllowNonCodexDesc: '将当前图片策略应用于 Python SDK、AxonHub 等非 Codex 客户端。启用 Hosted 桥接仍要求请求显式携带 image_generation 工具；选择移除模式时也会删除匹配的客户端图片工具。',
         compactMode: 'Compact 模式',
         compactModeDesc:
           '控制本账号在 /responses/compact 调度中的参与方式。Auto 跟随探测结果，Force On 强制允许，Force Off 强制排除。',

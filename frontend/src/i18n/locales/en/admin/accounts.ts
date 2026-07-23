@@ -628,6 +628,8 @@ export default {
         codexImageToolBadgeEnabled: 'Hosted bridge on',
         codexImageToolBadgeDisabled: 'No hosted injection',
         codexImageToolBadgeBlock: 'Client image tools stripped',
+        codexImagePolicyAllowNonCodex: 'Apply policy to non-Codex clients',
+        codexImagePolicyAllowNonCodexDesc: 'Apply the selected image policy to Python SDK, AxonHub, and other non-Codex clients. Hosted bridge activation still requires an explicit image_generation tool; Block mode removes matching client image tools.',
         compactMode: 'Compact mode',
         compactModeDesc:
           'Controls how this account participates in /responses/compact routing. Auto follows probe results, Force On always allows, Force Off always excludes.',
