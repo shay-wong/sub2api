@@ -632,6 +632,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			firstClientMessage = capped
 		}
 	}
+	firstClientMessage = applyOpenAIWSFixedRequestModel(firstClientMessage, hooks)
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
@@ -890,6 +891,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if err := hooks.BeforeRequest(turnNo, payload, requestModel); err != nil {
 					return payload, nil, err
 				}
+			}
+			if isResponseCreate {
+				payload = applyOpenAIWSFixedRequestModel(payload, hooks)
 			}
 			// 在评估策略前先刷新 capturedSessionModel：客户端可能通过
 			// session.update 修改 session-level model（Realtime /

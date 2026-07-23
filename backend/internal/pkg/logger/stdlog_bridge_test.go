@@ -61,10 +61,11 @@ func TestStdLogBridgeRoutesLevels(t *testing.T) {
 	})
 
 	if err := Init(InitOptions{
-		Level:       "debug",
-		Format:      "json",
-		ServiceName: "sub2api",
-		Environment: "test",
+		Level:           "debug",
+		Format:          "json",
+		ServiceName:     "sub2api",
+		Environment:     "test",
+		StacktraceLevel: "none",
 		Output: OutputOptions{
 			ToStdout: true,
 			ToFile:   false,
@@ -123,10 +124,11 @@ func TestLegacyPrintfRoutesLevels(t *testing.T) {
 	})
 
 	if err := Init(InitOptions{
-		Level:       "debug",
-		Format:      "json",
-		ServiceName: "sub2api",
-		Environment: "test",
+		Level:           "debug",
+		Format:          "json",
+		ServiceName:     "sub2api",
+		Environment:     "test",
+		StacktraceLevel: "none",
 		Output: OutputOptions{
 			ToStdout: true,
 			ToFile:   false,

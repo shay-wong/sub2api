@@ -172,8 +172,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 		}
 
-		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
-		eventType := strings.TrimSpace(values[0].String())
+		eventType := strings.TrimSpace(gjson.GetBytes(trimmed, "type").String())
 		normalized := trimmed
 		switch eventType {
 		case "":
@@ -197,13 +196,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+		normalized = applyOpenAIWSFixedRequestModel(normalized, hooks)
 		if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 			if capped, changed := ApplyOpenAIReasoningEffortPolicy(normalized, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 				normalized = capped
 			}
 		}
 
-		originalModel := strings.TrimSpace(values[1].String())
+		values := gjson.GetManyBytes(normalized, "model", "prompt_cache_key", "previous_response_id")
+		originalModel := strings.TrimSpace(values[0].String())
 		modelMissing := originalModel == ""
 		if originalModel == "" {
 			// 入站 WS 长会话里，部分客户端只在第一轮 response.create 上声明
@@ -220,8 +221,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			}
 		}
-		promptCacheKey := strings.TrimSpace(values[2].String())
-		previousResponseID := strings.TrimSpace(values[3].String())
+		promptCacheKey := strings.TrimSpace(values[1].String())
+		previousResponseID := strings.TrimSpace(values[2].String())
 		previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 		if previousResponseID != "" && previousResponseIDKind == OpenAIPreviousResponseIDKindMessageID {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(

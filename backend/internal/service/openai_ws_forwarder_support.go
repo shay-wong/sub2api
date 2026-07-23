@@ -538,6 +538,11 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		}
 		account = latest
 	}
+	// Proxy quarantine is transient, so preserve the response binding and let the
+	// caller fall back to normal scheduling until the proxy is admitted again.
+	if s.isOpenAIProxyStreamQuarantined(account) {
+		return 0, nil, "", nil
+	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
