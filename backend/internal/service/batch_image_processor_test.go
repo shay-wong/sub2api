@@ -458,6 +458,7 @@ func (r *fakeBatchImageRepository) CreateBatchImageJob(ctx context.Context, para
 		Currency:                params.Currency,
 		IdempotencyKey:          params.IdempotencyKey,
 		RequestHash:             params.RequestHash,
+		SessionID:               params.SessionID,
 		CreatedAt:               time.Now(),
 	}
 	r.jobs[job.BatchID] = job

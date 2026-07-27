@@ -272,6 +272,9 @@ type subscriptionUserRepoNoop struct{}
 func (subscriptionUserRepoNoop) Create(context.Context, *User) error {
 	panic("unexpected Create call")
 }
+func (subscriptionUserRepoNoop) CreateWithEmailAliasGuard(context.Context, *User) error {
+	panic("unexpected CreateWithEmailAliasGuard call")
+}
 func (subscriptionUserRepoNoop) GetByID(context.Context, int64) (*User, error) {
 	panic("unexpected GetByID call")
 }
@@ -331,6 +334,9 @@ func (subscriptionUserRepoNoop) BatchAddConcurrency(context.Context, []int64, in
 }
 func (subscriptionUserRepoNoop) ExistsByEmail(context.Context, string) (bool, error) {
 	panic("unexpected ExistsByEmail call")
+}
+func (subscriptionUserRepoNoop) ExistsByEmailAlias(context.Context, string) (bool, error) {
+	panic("unexpected ExistsByEmailAlias call")
 }
 func (subscriptionUserRepoNoop) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
 	panic("unexpected RemoveGroupFromAllowedGroups call")

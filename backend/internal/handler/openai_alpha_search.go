@@ -265,6 +265,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 ) {
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
+	sessionID := service.ExtractClientSessionID(c)
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
@@ -283,6 +284,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 			UpstreamEndpoint:      upstreamEndpoint,
 			UserAgent:             userAgent,
 			IPAddress:             clientIP,
+			SessionID:             sessionID,
 			RequestPayloadHash:    requestPayloadHash,
 			APIKeyService:         h.apiKeyService,
 			GroupRateLimitGroupID: groupRateLimitGroupID,

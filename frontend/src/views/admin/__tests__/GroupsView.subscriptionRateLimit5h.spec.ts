@@ -12,6 +12,7 @@ const {
   getUsageSummary,
   getCapacitySummary,
   getModelsListCandidates,
+  getLiveCapability,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const {
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
   getModelsListCandidates: vi.fn(),
+  getLiveCapability: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }));
@@ -36,6 +38,7 @@ vi.mock("@/api/admin", () => ({
       getUsageSummary,
       getCapacitySummary,
       getModelsListCandidates,
+      getLiveCapability,
       updateSortOrder: vi.fn(),
     },
     accounts: {
@@ -267,6 +270,7 @@ describe("admin GroupsView subscription 5-hour limit", () => {
     getUsageSummary.mockReset();
     getCapacitySummary.mockReset();
     getModelsListCandidates.mockReset();
+    getLiveCapability.mockReset();
     createGroup.mockReset();
     updateGroup.mockReset();
     showError.mockReset();
@@ -282,6 +286,7 @@ describe("admin GroupsView subscription 5-hour limit", () => {
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
     getModelsListCandidates.mockResolvedValue([]);
+    getLiveCapability.mockResolvedValue({ supported: false });
     createGroup.mockResolvedValue(defaultGroups()[1]);
     updateGroup.mockResolvedValue(defaultGroups()[1]);
   });

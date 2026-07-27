@@ -42,6 +42,9 @@ func (r *operatorPermissionRepoStub) ClearOperatorGroupIDs(context.Context, int6
 type operatorUserRepoStub struct{}
 
 func (operatorUserRepoStub) Create(context.Context, *service.User) error { return nil }
+func (operatorUserRepoStub) CreateWithEmailAliasGuard(context.Context, *service.User) error {
+	return nil
+}
 func (operatorUserRepoStub) GetByID(context.Context, int64) (*service.User, error) {
 	return &service.User{ID: 101, Role: service.RoleOperator, Status: service.StatusActive}, nil
 }
@@ -89,6 +92,9 @@ func (operatorUserRepoStub) BatchAddConcurrency(context.Context, []int64, int) (
 	return 0, nil
 }
 func (operatorUserRepoStub) ExistsByEmail(context.Context, string) (bool, error) { return false, nil }
+func (operatorUserRepoStub) ExistsByEmailAlias(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (operatorUserRepoStub) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
 	return 0, nil
 }
