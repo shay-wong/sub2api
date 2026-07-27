@@ -279,6 +279,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		ReasoningEffort: reasoningEffort,
 		Stream:          reqStream,
 		OpenAIWSMode:    false,
+		UsedPassthrough: true,
 		Duration:        time.Since(startTime),
 		FirstTokenMs:    firstTokenMs,
 	}

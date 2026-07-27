@@ -73,28 +73,42 @@ func usageToMap(u ClaudeUsage) map[string]any {
 }
 
 // ProcessLine 处理 SSE 行，返回 Claude SSE 事件
-func (p *StreamingProcessor) ProcessLine(line string) []byte {
+func (p *StreamingProcessor) ProcessLine(line string) ([]byte, error) {
 	line = strings.TrimSpace(line)
 	if line == "" || !strings.HasPrefix(line, "data:") {
-		return nil
+		return nil, nil
 	}
 
 	data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 	if data == "" || data == "[DONE]" {
-		return nil
+		return nil, nil
 	}
 
-	// 解包 v1internal 响应
+	var envelope struct {
+		Response     json.RawMessage `json:"response"`
+		ResponseID   string          `json:"responseId,omitempty"`
+		ModelVersion string          `json:"modelVersion,omitempty"`
+		Error        json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(data), &envelope); err != nil {
+		return nil, fmt.Errorf("decode antigravity stream payload: %w", err)
+	}
+	if len(bytes.TrimSpace(envelope.Error)) > 0 && string(bytes.TrimSpace(envelope.Error)) != "null" {
+		return nil, fmt.Errorf("antigravity upstream returned an error event")
+	}
+
 	var v1Resp V1InternalResponse
-	if err := json.Unmarshal([]byte(data), &v1Resp); err != nil {
-		// 尝试直接解析为 GeminiResponse
-		var directResp GeminiResponse
-		if err2 := json.Unmarshal([]byte(data), &directResp); err2 != nil {
-			return nil
+	if len(bytes.TrimSpace(envelope.Response)) > 0 && string(bytes.TrimSpace(envelope.Response)) != "null" {
+		if err := json.Unmarshal(envelope.Response, &v1Resp.Response); err != nil {
+			return nil, fmt.Errorf("decode antigravity response payload: %w", err)
 		}
-		v1Resp.Response = directResp
-		v1Resp.ResponseID = directResp.ResponseID
-		v1Resp.ModelVersion = directResp.ModelVersion
+		v1Resp.ResponseID = envelope.ResponseID
+		v1Resp.ModelVersion = envelope.ModelVersion
+	} else if err := json.Unmarshal([]byte(data), &v1Resp.Response); err != nil {
+		return nil, fmt.Errorf("decode direct antigravity response payload: %w", err)
+	} else {
+		v1Resp.ResponseID = v1Resp.Response.ResponseID
+		v1Resp.ModelVersion = v1Resp.Response.ModelVersion
 	}
 
 	geminiResp := &v1Resp.Response
@@ -144,7 +158,7 @@ func (p *StreamingProcessor) ProcessLine(line string) []byte {
 		}
 	}
 
-	return result.Bytes()
+	return result.Bytes(), nil
 }
 
 // Finish 结束处理，返回最终事件和用量。

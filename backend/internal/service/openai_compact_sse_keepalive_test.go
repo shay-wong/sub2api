@@ -106,6 +106,7 @@ func TestWriteOpenAICompactSSEBridge_AfterKeepaliveCommitFailureEmitsFailedEvent
 	require.Equal(t, "failed", gjson.Get(events[0][1], "response.status").String())
 	require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), "upstream exploded")
 	require.NotEmpty(t, gjson.Get(events[0][1], "response.id").String())
+	require.True(t, IsResponseCommitted(c))
 
 	streamErr, ok := GetOpsStreamError(c)
 	require.True(t, ok)
@@ -261,6 +262,7 @@ func TestWriteOpenAIFastPolicyBlockedResponse_AfterKeepaliveCommit(t *testing.T)
 	require.Equal(t, "response.failed", events[0][0])
 	require.Equal(t, "permission_error", gjson.Get(events[0][1], "response.error.code").String())
 	require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), "tier blocked")
+	require.True(t, IsResponseCommitted(c))
 }
 
 // failover"是否已写响应"判定的口径：心跳字节必须被排除，否则 compact 在

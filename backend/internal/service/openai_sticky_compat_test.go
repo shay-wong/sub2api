@@ -84,6 +84,51 @@ func TestSetStickySessionAccountID_DualWriteOldDisabled(t *testing.T) {
 	require.False(t, exists)
 }
 
+// The reasoning history flag must outlive sticky-account deletion so an unavailable
+// passthrough account cannot leak its encrypted history into a non-passthrough retry.
+func TestOpenAIReasoningSourcePassthroughSurvivesStickyDeletion(t *testing.T) {
+	cache := &stubGatewayCache{
+		sessionBindings:          map[string]int64{},
+		reasoningSourceBySession: map[string]bool{},
+	}
+	svc := &OpenAIGatewayService{cache: cache}
+	ctx := context.Background()
+
+	_, known, err := svc.GetOpenAIReasoningSourcePassthrough(ctx, 11, nil, "missing-session")
+	require.NoError(t, err)
+	require.False(t, known)
+
+	require.NoError(t, svc.BindOpenAIReasoningSourcePassthrough(ctx, 11, nil, "session-hash", true))
+	require.NoError(t, svc.deleteStickySessionAccountID(ctx, nil, "session-hash"))
+
+	passthrough, known, err := svc.GetOpenAIReasoningSourcePassthrough(ctx, 11, nil, "session-hash")
+	require.NoError(t, err)
+	require.True(t, known)
+	require.True(t, passthrough)
+}
+
+// A later compatible response does not remove passthrough reasoning from older
+// turns that the client may resend as part of the full conversation history.
+func TestOpenAIReasoningSourcePassthroughIsMonotonicAcrossTurns(t *testing.T) {
+	cache := &stubGatewayCache{reasoningSourceBySession: map[string]bool{}}
+	svc := &OpenAIGatewayService{cache: cache}
+	ctx := context.Background()
+
+	require.NoError(t, svc.BindOpenAIReasoningSourcePassthrough(ctx, 11, nil, "three-turn-session", true))
+	require.NoError(t, svc.BindOpenAIReasoningSourcePassthrough(ctx, 11, nil, "three-turn-session", false))
+
+	mayContainPassthrough, known, err := svc.GetOpenAIReasoningSourcePassthrough(ctx, 11, nil, "three-turn-session")
+	require.NoError(t, err)
+	require.True(t, known)
+	require.True(t, mayContainPassthrough)
+
+	require.NoError(t, svc.BindOpenAIReasoningSourcePassthrough(ctx, 11, nil, "compatible-only-session", false))
+	mayContainPassthrough, known, err = svc.GetOpenAIReasoningSourcePassthrough(ctx, 11, nil, "compatible-only-session")
+	require.NoError(t, err)
+	require.True(t, known)
+	require.False(t, mayContainPassthrough)
+}
+
 func TestSnapshotOpenAICompatibilityFallbackMetrics(t *testing.T) {
 	before := SnapshotOpenAICompatibilityFallbackMetrics()
 

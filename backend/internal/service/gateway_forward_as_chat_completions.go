@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -237,6 +236,14 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	failBuffered := func(err error) (*ForwardResult, error) {
+		logger.L().Warn("forward_as_cc buffered: conversion failed",
+			zap.Error(err),
+			zap.String("request_id", requestID),
+		)
+		writeGatewayCCError(c, http.StatusBadGateway, "stream_conversion_error", "Failed to convert upstream response stream")
+		return nil, err
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -247,16 +254,22 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		if !scanner.Scan() {
-			break
+			if err := scanner.Err(); err != nil {
+				return failBuffered(fmt.Errorf("read anthropic chat stream data: %w", err))
+			}
+			return failBuffered(io.ErrUnexpectedEOF)
 		}
 		payload, ok := extractOpenAISSEDataLine(scanner.Text())
 		if !ok {
-			continue
+			return failBuffered(fmt.Errorf("missing data field for anthropic %s event", line))
 		}
 
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
+			return failBuffered(fmt.Errorf("decode anthropic chat event: %w", err))
+		}
+		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
+			return failBuffered(err)
 		}
 
 		// message_start carries the initial response structure and cache usage
@@ -293,12 +306,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	}
 
 	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_cc buffered: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
+		return failBuffered(fmt.Errorf("read anthropic chat stream: %w", err))
 	}
 
 	if finalResp == nil {
@@ -381,28 +389,59 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	clientDisconnected := false
 
-	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	scanEvents, stopScanner := startSSELineScanner(resp.Body, maxLineSize)
+	defer stopScanner()
+	streamTimeout := time.Duration(0)
+	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamTimeout = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	timeoutTimer, timeoutCh := newStreamDataTimer(streamTimeout)
+	if timeoutTimer != nil {
+		defer timeoutTimer.Stop()
+	}
+	var disconnectDrainTimer *time.Timer
+	var disconnectDrainCh <-chan time.Time
+	var clientDone <-chan struct{}
+	if c.Request != nil {
+		clientDone = c.Request.Context().Done()
+	}
+	defer func() {
+		if disconnectDrainTimer != nil {
+			disconnectDrainTimer.Stop()
+		}
+	}()
+	startDisconnectDrainTimer := func() {
+		if disconnectDrainTimer != nil {
+			return
+		}
+		disconnectDrainTimer = time.NewTimer(disconnectedStreamDrainTimeout(streamTimeout))
+		disconnectDrainCh = disconnectDrainTimer.C
+	}
 
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
-			RequestID:       requestID,
-			Usage:           usage,
-			Model:           originalModel,
-			UpstreamModel:   mappedModel,
-			ReasoningEffort: reasoningEffort,
-			Stream:          true,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:        requestID,
+			Usage:            usage,
+			Model:            originalModel,
+			UpstreamModel:    mappedModel,
+			ReasoningEffort:  reasoningEffort,
+			Stream:           true,
+			Duration:         time.Since(startTime),
+			FirstTokenMs:     firstTokenMs,
+			ClientDisconnect: clientDisconnected,
 		}
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
+		if clientDisconnected {
+			return false
+		}
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
@@ -438,48 +477,89 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 			for _, chunk := range ccChunks {
 				if disconnected := writeChunk(chunk); disconnected {
-					return true
+					clientDisconnected = true
+					startDisconnectDrainTimer()
 				}
 			}
 		}
-		c.Writer.Flush()
+		if !clientDisconnected {
+			c.Writer.Flush()
+		}
 		return false
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		// 与缓冲路径一致：接受 SSE 紧凑格式（冒号后无空格，#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
-			continue
+	failStream := func(err error) (*ForwardResult, error) {
+		logger.L().Warn("forward_as_cc stream: conversion failed",
+			zap.Error(err),
+			zap.String("request_id", requestID),
+		)
+		if !clientDisconnected {
+			writeGatewayCCStreamError(c, http.StatusBadGateway, "stream_conversion_error", "Failed to convert upstream response stream")
 		}
+		return resultWithUsage(), err
+	}
 
-		if !scanner.Scan() {
-			break
+	processFrame := func(frame openAICompatSSEFrame) error {
+		if !json.Valid([]byte(frame.Data)) {
+			return fmt.Errorf("decode anthropic chat %s event: invalid JSON", frame.EventType)
 		}
-		payload, ok := extractOpenAISSEDataLine(scanner.Text())
-		if !ok {
-			continue
-		}
-
+		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
+			return fmt.Errorf("decode anthropic chat %s event: %w", frame.EventType, err)
 		}
+		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
+			return err
+		}
+		processAnthropicEvent(&event)
+		return nil
+	}
 
-		if processAnthropicEvent(&event) {
+	var parser openAICompatSSEFrameParser
+	for {
+		select {
+		case scanEvent, open := <-scanEvents:
+			if !open {
+				if parser.eventType != "" && len(parser.dataLines) == 0 {
+					return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
+				}
+				if frame, ok := parser.Finish(); ok {
+					if err := processFrame(frame); err != nil {
+						return failStream(err)
+					}
+				}
+				goto streamComplete
+			}
+			resetStreamDataTimer(timeoutTimer, streamTimeout)
+			if scanEvent.err != nil {
+				if clientDisconnected {
+					return resultWithUsage(), nil
+				}
+				return failStream(fmt.Errorf("read anthropic chat stream: %w", scanEvent.err))
+			}
+			if scanEvent.line == "" && parser.eventType != "" && len(parser.dataLines) == 0 {
+				return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
+			}
+			if frame, ok := parser.AddLine(scanEvent.line); ok {
+				if err := processFrame(frame); err != nil {
+					return failStream(err)
+				}
+			}
+		case <-timeoutCh:
+			if clientDisconnected {
+				return resultWithUsage(), nil
+			}
+			return failStream(fmt.Errorf("anthropic chat stream data interval timeout after %s", streamTimeout))
+		case <-clientDone:
+			clientDone = nil
+			clientDisconnected = true
+			startDisconnectDrainTimer()
+		case <-disconnectDrainCh:
 			return resultWithUsage(), nil
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_cc stream: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
-	}
-
+streamComplete:
 	// Finalize both state machines
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
 	for _, resEvt := range finalResEvents {
@@ -494,8 +574,10 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	// Write [DONE] marker
-	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-	c.Writer.Flush()
+	if !clientDisconnected {
+		fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
+		c.Writer.Flush()
+	}
 
 	return resultWithUsage(), nil
 }
@@ -510,4 +592,20 @@ func writeGatewayCCError(c *gin.Context, statusCode int, errType, message string
 			"message": message,
 		},
 	})
+}
+
+func writeGatewayCCStreamError(c *gin.Context, statusCode int, errType, message string) {
+	MarkOpsStreamError(c, errType, message, statusCode)
+	payload, err := json.Marshal(gin.H{
+		"error": gin.H{
+			"type":    errType,
+			"message": message,
+		},
+	})
+	if err != nil {
+		return
+	}
+	MarkResponseCommitted(c)
+	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+	c.Writer.Flush()
 }

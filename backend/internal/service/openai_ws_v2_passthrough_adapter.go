@@ -908,6 +908,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 
 	completedTurns := atomic.Int32{}
+	acceptedTurns := atomic.Int32{}
+	acceptedTurns.Store(1)
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	clientFrameConn := &openAIWSClientFrameConn{
 		conn:                 clientConn,
@@ -1037,6 +1039,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				acceptedTurns.Add(1)
 				acceptedTurn = true
 			}
 			return out, blocked, policyErr
@@ -1123,6 +1126,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					ReasoningEffort:       usageMeta.reasoningEffort.Load(),
 					Stream:                true,
 					OpenAIWSMode:          true,
+					UsedPassthrough:       true,
 					UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(turn.TerminalEventType),
 					ResponseHeaders:       cloneHeader(handshakeHeaders),
 					Duration:              turn.Duration,
@@ -1242,6 +1246,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		ReasoningEffort:       usageMeta.reasoningEffort.Load(),
 		Stream:                true,
 		OpenAIWSMode:          true,
+		UsedPassthrough:       true,
 		UpstreamTerminalEvent: normalizeOpenAIWSTerminalEvent(relayResult.TerminalEventType),
 		ResponseHeaders:       cloneHeader(handshakeHeaders),
 		Duration:              relayResult.Duration,
@@ -1328,10 +1333,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		relayErr,
 		relayExit.WroteDownstream,
 	)
-	if hooks != nil && hooks.AfterTurn != nil {
+	if openAIWSPassthroughHasPendingTurn(completedTurns.Load(), acceptedTurns.Load()) && hooks != nil && hooks.AfterTurn != nil {
 		hooks.AfterTurn(turnCount+1, nil, turnErr)
 	}
 	return turnErr
+}
+
+func openAIWSPassthroughHasPendingTurn(completedTurns, acceptedTurns int32) bool {
+	return completedTurns < acceptedTurns
 }
 
 func openAIWSPassthroughRelayClientClose(exit openaiwsv2.RelayExit, completedTurns int) (coderws.StatusCode, string, bool) {

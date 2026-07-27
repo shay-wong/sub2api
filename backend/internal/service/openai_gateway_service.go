@@ -244,6 +244,9 @@ type OpenAIForwardResult struct {
 	ReasoningEffort *string
 	Stream          bool
 	OpenAIWSMode    bool
+	// UsedPassthrough records the actual successful dispatch path, not merely
+	// the account's configured passthrough flag.
+	UsedPassthrough bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

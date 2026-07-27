@@ -96,6 +96,7 @@ func parseAdminUsageLogFilters(c *gin.Context) (usagestats.UsageLogFilters, bool
 		APIKeyID:          apiKeyID,
 		AccountID:         accountID,
 		GroupID:           groupID,
+		RequestID:         strings.TrimSpace(c.Query("request_id")),
 		Model:             c.Query("model"),
 		ModelFilterSource: usagestats.ModelSourceRequested,
 		BillingMode:       strings.TrimSpace(c.Query("billing_mode")),

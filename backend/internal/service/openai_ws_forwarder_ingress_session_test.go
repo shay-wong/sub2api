@@ -1000,6 +1000,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 		case result := <-resultCh:
 			require.Equal(t, requestID, result.RequestID)
 			require.True(t, result.OpenAIWSMode)
+			require.True(t, result.UsedPassthrough)
 			if i == 0 {
 				require.Equal(t, 2, result.Usage.InputTokens)
 				require.Equal(t, 3, result.Usage.OutputTokens)

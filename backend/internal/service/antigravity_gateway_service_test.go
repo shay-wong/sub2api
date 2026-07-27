@@ -1210,6 +1210,36 @@ func TestHandleClaudeStreamingResponse_NormalComplete(t *testing.T) {
 	require.NotContains(t, body, "event: error")
 }
 
+func TestHandleClaudeStreamingResponse_RejectsMalformedPartialStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := newAntigravityTestService(&config.Config{
+		Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+	})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1}}}`,
+			"",
+			"data: not-json",
+			"",
+		}, "\n"))),
+	}
+
+	result, err := svc.handleClaudeStreamingResponse(c, resp, time.Now(), "claude-sonnet-4-5")
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Contains(t, rec.Body.String(), "partial")
+	require.Contains(t, rec.Body.String(), "event: error")
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+	require.True(t, IsResponseCommitted(c))
+	require.NotContains(t, rec.Body.String(), "event: message_stop")
+}
+
 // TestHandleGeminiStreamingResponse_ThoughtsTokenCount
 // 验证：Gemini 流式转发时 thoughtsTokenCount 被计入 OutputTokens
 func TestHandleGeminiStreamingResponse_ThoughtsTokenCount(t *testing.T) {

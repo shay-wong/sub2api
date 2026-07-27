@@ -59,6 +59,7 @@ func registerAdminRoutesForTest(
 		servermiddleware.AuditLogMiddleware(passthrough),
 		servermiddleware.StepUpAuthMiddleware(passthrough),
 		settingService,
+		nil,
 	)
 }
 
@@ -80,6 +81,7 @@ func registerPaymentRoutesForTest(
 		adminAuth,
 		servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		settingService,
+		nil,
 	)
 }
 

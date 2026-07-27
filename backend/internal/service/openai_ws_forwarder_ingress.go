@@ -74,7 +74,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		switch ingressMode {
 		case OpenAIWSIngressModePassthrough:
-			if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+			if !s.shouldUseOpenAIResponsesWebSocketV2Passthrough(account, wsDecision) {
 				return fmt.Errorf("websocket ingress requires ws_v2 transport, got=%s", wsDecision.Transport)
 			}
 			return s.proxyResponsesWebSocketV2Passthrough(

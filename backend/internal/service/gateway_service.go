@@ -558,7 +558,7 @@ type ForwardResult struct {
 	Usage     ClaudeUsage
 	Model     string
 	// UpstreamModel is the actual upstream model after mapping.
-	// Prefer empty when it is identical to Model; persistence normalizes equal values away as no-op mappings.
+	// Keep it when known even if it matches the requested model; multi-stage mappings can loop back.
 	UpstreamModel    string
 	Stream           bool
 	Duration         time.Duration

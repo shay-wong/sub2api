@@ -61,7 +61,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
-	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	passthroughEnabled := account.ShouldUseOpenAIResponsesPassthrough()
 	if shouldFlattenOpenAIResponsesNamespaces(account, wsDecision.Transport, passthroughEnabled) {
 		body, err = flattenOpenAIResponsesNamespaces(c, body)
 		if err != nil {

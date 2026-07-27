@@ -487,8 +487,9 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 }
 
 type stubGatewayCache struct {
-	sessionBindings map[string]int64
-	deletedSessions map[string]int
+	sessionBindings          map[string]int64
+	deletedSessions          map[string]int
+	reasoningSourceBySession map[string]bool
 }
 
 func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -519,6 +520,32 @@ func (c *stubGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID i
 	}
 	c.deletedSessions[sessionHash]++
 	delete(c.sessionBindings, sessionHash)
+	return nil
+}
+
+func (c *stubGatewayCache) GetOpenAIReasoningSourcePassthrough(_ context.Context, projectID, groupID int64, sessionHash string) (bool, bool, error) {
+	passthrough, ok := c.reasoningSourceBySession[fmt.Sprintf("%d:%d:%s", projectID, groupID, sessionHash)]
+	if !ok {
+		return false, false, nil
+	}
+	return passthrough, true, nil
+}
+
+func (c *stubGatewayCache) SetOpenAIReasoningSourcePassthrough(
+	_ context.Context,
+	projectID int64,
+	groupID int64,
+	sessionHash string,
+	passthrough bool,
+	_ time.Duration,
+) error {
+	if c.reasoningSourceBySession == nil {
+		c.reasoningSourceBySession = make(map[string]bool)
+	}
+	key := fmt.Sprintf("%d:%d:%s", projectID, groupID, sessionHash)
+	if existing, ok := c.reasoningSourceBySession[key]; !ok || !existing {
+		c.reasoningSourceBySession[key] = passthrough
+	}
 	return nil
 }
 
@@ -3293,6 +3320,19 @@ func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) 
 	require.True(t, ok)
 	require.Empty(t, frame.EventType)
 	require.JSONEq(t, `{"delta":"ok"}`, frame.Data)
+}
+
+func TestOpenAICompatSSEFrameParserDispatchesEmptyDataField(t *testing.T) {
+	var parser openAICompatSSEFrameParser
+
+	_, ok := parser.AddLine("event: message_delta")
+	require.False(t, ok)
+	_, ok = parser.AddLine("data: \t ")
+	require.False(t, ok)
+	frame, ok := parser.AddLine("")
+	require.True(t, ok)
+	require.Equal(t, "message_delta", frame.EventType)
+	require.Empty(t, frame.Data)
 }
 
 func TestStreamingPassthroughCyberPolicyMarksAndPassesThrough(t *testing.T) {

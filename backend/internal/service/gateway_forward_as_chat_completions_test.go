@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -184,4 +186,222 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "medium", *result.ReasoningEffort)
 	require.Contains(t, rec.Body.String(), `[DONE]`)
+}
+
+// A broken upstream stream must not turn an already-created partial message into
+// a successful buffered Chat Completions response.
+func TestHandleCCBufferedFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	messageStart := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1}}}\n\n"
+	tests := []struct {
+		name string
+		body func() io.ReadCloser
+	}{
+		{name: "malformed json", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\ndata: not-json\n\n"))
+		}},
+		{name: "anthropic error", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"upstream overloaded\"}}\n\n"))
+		}},
+		{name: "missing data", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\nid: orphaned\n\n"))
+		}},
+		{name: "empty data", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\ndata: \t \n\n"))
+		}},
+		{name: "read failure", body: func() io.ReadCloser {
+			return &errTailReader{data: []byte(messageStart), err: io.ErrUnexpectedEOF}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			result, err := (&GatewayService{}).handleCCBufferedFromAnthropic(
+				&http.Response{Body: tt.body()}, c, "gpt-5", "claude-fable-5", nil, time.Now(),
+			)
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.Contains(t, rec.Body.String(), `"type":"stream_conversion_error"`)
+		})
+	}
+}
+
+// Once a Chat Completions SSE response is committed, protocol failures must end
+// with an error frame and never the normal [DONE] marker.
+func TestHandleCCStreamingFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	messageStart := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1}}}\n\n"
+	tests := []struct {
+		name string
+		body func() io.ReadCloser
+	}{
+		{name: "malformed json", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\ndata: not-json\n\n"))
+		}},
+		{name: "anthropic error", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"upstream overloaded\"}}\n\n"))
+		}},
+		{name: "missing data", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\nid: orphaned\n\n"))
+		}},
+		{name: "empty data", body: func() io.ReadCloser {
+			return io.NopCloser(strings.NewReader(messageStart + "event: message_delta\ndata: \t \n\n"))
+		}},
+		{name: "read failure", body: func() io.ReadCloser {
+			return &errTailReader{data: []byte(messageStart), err: io.ErrUnexpectedEOF}
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+				&http.Response{Body: tt.body()}, c, "gpt-5", "claude-fable-5", nil, time.Now(), false,
+			)
+
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.True(t, IsResponseCommitted(c))
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"stream_conversion_error"`))
+			require.Contains(t, rec.Body.String(), `"type":"stream_conversion_error"`)
+			require.NotContains(t, rec.Body.String(), `[DONE]`)
+		})
+	}
+}
+
+func TestHandleCCStreamingFromAnthropic_RequestCancelDrainsLateUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestCtx)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	type outcome struct {
+		result *ForwardResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+
+	go func() {
+		result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+		)
+		done <- outcome{result: result, err: err}
+	}()
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err := io.WriteString(writer, strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_cancel","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.5","usage":{"input_tokens":12}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
+		``,
+	}, "\n"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	got := <-done
+	require.NoError(t, got.err)
+	require.NotNil(t, got.result)
+	require.True(t, got.result.ClientDisconnect)
+	require.Equal(t, 12, got.result.Usage.InputTokens)
+	require.Equal(t, 7, got.result.Usage.OutputTokens)
+}
+
+func TestHandleCCStreamingFromAnthropic_RequestCancelHasConfiguredDrainDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestCtx)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	done := make(chan *ForwardResult, 1)
+
+	go func() {
+		result, _ := svc.handleCCStreamingFromAnthropic(
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+		)
+		done <- result
+	}()
+	cancel()
+
+	select {
+	case result := <-done:
+		require.NotNil(t, result)
+		require.True(t, result.ClientDisconnect)
+	case <-time.After(2 * time.Second):
+		t.Fatal("request cancellation kept the Anthropic chat stream open past its drain deadline")
+	}
+}
+
+func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsLateUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_disconnect","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.5","usage":{"input_tokens":12,"cache_read_input_tokens":4}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")))}
+
+	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+		resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 12, result.Usage.InputTokens)
+	require.Equal(t, 7, result.Usage.OutputTokens)
+	require.Equal(t, 4, result.Usage.CacheReadInputTokens)
+}
+
+func TestHandleCCStreamingFromAnthropic_ClientDisconnectHasDrainDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	done := make(chan *ForwardResult, 1)
+
+	go func() {
+		result, _ := svc.handleCCStreamingFromAnthropic(
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+		)
+		done <- result
+	}()
+	_, err := io.WriteString(writer, strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"msg_disconnect","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.5","usage":{"input_tokens":1}}}`,
+		``,
+	}, "\n")+"\n")
+	require.NoError(t, err)
+
+	select {
+	case result := <-done:
+		require.NotNil(t, result)
+		require.True(t, result.ClientDisconnect)
+	case <-time.After(2 * time.Second):
+		t.Fatal("client disconnect kept the Anthropic chat stream open past its drain deadline")
+	}
 }

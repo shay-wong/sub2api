@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,6 +48,20 @@ func TestAccount_IsOpenAIPassthroughEnabled(t *testing.T) {
 		}
 		require.False(t, account.IsOpenAIPassthroughEnabled())
 	})
+}
+
+func TestAccount_ShouldUseOpenAIResponsesPassthrough(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"openai_passthrough": true,
+		},
+	}
+	require.True(t, account.ShouldUseOpenAIResponsesPassthrough())
+
+	account.Extra[openai_compat.ExtraKeyResponsesMode] = string(openai_compat.ResponsesSupportModeForceChatCompletions)
+	require.False(t, account.ShouldUseOpenAIResponsesPassthrough())
 }
 
 func TestAccount_IsOpenAIOAuthPassthroughEnabled(t *testing.T) {

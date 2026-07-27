@@ -1667,6 +1667,16 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 	return false
 }
 
+// ShouldUseOpenAIResponsesPassthrough reports the actual Responses dispatch
+// mode. API key accounts forced onto Chat Completions cannot use passthrough
+// even when the passthrough setting is enabled.
+func (a *Account) ShouldUseOpenAIResponsesPassthrough() bool {
+	if !a.IsOpenAIPassthroughEnabled() {
+		return false
+	}
+	return a.Type != AccountTypeAPIKey || openai_compat.ShouldUseResponsesAPI(a.Extra)
+}
+
 // IsOpenAIResponsesWebSocketV2Enabled 返回 OpenAI 账号是否开启 Responses WebSocket v2。
 //
 // 分类型新字段：

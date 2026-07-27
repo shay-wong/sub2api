@@ -174,6 +174,13 @@ func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	}
 }
 
+func wrapAccountReleaseOnForwardDone(ctx context.Context, stream bool, releaseFunc func()) func() {
+	if stream {
+		ctx = context.WithoutCancel(ctx)
+	}
+	return wrapReleaseOnDone(ctx, releaseFunc)
+}
+
 // IncrementWaitCount increments the wait count for a user
 func (h *ConcurrencyHelper) IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error) {
 	return h.concurrencyService.IncrementWaitCount(ctx, userID, maxWait)

@@ -30,12 +30,16 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
+	args := []any{startTime, endTime, limit, startTime, endTime}
+	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
+	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
 			SELECT api_key_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			  %s
 			GROUP BY api_key_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -50,11 +54,12 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		LEFT JOIN api_keys k ON u.api_key_id = k.id
 		WHERE u.api_key_id IN (SELECT api_key_id FROM top_keys)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  %s
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, topProjectCondition, dateFormat, outerProjectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,12 +90,16 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 // GetUserUsageTrend returns usage trend data grouped by user and date
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
+	args := []any{startTime, endTime, limit, startTime, endTime}
+	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
+	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
 			SELECT user_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			  %s
 			GROUP BY user_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -108,11 +117,12 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  %s
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, topProjectCondition, dateFormat, outerProjectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +167,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
+			  %s
 			GROUP BY u.user_id, us.email
 		),
 		ranked AS (
@@ -185,8 +196,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		FROM ranked
 		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
 	`
+	args := []any{startTime, endTime, limit}
+	projectCondition := strings.TrimSpace(buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u")))
+	query = fmt.Sprintf(query, projectCondition)
 
-	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +251,12 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 			COALESCE(SUM(actual_cost), 0) as actual_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
-		GROUP BY date
-		ORDER BY date ASC
 	`, dateFormat)
+	args := []any{userID, startTime, endTime}
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
+	query += " GROUP BY date ORDER BY date ASC"
 
-	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -620,6 +635,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
 	`
 	args := []any{startTime, endTime}
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 
 	if dim.GroupID > 0 {
 		query += fmt.Sprintf(" AND ul.group_id = $%d", len(args)+1)
@@ -713,17 +729,24 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 // When usage_logs exceeds ~1M rows, consider adding a short-lived cache (30s)
 // or a materialized view / pre-aggregation table for cumulative costs.
 func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error) {
+	args := []any{todayStart}
+	usageClauses, args, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "ul.project_id", usageLogSQLScopeResources("ul"))
 	query := `
 		SELECT
 			g.id AS group_id,
 			COALESCE(SUM(ul.actual_cost), 0) AS total_cost,
 			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost
 		FROM groups g
-		LEFT JOIN usage_logs ul ON ul.group_id = g.id
-		GROUP BY g.id
-	`
+		LEFT JOIN usage_logs ul ON ul.group_id = g.id`
+	if len(usageClauses) > 0 {
+		query += " AND " + usageClauses[0]
+	}
+	groupClauses := []string{"g.deleted_at IS NULL"}
+	groupClauses, args = appendProjectProfileScopedWhere(ctx, groupClauses, args, "g.project_id", projectSQLScopeResources{GroupID: "g.id"})
+	query += " WHERE " + strings.Join(groupClauses, " AND ")
+	query += " GROUP BY g.id"
 
-	rows, err := r.sql.QueryContext(ctx, query, todayStart)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -755,11 +778,12 @@ func resolveModelDimensionExpressionWithAlias(modelType, alias string) string {
 		return alias + "." + name
 	}
 	requestedExpr := fmt.Sprintf("COALESCE(NULLIF(TRIM(%s), ''), %s)", column("requested_model"), column("model"))
+	upstreamExpr := fmt.Sprintf("COALESCE(NULLIF(TRIM(%s), ''), %s)", column("upstream_model"), requestedExpr)
 	switch usagestats.NormalizeModelSource(modelType) {
 	case usagestats.ModelSourceUpstream:
-		return fmt.Sprintf("COALESCE(NULLIF(TRIM(%s), ''), %s)", column("upstream_model"), requestedExpr)
+		return upstreamExpr
 	case usagestats.ModelSourceMapping:
-		return fmt.Sprintf("(%s || ' -> ' || COALESCE(NULLIF(TRIM(%s), ''), %s))", requestedExpr, column("upstream_model"), requestedExpr)
+		return fmt.Sprintf("(%s || ' -> ' || %s)", requestedExpr, upstreamExpr)
 	default:
 		return requestedExpr
 	}

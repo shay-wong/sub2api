@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 const stickySessionPrefix = "sticky_session:"
+const openAIReasoningSourcePrefix = "openai_reasoning_source:"
 const liveCallPrefix = "live:call:"
 
 type gatewayCache struct {
@@ -56,9 +58,50 @@ func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64
 	return c.rdb.Del(ctx, key).Err()
 }
 
+func openAIReasoningSourceKey(projectID, groupID int64, sessionHash string) string {
+	return fmt.Sprintf("%s%d:%d:%s", openAIReasoningSourcePrefix, projectID, groupID, sessionHash)
+}
+
+func (c *gatewayCache) GetOpenAIReasoningSourcePassthrough(
+	ctx context.Context,
+	projectID int64,
+	groupID int64,
+	sessionHash string,
+) (passthrough bool, found bool, err error) {
+	value, err := c.rdb.Get(ctx, openAIReasoningSourceKey(projectID, groupID, sessionHash)).Result()
+	if errors.Is(err, redis.Nil) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	passthrough, err = strconv.ParseBool(value)
+	return passthrough, err == nil, err
+}
+
+func (c *gatewayCache) SetOpenAIReasoningSourcePassthrough(
+	ctx context.Context,
+	projectID int64,
+	groupID int64,
+	sessionHash string,
+	passthrough bool,
+	ttl time.Duration,
+) error {
+	key := openAIReasoningSourceKey(projectID, groupID, sessionHash)
+	if passthrough {
+		return c.rdb.Set(ctx, key, true, ttl).Err()
+	}
+	created, err := c.rdb.SetNX(ctx, key, false, ttl).Result()
+	if err != nil || created {
+		return err
+	}
+	return c.rdb.Expire(ctx, key, ttl).Err()
+}
+
 // Compile-time assertion: gatewayCache must implement CyberSessionBlockStore.
 var _ service.CyberSessionBlockStore = (*gatewayCache)(nil)
 var _ service.LiveCallStore = (*gatewayCache)(nil)
+var _ service.OpenAIReasoningSourceStore = (*gatewayCache)(nil)
 
 const cyberSessionBlockPrefix = "cyber_session_block:"
 

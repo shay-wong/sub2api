@@ -29,6 +29,7 @@ func TestUserRoutesRegisterBatchImageAllKeyHistory(t *testing.T) {
 		}),
 		middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		nil,
+		nil,
 	)
 
 	rec := httptest.NewRecorder()
@@ -73,6 +74,7 @@ func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
 			c.Next()
 		}),
 		middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
+		nil,
 		nil,
 	)
 

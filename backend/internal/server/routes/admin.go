@@ -17,9 +17,12 @@ func RegisterAdminRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	stepUpAuth middleware.StepUpAuthMiddleware,
 	settingService *service.SettingService,
+	panelRateLimiter *middleware.PanelRateLimiter,
 ) {
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
+	// 面板全局按用户限流（默认管理员豁免，可在系统设置中关闭豁免）
+	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
@@ -28,7 +31,7 @@ func RegisterAdminRoutes(
 		registerAdminComplianceRoutes(admin, h)
 
 		// 仪表盘
-		registerDashboardRoutes(admin, h)
+		registerDashboardRoutes(admin, h, panelRateLimiter)
 
 		// 分组管理
 		registerGroupRoutes(admin, h)
@@ -45,7 +48,7 @@ func RegisterAdminRoutes(
 		registerGrokOAuthRoutes(admin, h)
 
 		// 运维监控（Ops）
-		registerOpsRoutes(admin, h)
+		registerOpsRoutes(admin, h, panelRateLimiter)
 
 		adminOnly := admin.Group("")
 		adminOnly.Use(middleware.RequireAdminOnly())
@@ -84,7 +87,7 @@ func RegisterAdminRoutes(
 		registerSubscriptionRoutes(admin, h)
 
 		// 使用记录管理：项目管理员可查看当前项目范围，清理任务仍限超级管理员。
-		registerUsageRoutes(admin, h)
+		registerUsageRoutes(admin, h, panelRateLimiter)
 
 		// 用户属性管理
 		registerUserAttributeRoutes(adminOnly, h)
@@ -201,7 +204,7 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers, panelRateLimiter *middleware.PanelRateLimiter) {
 	ops := admin.Group("/ops")
 	{
 		opsRead := middleware.RequireAdminPermission(service.AdminPermissionOpsRead)
@@ -285,18 +288,21 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.GET("/system-logs/health", adminOnly, h.Admin.Ops.GetSystemLogIngestionHealth)
 
 		// Dashboard (vNext - raw path for MVP)
-		ops.GET("/dashboard/snapshot-v2", opsRead, h.Admin.Ops.GetDashboardSnapshotV2)
-		ops.GET("/dashboard/overview", opsRead, h.Admin.Ops.GetDashboardOverview)
-		ops.GET("/dashboard/throughput-trend", opsRead, h.Admin.Ops.GetDashboardThroughputTrend)
-		ops.GET("/dashboard/latency-histogram", opsRead, h.Admin.Ops.GetDashboardLatencyHistogram)
-		ops.GET("/dashboard/error-trend", opsRead, h.Admin.Ops.GetDashboardErrorTrend)
-		ops.GET("/dashboard/error-distribution", opsRead, h.Admin.Ops.GetDashboardErrorDistribution)
-		ops.GET("/dashboard/openai-token-stats", opsRead, h.Admin.Ops.GetDashboardOpenAITokenStats)
+		opsDashboard := ops.Group("/dashboard")
+		opsDashboard.Use(panelRateLimiter.Heavy())
+		opsDashboard.GET("/snapshot-v2", opsRead, h.Admin.Ops.GetDashboardSnapshotV2)
+		opsDashboard.GET("/overview", opsRead, h.Admin.Ops.GetDashboardOverview)
+		opsDashboard.GET("/throughput-trend", opsRead, h.Admin.Ops.GetDashboardThroughputTrend)
+		opsDashboard.GET("/latency-histogram", opsRead, h.Admin.Ops.GetDashboardLatencyHistogram)
+		opsDashboard.GET("/error-trend", opsRead, h.Admin.Ops.GetDashboardErrorTrend)
+		opsDashboard.GET("/error-distribution", opsRead, h.Admin.Ops.GetDashboardErrorDistribution)
+		opsDashboard.GET("/openai-token-stats", opsRead, h.Admin.Ops.GetDashboardOpenAITokenStats)
 	}
 }
 
-func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers, panelRateLimiter *middleware.PanelRateLimiter) {
 	dashboard := admin.Group("/dashboard")
+	dashboard.Use(panelRateLimiter.Heavy())
 	{
 		dashboardRead := middleware.RequireAdminPermission(service.AdminPermissionDashboardRead)
 		adminOnly := middleware.RequireAdminOnly()
@@ -595,6 +601,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 429默认回避配置
 		adminSettings.GET("/rate-limit-429-cooldown", h.Admin.Setting.GetRateLimit429CooldownSettings)
 		adminSettings.PUT("/rate-limit-429-cooldown", h.Admin.Setting.UpdateRateLimit429CooldownSettings)
+		// 面板 API 限流配置
+		adminSettings.GET("/panel-rate-limit", h.Admin.Setting.GetPanelRateLimitSettings)
+		adminSettings.PUT("/panel-rate-limit", h.Admin.Setting.UpdatePanelRateLimitSettings)
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)
@@ -704,8 +713,9 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/users/:id/subscriptions", subscriptionManage, h.Admin.Subscription.ListByUser)
 }
 
-func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers, panelRateLimiter *middleware.PanelRateLimiter) {
 	usage := admin.Group("/usage")
+	usage.Use(panelRateLimiter.Heavy())
 	usageRead := middleware.RequireAdminPermission(service.AdminPermissionUsageRead)
 	adminOnly := middleware.RequireAdminOnly()
 	{

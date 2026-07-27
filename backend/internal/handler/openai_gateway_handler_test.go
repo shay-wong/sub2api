@@ -1343,6 +1343,14 @@ func TestOpenAIResponsesWebSocket_PassthroughUsageLogPersistsUserAgentAndReasoni
 	require.True(t, got.log.OpenAIWSMode)
 }
 
+func TestOpenAIResponsesWebSocket_WSPassthroughBindsReasoningProvenanceWithoutHTTPFlag(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload: `{"type":"response.create","model":"gpt-5.4","stream":false}`,
+	})
+
+	require.True(t, got.reasoningPassthrough)
+}
+
 func TestOpenAIResponsesWebSocket_PassthroughUsageLogInfersReasoningFromInitialRequestModel(t *testing.T) {
 	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
 		firstPayload: `{"type":"response.create","model":"gpt-5.4-xhigh","stream":false}`,
@@ -1756,6 +1764,7 @@ type openAIResponsesWSUsageLogResult struct {
 	upstreamFirstPayload []byte
 	upstreamPayloads     [][]byte
 	clientEvents         [][]byte
+	reasoningPassthrough bool
 }
 
 type openAIWSUsageHandlerAccountRepoStub struct {
@@ -1792,6 +1801,60 @@ type openAIHTTPPassthroughFailoverUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
+}
+
+type openAIReasoningBindOrderCache struct {
+	reasoningSource atomic.Bool
+	onSet           func()
+}
+
+func (c *openAIReasoningBindOrderCache) GetSessionAccountID(context.Context, int64, string) (int64, error) {
+	return 0, errors.New("not found")
+}
+
+func (c *openAIReasoningBindOrderCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
+	return nil
+}
+
+func (c *openAIReasoningBindOrderCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+
+func (c *openAIReasoningBindOrderCache) DeleteSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
+func (c *openAIReasoningBindOrderCache) GetOpenAIReasoningSourcePassthrough(context.Context, int64, int64, string) (bool, bool, error) {
+	return c.reasoningSource.Load(), true, nil
+}
+
+func (c *openAIReasoningBindOrderCache) SetOpenAIReasoningSourcePassthrough(_ context.Context, _, _ int64, _ string, passthrough bool, _ time.Duration) error {
+	if c.onSet != nil {
+		c.onSet()
+	}
+	if passthrough {
+		c.reasoningSource.Store(true)
+	}
+	return nil
+}
+
+type openAIReasoningBindOrderUpstream struct {
+	service.HTTPUpstream
+	cache         *openAIReasoningBindOrderCache
+	boundBeforeDo atomic.Bool
+	calls         atomic.Int32
+}
+
+func (u *openAIReasoningBindOrderUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls.Add(1)
+	u.boundBeforeDo.Store(u.cache.reasoningSource.Load())
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_bound","object":"response","status":"completed","model":"gpt-5.2","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		)),
+	}, nil
 }
 
 func (u *openAIHTTPPassthroughFailoverUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -2012,6 +2075,104 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
+// Passthrough provenance must be durable before the upstream can produce any
+// client-visible response; otherwise an immediate next turn can read stale false.
+func TestOpenAIResponses_PassthroughProvenanceBoundBeforeDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(4204)
+	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{{
+		ID: 9912, Name: "passthrough-api-key", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.example.test"},
+		Extra:       map[string]any{"openai_passthrough": true},
+	}}}
+	cache := &openAIReasoningBindOrderCache{}
+	upstream := &openAIReasoningBindOrderUpstream{cache: cache}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, nil, nil, nil, nil, nil, cache, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, billingCacheSvc, upstream,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc,
+		service.NewConcurrencyService(nil),
+		billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.2","input":"hello","stream":false}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("session_id", "reasoning-bind-order")
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 1804, GroupID: &groupID,
+		User:  &service.User{ID: 1704, Status: service.StatusActive},
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1704, Concurrency: 0})
+
+	h.Responses(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, upstream.boundBeforeDo.Load())
+	require.True(t, cache.reasoningSource.Load())
+}
+
+func TestOpenAIResponses_DisconnectDuringProvenanceBindSkipsUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(4205)
+	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{{
+		ID: 9913, Name: "passthrough-api-key", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.example.test"},
+		Extra:       map[string]any{"openai_passthrough": true},
+	}}}
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cache := &openAIReasoningBindOrderCache{onSet: cancel}
+	upstream := &openAIReasoningBindOrderUpstream{cache: cache}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, nil, nil, nil, nil, nil, cache, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, billingCacheSvc, upstream,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc,
+		service.NewConcurrencyService(nil),
+		billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.2","input":"hello","stream":true}`)).WithContext(requestCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("session_id", "reasoning-bind-cancel")
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID: 1805, GroupID: &groupID,
+		User:  &service.User{ID: 1705, Status: service.StatusActive},
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1705, Concurrency: 0})
+
+	h.Responses(c)
+
+	require.ErrorIs(t, requestCtx.Err(), context.Canceled)
+	require.Zero(t, upstream.calls.Load())
+}
+
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2075,6 +2236,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 				"base_url": firstUpstream.URL,
 			},
 			Extra: map[string]any{
+				"openai_passthrough":                            true,
 				"openai_apikey_responses_websockets_v2_enabled": true,
 				"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
 			},
@@ -2093,6 +2255,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 				"base_url": secondUpstream.URL,
 			},
 			Extra: map[string]any{
+				"openai_passthrough":                            false,
 				"openai_apikey_responses_websockets_v2_enabled": true,
 				"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
 			},
@@ -2114,6 +2277,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	cfg.Gateway.MaxAccountSwitches = 3
 
 	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}
+	reasoningCache := &openAIReasoningBindOrderCache{}
 	rateLimitSvc := service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
 	gatewaySvc := service.NewOpenAIGatewayService(
@@ -2123,7 +2287,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 		nil,
 		nil,
 		nil,
-		nil,
+		reasoningCache,
 		cfg,
 		nil,
 		nil,
@@ -2184,8 +2348,10 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	require.NoError(t, err)
 	defer func() { _ = clientConn.CloseNow() }()
 
+	wsBody, err := sjson.Set(kiroReasoningCanonicalBody, "type", "response.create")
+	require.NoError(t, err)
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(wsBody))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -2196,16 +2362,23 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
 	require.Equal(t, "resp_ws_failover_ok", gjson.GetBytes(event, "response.id").String())
 
+	var firstPayload []byte
 	select {
-	case <-firstHitCh:
+	case firstPayload = <-firstHitCh:
 	case <-time.After(3 * time.Second):
 		t.Fatal("等待第一个上游收到首帧超时")
 	}
+	var secondPayload []byte
 	select {
-	case <-secondHitCh:
+	case secondPayload = <-secondHitCh:
 	case <-time.After(3 * time.Second):
 		t.Fatal("等待第二个上游收到重放首帧超时")
 	}
+	require.Equal(t, 1, reasoningItemCount(t, firstPayload))
+	// Both accounts use WS passthrough; the second account's HTTP passthrough
+	// flag must not cause valid encrypted reasoning to be stripped.
+	require.Equal(t, 1, reasoningItemCount(t, secondPayload))
+	require.True(t, reasoningCache.reasoningSource.Load())
 	require.Equal(t, []int64{int64(9902)}, accountRepo.rateLimitedIDs)
 }
 
@@ -2513,6 +2686,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
+	reasoningCache := &openAIReasoningBindOrderCache{}
 
 	if len(tc.channelMapping) > 0 {
 		channelSvc = service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
@@ -2536,7 +2710,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil,
 		nil,
-		nil,
+		reasoningCache,
 		cfg,
 		nil,
 		nil,
@@ -2659,6 +2833,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		upstreamFirstPayload: upstreamPayloads[0],
 		upstreamPayloads:     upstreamPayloads,
 		clientEvents:         clientEvents,
+		reasoningPassthrough: reasoningCache.reasoningSource.Load(),
 	}
 }
 

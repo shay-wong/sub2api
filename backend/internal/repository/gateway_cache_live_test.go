@@ -64,3 +64,37 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, closed)
 }
+
+// Once passthrough reasoning enters a session history, later compatible turns
+// may refresh its TTL but cannot clear the marker while old turns can be resent.
+func TestGatewayCacheOpenAIReasoningSourcePassthroughIsMonotonicAndProjectScoped(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	store, ok := NewGatewayCache(client).(service.OpenAIReasoningSourceStore)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	require.NoError(t, store.SetOpenAIReasoningSourcePassthrough(ctx, 11, 7, "session", false, time.Hour))
+	mayContainPassthrough, found, err := store.GetOpenAIReasoningSourcePassthrough(ctx, 11, 7, "session")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, mayContainPassthrough)
+
+	_, found, err = store.GetOpenAIReasoningSourcePassthrough(ctx, 12, 7, "session")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.NoError(t, store.SetOpenAIReasoningSourcePassthrough(ctx, 12, 7, "session", false, time.Hour))
+
+	require.NoError(t, store.SetOpenAIReasoningSourcePassthrough(ctx, 11, 7, "session", true, time.Hour))
+	redisServer.FastForward(30 * time.Minute)
+	require.NoError(t, store.SetOpenAIReasoningSourcePassthrough(ctx, 11, 7, "session", false, time.Hour))
+	mayContainPassthrough, found, err = store.GetOpenAIReasoningSourcePassthrough(ctx, 11, 7, "session")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, mayContainPassthrough)
+	require.Equal(t, time.Hour, redisServer.TTL(openAIReasoningSourceKey(11, 7, "session")))
+	otherProjectPassthrough, found, err := store.GetOpenAIReasoningSourcePassthrough(ctx, 12, 7, "session")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, otherProjectPassthrough)
+}

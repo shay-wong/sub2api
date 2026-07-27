@@ -113,7 +113,7 @@ type UsageLog struct {
 	// Empty should be treated as Model for backward compatibility with historical rows.
 	RequestedModel string
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
-	// Nil means no mapping was applied (requested model was used as-is).
+	// Nil means the final upstream model was unavailable or the row predates this field.
 	UpstreamModel *string
 	// ChannelID 渠道 ID
 	ChannelID *int64

@@ -258,6 +258,14 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 	require.False(t, <-admitted, "failed terminal write must keep the current turn in flight")
 }
 
+func TestOpenAIWSPassthroughHasPendingTurn(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, openAIWSPassthroughHasPendingTurn(1, 1), "a terminal delivery failure after completion must not create a phantom turn")
+	require.False(t, openAIWSPassthroughHasPendingTurn(2, 1), "duplicate completion observations must not create another callback")
+	require.True(t, openAIWSPassthroughHasPendingTurn(1, 2), "an accepted later turn without terminal completion still needs its error callback")
+}
+
 func TestPassthroughLifecycle_LeaseLossSendsRetryClose(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())

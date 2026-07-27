@@ -441,6 +441,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	reasoningHistoryPassthrough, reasoningHistoryKnown, reasoningHistoryErr := h.gatewayService.GetOpenAIReasoningSourcePassthrough(
+		c.Request.Context(),
+		apiKey.ProjectID,
+		apiKey.GroupID,
+		sessionHash,
+	)
+	if reasoningHistoryErr != nil {
+		reqLog.Warn("openai.reasoning_history_lookup_failed", zap.Error(reasoningHistoryErr))
+	}
+	passthroughFailoverState := openAIPassthroughFailoverState{
+		historyMayContainPassthrough: reasoningHistoryPassthrough,
+		historyKnown:                 reasoningHistoryKnown,
+	}
 
 	// 生图意图的 /v1/responses 请求必须调度到确实支持 Responses API 的账号，否则
 	// 会在 forward 阶段被静默降级为无法生图的 Chat Completions 直转（#4417）。
@@ -562,13 +575,38 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 用扣除 compact 心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+		// 跨 passthrough 边界的 failover：从 Kiro 等透传账号切到 Bedrock 等非透传账号前，
+		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
+		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
+		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		if account.ShouldUseOpenAIResponsesPassthrough() {
+			passthroughFailoverState.historyMayContainPassthrough = true
+			passthroughFailoverState.historyKnown = true
+		}
+		if passthroughFailoverState.historyMayContainPassthrough {
+			if err := h.gatewayService.BindOpenAIReasoningSourcePassthrough(
+				c.Request.Context(),
+				apiKey.ProjectID,
+				apiKey.GroupID,
+				sessionHash,
+				true,
+			); err != nil {
+				reqLog.Warn("openai.reasoning_history_prebind_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			}
+		}
+		if !openAIRequestAllowsFailoverReplay(c) {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			return
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
+			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		cyberBlockKeyHTTP := ""
 		if service.GetOpsCyberPolicy(c) != nil {
@@ -688,6 +726,18 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 				reqLog.Error("openai.forward_failed", fields...)
 				return
+			}
+		}
+		if result != nil && openAIForwardSucceededForScheduling(result) && !result.ClientDisconnect {
+			passthroughHistory := passthroughFailoverState.historyMayContainPassthrough || result.UsedPassthrough
+			if err := h.gatewayService.BindOpenAIReasoningSourcePassthrough(
+				c.Request.Context(),
+				apiKey.ProjectID,
+				apiKey.GroupID,
+				sessionHash,
+				passthroughHistory,
+			); err != nil {
+				reqLog.Warn("openai.reasoning_history_bind_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
 		if result != nil {
@@ -1416,7 +1466,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	ctx := c.Request.Context()
 	account := selection.Account
 	if selection.Acquired {
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), true
+		return wrapAccountReleaseOnForwardDone(ctx, reqStream, selection.ReleaseFunc), true
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -1438,7 +1488,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 		if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), true
+		return wrapAccountReleaseOnForwardDone(ctx, reqStream, fastReleaseFunc), true
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -1481,7 +1531,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), true
+	return wrapAccountReleaseOnForwardDone(ctx, reqStream, accountReleaseFunc), true
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
@@ -1689,7 +1739,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
 		return
 	}
-	currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+	currentUserRelease = wrapAccountReleaseOnForwardDone(ctx, true, userReleaseFunc)
 	ensureUserSlotHeld := func() bool {
 		if currentUserRelease != nil {
 			return true
@@ -1704,7 +1754,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
 			return false
 		}
-		currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+		currentUserRelease = wrapAccountReleaseOnForwardDone(ctx, true, userReleaseFunc)
 		return true
 	}
 
@@ -1720,6 +1770,19 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
+	reasoningHistoryPassthrough, reasoningHistoryKnown, reasoningHistoryErr := h.gatewayService.GetOpenAIReasoningSourcePassthrough(
+		ctx,
+		apiKey.ProjectID,
+		apiKey.GroupID,
+		sessionHash,
+	)
+	if reasoningHistoryErr != nil {
+		reqLog.Warn("openai.websocket_reasoning_history_lookup_failed", zap.Error(reasoningHistoryErr))
+	}
+	passthroughFailoverState := openAIPassthroughFailoverState{
+		historyMayContainPassthrough: reasoningHistoryPassthrough,
+		historyKnown:                 reasoningHistoryKnown,
+	}
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	failedAccountIDs := make(map[int64]struct{})
@@ -1839,7 +1902,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			accountReleaseFunc = fastReleaseFunc
 		}
-		currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
+		currentAccountRelease = wrapAccountReleaseOnForwardDone(ctx, true, accountReleaseFunc)
 		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
 		if err := h.gatewayService.BindStickySession(ctx, selectedGroupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.websocket_bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
@@ -1982,8 +2045,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					}
 					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is busy, please retry later", nil)
 				}
-				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
-				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
+				currentUserRelease = wrapAccountReleaseOnForwardDone(ctx, true, userReleaseFunc)
+				currentAccountRelease = wrapAccountReleaseOnForwardDone(ctx, true, accountReleaseFunc)
 				return nil
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
@@ -1992,6 +2055,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 届时 defer 已清除标记）。
 				defer clearCyberPolicyTurnState(c)
 				releaseTurnSlots()
+				if result != nil {
+					passthroughFailoverState.historyMayContainPassthrough =
+						passthroughFailoverState.historyMayContainPassthrough || result.UsedPassthrough
+					passthroughFailoverState.historyKnown = true
+					if err := h.gatewayService.BindOpenAIReasoningSourcePassthrough(
+						ctx,
+						apiKey.ProjectID,
+						apiKey.GroupID,
+						sessionHash,
+						passthroughFailoverState.historyMayContainPassthrough,
+					); err != nil {
+						reqLog.Warn("openai.websocket_reasoning_history_bind_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+					}
+				}
 				turnRequestedModel := publicReqModel
 				turnUpstreamModel := ""
 				if result != nil && turn > 1 {
@@ -2101,6 +2178,30 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				zap.Int64("account_id", account.ID),
 				zap.String("schedule_layer", scheduleDecision.Layer),
 			)
+		}
+		wsPassthrough := h.gatewayService.ShouldUseOpenAIResponsesWebSocketV2Passthrough(account)
+		wsFirstMessage = h.deriveOpenAIForwardAttemptBodyForMode(
+			reqLog,
+			wsFirstMessage,
+			account,
+			wsPassthrough,
+			&passthroughFailoverState,
+		)
+		if wsPassthrough {
+			passthroughFailoverState.historyMayContainPassthrough = true
+			passthroughFailoverState.historyKnown = true
+		}
+		if err := h.gatewayService.BindOpenAIReasoningSourcePassthrough(
+			ctx,
+			apiKey.ProjectID,
+			apiKey.GroupID,
+			sessionHash,
+			passthroughFailoverState.historyMayContainPassthrough,
+		); err != nil {
+			reqLog.Warn("openai.websocket_reasoning_history_prebind_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		}
+		if ctx.Err() != nil {
+			return
 		}
 
 		// WebSocket 首包可能很大，hash 必须在 hooks 外算成字符串，避免 AfterTurn 闭包保活请求体。
@@ -2421,7 +2522,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 }
 
 func credentialFailoverClientResponse(failoverErr *service.UpstreamFailoverError) (int, string) {
-	_ = failoverErr
+	if failoverErr != nil && failoverErr.Reason == service.AntigravityCredentialRejectedReason {
+		return http.StatusBadGateway, service.AntigravityCredentialRejectedClientMessage
+	}
 	return http.StatusServiceUnavailable, service.GrokCredentialUnavailableClientMessage
 }
 

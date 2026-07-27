@@ -123,3 +123,23 @@ func openAIWSHTTPDecision(reason string) OpenAIWSProtocolDecision {
 		Reason:    reason,
 	}
 }
+
+func (s *OpenAIGatewayService) ShouldUseOpenAIResponsesWebSocketV2Passthrough(account *Account) bool {
+	if s == nil {
+		return false
+	}
+	return s.shouldUseOpenAIResponsesWebSocketV2Passthrough(account, s.getOpenAIWSProtocolResolver().Resolve(account))
+}
+
+func (s *OpenAIGatewayService) shouldUseOpenAIResponsesWebSocketV2Passthrough(
+	account *Account,
+	decision OpenAIWSProtocolDecision,
+) bool {
+	if s == nil || s.cfg == nil || account == nil || account.Platform == PlatformGrok {
+		return false
+	}
+	wsCfg := s.cfg.Gateway.OpenAIWS
+	return wsCfg.ModeRouterV2Enabled &&
+		account.ResolveOpenAIResponsesWebSocketV2Mode(wsCfg.IngressModeDefault) == OpenAIWSIngressModePassthrough &&
+		decision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2
+}

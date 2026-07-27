@@ -804,13 +804,14 @@ func (p *openAICompatSSEFrameParser) Finish() (openAICompatSSEFrame, bool) {
 }
 
 func (p *openAICompatSSEFrameParser) dispatch() (openAICompatSSEFrame, bool) {
+	hasData := len(p.dataLines) > 0
 	frame := openAICompatSSEFrame{
 		EventType: p.eventType,
 		Data:      strings.Join(p.dataLines, "\n"),
 	}
 	p.eventType = ""
 	p.dataLines = nil
-	return frame, frame.Data != ""
+	return frame, hasData
 }
 
 func openAICompatPayloadWithEventType(payload, eventType string) string {

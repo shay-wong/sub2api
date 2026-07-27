@@ -229,3 +229,35 @@ func TestOpenAIWSProtocolResolver_Resolve_ModeRouterV2(t *testing.T) {
 		require.Equal(t, "account_concurrency_invalid", decision.Reason)
 	})
 }
+
+func TestOpenAIGatewayService_ShouldUseOpenAIResponsesWebSocketV2Passthrough(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.IngressModeDefault = OpenAIWSIngressModeCtxPool
+
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+		},
+	}
+	svc := &OpenAIGatewayService{cfg: cfg}
+
+	require.False(t, account.ShouldUseOpenAIResponsesPassthrough(), "HTTP passthrough is intentionally unset")
+	require.True(t, svc.ShouldUseOpenAIResponsesWebSocketV2Passthrough(account))
+
+	httpBridge := *account
+	httpBridge.Extra = map[string]any{
+		"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge,
+	}
+	require.False(t, svc.ShouldUseOpenAIResponsesWebSocketV2Passthrough(&httpBridge))
+
+	grok := *account
+	grok.Platform = PlatformGrok
+	require.False(t, svc.ShouldUseOpenAIResponsesWebSocketV2Passthrough(&grok))
+}

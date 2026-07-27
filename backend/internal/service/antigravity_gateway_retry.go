@@ -23,22 +23,23 @@ import (
 
 // antigravityRetryLoopParams 重试循环的参数
 type antigravityRetryLoopParams struct {
-	ctx             context.Context
-	prefix          string
-	account         *Account
-	proxyURL        string
-	accessToken     string
-	action          string
-	body            []byte
-	c               *gin.Context
-	httpUpstream    HTTPUpstream
-	settingService  *SettingService
-	accountRepo     AccountRepository // 用于智能重试的模型级别限流
-	handleError     func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult
-	requestedModel  string // 用于限流检查的原始请求模型
-	isStickySession bool   // 是否为粘性会话（用于账号切换时的缓存计费判断）
-	groupID         int64  // 用于模型级限流时清除粘性会话
-	sessionHash     string // 用于模型级限流时清除粘性会话
+	ctx                context.Context
+	upstreamRequestCtx context.Context
+	prefix             string
+	account            *Account
+	proxyURL           string
+	accessToken        string
+	action             string
+	body               []byte
+	c                  *gin.Context
+	httpUpstream       HTTPUpstream
+	settingService     *SettingService
+	accountRepo        AccountRepository // 用于智能重试的模型级别限流
+	handleError        func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult
+	requestedModel     string // 用于限流检查的原始请求模型
+	isStickySession    bool   // 是否为粘性会话（用于账号切换时的缓存计费判断）
+	groupID            int64  // 用于模型级限流时清除粘性会话
+	sessionHash        string // 用于模型级限流时清除粘性会话
 }
 
 // antigravityRetryLoopResult 重试循环的结果
@@ -449,6 +450,10 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 
 // antigravityRetryLoop 执行带 URL fallback 的重试循环
 func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopParams) (*antigravityRetryLoopResult, error) {
+	upstreamRequestCtx := p.ctx
+	if p.upstreamRequestCtx != nil {
+		upstreamRequestCtx = p.upstreamRequestCtx
+	}
 	// 预检查：模型限流 + overages 启用 + 积分未耗尽 → 直接注入 AI Credits
 	overagesInjected := false
 	if p.requestedModel != "" && p.account.Platform == PlatformAntigravity &&
@@ -520,7 +525,7 @@ urlFallbackLoop:
 			default:
 			}
 
-			upstreamReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, p.body)
+			upstreamReq, err := antigravity.NewAPIRequestWithURL(upstreamRequestCtx, baseURL, p.action, p.accessToken, p.body)
 			if err != nil {
 				return nil, err
 			}

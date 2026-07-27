@@ -128,6 +128,7 @@ func writeOpenAICompactSSEFailureMessage(c *gin.Context, statusCode int, errType
 	if err != nil {
 		return
 	}
+	MarkResponseCommitted(c)
 	_, _ = c.Writer.Write([]byte("event: response.failed\ndata: "))
 	_, _ = c.Writer.Write(payload)
 	_, _ = c.Writer.Write([]byte("\n\n"))

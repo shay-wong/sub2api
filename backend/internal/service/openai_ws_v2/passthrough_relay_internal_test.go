@@ -178,6 +178,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 		drop := &atomic.Bool{}
 		drop.Store(true)
 		dropped := &atomic.Int64{}
+		completed := &atomic.Int32{}
 		runUpstreamToClient(
 			context.Background(),
 			newPassthroughTestFrameConn([]passthroughTestFrame{
@@ -191,7 +192,10 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			time.Now,
 			&relayState{},
 			nil,
-			nil,
+			func(turn RelayTurnResult) {
+				completed.Add(1)
+				require.Equal(t, "resp_drop", turn.RequestID)
+			},
 			nil,
 			nil,
 			nil,
@@ -207,7 +211,81 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 		require.Equal(t, "drain_terminal", sig.stage)
 		require.True(t, sig.graceful)
 		require.Equal(t, int64(1), dropped.Load())
+		require.Equal(t, int32(1), completed.Load(), "drained terminal must still complete accounting exactly once")
 	})
+}
+
+func TestRunUpstreamToClient_TerminalCompletionWaitsForDeliveryOutcome(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		beforeErr error
+		writeErr  error
+		wantStage string
+	}{
+		{name: "blocked", beforeErr: errors.New("blocked"), wantStage: "upstream_message"},
+		{name: "write failed", writeErr: errors.New("write failed"), wantStage: "write_client"},
+		{name: "write succeeded", wantStage: "read_upstream"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			exitCh := make(chan relayExitSignal, 1)
+			drop := &atomic.Bool{}
+			var beforeCalled atomic.Bool
+			var writeCalled atomic.Bool
+			var afterCalled atomic.Bool
+			var callbackCount atomic.Int32
+			runUpstreamToClient(
+				context.Background(),
+				newPassthroughTestFrameConn([]passthroughTestFrame{{
+					msgType: coderws.MessageText,
+					payload: []byte(`{"type":"response.completed","response":{"id":"resp_delivery","usage":{"input_tokens":2,"output_tokens":1}}}`),
+				}}, true),
+				func(_ coderws.MessageType, _ []byte) error {
+					writeCalled.Store(true)
+					return tt.writeErr
+				},
+				time.Now(),
+				time.Now,
+				&relayState{},
+				nil,
+				func(turn RelayTurnResult) {
+					callbackCount.Add(1)
+					require.True(t, beforeCalled.Load(), "terminal must be observed and accepted or rejected before completion")
+					if tt.beforeErr == nil {
+						require.True(t, writeCalled.Load(), "completion must wait for the client write result")
+						require.True(t, afterCalled.Load(), "completion must run after the client write hook")
+					} else {
+						require.False(t, writeCalled.Load(), "a rejected terminal must not be written")
+					}
+					require.Equal(t, "resp_delivery", turn.RequestID)
+					require.Equal(t, 2, turn.Usage.InputTokens)
+				},
+				func(_ coderws.MessageType, _ []byte, _ bool) error {
+					beforeCalled.Store(true)
+					return tt.beforeErr
+				},
+				nil,
+				func(_ coderws.MessageType, _ []byte, _ error) {
+					afterCalled.Store(true)
+				},
+				nil,
+				drop,
+				nil,
+				nil,
+				func() {},
+				nil,
+				exitCh,
+			)
+
+			require.Equal(t, tt.wantStage, (<-exitCh).stage)
+			require.Equal(t, int32(1), callbackCount.Load(), "one observed terminal must complete exactly one turn")
+		})
+	}
 }
 
 func TestRunIdleWatchdog_NoTimeoutWhenDisabled(t *testing.T) {

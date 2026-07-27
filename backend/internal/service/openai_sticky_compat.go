@@ -23,6 +23,14 @@ var (
 	openAIStickyLegacyDualWriteTotal    atomic.Int64
 )
 
+// OpenAIReasoningSourceStore persists whether a sticky session's full history
+// may contain passthrough reasoning. Implementations must preserve true across
+// later non-passthrough successes while refreshing the TTL.
+type OpenAIReasoningSourceStore interface {
+	GetOpenAIReasoningSourcePassthrough(ctx context.Context, projectID, groupID int64, sessionHash string) (passthrough bool, found bool, err error)
+	SetOpenAIReasoningSourcePassthrough(ctx context.Context, projectID, groupID int64, sessionHash string, passthrough bool, ttl time.Duration) error
+}
+
 func openAIStickyCompatStats() (legacyReadFallbackTotal, legacyReadFallbackHit, legacyDualWriteTotal int64) {
 	return openAIStickyLegacyReadFallbackTotal.Load(),
 		openAIStickyLegacyReadFallbackHit.Load(),
@@ -218,4 +226,47 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 		_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), legacyKey)
 	}
 	return err
+}
+
+// GetOpenAIReasoningSourcePassthrough returns whether this session's full history
+// may contain passthrough reasoning. known=false covers missing metadata and cache
+// implementations that predate this optional capability.
+func (s *OpenAIGatewayService) GetOpenAIReasoningSourcePassthrough(
+	ctx context.Context,
+	projectID int64,
+	groupID *int64,
+	sessionHash string,
+) (passthrough bool, known bool, err error) {
+	if s == nil || strings.TrimSpace(sessionHash) == "" {
+		return false, false, nil
+	}
+	store, ok := s.cache.(OpenAIReasoningSourceStore)
+	if !ok {
+		return false, false, nil
+	}
+	return store.GetOpenAIReasoningSourcePassthrough(ctx, projectID, derefGroupID(groupID), sessionHash)
+}
+
+// BindOpenAIReasoningSourcePassthrough updates the monotonic history flag and
+// refreshes its TTL. It intentionally survives sticky-account invalidation so
+// failover can still sanitize older turns after an account switch.
+func (s *OpenAIGatewayService) BindOpenAIReasoningSourcePassthrough(
+	ctx context.Context,
+	projectID int64,
+	groupID *int64,
+	sessionHash string,
+	passthrough bool,
+) error {
+	if s == nil || strings.TrimSpace(sessionHash) == "" {
+		return nil
+	}
+	store, ok := s.cache.(OpenAIReasoningSourceStore)
+	if !ok {
+		return nil
+	}
+	ttl := openaiStickySessionTTL
+	if s.cfg != nil && s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds > 0 {
+		ttl = time.Duration(s.cfg.Gateway.OpenAIWS.StickySessionTTLSeconds) * time.Second
+	}
+	return store.SetOpenAIReasoningSourcePassthrough(ctx, projectID, derefGroupID(groupID), sessionHash, passthrough, ttl)
 }

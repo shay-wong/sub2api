@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 // TestWrapReleaseOnDone_NoGoroutineLeak 验证 wrapReleaseOnDone 修复后不会泄露 goroutine
@@ -82,6 +85,115 @@ func TestWrapReleaseOnDone_AlreadyCancelledReleasesExactlyOnce(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&releaseCount) == 1
 	}, time.Second, time.Millisecond)
+}
+
+// Streaming forwarders keep draining upstream usage after the client leaves, so
+// the account slot must remain held until the forward call explicitly returns.
+func TestWrapAccountReleaseOnForwardDone_StreamingWaitsForForwardCompletion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	released := make(chan struct{})
+	release := wrapAccountReleaseOnForwardDone(ctx, true, func() { close(released) })
+
+	cancel()
+	select {
+	case <-released:
+		t.Fatal("streaming account slot released on client cancellation")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	release()
+	require.Eventually(t, func() bool {
+		select {
+		case <-released:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+}
+
+func TestAcquireResponsesAccountSlot_StreamingReleaseWaitsForForwardCompletion(t *testing.T) {
+	newContext := func(t *testing.T) (*gin.Context, context.CancelFunc) {
+		t.Helper()
+		c, _ := newHelperTestContext("POST", "/openai/v1/responses")
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		return c, cancel
+	}
+	cacheReleaseCount := func(cache *helperConcurrencyCacheStub) int {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		return cache.accountReleaseCalls
+	}
+	assertHeld := func(t *testing.T, cancel context.CancelFunc, release func(), released func() int) {
+		t.Helper()
+		cancel()
+		time.Sleep(20 * time.Millisecond)
+		require.Zero(t, released(), "streaming slot released before forward returned")
+		release()
+		require.Eventually(t, func() bool { return released() == 1 }, time.Second, time.Millisecond)
+	}
+
+	t.Run("scheduler acquired", func(t *testing.T) {
+		c, cancel := newContext(t)
+		var releases atomic.Int32
+		h := &OpenAIGatewayHandler{}
+		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+			Account:     &service.Account{ID: 101},
+			Acquired:    true,
+			ReleaseFunc: func() { releases.Add(1) },
+		}, true, new(bool), zap.NewNop())
+		require.True(t, acquired)
+		assertHeld(t, cancel, release, func() int { return int(releases.Load()) })
+	})
+
+	t.Run("fast acquired", func(t *testing.T) {
+		c, cancel := newContext(t)
+		cache := &helperConcurrencyCacheStub{accountSeq: []bool{true}}
+		h := &OpenAIGatewayHandler{
+			gatewayService:    &service.OpenAIGatewayService{},
+			concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Millisecond),
+		}
+		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+			Account:  &service.Account{ID: 102},
+			WaitPlan: &service.AccountWaitPlan{MaxConcurrency: 1, Timeout: time.Second, MaxWaiting: 1},
+		}, true, new(bool), zap.NewNop())
+		require.True(t, acquired)
+		assertHeld(t, cancel, release, func() int { return cacheReleaseCount(cache) })
+	})
+
+	t.Run("waited acquired", func(t *testing.T) {
+		c, cancel := newContext(t)
+		cache := &helperConcurrencyCacheStub{accountSeq: []bool{false, true}}
+		h := &OpenAIGatewayHandler{
+			gatewayService:    &service.OpenAIGatewayService{},
+			concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Millisecond),
+		}
+		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+			Account:  &service.Account{ID: 103},
+			WaitPlan: &service.AccountWaitPlan{MaxConcurrency: 1, Timeout: time.Second, MaxWaiting: 1},
+		}, true, new(bool), zap.NewNop())
+		require.True(t, acquired)
+		assertHeld(t, cancel, release, func() int { return cacheReleaseCount(cache) })
+	})
+}
+
+func TestAcquireResponsesAccountSlot_NonStreamingReleaseFollowsClientCancellation(t *testing.T) {
+	c, _ := newHelperTestContext("POST", "/openai/v1/responses")
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(ctx)
+	var releases atomic.Int32
+	h := &OpenAIGatewayHandler{}
+	release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+		Account:     &service.Account{ID: 104},
+		Acquired:    true,
+		ReleaseFunc: func() { releases.Add(1) },
+	}, false, new(bool), zap.NewNop())
+	require.True(t, acquired)
+	defer release()
+
+	cancel()
+	require.Eventually(t, func() bool { return releases.Load() == 1 }, time.Second, time.Millisecond)
 }
 
 // TestWrapReleaseOnDone_MultipleCallsOnlyReleaseOnce 验证多次调用 release 只释放一次

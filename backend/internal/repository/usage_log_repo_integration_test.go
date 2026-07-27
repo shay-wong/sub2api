@@ -1635,6 +1635,138 @@ func (s *UsageLogRepoSuite) TestGetAccountUsageStats_EmptyRange() {
 
 // --- GetUserUsageTrend ---
 
+// This matrix locks project filters into both ranking CTEs and their result scans.
+func (s *UsageLogRepoSuite) TestProjectScopedAggregateTrendsAndGroupSummary() {
+	projectA, err := s.client.Project.Create().
+		SetName("Usage Aggregate Project A").
+		SetSlug("usage-aggregate-project-a-" + uuid.NewString()).
+		SetProfiles(map[string]any{}).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	projectB, err := s.client.Project.Create().
+		SetName("Usage Aggregate Project B").
+		SetSlug("usage-aggregate-project-b-" + uuid.NewString()).
+		SetProfiles(map[string]any{}).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	userA := mustCreateUser(s.T(), s.client, &service.User{Email: "usage-project-a-" + uuid.NewString() + "@test.com"})
+	foreignUser := mustCreateUser(s.T(), s.client, &service.User{Email: "usage-foreign-" + uuid.NewString() + "@test.com"})
+	_, err = s.client.ProjectMember.Create().
+		SetProjectID(projectA.ID).
+		SetUserID(userA.ID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	_, err = s.client.ProjectMember.Create().
+		SetProjectID(projectB.ID).
+		SetUserID(userA.ID).
+		SetRole(service.ProjectRoleUser).
+		SetStatus(service.StatusActive).
+		Save(s.ctx)
+	s.Require().NoError(err)
+
+	groupA := mustCreateGroup(s.T(), s.client, &service.Group{Name: "usage-project-group-a", ProjectID: projectA.ID})
+	groupOnlyForeignUsage := mustCreateGroup(s.T(), s.client, &service.Group{Name: "usage-project-group-only-foreign-usage", ProjectID: projectA.ID})
+	groupB := mustCreateGroup(s.T(), s.client, &service.Group{Name: "usage-project-group-b", ProjectID: projectB.ID})
+	accountA := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-project-account-a", ProjectID: projectA.ID})
+	accountB := mustCreateAccount(s.T(), s.client, &service.Account{Name: "usage-project-account-b", ProjectID: projectB.ID})
+	keyA := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: userA.ID, ProjectID: projectA.ID, Key: "sk-usage-project-a-" + uuid.NewString()})
+	keyB := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: userA.ID, ProjectID: projectB.ID, Key: "sk-usage-project-b-" + uuid.NewString()})
+	foreignKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: foreignUser.ID, ProjectID: projectB.ID, Key: "sk-usage-foreign-" + uuid.NewString()})
+
+	profile, err := s.client.ProjectProfile.Create().
+		SetProjectID(projectA.ID).
+		SetName("Restricted").
+		SetMode(service.ProjectProfileModeRestricted).
+		SetIsActive(true).
+		Save(s.ctx)
+	s.Require().NoError(err)
+	for _, groupID := range []int64{groupA.ID, groupOnlyForeignUsage.ID} {
+		_, err = s.client.ProjectProfileBinding.Create().
+			SetProjectProfileID(profile.ID).
+			SetResourceType(service.ProjectResourceTypeGroup).
+			SetResourceID(groupID).
+			Save(s.ctx)
+		s.Require().NoError(err)
+	}
+
+	createdAt := time.Now().UTC()
+	for _, item := range []struct {
+		projectID int64
+		userID    int64
+		keyID     int64
+		accountID int64
+		groupID   int64
+		requestID string
+		cost      float64
+	}{
+		{projectA.ID, userA.ID, keyA.ID, accountA.ID, groupA.ID, "req-project-a-" + uuid.NewString(), 1.25},
+		{projectB.ID, userA.ID, keyB.ID, accountB.ID, groupB.ID, "req-project-b-" + uuid.NewString(), 9.75},
+		{projectB.ID, foreignUser.ID, foreignKey.ID, accountB.ID, groupOnlyForeignUsage.ID, "req-foreign-" + uuid.NewString(), 4.50},
+	} {
+		_, err = s.client.UsageLog.Create().
+			SetProjectID(item.projectID).
+			SetUserID(item.userID).
+			SetAPIKeyID(item.keyID).
+			SetAccountID(item.accountID).
+			SetGroupID(item.groupID).
+			SetRequestID(item.requestID).
+			SetModel("gpt-5").
+			SetInputTokens(10).
+			SetOutputTokens(5).
+			SetActualCost(item.cost).
+			SetCreatedAt(createdAt).
+			Save(s.ctx)
+		s.Require().NoError(err)
+	}
+
+	projectCtx := service.WithProjectID(s.ctx, projectA.ID)
+	startTime := createdAt.Add(-time.Hour)
+	endTime := createdAt.Add(time.Hour)
+
+	keyTrend, err := s.repo.GetAPIKeyUsageTrend(projectCtx, startTime, endTime, "day", 10)
+	s.Require().NoError(err)
+	s.Require().Len(keyTrend, 1)
+	s.Equal(keyA.ID, keyTrend[0].APIKeyID)
+
+	userTrend, err := s.repo.GetUserUsageTrend(projectCtx, startTime, endTime, "day", 10)
+	s.Require().NoError(err)
+	s.Require().Len(userTrend, 1)
+	s.Equal(userA.ID, userTrend[0].UserID)
+	s.InDelta(1.25, userTrend[0].ActualCost, 1e-9)
+
+	userTrendByID, err := s.repo.GetUserUsageTrendByUserID(projectCtx, userA.ID, startTime, endTime, "day")
+	s.Require().NoError(err)
+	s.Require().Len(userTrendByID, 1)
+	s.Equal(int64(1), userTrendByID[0].Requests)
+	s.InDelta(1.25, userTrendByID[0].ActualCost, 1e-9)
+
+	userBreakdown, err := s.repo.GetUserBreakdownStats(projectCtx, startTime, endTime, usagestats.UserBreakdownDimension{}, 10)
+	s.Require().NoError(err)
+	s.Require().Len(userBreakdown, 1)
+	s.Equal(userA.ID, userBreakdown[0].UserID)
+	s.Equal(int64(1), userBreakdown[0].Requests)
+	s.InDelta(1.25, userBreakdown[0].ActualCost, 1e-9)
+
+	ranking, err := s.repo.GetUserSpendingRanking(projectCtx, startTime, endTime, 10)
+	s.Require().NoError(err)
+	s.Require().Len(ranking.Ranking, 1)
+	s.Equal(userA.ID, ranking.Ranking[0].UserID)
+	s.InDelta(1.25, ranking.TotalActualCost, 1e-9)
+
+	groupSummary, err := s.repo.GetAllGroupUsageSummary(projectCtx, startTime.Add(-time.Hour))
+	s.Require().NoError(err)
+	s.Require().Len(groupSummary, 2)
+	summaryByGroupID := make(map[int64]usagestats.GroupUsageSummary, len(groupSummary))
+	for _, summary := range groupSummary {
+		summaryByGroupID[summary.GroupID] = summary
+	}
+	s.InDelta(1.25, summaryByGroupID[groupA.ID].TotalCost, 1e-9)
+	s.InDelta(0, summaryByGroupID[groupOnlyForeignUsage.ID].TotalCost, 1e-9)
+}
+
 func (s *UsageLogRepoSuite) TestGetUserUsageTrend() {
 	user1 := mustCreateUser(s.T(), s.client, &service.User{Email: "usertrend1@test.com"})
 	user2 := mustCreateUser(s.T(), s.client, &service.User{Email: "usertrend2@test.com"})
