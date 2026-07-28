@@ -229,6 +229,13 @@ func NewProjectService(repo ProjectRepository, authCacheInvalidator ...APIKeyAut
 	return s
 }
 
+func (s *ProjectService) GetDefaultProjectID(ctx context.Context) (int64, error) {
+	if s == nil || s.repo == nil {
+		return 0, infraerrors.InternalServer("PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
+	}
+	return s.repo.GetDefaultProjectID(ctx)
+}
+
 func (s *ProjectService) ResolveAdminProject(ctx context.Context, user *User, requestedProjectID int64) (int64, string, []string, error) {
 	if user == nil || user.ID <= 0 {
 		return 0, "", nil, infraerrors.Unauthorized("UNAUTHORIZED", "authorization required")

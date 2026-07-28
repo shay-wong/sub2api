@@ -142,7 +142,7 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	}
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
-		return r.finishFailure(ctx, job, &GuardError{Code: "no_enabled_endpoint", Retryable: true})
+		return r.finishFailure(ctx, job, &GuardError{Code: ErrorCodeNoEnabledEndpoint, Retryable: true})
 	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))
 	results := make([]*NormalizedResult, 0, len(chunks))

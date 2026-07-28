@@ -10,6 +10,7 @@ const (
 	EventConfigUpdated        = "prompt_audit.config_updated"
 	EventConfigLoaded         = "prompt_guard.config_loaded"
 	EventConfigReloadDegraded = "prompt_guard.config_reload_degraded"
+	EventConfigTokenInvalid   = "prompt_guard.config_token_invalid"
 	EventProbeStarted         = "prompt_audit.endpoint_probe_started"
 	EventProbeFinished        = "prompt_audit.endpoint_probe_finished"
 	EventProbeFailed          = "prompt_audit.endpoint_probe_failed"
@@ -37,7 +38,7 @@ const (
 )
 
 var knownLogEvents = map[string]struct{}{
-	EventConfigUpdated: {}, EventConfigLoaded: {}, EventConfigReloadDegraded: {},
+	EventConfigUpdated: {}, EventConfigLoaded: {}, EventConfigReloadDegraded: {}, EventConfigTokenInvalid: {},
 	EventProbeStarted: {}, EventProbeFinished: {}, EventProbeFailed: {},
 	EventJobEnqueued: {}, EventEnqueueSkipped: {}, EventEnqueueDropped: {},
 	EventAuditStarted: {}, EventProcessingReclaimed: {}, EventProcessed: {}, EventProcessFailed: {}, EventFindingRecorded: {},
@@ -155,6 +156,8 @@ func stableErrorMessage(code string) string {
 		return "Prompt Audit dependency is unavailable"
 	case ErrorCodeInvalidResponse:
 		return "Prompt Guard returned an invalid response"
+	case ErrorCodeNoEnabledEndpoint:
+		return "Prompt Audit has no enabled endpoint"
 	case "queue_full", "queue_admission_busy":
 		return "Prompt Audit queue is unavailable"
 	case "worker_panic":

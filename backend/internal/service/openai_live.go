@@ -28,13 +28,29 @@ const (
 	liveRedisOperationTimeout     = 3 * time.Second
 	liveClosedRecordTTL           = 24 * time.Hour
 	liveObserverPollInterval      = 250 * time.Millisecond
+	liveObserverStoreRetryLimit   = 5
+	liveFinalizeStoreRetryLimit   = 5
+	liveRecoveryRetryInterval     = 30 * time.Second
 	liveUpstreamBodyLimit         = 2 << 20
+)
+
+// 重试间隔使用 var 以便测试缩短 store 报错的等待。
+var (
+	liveObserverStoreRetryInterval = time.Second
+	liveFinalizeStoreRetryInterval = time.Second
 )
 
 var (
 	chatGPTLiveCallsURL        = "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
 	chatGPTLiveSidebandBaseURL = "wss://chatgpt.com/backend-api/codex"
 )
+
+type liveCreateAmbiguousError struct {
+	err error
+}
+
+func (e *liveCreateAmbiguousError) Error() string { return e.err.Error() }
+func (e *liveCreateAmbiguousError) Unwrap() error { return e.err }
 
 type liveFrameConn interface {
 	ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error)
@@ -188,26 +204,16 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
-		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
-		selection.ReleaseFunc()
-		if createErr != nil {
-			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
-			if !s.shouldFailoverLiveCreateError(createErr) {
-				return nil, createErr
-			}
-			excluded[account.ID] = struct{}{}
-			lastErr = createErr
-			continue
-		}
-
 		now := time.Now()
 		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
 		if model == "" {
 			model = "gpt-live"
 		}
-		record := &LiveCallRecord{
-			CallID:                created.CallID,
-			CallHash:              hashLiveCallID(created.CallID),
+		intentID := "pending:" + leaseID
+		intent := &LiveCallRecord{
+			CallID:                intentID,
+			CallHash:              hashLiveCallID(intentID),
+			Provisional:           true,
 			AccountID:             account.ID,
 			APIKeyID:              identity.APIKeyID,
 			ProjectID:             identity.ProjectID,
@@ -225,13 +231,62 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			InboundEndpoint:       identity.InboundEndpoint,
 			AttestationCiphertext: attestationCiphertext,
 		}
-		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
-		if saveErr := store.SaveLiveCall(ctx, record, mappingTTL); saveErr != nil {
+		mappingTTL := s.liveMaxSessionDuration() + liveClosedRecordTTL
+		if saveErr := store.SaveLiveCall(ctx, intent, mappingTTL); saveErr != nil {
+			selection.ReleaseFunc()
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
-			return nil, fmt.Errorf("save live call mapping: %w", saveErr)
+			return nil, fmt.Errorf("save live create intent: %w", saveErr)
+		}
+
+		var record LiveCallRecord
+		var mappingErr error
+		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation, func(created *LiveCallCreated) error {
+			record = *intent
+			record.CallID = created.CallID
+			record.CallHash = hashLiveCallID(created.CallID)
+			record.Provisional = false
+			mappingErr = promoteLiveCall(ctx, store, intent.CallHash, &record, mappingTTL)
+			return mappingErr
+		})
+		selection.ReleaseFunc()
+		if created == nil {
+			if createErr == nil {
+				createErr = ErrLiveUnavailable
+			}
+			var ambiguousErr *liveCreateAmbiguousError
+			if errors.As(createErr, &ambiguousErr) {
+				logger.FromContext(ctx).Error(
+					"openai_live_create_outcome_ambiguous",
+					zap.String("intent_hash", intent.CallHash),
+					zap.Int64("account_id", account.ID),
+					zap.Error(createErr),
+				)
+				return nil, createErr
+			}
+			s.closeLiveCreateIntent(intent)
+			if !s.shouldFailoverLiveCreateError(createErr) {
+				return nil, createErr
+			}
+			excluded[account.ID] = struct{}{}
+			lastErr = createErr
+			continue
+		}
+
+		if mappingErr != nil {
+			logger.FromContext(ctx).Error(
+				"openai_live_upstream_created_mapping_failed",
+				zap.String("intent_hash", intent.CallHash),
+				zap.String("call_hash", record.CallHash),
+				zap.Int64("account_id", account.ID),
+				zap.Error(mappingErr),
+			)
+			return nil, fmt.Errorf("save live call mapping: %w", mappingErr)
 		}
 		created.Account = account
-		go s.observeLiveCall(record.CallHash)
+		go s.observeLiveCall(&record)
+		if createErr != nil {
+			return nil, createErr
+		}
 		return created, nil
 	}
 	if lastErr != nil {
@@ -240,10 +295,58 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	return nil, ErrLiveUnavailable
 }
 
+func promoteLiveCall(
+	ctx context.Context,
+	store LiveCallStore,
+	intentHash string,
+	record *LiveCallRecord,
+	ttl time.Duration,
+) error {
+	promoteErr := store.PromoteLiveCall(ctx, intentHash, record, ttl)
+	if promoteErr == nil {
+		return nil
+	}
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+	stored, verifyErr := store.GetLiveCall(verifyCtx, record.CallHash)
+	verifyCancel()
+	if verifyErr == nil && stored != nil && stored.CallID == record.CallID &&
+		stored.LeaseID == record.LeaseID && !stored.Provisional {
+		return nil
+	}
+	if verifyErr != nil {
+		return fmt.Errorf("promotion failed: %w; verification failed: %v", promoteErr, verifyErr)
+	}
+	return fmt.Errorf("promotion failed: %w; stored record did not match", promoteErr)
+}
+
+func (s *OpenAIGatewayService) closeLiveCreateIntent(intent *LiveCallRecord) {
+	if intent == nil {
+		return
+	}
+	defer s.releaseLiveLease(intent.AccountID, intent.UserID, intent.APIKeyID, intent.LeaseID)
+	store, err := s.liveStore()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
+	defer cancel()
+	if _, err := store.MarkLiveCallClosed(ctx, intent.CallHash, liveClosedRecordTTL); err != nil {
+		logger.FromContext(context.Background()).Error(
+			"openai_live_close_create_intent_failed",
+			zap.String("intent_hash", intent.CallHash),
+			zap.Error(err),
+		)
+	}
+}
+
 func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+	var ambiguousErr *liveCreateAmbiguousError
+	if errors.As(err, &ambiguousErr) {
+		return false
+	}
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
-		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
+		// 请求发出前的凭证读取或请求构造错误可能只影响当前账号。
 		return true
 	}
 	return s.shouldFailoverOpenAIUpstreamResponse(
@@ -258,6 +361,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	account *Account,
 	request *LiveCallRequest,
 	attestation string,
+	onAccepted func(*LiveCallCreated) error,
 ) (*LiveCallCreated, error) {
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -302,17 +406,18 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	resp, err := s.httpUpstream.Do(upstreamReq, resolveAccountProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
-		return nil, err
+		// POST 可能已被上游接收；没有幂等或查询能力时切换账号会重复创建。
+		return nil, &liveCreateAmbiguousError{err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, liveUpstreamBodyLimit+1))
-	if readErr != nil {
-		return nil, readErr
-	}
-	if len(responseBody) > liveUpstreamBodyLimit {
-		return nil, errors.New("live upstream response is too large")
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, liveUpstreamBodyLimit+1))
+		if readErr != nil {
+			return nil, readErr
+		}
+		if len(responseBody) > liveUpstreamBodyLimit {
+			return nil, errors.New("live upstream response is too large")
+		}
 		logLiveUpstreamFailure(ctx, account.ID, resp.StatusCode, resp.Header, responseBody)
 		return nil, &UpstreamFailoverError{
 			StatusCode:      resp.StatusCode,
@@ -322,13 +427,26 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	}
 	callID, err := liveCallIDFromLocation(resp.Header.Get("Location"))
 	if err != nil {
-		return nil, err
+		return nil, &liveCreateAmbiguousError{err: err}
 	}
-	return &LiveCallCreated{
-		SDP:      responseBody,
+	created := &LiveCallCreated{
 		CallID:   callID,
 		Location: resp.Header.Get("Location"),
-	}, nil
+	}
+	if onAccepted != nil {
+		if err := onAccepted(created); err != nil {
+			return created, &liveCreateAmbiguousError{err: err}
+		}
+	}
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, liveUpstreamBodyLimit+1))
+	if readErr != nil {
+		return created, &liveCreateAmbiguousError{err: readErr}
+	}
+	if len(responseBody) > liveUpstreamBodyLimit {
+		return created, &liveCreateAmbiguousError{err: errors.New("live upstream response is too large")}
+	}
+	created.SDP = responseBody
+	return created, nil
 }
 
 func logLiveCreateStageFailure(ctx context.Context, accountID int64, stage string, err error) {
@@ -511,7 +629,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 	upstream, err := s.dialLiveSideband(ctx, record)
 	if err != nil {
 		_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
-		go s.observeLiveCall(record.CallHash)
+		go s.observeLiveCall(record)
 		return err
 	}
 	defer func() { _ = upstream.Close() }()
@@ -561,7 +679,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 		s.finalizeLiveCall(record)
 		return runErr
 	}
-	go s.observeLiveCall(record.CallHash)
+	go s.observeLiveCall(record)
 	return runErr
 }
 
@@ -606,19 +724,51 @@ func (s *OpenAIGatewayService) runLiveController(
 	}
 }
 
-func (s *OpenAIGatewayService) observeLiveCall(callHash string) {
+func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
+	if record == nil {
+		return
+	}
 	store, err := s.liveStore()
 	if err != nil {
 		return
 	}
 	owner := uuid.NewString()
-	claimed, err := store.ClaimLiveController(context.Background(), callHash, LiveControllerObserver, owner)
-	if err != nil || !claimed {
+	claimed, claimErr := store.ClaimLiveController(context.Background(), record.CallHash, LiveControllerObserver, owner)
+	if claimErr != nil {
+		// store 报错时无法确认控制权归属，不能静默退出：若 claim 实际已生效而
+		// observer 消失，租约与 usage log 都会丢。兜底 finalize 是幂等的，即使
+		// 控制权在他人手上也只会在到期后落一次库。
+		s.finalizeLiveCallAfterExpiry(record)
 		return
 	}
+	if !claimed {
+		if _, getErr := store.GetLiveController(context.Background(), record.CallHash); errors.Is(getErr, ErrLiveCallNotFound) {
+			s.finalizeLiveCall(record)
+		}
+		return
+	}
+	storeErrStreak := 0
 	for {
-		record, getErr := store.GetLiveCall(context.Background(), callHash)
-		if getErr != nil || record.Controller != LiveControllerObserver {
+		latest, getErr := store.GetLiveCall(context.Background(), record.CallHash)
+		if getErr != nil {
+			// Redis 记录可能在会话仍活跃时被淘汰；数据库幂等键负责与已完成路径去重。
+			if errors.Is(getErr, ErrLiveCallNotFound) {
+				s.finalizeLiveCall(record)
+				return
+			}
+			// store 抖动不等于控制权被接管：有限次重试；仍失败则按
+			// record.ExpiresAt 兜底 finalize，保证 usage log 与租约释放不丢。
+			storeErrStreak++
+			if storeErrStreak >= liveObserverStoreRetryLimit {
+				s.finalizeLiveCallAfterExpiry(record)
+				return
+			}
+			time.Sleep(liveObserverStoreRetryInterval)
+			continue
+		}
+		storeErrStreak = 0
+		record = latest
+		if record.Controller != LiveControllerObserver {
 			return
 		}
 		if !time.Now().Before(record.ExpiresAt) {
@@ -716,10 +866,48 @@ func (s *OpenAIGatewayService) waitForLiveObserverRetry(record *LiveCallRecord) 
 	if err != nil {
 		return false
 	}
-	controller, err := store.GetLiveController(context.Background(), record.CallHash)
+	controller, getErr := store.GetLiveController(context.Background(), record.CallHash)
+	if getErr != nil && !errors.Is(getErr, ErrLiveCallNotFound) {
+		// store 报错不等于控制权被接管：返回 true 交回 observeLiveCall 循环顶部，
+		// 由它对 store 故障做有限次重试与 ExpiresAt 兜底 finalize。在这里返回
+		// false 会让 Redis 抖动时会话静默结束、不留记录。
+		return true
+	}
 	// 过期不在此处判定：返回 true 让调用方回到循环顶部的过期分支，由它 finalize
 	// （写 usage log + 释放租约）。在这里直接返回 false 会让会话静默结束、不留记录。
-	return err == nil && controller == LiveControllerObserver
+	return errors.Is(getErr, ErrLiveCallNotFound) || controller == LiveControllerObserver
+}
+
+// finalizeLiveCallAfterExpiry 是 store 持续报错、observer 无法继续观察时的兜底：
+// 等到会话最长时限 ExpiresAt 再 finalize，保证 usage log 与租约释放最迟在会话到期
+// 时完成。usage_logs 的数据库唯一约束保证与其他恢复路径不会重复落库。
+func (s *OpenAIGatewayService) finalizeLiveCallAfterExpiry(record *LiveCallRecord) {
+	if record == nil {
+		return
+	}
+	if wait := time.Until(record.ExpiresAt); wait > 0 {
+		time.Sleep(wait)
+	}
+	s.finalizeLiveCall(record)
+}
+
+func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
+	for attempt := 0; attempt < liveFinalizeStoreRetryLimit; attempt++ {
+		if s.tryFinalizeLiveCall(context.Background(), record) {
+			return
+		}
+		if attempt+1 < liveFinalizeStoreRetryLimit {
+			time.Sleep(liveFinalizeStoreRetryInterval * time.Duration(1<<attempt))
+		}
+	}
+	logger.FromContext(context.Background()).Error(
+		"openai_live_finalize_retry_exhausted",
+		zap.String("call_hash", record.CallHash),
+		zap.Int64("account_id", record.AccountID),
+		zap.Int64("api_key_id", record.APIKeyID),
+		zap.Int("attempts", liveFinalizeStoreRetryLimit),
+	)
+	s.scheduleLiveCallRecovery(record)
 }
 
 func (s *OpenAIGatewayService) refreshLiveLease(record *LiveCallRecord) bool {
@@ -743,7 +931,7 @@ func (s *OpenAIGatewayService) releaseLiveLease(accountID, userID, apiKeyID int6
 	_ = cache.ReleaseLiveLease(ctx, accountID, userID, apiKeyID, leaseID)
 }
 
-func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
+func (s *OpenAIGatewayService) scheduleLiveCallRecovery(record *LiveCallRecord) {
 	if record == nil {
 		return
 	}
@@ -752,16 +940,60 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), liveRedisOperationTimeout)
-	first, err := store.MarkLiveCallClosed(ctx, record.CallHash, liveClosedRecordTTL)
+	defer cancel()
+	if err := store.ScheduleLiveCallRecovery(ctx, record, time.Now().Add(liveRecoveryRetryInterval), liveClosedRecordTTL); err != nil {
+		logger.FromContext(context.Background()).Error(
+			"openai_live_schedule_recovery_failed",
+			zap.String("call_hash", record.CallHash),
+			zap.Error(err),
+		)
+	}
+}
+
+// tryFinalizeLiveCall 返回本次 finalize 是否已持久化并通过 Redis 关闭状态检查。
+// 终止时间必须先在 Redis 冻结，usage log 必须先落库；false 表示数据库或 store
+// 暂时不可用。
+func (s *OpenAIGatewayService) tryFinalizeLiveCall(ctx context.Context, record *LiveCallRecord) bool {
+	if record == nil {
+		return true
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if record.FinishedAt.IsZero() {
+		record.FinishedAt = time.Now()
+	}
+	store, err := s.liveStore()
+	if err != nil {
+		return false
+	}
+	storeCtx, cancel := context.WithTimeout(ctx, liveRedisOperationTimeout)
+	finishedAt, err := store.FreezeLiveCallFinishedAt(storeCtx, record.CallHash, record.FinishedAt)
 	cancel()
-	if err != nil || !first {
-		return
+	if err != nil && !errors.Is(err, ErrLiveCallNotFound) {
+		return false
+	}
+	if err == nil {
+		record.FinishedAt = finishedAt
+	}
+	if err := s.persistLiveCallUsage(ctx, record); err != nil {
+		return false
+	}
+	storeCtx, cancel = context.WithTimeout(ctx, liveRedisOperationTimeout)
+	_, err = store.MarkLiveCallClosed(storeCtx, record.CallHash, liveClosedRecordTTL)
+	cancel()
+	if err != nil {
+		return false
 	}
 	s.releaseLiveLease(record.AccountID, record.UserID, record.APIKeyID, record.LeaseID)
+	return true
+}
+
+func (s *OpenAIGatewayService) persistLiveCallUsage(ctx context.Context, record *LiveCallRecord) error {
 	if s.usageLogRepo == nil {
-		return
+		return errors.New("usage log repository unavailable")
 	}
-	duration := int(time.Since(record.CreatedAt).Milliseconds())
+	duration := int(record.FinishedAt.Sub(record.CreatedAt).Milliseconds())
 	if duration < 0 {
 		duration = 0
 	}
@@ -773,11 +1005,24 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 	if record.SubscriptionID > 0 {
 		billingType = BillingTypeSubscription
 	}
-	logCtx := context.Background()
+	logCtx := ctx
+	if logCtx == nil {
+		logCtx = context.Background()
+	}
 	if record.ProjectID > 0 {
 		logCtx = WithProjectID(logCtx, record.ProjectID)
 	}
-	_, _ = s.usageLogRepo.Create(logCtx, &UsageLog{
+	// TODO(billing): Live 会话目前不计费：TotalCost/ActualCost 恒为 0，完全绕过
+	// recordUsageCore/applyUsageBilling，余额模式下极低余额也能反复开启最长
+	// liveMaxSessionDuration 的会话。若确认按时长计费，应在此接入计费管道；
+	// 若确认有意免费，删除本注释即可（零值行为由
+	// TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage 锁定）。
+	//
+	// usage_logs 的 (request_id, api_key_id) 唯一约束负责重试幂等。必须先同步确认
+	// 落库，再把 Redis 标为 closed 并释放租约；否则进程在两者之间退出后，没有持久
+	// 恢复器能补回 usage log。
+	usageCtx, cancel := context.WithTimeout(logCtx, postUsageBillingTimeout)
+	_, err := s.usageLogRepo.Create(usageCtx, &UsageLog{
 		ProjectID:        record.ProjectID,
 		SessionID:        optionalTrimmedStringPtr(record.SessionID),
 		UserID:           record.UserID,
@@ -798,4 +1043,11 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		UpstreamEndpoint: &upstreamEndpoint,
 		CreatedAt:        record.CreatedAt,
 	})
+	cancel()
+	if err != nil {
+		recordUsageLogCreateError(err)
+		logger.LegacyPrintf("service.openai_live", "Create usage log failed: %v", err)
+		return err
+	}
+	return nil
 }

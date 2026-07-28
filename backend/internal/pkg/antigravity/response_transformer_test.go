@@ -13,6 +13,12 @@ import (
 
 // --- Task 7: 验证 generateRandomID 和降级碰撞防护 ---
 
+// Upstream Gemini IDs must not leak into the Anthropic response contract.
+func TestNonStreamingProcessor_UsesAnthropicMessageIDFormat(t *testing.T) {
+	response := NewNonStreamingProcessor().Process(&GeminiResponse{ResponseID: "resp_nested"}, "claude-sonnet-4-5")
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, response.ID)
+}
+
 func TestGenerateRandomID_Uniqueness(t *testing.T) {
 	seen := make(map[string]struct{}, 100)
 	for i := 0; i < 100; i++ {

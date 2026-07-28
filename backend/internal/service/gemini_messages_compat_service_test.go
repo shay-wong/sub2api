@@ -25,6 +25,12 @@ type geminiCompatHTTPUpstreamStub struct {
 	lastReq  *http.Request
 }
 
+// Generated compatibility responses must keep the exact Anthropic message ID shape.
+func TestConvertGeminiToClaudeMessage_GeneratedMessageIDFormat(t *testing.T) {
+	response, _ := convertGeminiToClaudeMessage(map[string]any{}, "claude-sonnet-4-5", nil, false)
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, response["id"])
+}
+
 func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	s.calls++
 	s.lastReq = req

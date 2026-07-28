@@ -7,26 +7,28 @@ import (
 )
 
 type User struct {
-	ID                  int64
-	Email               string
-	Username            string
-	Notes               string
-	AvatarURL           string
-	AvatarSource        string
-	AvatarMIME          string
-	AvatarByteSize      int
-	AvatarSHA256        string
-	PasswordHash        string
-	Role                string
-	ProjectRole         string
-	ProjectMemberStatus string
-	ProjectPermissions  []string
-	Balance             float64
-	FrozenBalance       float64
-	Concurrency         int
-	Status              string
-	AllowedGroups       []int64
-	TokenVersion        int64 // Incremented on password change to invalidate existing tokens
+	ID                   int64
+	Email                string
+	Username             string
+	Notes                string
+	AvatarURL            string
+	AvatarSource         string
+	AvatarMIME           string
+	AvatarByteSize       int
+	AvatarSHA256         string
+	PasswordHash         string
+	PasswordAuthDisabled bool
+	PasswordAuthResolved bool
+	Role                 string
+	ProjectRole          string
+	ProjectMemberStatus  string
+	ProjectPermissions   []string
+	Balance              float64
+	FrozenBalance        float64
+	Concurrency          int
+	Status               string
+	AllowedGroups        []int64
+	TokenVersion         int64 // Persisted revocation epoch combined with the credential fingerprint
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.
 	TokenVersionResolved bool
@@ -111,9 +113,15 @@ func (u *User) SetPassword(password string) error {
 		return err
 	}
 	u.PasswordHash = string(hash)
+	u.PasswordAuthDisabled = false
+	u.PasswordAuthResolved = true
 	return nil
 }
 
+func (u *User) HasLocalPassword() bool {
+	return u != nil && !u.PasswordAuthDisabled
+}
+
 func (u *User) CheckPassword(password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
+	return u.HasLocalPassword() && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
 }

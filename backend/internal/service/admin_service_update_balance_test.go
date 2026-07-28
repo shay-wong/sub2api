@@ -12,23 +12,62 @@ import (
 
 type balanceUserRepoStub struct {
 	*userRepoStub
-	updateErr error
-	updated   []*User
+	adjustErr error
+	// changes 记录每次原子余额变更，顺序与调用顺序一致。
+	changes []BalanceChange
 }
 
-func (s *balanceUserRepoStub) Update(ctx context.Context, user *User) error {
-	if s.updateErr != nil {
-		return s.updateErr
+type scopedBalanceUserRepoStub struct {
+	*scopedAdminUserRepoStub
+}
+
+func (s *scopedBalanceUserRepoStub) AdjustBalance(_ context.Context, id int64, delta float64) (BalanceChange, error) {
+	return s.apply(id, func(current float64) float64 { return current + delta })
+}
+
+func (s *scopedBalanceUserRepoStub) SetBalance(_ context.Context, id int64, value float64) (BalanceChange, error) {
+	return s.apply(id, func(float64) float64 { return value })
+}
+
+func (s *scopedBalanceUserRepoStub) apply(id int64, next func(float64) float64) (BalanceChange, error) {
+	for i := range s.scopedUsers {
+		if s.scopedUsers[i].ID != id {
+			continue
+		}
+		change := BalanceChange{Old: s.scopedUsers[i].Balance}
+		change.New = next(change.Old)
+		if change.New < 0 {
+			return change, ErrBalanceNegative
+		}
+		s.scopedUsers[i].Balance = change.New
+		return change, nil
 	}
-	if user == nil {
-		return nil
+	return BalanceChange{}, ErrUserNotFound
+}
+
+func (s *balanceUserRepoStub) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
+	return s.apply(func(current float64) float64 { return current + delta })
+}
+
+func (s *balanceUserRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
+	return s.apply(func(float64) float64 { return value })
+}
+
+func (s *balanceUserRepoStub) apply(next func(current float64) float64) (BalanceChange, error) {
+	if s.adjustErr != nil {
+		return BalanceChange{}, s.adjustErr
 	}
-	clone := *user
-	s.updated = append(s.updated, &clone)
-	if s.userRepoStub != nil {
-		s.userRepoStub.user = &clone
+	if s.userRepoStub == nil || s.userRepoStub.user == nil {
+		return BalanceChange{}, ErrUserNotFound
 	}
-	return nil
+	change := BalanceChange{Old: s.userRepoStub.user.Balance}
+	change.New = next(change.Old)
+	if change.New < 0 {
+		return change, ErrBalanceNegative
+	}
+	s.userRepoStub.user.Balance = change.New
+	s.changes = append(s.changes, change)
+	return change, nil
 }
 
 type balanceRedeemRepoStub struct {
@@ -90,6 +129,63 @@ func (s *authCacheInvalidatorStub) InvalidateAuthCacheByGroupID(ctx context.Cont
 
 func (s *authCacheInvalidatorStub) InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKeyID int64) {
 	s.apiKeyIDs = append(s.apiKeyIDs, apiKeyID)
+}
+
+// 管理员调账必须走原子的 AdjustBalance/SetBalance，而不是"读余额→算新值→整行写回"，
+// 后者会把并发的计费扣款覆盖掉。userRepoStub.Update 对未预期的调用会 panic，
+// 因此这里同时证明它没被走到。
+func TestAdminService_UpdateUserBalance_UsesAtomicPrimitives(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		amount    float64
+		want      BalanceChange
+	}{
+		{name: "add", operation: "add", amount: 5, want: BalanceChange{Old: 10, New: 15}},
+		{name: "subtract", operation: "subtract", amount: 4, want: BalanceChange{Old: 10, New: 6}},
+		{name: "set", operation: "set", amount: 2, want: BalanceChange{Old: 10, New: 2}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}
+			svc := &adminServiceImpl{
+				userRepo:       repo,
+				redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
+			}
+
+			user, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, tt.operation, "")
+			require.NoError(t, err)
+			require.Equal(t, []BalanceChange{tt.want}, repo.changes)
+			require.Equal(t, tt.want.New, user.Balance)
+		})
+	}
+}
+
+func TestAdminService_UpdateUserBalance_RejectsNegativeResult(t *testing.T) {
+	repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 3}}}
+	svc := &adminServiceImpl{
+		userRepo:       repo,
+		redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
+	}
+
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 4, "subtract", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "balance cannot be negative")
+	require.Empty(t, repo.changes, "refused adjustment must not be applied")
+	require.Equal(t, 3.0, repo.userRepoStub.user.Balance)
+}
+
+func TestAdminService_UpdateUserBalance_RejectsUnknownOperation(t *testing.T) {
+	repo := &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}
+	svc := &adminServiceImpl{
+		userRepo:       repo,
+		redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
+	}
+
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 1, "multiply", "")
+	require.Error(t, err)
+	require.Empty(t, repo.changes)
 }
 
 func TestAdminService_UpdateUserBalance_InvalidatesAuthCache(t *testing.T) {
@@ -184,7 +280,9 @@ func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.
 			ctx := context.Background()
 			if tt.projectScoped {
 				ctx = WithProjectID(ctx, 42)
-				svc.userRepo = &scopedAdminUserRepoStub{scopedUsers: []User{{ID: 7, Role: RoleUser, Balance: 10}}}
+				svc.userRepo = &scopedBalanceUserRepoStub{scopedAdminUserRepoStub: &scopedAdminUserRepoStub{
+					scopedUsers: []User{{ID: 7, Role: RoleUser, Balance: 10}},
+				}}
 			}
 
 			_, err := svc.UpdateUserBalance(ctx, 7, tt.amount, tt.operation, "")

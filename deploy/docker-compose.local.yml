@@ -101,6 +101,7 @@ services:
       # Setup Configuration
       # =======================================================================
       - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
+      - SKIP_SETUP=${SKIP_SETUP:-false}
 
       # =======================================================================
       # TOTP (2FA) Configuration

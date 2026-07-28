@@ -64,7 +64,11 @@ func (s *emailSyncRepoStub) GetFirstAdmin(context.Context) (*User, error) {
 	return nil, fmt.Errorf("unexpected GetFirstAdmin call")
 }
 
-func (s *emailSyncRepoStub) Update(_ context.Context, user *User) error {
+func (s *emailSyncRepoStub) IncrementTokenVersion(context.Context, int64) error {
+	return fmt.Errorf("unexpected IncrementTokenVersion call")
+}
+
+func (s *emailSyncRepoStub) Update(_ context.Context, user *User, _ UserUpdateFields) error {
 	s.updateCalls++
 	s.updated = append(s.updated, user)
 	s.user = user
@@ -115,6 +119,14 @@ func (s *emailSyncRepoStub) ExistsByEmail(context.Context, string) (bool, error)
 
 func (s *emailSyncRepoStub) ExistsByEmailAlias(context.Context, string) (bool, error) {
 	return false, nil
+}
+
+func (s *emailSyncRepoStub) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
+	panic("unexpected AdjustBalance call")
+}
+
+func (s *emailSyncRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
+	panic("unexpected SetBalance call")
 }
 
 func (s *emailSyncRepoStub) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {

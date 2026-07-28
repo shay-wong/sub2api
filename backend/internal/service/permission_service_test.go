@@ -51,6 +51,7 @@ func TestPermissionServiceSetOperatorPermissionsClearsLegacyScopeWhenDowngrading
 	require.Equal(t, RoleUser, updated.Role)
 	require.Empty(t, updated.GroupIDs)
 	require.True(t, userRepo.updated)
+	require.Equal(t, []UserUpdateFields{{Role: true}}, userRepo.updateFields)
 	require.True(t, operatorRepo.clearCalled)
 	require.Equal(t, int64(9), operatorRepo.clearUserID)
 }
@@ -84,15 +85,17 @@ func (r *permissionOperatorRepoStub) ClearOperatorGroupIDs(_ context.Context, us
 
 type permissionUserRepoStub struct {
 	UserRepository
-	user    *User
-	updated bool
+	user         *User
+	updated      bool
+	updateFields []UserUpdateFields
 }
 
 func (r *permissionUserRepoStub) GetByID(context.Context, int64) (*User, error) {
 	return r.user, nil
 }
 
-func (r *permissionUserRepoStub) Update(context.Context, *User) error {
+func (r *permissionUserRepoStub) Update(_ context.Context, _ *User, fields UserUpdateFields) error {
 	r.updated = true
+	r.updateFields = append(r.updateFields, fields)
 	return nil
 }

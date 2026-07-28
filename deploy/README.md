@@ -128,6 +128,14 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by `docker-deploy.sh`) for easier data management and migration.
 
+### Provisioning Without the Setup Wizard
+
+Automated provisioning may set `SKIP_SETUP=true` (also accepts `1` or `yes`) to
+skip the web setup check when the config and install-lock files are absent. This
+does not create an administrator or validate configuration; use it only when
+those steps are completed by another provisioning process. Normal deployments
+should leave `SKIP_SETUP=false`.
+
 ### How Auto-Setup Works
 
 When using Docker Compose with `AUTO_SETUP=true`:

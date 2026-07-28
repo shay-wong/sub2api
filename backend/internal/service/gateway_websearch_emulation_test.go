@@ -5,11 +5,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/websearch"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -145,6 +148,45 @@ func TestBuildTextSummary_WithResults(t *testing.T) {
 func TestBuildTextSummary_NoResults(t *testing.T) {
 	summary := buildTextSummary("test", nil)
 	require.Contains(t, summary, "No search results found for: test")
+}
+
+// Provider-facing web-search responses must use the shared Anthropic message ID format.
+func TestWriteWebSearchResponses_UseAnthropicMessageIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := &websearch.SearchResponse{}
+
+	t.Run("non-streaming", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+
+		_, err := writeWebSearchNonStreamResponse(ctx, "query", response, defaultWebSearchModel, time.Now())
+		require.NoError(t, err)
+
+		var message map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &message))
+		require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, message["id"])
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+
+		_, err := writeWebSearchStreamResponse(ctx, "query", response, defaultWebSearchModel, time.Now())
+		require.NoError(t, err)
+
+		var messageID any
+		for _, line := range strings.Split(recorder.Body.String(), "\n") {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var event map[string]any
+			require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event))
+			if event["type"] == "message_start" {
+				messageID = event["message"].(map[string]any)["id"]
+			}
+		}
+		require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, messageID)
+	})
 }
 
 // --- shouldEmulateWebSearch ---

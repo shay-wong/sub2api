@@ -37,7 +37,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	}
 	if len(cfg.EnabledEndpoints()) == 0 {
 		e.recordDropped()
-		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": "no_enabled_endpoint"}))
+		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": ErrorCodeNoEnabledEndpoint}))
 		return nil
 	}
 	snapshot, err := ExtractPromptSnapshot(req)

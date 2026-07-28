@@ -83,10 +83,9 @@ func jwtAuth(
 			return
 		}
 
-		// Security: Validate TokenVersion to ensure token hasn't been invalidated
-		// This check ensures tokens issued before a password change are rejected
+		// Security: reject tokens issued before a credential change or explicit revocation.
 		if claims.TokenVersion != user.TokenVersion {
-			AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")
+			AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked")
 			return
 		}
 

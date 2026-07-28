@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // ---------------------------------------------------------------------------
@@ -16,7 +18,7 @@ import (
 // blocks; function_call items become tool_use blocks.
 func ResponsesToAnthropic(resp *ResponsesResponse, model string) *AnthropicResponse {
 	out := &AnthropicResponse{
-		ID:    resp.ID,
+		ID:    claude.GenerateMessageID(),
 		Type:  "message",
 		Role:  "assistant",
 		Model: model,
@@ -195,15 +197,16 @@ type ResponsesEventToAnthropicState struct {
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 
-	ResponseID string
-	Model      string
-	Created    int64
+	MessageID string
+	Model     string
+	Created   int64
 }
 
 // NewResponsesEventToAnthropicState returns an initialised stream state.
 func NewResponsesEventToAnthropicState() *ResponsesEventToAnthropicState {
 	return &ResponsesEventToAnthropicState{
 		OutputIndexToBlockIdx: make(map[int]int),
+		MessageID:             claude.GenerateMessageID(),
 		Created:               time.Now().Unix(),
 	}
 }
@@ -296,7 +299,6 @@ func ResponsesAnthropicEventToSSE(evt AnthropicStreamEvent) (string, error) {
 
 func resToAnthHandleCreated(evt *ResponsesStreamEvent, state *ResponsesEventToAnthropicState) []AnthropicStreamEvent {
 	if evt.Response != nil {
-		state.ResponseID = evt.Response.ID
 		// Only use upstream model if no override was set (e.g. originalModel)
 		if state.Model == "" {
 			state.Model = evt.Response.Model
@@ -315,7 +317,7 @@ func resToAnthHandleCreated(evt *ResponsesStreamEvent, state *ResponsesEventToAn
 	return []AnthropicStreamEvent{{
 		Type: "message_start",
 		Message: &AnthropicResponse{
-			ID:         state.ResponseID,
+			ID:         state.MessageID,
 			Type:       "message",
 			Role:       "assistant",
 			Content:    []AnthropicContentBlock{},

@@ -37,6 +37,8 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 	}
 	authService := service.NewAuthService(nil, repo, nil, refreshTokenCache, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	handler := &AuthHandler{authService: authService}
+	accessToken, err := authService.GenerateToken(t.Context(), repo.user)
+	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -58,4 +60,19 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
 	require.Equal(t, "All sessions have been revoked. Please log in again.", resp.Data.Message)
+
+	protected := gin.New()
+	protected.Use(gin.HandlerFunc(middleware2.NewJWTAuthMiddleware(
+		authService,
+		service.NewUserService(repo, nil, nil, nil),
+		nil,
+		nil,
+		nil,
+	)))
+	protected.GET("/protected", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	afterRevoke := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	protected.ServeHTTP(afterRevoke, req)
+	require.Equal(t, http.StatusUnauthorized, afterRevoke.Code)
 }

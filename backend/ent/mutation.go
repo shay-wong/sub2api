@@ -51718,6 +51718,7 @@ type UserMutation struct {
 	deleted_at                      *time.Time
 	email                           *string
 	password_hash                   *string
+	password_auth_disabled          *bool
 	role                            *string
 	balance                         *float64
 	addbalance                      *float64
@@ -51726,6 +51727,8 @@ type UserMutation struct {
 	concurrency                     *int
 	addconcurrency                  *int
 	status                          *string
+	token_version                   *int64
+	addtoken_version                *int64
 	username                        *string
 	notes                           *string
 	totp_secret_encrypted           *string
@@ -52085,6 +52088,55 @@ func (m *UserMutation) ResetPasswordHash() {
 	m.password_hash = nil
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (m *UserMutation) SetPasswordAuthDisabled(b bool) {
+	m.password_auth_disabled = &b
+}
+
+// PasswordAuthDisabled returns the value of the "password_auth_disabled" field in the mutation.
+func (m *UserMutation) PasswordAuthDisabled() (r bool, exists bool) {
+	v := m.password_auth_disabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPasswordAuthDisabled returns the old "password_auth_disabled" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldPasswordAuthDisabled(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPasswordAuthDisabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPasswordAuthDisabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPasswordAuthDisabled: %w", err)
+	}
+	return oldValue.PasswordAuthDisabled, nil
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (m *UserMutation) ClearPasswordAuthDisabled() {
+	m.password_auth_disabled = nil
+	m.clearedFields[user.FieldPasswordAuthDisabled] = struct{}{}
+}
+
+// PasswordAuthDisabledCleared returns if the "password_auth_disabled" field was cleared in this mutation.
+func (m *UserMutation) PasswordAuthDisabledCleared() bool {
+	_, ok := m.clearedFields[user.FieldPasswordAuthDisabled]
+	return ok
+}
+
+// ResetPasswordAuthDisabled resets all changes to the "password_auth_disabled" field.
+func (m *UserMutation) ResetPasswordAuthDisabled() {
+	m.password_auth_disabled = nil
+	delete(m.clearedFields, user.FieldPasswordAuthDisabled)
+}
+
 // SetRole sets the "role" field.
 func (m *UserMutation) SetRole(s string) {
 	m.role = &s
@@ -52323,6 +52375,62 @@ func (m *UserMutation) OldStatus(ctx context.Context) (v string, err error) {
 // ResetStatus resets all changes to the "status" field.
 func (m *UserMutation) ResetStatus() {
 	m.status = nil
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (m *UserMutation) SetTokenVersion(i int64) {
+	m.token_version = &i
+	m.addtoken_version = nil
+}
+
+// TokenVersion returns the value of the "token_version" field in the mutation.
+func (m *UserMutation) TokenVersion() (r int64, exists bool) {
+	v := m.token_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTokenVersion returns the old "token_version" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldTokenVersion(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTokenVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTokenVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTokenVersion: %w", err)
+	}
+	return oldValue.TokenVersion, nil
+}
+
+// AddTokenVersion adds i to the "token_version" field.
+func (m *UserMutation) AddTokenVersion(i int64) {
+	if m.addtoken_version != nil {
+		*m.addtoken_version += i
+	} else {
+		m.addtoken_version = &i
+	}
+}
+
+// AddedTokenVersion returns the value that was added to the "token_version" field in this mutation.
+func (m *UserMutation) AddedTokenVersion() (r int64, exists bool) {
+	v := m.addtoken_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTokenVersion resets all changes to the "token_version" field.
+func (m *UserMutation) ResetTokenVersion() {
+	m.token_version = nil
+	m.addtoken_version = nil
 }
 
 // SetUsername sets the "username" field.
@@ -53799,7 +53907,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 24)
+	fields := make([]string, 0, 26)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -53815,6 +53923,9 @@ func (m *UserMutation) Fields() []string {
 	if m.password_hash != nil {
 		fields = append(fields, user.FieldPasswordHash)
 	}
+	if m.password_auth_disabled != nil {
+		fields = append(fields, user.FieldPasswordAuthDisabled)
+	}
 	if m.role != nil {
 		fields = append(fields, user.FieldRole)
 	}
@@ -53829,6 +53940,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, user.FieldStatus)
+	}
+	if m.token_version != nil {
+		fields = append(fields, user.FieldTokenVersion)
 	}
 	if m.username != nil {
 		fields = append(fields, user.FieldUsername)
@@ -53890,6 +54004,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Email()
 	case user.FieldPasswordHash:
 		return m.PasswordHash()
+	case user.FieldPasswordAuthDisabled:
+		return m.PasswordAuthDisabled()
 	case user.FieldRole:
 		return m.Role()
 	case user.FieldBalance:
@@ -53900,6 +54016,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Concurrency()
 	case user.FieldStatus:
 		return m.Status()
+	case user.FieldTokenVersion:
+		return m.TokenVersion()
 	case user.FieldUsername:
 		return m.Username()
 	case user.FieldNotes:
@@ -53947,6 +54065,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldEmail(ctx)
 	case user.FieldPasswordHash:
 		return m.OldPasswordHash(ctx)
+	case user.FieldPasswordAuthDisabled:
+		return m.OldPasswordAuthDisabled(ctx)
 	case user.FieldRole:
 		return m.OldRole(ctx)
 	case user.FieldBalance:
@@ -53957,6 +54077,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldConcurrency(ctx)
 	case user.FieldStatus:
 		return m.OldStatus(ctx)
+	case user.FieldTokenVersion:
+		return m.OldTokenVersion(ctx)
 	case user.FieldUsername:
 		return m.OldUsername(ctx)
 	case user.FieldNotes:
@@ -54029,6 +54151,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetPasswordHash(v)
 		return nil
+	case user.FieldPasswordAuthDisabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPasswordAuthDisabled(v)
+		return nil
 	case user.FieldRole:
 		v, ok := value.(string)
 		if !ok {
@@ -54063,6 +54192,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case user.FieldTokenVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTokenVersion(v)
 		return nil
 	case user.FieldUsername:
 		v, ok := value.(string)
@@ -54179,6 +54315,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addconcurrency != nil {
 		fields = append(fields, user.FieldConcurrency)
 	}
+	if m.addtoken_version != nil {
+		fields = append(fields, user.FieldTokenVersion)
+	}
 	if m.addbalance_notify_threshold != nil {
 		fields = append(fields, user.FieldBalanceNotifyThreshold)
 	}
@@ -54202,6 +54341,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedFrozenBalance()
 	case user.FieldConcurrency:
 		return m.AddedConcurrency()
+	case user.FieldTokenVersion:
+		return m.AddedTokenVersion()
 	case user.FieldBalanceNotifyThreshold:
 		return m.AddedBalanceNotifyThreshold()
 	case user.FieldTotalRecharged:
@@ -54238,6 +54379,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddConcurrency(v)
 		return nil
+	case user.FieldTokenVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTokenVersion(v)
+		return nil
 	case user.FieldBalanceNotifyThreshold:
 		v, ok := value.(float64)
 		if !ok {
@@ -54270,6 +54418,9 @@ func (m *UserMutation) ClearedFields() []string {
 	if m.FieldCleared(user.FieldDeletedAt) {
 		fields = append(fields, user.FieldDeletedAt)
 	}
+	if m.FieldCleared(user.FieldPasswordAuthDisabled) {
+		fields = append(fields, user.FieldPasswordAuthDisabled)
+	}
 	if m.FieldCleared(user.FieldTotpSecretEncrypted) {
 		fields = append(fields, user.FieldTotpSecretEncrypted)
 	}
@@ -54301,6 +54452,9 @@ func (m *UserMutation) ClearField(name string) error {
 	switch name {
 	case user.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case user.FieldPasswordAuthDisabled:
+		m.ClearPasswordAuthDisabled()
 		return nil
 	case user.FieldTotpSecretEncrypted:
 		m.ClearTotpSecretEncrypted()
@@ -54340,6 +54494,9 @@ func (m *UserMutation) ResetField(name string) error {
 	case user.FieldPasswordHash:
 		m.ResetPasswordHash()
 		return nil
+	case user.FieldPasswordAuthDisabled:
+		m.ResetPasswordAuthDisabled()
+		return nil
 	case user.FieldRole:
 		m.ResetRole()
 		return nil
@@ -54354,6 +54511,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case user.FieldTokenVersion:
+		m.ResetTokenVersion()
 		return nil
 	case user.FieldUsername:
 		m.ResetUsername()

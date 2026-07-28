@@ -188,7 +188,7 @@ func (s *PermissionService) SetOperatorPermissions(ctx context.Context, userID i
 	}
 
 	user.Role = role
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{Role: true}); err != nil {
 		return nil, fmt.Errorf("update permission subject role: %w", err)
 	}
 

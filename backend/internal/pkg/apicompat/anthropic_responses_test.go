@@ -230,7 +230,7 @@ func TestResponsesToAnthropic_TextOnly(t *testing.T) {
 	}
 
 	anth := ResponsesToAnthropic(resp, "claude-opus-4-6")
-	assert.Equal(t, "resp_123", anth.ID)
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, anth.ID)
 	assert.Equal(t, "claude-opus-4-6", anth.Model)
 	assert.Equal(t, "end_turn", AnthropicStopReasonString(anth.StopReason))
 	require.Len(t, anth.Content, 1)
@@ -517,6 +517,8 @@ func TestStreamingTextOnly(t *testing.T) {
 	}, state)
 	require.Len(t, events, 1)
 	assert.Equal(t, "message_start", events[0].Type)
+	require.NotNil(t, events[0].Message)
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, events[0].Message.ID)
 
 	// 2. output_item.added (message)
 	events = ResponsesEventToAnthropicEvents(&ResponsesStreamEvent{

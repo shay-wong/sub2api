@@ -287,7 +287,7 @@ func (subscriptionUserRepoNoop) GetByEmail(context.Context, string) (*User, erro
 func (subscriptionUserRepoNoop) GetFirstAdmin(context.Context) (*User, error) {
 	panic("unexpected GetFirstAdmin call")
 }
-func (subscriptionUserRepoNoop) Update(context.Context, *User) error {
+func (subscriptionUserRepoNoop) Update(context.Context, *User, UserUpdateFields) error {
 	panic("unexpected Update call")
 }
 func (subscriptionUserRepoNoop) Delete(context.Context, int64) error {
@@ -319,6 +319,12 @@ func (subscriptionUserRepoNoop) UpdateUserLastActiveAt(context.Context, int64, t
 }
 func (subscriptionUserRepoNoop) UpdateBalance(context.Context, int64, float64) error {
 	panic("unexpected UpdateBalance call")
+}
+func (subscriptionUserRepoNoop) AdjustBalance(context.Context, int64, float64) (BalanceChange, error) {
+	panic("unexpected AdjustBalance call")
+}
+func (subscriptionUserRepoNoop) SetBalance(context.Context, int64, float64) (BalanceChange, error) {
+	panic("unexpected SetBalance call")
 }
 func (subscriptionUserRepoNoop) DeductBalance(context.Context, int64, float64) error {
 	panic("unexpected DeductBalance call")
@@ -361,6 +367,9 @@ func (subscriptionUserRepoNoop) EnableTotp(context.Context, int64) error {
 }
 func (subscriptionUserRepoNoop) DisableTotp(context.Context, int64) error {
 	panic("unexpected DisableTotp call")
+}
+func (subscriptionUserRepoNoop) IncrementTokenVersion(context.Context, int64) error {
+	panic("unexpected IncrementTokenVersion call")
 }
 func (subscriptionUserRepoNoop) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
 	panic("unexpected BatchUpdateLimits call")

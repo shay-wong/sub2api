@@ -52,8 +52,10 @@ type LiveCallIdentity struct {
 }
 
 type LiveCallRecord struct {
-	CallID          string
-	CallHash        string
+	CallID   string
+	CallHash string
+	// Provisional records represent pre-create intent and must never produce usage.
+	Provisional     bool
 	AccountID       int64
 	APIKeyID        int64
 	ProjectID       int64
@@ -64,6 +66,7 @@ type LiveCallRecord struct {
 	LeaseID         string
 	Model           string
 	CreatedAt       time.Time
+	FinishedAt      time.Time
 	ExpiresAt       time.Time
 	Controller      string
 	ControllerOwner string
@@ -81,14 +84,26 @@ type LiveCallCreated struct {
 	Account  *Account
 }
 
+type LiveCallCloseStatus int
+
+const (
+	LiveCallCloseMissing LiveCallCloseStatus = iota
+	LiveCallCloseFirst
+	LiveCallCloseAlready
+)
+
 // LiveCallStore 由 GatewayCache 的 Redis 实现可选提供，避免扩大旧缓存接口。
 type LiveCallStore interface {
 	SaveLiveCall(ctx context.Context, record *LiveCallRecord, ttl time.Duration) error
+	PromoteLiveCall(ctx context.Context, intentHash string, record *LiveCallRecord, ttl time.Duration) error
 	GetLiveCall(ctx context.Context, callHash string) (*LiveCallRecord, error)
 	ClaimLiveController(ctx context.Context, callHash, controller, owner string) (bool, error)
 	ReleaseLiveController(ctx context.Context, callHash, owner string) (bool, error)
 	GetLiveController(ctx context.Context, callHash string) (string, error)
-	MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (bool, error)
+	FreezeLiveCallFinishedAt(ctx context.Context, callHash string, finishedAt time.Time) (time.Time, error)
+	MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (LiveCallCloseStatus, error)
+	ScheduleLiveCallRecovery(ctx context.Context, record *LiveCallRecord, at time.Time, ttl time.Duration) error
+	ListRecoverableLiveCalls(ctx context.Context, before time.Time, limit int64) ([]*LiveCallRecord, error)
 }
 
 type LiveConcurrencyCache interface {

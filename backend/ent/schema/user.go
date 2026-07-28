@@ -43,6 +43,9 @@ func (User) Fields() []ent.Field {
 		field.String("password_hash").
 			MaxLen(255).
 			NotEmpty(),
+		field.Bool("password_auth_disabled").
+			Optional().
+			Nillable(),
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),
@@ -57,6 +60,8 @@ func (User) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
+		field.Int64("token_version").
+			Default(0),
 
 		// Optional profile fields (added later; default '' in DB migration)
 		field.String("username").

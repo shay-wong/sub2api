@@ -115,22 +115,26 @@ func ensureLoginUserActive(user *service.User) error {
 // respondWithTokenPair 生成 Token 对并返回认证响应
 // 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
+	respondWithTokenPair(c, h.authService, h.projectService, user)
+}
+
+func respondWithTokenPair(c *gin.Context, authService *service.AuthService, projectService *service.ProjectService, user *service.User) {
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	authUser, err := h.authUserFromService(c.Request.Context(), user)
+	authUser, err := authUserFromService(c.Request.Context(), projectService, user)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+	tokenPair, err := authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
 		// 回退到只返回Access Token
-		token, tokenErr := h.authService.GenerateToken(c.Request.Context(), user)
+		token, tokenErr := authService.GenerateToken(c.Request.Context(), user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
 			return
@@ -151,12 +155,12 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 	})
 }
 
-func (h *AuthHandler) authUserFromService(ctx context.Context, user *service.User) (*authUser, error) {
+func authUserFromService(ctx context.Context, projectService *service.ProjectService, user *service.User) (*authUser, error) {
 	base := dto.UserFromService(user)
 	if base == nil {
 		return nil, nil
 	}
-	projects, err := h.authProjectsForUser(ctx, user)
+	projects, err := authProjectsForUser(ctx, projectService, user)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +171,17 @@ func (h *AuthHandler) authUserFromService(ctx context.Context, user *service.Use
 }
 
 func (h *AuthHandler) authProjectsForUser(ctx context.Context, user *service.User) ([]authProject, error) {
-	if h == nil || h.projectService == nil || user == nil {
+	if h == nil {
 		return nil, nil
 	}
-	projects, err := h.projectService.ListUserProjects(ctx, user)
+	return authProjectsForUser(ctx, h.projectService, user)
+}
+
+func authProjectsForUser(ctx context.Context, projectService *service.ProjectService, user *service.User) ([]authProject, error) {
+	if projectService == nil || user == nil {
+		return nil, nil
+	}
+	projects, err := projectService.ListUserProjects(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -190,14 +201,21 @@ func (h *AuthHandler) authProjectsForUser(ctx context.Context, user *service.Use
 }
 
 func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
+	if h == nil {
+		return ensureBackendModeUserAccess(ctx, user, false, nil)
+	}
+	return ensureBackendModeUserAccess(ctx, user, h.isBackendModeEnabled(ctx), h.projectService)
+}
+
+func ensureBackendModeUserAccess(ctx context.Context, user *service.User, backendModeEnabled bool, projectService *service.ProjectService) error {
 	if user == nil {
 		return infraerrors.Unauthorized("INVALID_USER", "user not found")
 	}
-	if h == nil || !h.isBackendModeEnabled(ctx) || user.CanAccessAdminConsole() {
+	if !backendModeEnabled || user.CanAccessAdminConsole() {
 		return nil
 	}
-	if h.projectService != nil {
-		projects, err := h.projectService.ListUserProjects(ctx, user)
+	if projectService != nil {
+		projects, err := projectService.ListUserProjects(ctx, user)
 		if err != nil {
 			return err
 		}

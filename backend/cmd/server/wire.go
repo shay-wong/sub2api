@@ -34,6 +34,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	wire.Build(
 		// Infrastructure layer ProviderSets
 		config.ProviderSet,
+		providePromptAuditEncryptionKeyConfigured,
 
 		// Business layer ProviderSets
 		repository.ProviderSet,
@@ -72,6 +73,10 @@ func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
 	}
 }
 
+func providePromptAuditEncryptionKeyConfigured(cfg *config.Config) bool {
+	return cfg != nil && cfg.Totp.EncryptionKeyConfigured
+}
+
 func provideCleanup(
 	entClient *ent.Client,
 	rdb *redis.Client,
@@ -105,6 +110,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	liveCallRecovery *service.LiveCallRecoveryService,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -293,6 +299,12 @@ func provideCleanup(
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
+				}
+				return nil
+			}},
+			{"LiveCallRecoveryService", func() error {
+				if liveCallRecovery != nil {
+					liveCallRecovery.Stop()
 				}
 				return nil
 			}},

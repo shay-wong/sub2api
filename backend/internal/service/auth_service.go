@@ -457,7 +457,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	}
 
 	// 验证密码
-	if !s.CheckPassword(password, user.PasswordHash) {
+	if !user.CheckPassword(password) {
 		return "", nil, ErrInvalidCredentials
 	}
 
@@ -521,15 +521,17 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 			}
 
 			newUser := &User{
-				Email:        email,
-				Username:     username,
-				PasswordHash: hashedPassword,
-				Role:         RoleUser,
-				Balance:      grantPlan.Balance,
-				Concurrency:  grantPlan.Concurrency,
-				RPMLimit:     defaultRPMLimit,
-				Status:       StatusActive,
-				SignupSource: signupSource,
+				Email:                email,
+				Username:             username,
+				PasswordHash:         hashedPassword,
+				PasswordAuthDisabled: true,
+				PasswordAuthResolved: true,
+				Role:                 RoleUser,
+				Balance:              grantPlan.Balance,
+				Concurrency:          grantPlan.Concurrency,
+				RPMLimit:             defaultRPMLimit,
+				Status:               StatusActive,
+				SignupSource:         signupSource,
 			}
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
@@ -564,7 +566,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填。
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -670,15 +672,17 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 			}
 
 			newUser := &User{
-				Email:        email,
-				Username:     username,
-				PasswordHash: hashedPassword,
-				Role:         RoleUser,
-				Balance:      grantPlan.Balance,
-				Concurrency:  grantPlan.Concurrency,
-				RPMLimit:     defaultRPMLimit,
-				Status:       StatusActive,
-				SignupSource: signupSource,
+				Email:                email,
+				Username:             username,
+				PasswordHash:         hashedPassword,
+				PasswordAuthDisabled: true,
+				PasswordAuthResolved: true,
+				Role:                 RoleUser,
+				Balance:              grantPlan.Balance,
+				Concurrency:          grantPlan.Concurrency,
+				RPMLimit:             defaultRPMLimit,
+				Status:               StatusActive,
+				SignupSource:         signupSource,
 			}
 
 			if s.entClient != nil && invitationRedeemCode != nil {
@@ -756,7 +760,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -1405,8 +1409,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 	return nil
 }
 
-// ResetPassword 重置密码
-// Security: Increments TokenVersion to invalidate all existing JWT tokens
+// ResetPassword 重置密码。PasswordHash 变化会改变 token 指纹，使旧 JWT 失效。
 func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPassword string) error {
 	// Check if password reset is enabled
 	if !s.IsPasswordResetEnabled(ctx) {
@@ -1443,11 +1446,13 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 		return fmt.Errorf("hash password: %w", err)
 	}
 
-	// Update password and increment TokenVersion
+	// Update password
 	user.PasswordHash = hashedPassword
-	user.TokenVersion++ // Invalidate all existing tokens
+	user.PasswordAuthDisabled = false
+	user.PasswordAuthResolved = true
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	// 只写 password_hash，避免旧用户快照覆盖并发更新的其他列。
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true, PasswordAuthDisabled: true}); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error updating password for user %d: %v", user.ID, err)
 		return ErrServiceUnavailable
 	}
@@ -1702,17 +1707,9 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 }
 
 // RevokeAllUserTokens invalidates both stateless access tokens and refresh sessions.
-// Access/refresh token verification both depend on TokenVersion, so bumping it provides
-// immediate revocation even if refresh-token cache cleanup later fails.
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
-	}
-
-	user.TokenVersion++
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return fmt.Errorf("update user: %w", err)
+	if err := s.userRepo.IncrementTokenVersion(ctx, userID); err != nil {
+		return fmt.Errorf("increment token version: %w", err)
 	}
 
 	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {

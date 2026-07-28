@@ -17,8 +17,10 @@ import (
 )
 
 type liveHTTPUpstreamStub struct {
-	request *http.Request
-	body    []byte
+	request  *http.Request
+	body     []byte
+	response *http.Response
+	err      error
 }
 
 type liveAttestationStub struct {
@@ -46,6 +48,12 @@ func (s *liveHTTPUpstreamStub) Do(
 		return nil, err
 	}
 	s.body = body
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.response != nil {
+		return s.response, nil
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{
@@ -54,6 +62,13 @@ func (s *liveHTTPUpstreamStub) Do(
 		Body: io.NopCloser(strings.NewReader("v=0\r\n")),
 	}, nil
 }
+
+type liveFailingResponseBody struct{}
+
+func (liveFailingResponseBody) Read([]byte) (int, error) {
+	return 0, errors.New("response read failed")
+}
+func (liveFailingResponseBody) Close() error { return nil }
 
 func (s *liveHTTPUpstreamStub) DoWithTLS(
 	request *http.Request,
@@ -119,7 +134,7 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
 		SDP:     "v=offer\r\n",
 		Session: session,
-	}, `{"v":1,"s":0,"t":"v1.test"}`)
+	}, `{"v":1,"s":0,"t":"v1.test"}`, nil)
 	require.NoError(t, err)
 	require.Equal(t, "call_test", created.CallID)
 	require.Equal(t, []byte("v=0\r\n"), created.SDP)
@@ -140,6 +155,75 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.Empty(t, upstream.request.Header.Get("OpenAI-Beta"))
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.request.Context()))
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
+}
+
+func TestCreateUpstreamLiveCallReturnsAcceptedCallOnBodyFailure(t *testing.T) {
+	upstream := &liveHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Location": {"/backend-api/codex/call_partial"}},
+		Body:       liveFailingResponseBody{},
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test", "chatgpt_account_id": "acct_test"},
+	}
+
+	accepted := false
+	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
+		SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live-test"}`),
+	}, "attestation", func(created *LiveCallCreated) error {
+		accepted = created.CallID == "call_partial"
+		return nil
+	})
+	require.Error(t, err)
+	require.True(t, accepted)
+	require.Equal(t, "call_partial", created.CallID)
+	var ambiguousErr *liveCreateAmbiguousError
+	require.ErrorAs(t, err, &ambiguousErr)
+}
+
+func TestCreateUpstreamLiveCallDoesNotFailOverAcceptedResponseWithoutLocation(t *testing.T) {
+	upstream := &liveHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("v=0\r\n")),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test", "chatgpt_account_id": "acct_test"},
+	}
+
+	accepted := false
+	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
+		SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live-test"}`),
+	}, "attestation", func(*LiveCallCreated) error {
+		accepted = true
+		return nil
+	})
+	require.Nil(t, created)
+	require.False(t, accepted)
+	var ambiguousErr *liveCreateAmbiguousError
+	require.ErrorAs(t, err, &ambiguousErr)
+	require.False(t, service.shouldFailoverLiveCreateError(err))
+}
+
+func TestCreateUpstreamLiveCallDoesNotFailOverAmbiguousTransportError(t *testing.T) {
+	upstream := &liveHTTPUpstreamStub{err: errors.New("response headers lost")}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test", "chatgpt_account_id": "acct_test"},
+	}
+
+	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
+		SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live-test"}`),
+	}, "attestation", nil)
+	require.Nil(t, created)
+	var ambiguousErr *liveCreateAmbiguousError
+	require.ErrorAs(t, err, &ambiguousErr)
+	require.False(t, service.shouldFailoverLiveCreateError(err))
 }
 
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {
@@ -220,7 +304,7 @@ func TestLiveCreateFailoverUsesExistingOpenAIPolicy(t *testing.T) {
 	require.True(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
 		StatusCode: http.StatusBadGateway,
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(errors.New("transport failed")))
+	require.True(t, service.shouldFailoverLiveCreateError(errors.New("preflight failed")))
 }
 
 func TestLiveCallIDFromLocation(t *testing.T) {

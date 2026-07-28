@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // BlockType 内容块类型
@@ -31,6 +33,7 @@ type StreamingProcessor struct {
 	pendingSignature  string
 	trailingSignature string
 	originalModel     string
+	messageID         string
 	webSearchQueries  []string
 	groundingChunks   []GeminiGroundingChunk
 	usageMapHook      UsageMapHook
@@ -47,6 +50,7 @@ func NewStreamingProcessor(originalModel string) *StreamingProcessor {
 	return &StreamingProcessor{
 		blockType:     BlockTypeNone,
 		originalModel: originalModel,
+		messageID:     claude.GenerateMessageID(),
 	}
 }
 
@@ -204,14 +208,6 @@ func (p *StreamingProcessor) emitMessageStart(v1Resp *V1InternalResponse) []byte
 		usage.ImageOutputTokens = v1Resp.Response.UsageMetadata.ImageOutputTokens()
 	}
 
-	responseID := v1Resp.ResponseID
-	if responseID == "" {
-		responseID = v1Resp.Response.ResponseID
-	}
-	if responseID == "" {
-		responseID = "msg_" + generateRandomID()
-	}
-
 	var usageValue any = usage
 	if p.usageMapHook != nil {
 		usageMap := usageToMap(usage)
@@ -220,7 +216,7 @@ func (p *StreamingProcessor) emitMessageStart(v1Resp *V1InternalResponse) []byte
 	}
 
 	message := map[string]any{
-		"id":            responseID,
+		"id":            p.messageID,
 		"type":          "message",
 		"role":          "assistant",
 		"content":       []any{},

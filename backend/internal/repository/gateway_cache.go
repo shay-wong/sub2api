@@ -16,6 +16,7 @@ import (
 const stickySessionPrefix = "sticky_session:"
 const openAIReasoningSourcePrefix = "openai_reasoning_source:"
 const liveCallPrefix = "live:call:"
+const liveCallRecoveryIndexKey = "live:call:recovery"
 
 type gatewayCache struct {
 	rdb *redis.Client
@@ -142,14 +143,30 @@ var claimLiveControllerScript = redis.NewScript(`
 var markLiveCallClosedScript = redis.NewScript(`
 	local key = KEYS[1]
 	if redis.call('EXISTS', key) == 0 then
+		redis.call('ZREM', KEYS[2], ARGV[2])
 		return 0
 	end
 	if redis.call('HGET', key, 'controller') == 'closed' then
-		return 0
+		redis.call('ZREM', KEYS[2], ARGV[2])
+		return 2
 	end
 	redis.call('HSET', key, 'controller', 'closed', 'controller_owner', '')
 	redis.call('EXPIRE', key, ARGV[1])
+	redis.call('ZREM', KEYS[2], ARGV[2])
 	return 1
+`)
+
+var freezeLiveCallFinishedAtScript = redis.NewScript(`
+	local key = KEYS[1]
+	if redis.call('EXISTS', key) == 0 then
+		return 0
+	end
+	local finished_at = redis.call('HGET', key, 'finished_at')
+	if finished_at == false then
+		finished_at = ARGV[1]
+		redis.call('HSET', key, 'finished_at', finished_at)
+	end
+	return finished_at
 `)
 
 var releaseLiveControllerScript = redis.NewScript(`
@@ -171,12 +188,14 @@ func HashLiveCallID(callID string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCallRecord, ttl time.Duration) error {
-	if record == nil || record.CallHash == "" || record.CallID == "" {
-		return fmt.Errorf("invalid live call record")
+func liveCallValues(record *service.LiveCallRecord) map[string]any {
+	provisional := 0
+	if record.Provisional {
+		provisional = 1
 	}
 	values := map[string]any{
 		"call_id":          record.CallID,
+		"provisional":      provisional,
 		"account_id":       record.AccountID,
 		"api_key_id":       record.APIKeyID,
 		"project_id":       record.ProjectID,
@@ -195,10 +214,43 @@ func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCal
 		"inbound_endpoint": record.InboundEndpoint,
 		"attestation":      record.AttestationCiphertext,
 	}
+	if !record.FinishedAt.IsZero() {
+		values["finished_at"] = record.FinishedAt.UnixMilli()
+	}
+	return values
+}
+
+func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCallRecord, ttl time.Duration) error {
+	if record == nil || record.CallHash == "" || record.CallID == "" || ttl <= 0 {
+		return fmt.Errorf("invalid live call record")
+	}
 	key := liveCallKey(record.CallHash)
 	pipe := c.rdb.TxPipeline()
-	pipe.HSet(ctx, key, values)
+	pipe.HSet(ctx, key, liveCallValues(record))
 	pipe.Expire(ctx, key, ttl)
+	pipe.ZAdd(ctx, liveCallRecoveryIndexKey, redis.Z{
+		Score:  float64(record.ExpiresAt.UnixMilli()),
+		Member: record.CallHash,
+	})
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (c *gatewayCache) PromoteLiveCall(ctx context.Context, intentHash string, record *service.LiveCallRecord, ttl time.Duration) error {
+	if intentHash == "" || record == nil || record.Provisional || record.CallHash == "" || record.CallID == "" ||
+		intentHash == record.CallHash || ttl <= 0 {
+		return fmt.Errorf("invalid live call promotion")
+	}
+	key := liveCallKey(record.CallHash)
+	pipe := c.rdb.TxPipeline()
+	pipe.HSet(ctx, key, liveCallValues(record))
+	pipe.Expire(ctx, key, ttl)
+	pipe.ZAdd(ctx, liveCallRecoveryIndexKey, redis.Z{
+		Score:  float64(record.ExpiresAt.UnixMilli()),
+		Member: record.CallHash,
+	})
+	pipe.Del(ctx, liveCallKey(intentHash))
+	pipe.ZRem(ctx, liveCallRecoveryIndexKey, intentHash)
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -217,9 +269,14 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 	}
 	createdAt := time.UnixMilli(parseInt("created_at"))
 	expiresAt := time.UnixMilli(parseInt("expires_at"))
+	var finishedAt time.Time
+	if values["finished_at"] != "" {
+		finishedAt = time.UnixMilli(parseInt("finished_at"))
+	}
 	return &service.LiveCallRecord{
 		CallID:                values["call_id"],
 		CallHash:              callHash,
+		Provisional:           parseInt("provisional") == 1,
 		AccountID:             parseInt("account_id"),
 		APIKeyID:              parseInt("api_key_id"),
 		ProjectID:             parseInt("project_id"),
@@ -230,6 +287,7 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 		LeaseID:               values["lease_id"],
 		Model:                 values["model"],
 		CreatedAt:             createdAt,
+		FinishedAt:            finishedAt,
 		ExpiresAt:             expiresAt,
 		Controller:            values["controller"],
 		ControllerOwner:       values["controller_owner"],
@@ -258,7 +316,80 @@ func (c *gatewayCache) ReleaseLiveController(ctx context.Context, callHash, owne
 	return result == 1, err
 }
 
-func (c *gatewayCache) MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (bool, error) {
-	result, err := markLiveCallClosedScript.Run(ctx, c.rdb, []string{liveCallKey(callHash)}, int64(ttl.Seconds())).Int()
-	return result == 1, err
+func (c *gatewayCache) FreezeLiveCallFinishedAt(
+	ctx context.Context,
+	callHash string,
+	finishedAt time.Time,
+) (time.Time, error) {
+	result, err := freezeLiveCallFinishedAtScript.Run(
+		ctx,
+		c.rdb,
+		[]string{liveCallKey(callHash)},
+		finishedAt.UnixMilli(),
+	).Int64()
+	if err != nil {
+		return time.Time{}, err
+	}
+	if result == 0 {
+		return time.Time{}, service.ErrLiveCallNotFound
+	}
+	return time.UnixMilli(result), nil
+}
+
+func (c *gatewayCache) MarkLiveCallClosed(ctx context.Context, callHash string, ttl time.Duration) (service.LiveCallCloseStatus, error) {
+	result, err := markLiveCallClosedScript.Run(
+		ctx,
+		c.rdb,
+		[]string{liveCallKey(callHash), liveCallRecoveryIndexKey},
+		int64(ttl.Seconds()),
+		callHash,
+	).Int()
+	return service.LiveCallCloseStatus(result), err
+}
+
+func (c *gatewayCache) ScheduleLiveCallRecovery(ctx context.Context, record *service.LiveCallRecord, at time.Time, ttl time.Duration) error {
+	if record == nil || record.CallHash == "" || record.CallID == "" || ttl <= 0 {
+		return fmt.Errorf("invalid live call recovery")
+	}
+	pipe := c.rdb.TxPipeline()
+	key := liveCallKey(record.CallHash)
+	pipe.HSet(ctx, key, liveCallValues(record))
+	pipe.Expire(ctx, key, ttl)
+	pipe.ZAdd(ctx, liveCallRecoveryIndexKey, redis.Z{
+		Score:  float64(at.UnixMilli()),
+		Member: record.CallHash,
+	})
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (c *gatewayCache) ListRecoverableLiveCalls(ctx context.Context, before time.Time, limit int64) ([]*service.LiveCallRecord, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	hashes, err := c.rdb.ZRangeByScore(ctx, liveCallRecoveryIndexKey, &redis.ZRangeBy{
+		Min:   "-inf",
+		Max:   strconv.FormatInt(before.UnixMilli(), 10),
+		Count: limit,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	records := make([]*service.LiveCallRecord, 0, len(hashes))
+	for _, callHash := range hashes {
+		record, getErr := c.GetLiveCall(ctx, callHash)
+		if errors.Is(getErr, service.ErrLiveCallNotFound) {
+			_ = c.rdb.ZRem(ctx, liveCallRecoveryIndexKey, callHash).Err()
+			continue
+		}
+		if getErr != nil {
+			return nil, getErr
+		}
+		if record.Controller == service.LiveControllerClosed {
+			_ = c.rdb.ZRem(ctx, liveCallRecoveryIndexKey, callHash).Err()
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }

@@ -309,7 +309,7 @@ func TestChatCompletionsResponseToAnthropic_TextOnly(t *testing.T) {
 	}
 
 	out := ChatCompletionsResponseToAnthropic(resp, "claude-sonnet-4-20250514")
-	require.Equal(t, "chatcmpl-1", out.ID)
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, out.ID)
 	require.Equal(t, "claude-sonnet-4-20250514", out.Model)
 	require.Len(t, out.Content, 1)
 	require.Equal(t, "text", out.Content[0].Type)
@@ -443,7 +443,7 @@ func TestChatCompletionsResponseToAnthropic_NilResponse(t *testing.T) {
 
 func TestChatCompletionsChunkToAnthropicEvents_TextOnly(t *testing.T) {
 	events := collectAnthropicStreamEvents(t, []string{
-		`{"choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}`,
+		`{"id":"chatcmpl-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"}}]}`,
 		`{"choices":[{"index":0,"delta":{"content":" world"}}]}`,
 		`{"choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
 	})
@@ -459,6 +459,8 @@ func TestChatCompletionsChunkToAnthropicEvents_TextOnly(t *testing.T) {
 		"message_delta",
 		"message_stop",
 	}, types)
+	require.NotNil(t, events[0].Message)
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, events[0].Message.ID)
 
 	// Verify deltas
 	var texts []string

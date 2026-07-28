@@ -25,6 +25,8 @@ const (
 	FieldEmail = "email"
 	// FieldPasswordHash holds the string denoting the password_hash field in the database.
 	FieldPasswordHash = "password_hash"
+	// FieldPasswordAuthDisabled holds the string denoting the password_auth_disabled field in the database.
+	FieldPasswordAuthDisabled = "password_auth_disabled"
 	// FieldRole holds the string denoting the role field in the database.
 	FieldRole = "role"
 	// FieldBalance holds the string denoting the balance field in the database.
@@ -35,6 +37,8 @@ const (
 	FieldConcurrency = "concurrency"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
+	// FieldTokenVersion holds the string denoting the token_version field in the database.
+	FieldTokenVersion = "token_version"
 	// FieldUsername holds the string denoting the username field in the database.
 	FieldUsername = "username"
 	// FieldNotes holds the string denoting the notes field in the database.
@@ -217,11 +221,13 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldEmail,
 	FieldPasswordHash,
+	FieldPasswordAuthDisabled,
 	FieldRole,
 	FieldBalance,
 	FieldFrozenBalance,
 	FieldConcurrency,
 	FieldStatus,
+	FieldTokenVersion,
 	FieldUsername,
 	FieldNotes,
 	FieldTotpSecretEncrypted,
@@ -286,6 +292,8 @@ var (
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	StatusValidator func(string) error
+	// DefaultTokenVersion holds the default value on creation for the "token_version" field.
+	DefaultTokenVersion int64
 	// DefaultUsername holds the default value on creation for the "username" field.
 	DefaultUsername string
 	// UsernameValidator is a validator for the "username" field. It is called by the builders before save.
@@ -343,6 +351,11 @@ func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPasswordHash, opts...).ToFunc()
 }
 
+// ByPasswordAuthDisabled orders the results by the password_auth_disabled field.
+func ByPasswordAuthDisabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldPasswordAuthDisabled, opts...).ToFunc()
+}
+
 // ByRole orders the results by the role field.
 func ByRole(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRole, opts...).ToFunc()
@@ -366,6 +379,11 @@ func ByConcurrency(opts ...sql.OrderTermOption) OrderOption {
 // ByStatus orders the results by the status field.
 func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldStatus, opts...).ToFunc()
+}
+
+// ByTokenVersion orders the results by the token_version field.
+func ByTokenVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTokenVersion, opts...).ToFunc()
 }
 
 // ByUsername orders the results by the username field.

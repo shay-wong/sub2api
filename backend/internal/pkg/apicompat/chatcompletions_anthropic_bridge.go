@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // This file implements a DIRECT bridge between Anthropic Messages and OpenAI
@@ -376,13 +378,13 @@ func joinResponsesContentPartText(parts []ResponsesContentPart) string {
 // ChatCompletionsResponseToResponses + ResponsesToAnthropic.
 func ChatCompletionsResponseToAnthropic(resp *ChatCompletionsResponse, model string) *AnthropicResponse {
 	out := &AnthropicResponse{
+		ID:    claude.GenerateMessageID(),
 		Type:  "message",
 		Role:  "assistant",
 		Model: model,
 	}
 
 	if resp != nil {
-		out.ID = resp.ID
 		if out.Model == "" {
 			out.Model = resp.Model
 		}
@@ -408,12 +410,6 @@ func ChatCompletionsResponseToAnthropic(resp *ChatCompletionsResponse, model str
 	if AnthropicStopReasonString(out.StopReason) == "" {
 		out.StopReason = AnthropicStopReasonPtr(chatFinishReasonToAnthropicStopReason("", out.Content))
 	}
-	// The double-conversion path generates a response id when the upstream
-	// omits one (ChatCompletionsResponseToResponses); clients treat it as required.
-	if out.ID == "" {
-		out.ID = generateResponsesID()
-	}
-
 	return out
 }
 
@@ -558,15 +554,15 @@ type ChatCompletionsToAnthropicStreamState struct {
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 
-	ResponseID string
-	Model      string
-	Created    int64
+	MessageID string
+	Model     string
+	Created   int64
 }
 
 // NewChatCompletionsToAnthropicStreamState returns an initialized stream state.
 func NewChatCompletionsToAnthropicStreamState(model string) *ChatCompletionsToAnthropicStreamState {
 	return &ChatCompletionsToAnthropicStreamState{
-		ResponseID:        generateResponsesID(),
+		MessageID:         claude.GenerateMessageID(),
 		Model:             model,
 		Created:           time.Now().Unix(),
 		toolBlockIndex:    make(map[int]int),
@@ -585,9 +581,6 @@ func ChatCompletionsChunkToAnthropicEvents(
 ) []AnthropicStreamEvent {
 	if chunk == nil || state == nil {
 		return nil
-	}
-	if chunk.ID != "" {
-		state.ResponseID = chunk.ID
 	}
 	if state.Model == "" && chunk.Model != "" {
 		state.Model = chunk.Model
@@ -701,7 +694,7 @@ func ensureCCAnthropicMessageStart(state *ChatCompletionsToAnthropicStreamState)
 	return []AnthropicStreamEvent{{
 		Type: "message_start",
 		Message: &AnthropicResponse{
-			ID:         state.ResponseID,
+			ID:         state.MessageID,
 			Type:       "message",
 			Role:       "assistant",
 			Content:    []AnthropicContentBlock{},

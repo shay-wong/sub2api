@@ -90,6 +90,20 @@ func (_c *UserCreate) SetPasswordHash(v string) *UserCreate {
 	return _c
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (_c *UserCreate) SetPasswordAuthDisabled(v bool) *UserCreate {
+	_c.mutation.SetPasswordAuthDisabled(v)
+	return _c
+}
+
+// SetNillablePasswordAuthDisabled sets the "password_auth_disabled" field if the given value is not nil.
+func (_c *UserCreate) SetNillablePasswordAuthDisabled(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetPasswordAuthDisabled(*v)
+	}
+	return _c
+}
+
 // SetRole sets the "role" field.
 func (_c *UserCreate) SetRole(v string) *UserCreate {
 	_c.mutation.SetRole(v)
@@ -156,6 +170,20 @@ func (_c *UserCreate) SetStatus(v string) *UserCreate {
 func (_c *UserCreate) SetNillableStatus(v *string) *UserCreate {
 	if v != nil {
 		_c.SetStatus(*v)
+	}
+	return _c
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (_c *UserCreate) SetTokenVersion(v int64) *UserCreate {
+	_c.mutation.SetTokenVersion(v)
+	return _c
+}
+
+// SetNillableTokenVersion sets the "token_version" field if the given value is not nil.
+func (_c *UserCreate) SetNillableTokenVersion(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetTokenVersion(*v)
 	}
 	return _c
 }
@@ -652,6 +680,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.TokenVersion(); !ok {
+		v := user.DefaultTokenVersion
+		_c.mutation.SetTokenVersion(v)
+	}
 	if _, ok := _c.mutation.Username(); !ok {
 		v := user.DefaultUsername
 		_c.mutation.SetUsername(v)
@@ -740,6 +772,9 @@ func (_c *UserCreate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "User.status": %w`, err)}
 		}
 	}
+	if _, ok := _c.mutation.TokenVersion(); !ok {
+		return &ValidationError{Name: "token_version", err: errors.New(`ent: missing required field "User.token_version"`)}
+	}
 	if _, ok := _c.mutation.Username(); !ok {
 		return &ValidationError{Name: "username", err: errors.New(`ent: missing required field "User.username"`)}
 	}
@@ -824,6 +859,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 		_node.PasswordHash = value
 	}
+	if value, ok := _c.mutation.PasswordAuthDisabled(); ok {
+		_spec.SetField(user.FieldPasswordAuthDisabled, field.TypeBool, value)
+		_node.PasswordAuthDisabled = &value
+	}
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 		_node.Role = value
@@ -843,6 +882,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.TokenVersion(); ok {
+		_spec.SetField(user.FieldTokenVersion, field.TypeInt64, value)
+		_node.TokenVersion = value
 	}
 	if value, ok := _c.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -1250,6 +1293,24 @@ func (u *UserUpsert) UpdatePasswordHash() *UserUpsert {
 	return u
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (u *UserUpsert) SetPasswordAuthDisabled(v bool) *UserUpsert {
+	u.Set(user.FieldPasswordAuthDisabled, v)
+	return u
+}
+
+// UpdatePasswordAuthDisabled sets the "password_auth_disabled" field to the value that was provided on create.
+func (u *UserUpsert) UpdatePasswordAuthDisabled() *UserUpsert {
+	u.SetExcluded(user.FieldPasswordAuthDisabled)
+	return u
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (u *UserUpsert) ClearPasswordAuthDisabled() *UserUpsert {
+	u.SetNull(user.FieldPasswordAuthDisabled)
+	return u
+}
+
 // SetRole sets the "role" field.
 func (u *UserUpsert) SetRole(v string) *UserUpsert {
 	u.Set(user.FieldRole, v)
@@ -1325,6 +1386,24 @@ func (u *UserUpsert) SetStatus(v string) *UserUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *UserUpsert) UpdateStatus() *UserUpsert {
 	u.SetExcluded(user.FieldStatus)
+	return u
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (u *UserUpsert) SetTokenVersion(v int64) *UserUpsert {
+	u.Set(user.FieldTokenVersion, v)
+	return u
+}
+
+// UpdateTokenVersion sets the "token_version" field to the value that was provided on create.
+func (u *UserUpsert) UpdateTokenVersion() *UserUpsert {
+	u.SetExcluded(user.FieldTokenVersion)
+	return u
+}
+
+// AddTokenVersion adds v to the "token_version" field.
+func (u *UserUpsert) AddTokenVersion(v int64) *UserUpsert {
+	u.Add(user.FieldTokenVersion, v)
 	return u
 }
 
@@ -1652,6 +1731,27 @@ func (u *UserUpsertOne) UpdatePasswordHash() *UserUpsertOne {
 	})
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (u *UserUpsertOne) SetPasswordAuthDisabled(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPasswordAuthDisabled(v)
+	})
+}
+
+// UpdatePasswordAuthDisabled sets the "password_auth_disabled" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdatePasswordAuthDisabled() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePasswordAuthDisabled()
+	})
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (u *UserUpsertOne) ClearPasswordAuthDisabled() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearPasswordAuthDisabled()
+	})
+}
+
 // SetRole sets the "role" field.
 func (u *UserUpsertOne) SetRole(v string) *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
@@ -1740,6 +1840,27 @@ func (u *UserUpsertOne) SetStatus(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateStatus() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (u *UserUpsertOne) SetTokenVersion(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTokenVersion(v)
+	})
+}
+
+// AddTokenVersion adds v to the "token_version" field.
+func (u *UserUpsertOne) AddTokenVersion(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddTokenVersion(v)
+	})
+}
+
+// UpdateTokenVersion sets the "token_version" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateTokenVersion() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTokenVersion()
 	})
 }
 
@@ -2269,6 +2390,27 @@ func (u *UserUpsertBulk) UpdatePasswordHash() *UserUpsertBulk {
 	})
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (u *UserUpsertBulk) SetPasswordAuthDisabled(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetPasswordAuthDisabled(v)
+	})
+}
+
+// UpdatePasswordAuthDisabled sets the "password_auth_disabled" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdatePasswordAuthDisabled() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdatePasswordAuthDisabled()
+	})
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (u *UserUpsertBulk) ClearPasswordAuthDisabled() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearPasswordAuthDisabled()
+	})
+}
+
 // SetRole sets the "role" field.
 func (u *UserUpsertBulk) SetRole(v string) *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
@@ -2357,6 +2499,27 @@ func (u *UserUpsertBulk) SetStatus(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateStatus() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (u *UserUpsertBulk) SetTokenVersion(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetTokenVersion(v)
+	})
+}
+
+// AddTokenVersion adds v to the "token_version" field.
+func (u *UserUpsertBulk) AddTokenVersion(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddTokenVersion(v)
+	})
+}
+
+// UpdateTokenVersion sets the "token_version" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateTokenVersion() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateTokenVersion()
 	})
 }
 

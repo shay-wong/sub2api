@@ -80,6 +80,11 @@ func PasswordHash(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPasswordHash, v))
 }
 
+// PasswordAuthDisabled applies equality check predicate on the "password_auth_disabled" field. It's identical to PasswordAuthDisabledEQ.
+func PasswordAuthDisabled(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPasswordAuthDisabled, v))
+}
+
 // Role applies equality check predicate on the "role" field. It's identical to RoleEQ.
 func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -103,6 +108,11 @@ func Concurrency(v int) predicate.User {
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldStatus, v))
+}
+
+// TokenVersion applies equality check predicate on the "token_version" field. It's identical to TokenVersionEQ.
+func TokenVersion(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldTokenVersion, v))
 }
 
 // Username applies equality check predicate on the "username" field. It's identical to UsernameEQ.
@@ -435,6 +445,26 @@ func PasswordHashContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldPasswordHash, v))
 }
 
+// PasswordAuthDisabledEQ applies the EQ predicate on the "password_auth_disabled" field.
+func PasswordAuthDisabledEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldPasswordAuthDisabled, v))
+}
+
+// PasswordAuthDisabledNEQ applies the NEQ predicate on the "password_auth_disabled" field.
+func PasswordAuthDisabledNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldPasswordAuthDisabled, v))
+}
+
+// PasswordAuthDisabledIsNil applies the IsNil predicate on the "password_auth_disabled" field.
+func PasswordAuthDisabledIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldPasswordAuthDisabled))
+}
+
+// PasswordAuthDisabledNotNil applies the NotNil predicate on the "password_auth_disabled" field.
+func PasswordAuthDisabledNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldPasswordAuthDisabled))
+}
+
 // RoleEQ applies the EQ predicate on the "role" field.
 func RoleEQ(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -683,6 +713,46 @@ func StatusEqualFold(v string) predicate.User {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// TokenVersionEQ applies the EQ predicate on the "token_version" field.
+func TokenVersionEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldTokenVersion, v))
+}
+
+// TokenVersionNEQ applies the NEQ predicate on the "token_version" field.
+func TokenVersionNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldTokenVersion, v))
+}
+
+// TokenVersionIn applies the In predicate on the "token_version" field.
+func TokenVersionIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldTokenVersion, vs...))
+}
+
+// TokenVersionNotIn applies the NotIn predicate on the "token_version" field.
+func TokenVersionNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldTokenVersion, vs...))
+}
+
+// TokenVersionGT applies the GT predicate on the "token_version" field.
+func TokenVersionGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldTokenVersion, v))
+}
+
+// TokenVersionGTE applies the GTE predicate on the "token_version" field.
+func TokenVersionGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldTokenVersion, v))
+}
+
+// TokenVersionLT applies the LT predicate on the "token_version" field.
+func TokenVersionLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldTokenVersion, v))
+}
+
+// TokenVersionLTE applies the LTE predicate on the "token_version" field.
+func TokenVersionLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldTokenVersion, v))
 }
 
 // UsernameEQ applies the EQ predicate on the "username" field.

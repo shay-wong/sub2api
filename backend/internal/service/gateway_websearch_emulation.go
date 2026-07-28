@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/websearch"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -27,7 +28,6 @@ const (
 
 	webSearchDefaultMaxResults = 5
 	defaultWebSearchModel      = "claude-sonnet-4-6"
-	webSearchMsgIDPrefix       = "msg_ws_"
 	webSearchToolUseIDPrefix   = "srvtoolu_ws_"
 	tokenEstimateDivisor       = 4
 
@@ -212,7 +212,7 @@ func resolveAccountProxyURL(account *Account) string {
 func writeWebSearchStreamResponse(
 	c *gin.Context, query string, resp *websearch.SearchResponse, model string, startTime time.Time,
 ) (*ForwardResult, error) {
-	msgID := webSearchMsgIDPrefix + uuid.New().String()
+	msgID := claude.GenerateMessageID()
 	toolUseID := webSearchToolUseIDPrefix + uuid.New().String()[:16]
 	textSummary := buildTextSummary(query, resp.Results)
 
@@ -330,7 +330,7 @@ func flushSSEJSON(w http.ResponseWriter, event string, data any) error {
 func writeWebSearchNonStreamResponse(
 	c *gin.Context, query string, resp *websearch.SearchResponse, model string, startTime time.Time,
 ) (*ForwardResult, error) {
-	msgID := webSearchMsgIDPrefix + uuid.New().String()
+	msgID := claude.GenerateMessageID()
 	toolUseID := webSearchToolUseIDPrefix + uuid.New().String()[:16]
 	textSummary := buildTextSummary(query, resp.Results)
 

@@ -19,6 +19,12 @@ export { userGroupsAPI } from './groups'
 export { userChannelsAPI } from './channels'
 export * as batchImageAPI from './batchImage'
 export { totpAPI } from './totp'
+export {
+  passkeyAPI,
+  type PasskeyCredentialSummary,
+  type PasskeyVerification,
+  type PasskeyVerificationMethod
+} from './passkey'
 export { default as announcementsAPI } from './announcements'
 export { channelMonitorUserAPI } from './channelMonitor'
 

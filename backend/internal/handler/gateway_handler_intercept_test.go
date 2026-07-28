@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -49,7 +48,7 @@ func TestSendMockInterceptResponse_MaxTokensOneHaiku(t *testing.T) {
 
 	id, ok := response["id"].(string)
 	require.True(t, ok)
-	require.True(t, strings.HasPrefix(id, "msg_bdrk_"))
+	require.Regexp(t, `^msg_01[0-9A-Za-z]{22}$`, id)
 
 	content, ok := response["content"].([]any)
 	require.True(t, ok)
@@ -62,4 +61,20 @@ func TestSendMockInterceptResponse_MaxTokensOneHaiku(t *testing.T) {
 	usage, ok := response["usage"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, float64(1), usage["output_tokens"])
+}
+
+// Streaming Claude Code health probes must keep the max-token response shape.
+func TestSendMockInterceptStream_MaxTokensOneHaiku(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+
+	sendMockInterceptStream(ctx, "claude-haiku-4-5", InterceptTypeMaxTokensOneHaiku)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, `"text":"#"`)
+	require.Contains(t, body, `"stop_reason":"max_tokens"`)
+	require.Contains(t, body, `"output_tokens":1`)
+	require.NotContains(t, body, "New Conversation")
 }

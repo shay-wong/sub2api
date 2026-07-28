@@ -96,6 +96,26 @@ func (_u *UserUpdate) SetNillablePasswordHash(v *string) *UserUpdate {
 	return _u
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (_u *UserUpdate) SetPasswordAuthDisabled(v bool) *UserUpdate {
+	_u.mutation.SetPasswordAuthDisabled(v)
+	return _u
+}
+
+// SetNillablePasswordAuthDisabled sets the "password_auth_disabled" field if the given value is not nil.
+func (_u *UserUpdate) SetNillablePasswordAuthDisabled(v *bool) *UserUpdate {
+	if v != nil {
+		_u.SetPasswordAuthDisabled(*v)
+	}
+	return _u
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (_u *UserUpdate) ClearPasswordAuthDisabled() *UserUpdate {
+	_u.mutation.ClearPasswordAuthDisabled()
+	return _u
+}
+
 // SetRole sets the "role" field.
 func (_u *UserUpdate) SetRole(v string) *UserUpdate {
 	_u.mutation.SetRole(v)
@@ -184,6 +204,27 @@ func (_u *UserUpdate) SetNillableStatus(v *string) *UserUpdate {
 	if v != nil {
 		_u.SetStatus(*v)
 	}
+	return _u
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (_u *UserUpdate) SetTokenVersion(v int64) *UserUpdate {
+	_u.mutation.ResetTokenVersion()
+	_u.mutation.SetTokenVersion(v)
+	return _u
+}
+
+// SetNillableTokenVersion sets the "token_version" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableTokenVersion(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetTokenVersion(*v)
+	}
+	return _u
+}
+
+// AddTokenVersion adds value to the "token_version" field.
+func (_u *UserUpdate) AddTokenVersion(v int64) *UserUpdate {
+	_u.mutation.AddTokenVersion(v)
 	return _u
 }
 
@@ -1083,6 +1124,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.PasswordAuthDisabled(); ok {
+		_spec.SetField(user.FieldPasswordAuthDisabled, field.TypeBool, value)
+	}
+	if _u.mutation.PasswordAuthDisabledCleared() {
+		_spec.ClearField(user.FieldPasswordAuthDisabled, field.TypeBool)
+	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 	}
@@ -1106,6 +1153,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.TokenVersion(); ok {
+		_spec.SetField(user.FieldTokenVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTokenVersion(); ok {
+		_spec.AddField(user.FieldTokenVersion, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)
@@ -1934,6 +1987,26 @@ func (_u *UserUpdateOne) SetNillablePasswordHash(v *string) *UserUpdateOne {
 	return _u
 }
 
+// SetPasswordAuthDisabled sets the "password_auth_disabled" field.
+func (_u *UserUpdateOne) SetPasswordAuthDisabled(v bool) *UserUpdateOne {
+	_u.mutation.SetPasswordAuthDisabled(v)
+	return _u
+}
+
+// SetNillablePasswordAuthDisabled sets the "password_auth_disabled" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillablePasswordAuthDisabled(v *bool) *UserUpdateOne {
+	if v != nil {
+		_u.SetPasswordAuthDisabled(*v)
+	}
+	return _u
+}
+
+// ClearPasswordAuthDisabled clears the value of the "password_auth_disabled" field.
+func (_u *UserUpdateOne) ClearPasswordAuthDisabled() *UserUpdateOne {
+	_u.mutation.ClearPasswordAuthDisabled()
+	return _u
+}
+
 // SetRole sets the "role" field.
 func (_u *UserUpdateOne) SetRole(v string) *UserUpdateOne {
 	_u.mutation.SetRole(v)
@@ -2022,6 +2095,27 @@ func (_u *UserUpdateOne) SetNillableStatus(v *string) *UserUpdateOne {
 	if v != nil {
 		_u.SetStatus(*v)
 	}
+	return _u
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (_u *UserUpdateOne) SetTokenVersion(v int64) *UserUpdateOne {
+	_u.mutation.ResetTokenVersion()
+	_u.mutation.SetTokenVersion(v)
+	return _u
+}
+
+// SetNillableTokenVersion sets the "token_version" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableTokenVersion(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetTokenVersion(*v)
+	}
+	return _u
+}
+
+// AddTokenVersion adds value to the "token_version" field.
+func (_u *UserUpdateOne) AddTokenVersion(v int64) *UserUpdateOne {
+	_u.mutation.AddTokenVersion(v)
 	return _u
 }
 
@@ -2951,6 +3045,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.PasswordAuthDisabled(); ok {
+		_spec.SetField(user.FieldPasswordAuthDisabled, field.TypeBool, value)
+	}
+	if _u.mutation.PasswordAuthDisabledCleared() {
+		_spec.ClearField(user.FieldPasswordAuthDisabled, field.TypeBool)
+	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 	}
@@ -2974,6 +3074,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(user.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.TokenVersion(); ok {
+		_spec.SetField(user.FieldTokenVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTokenVersion(); ok {
+		_spec.AddField(user.FieldTokenVersion, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Username(); ok {
 		_spec.SetField(user.FieldUsername, field.TypeString, value)

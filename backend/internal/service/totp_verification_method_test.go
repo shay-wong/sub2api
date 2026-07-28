@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +37,29 @@ type totpVMSettingRepoStub struct {
 	values map[string]string
 }
 
+type totpVMCacheStub struct {
+	TotpCache
+	setup *TotpSetupSession
+}
+
+func (s *totpVMCacheStub) SetSetupSession(_ context.Context, _ int64, session *TotpSetupSession, _ time.Duration) error {
+	s.setup = session
+	return nil
+}
+
+type totpVMEmailCacheStub struct {
+	EmailCache
+	data *VerificationCodeData
+}
+
+func (s *totpVMEmailCacheStub) GetVerificationCode(context.Context, string) (*VerificationCodeData, error) {
+	return s.data, nil
+}
+
+func (*totpVMEmailCacheStub) DeleteVerificationCode(context.Context, string) error {
+	return nil
+}
+
 func (s *totpVMSettingRepoStub) GetValue(ctx context.Context, key string) (string, error) {
 	v, ok := s.values[key]
 	if !ok {
@@ -53,6 +77,23 @@ func newTotpVMService(t *testing.T, user *User, emailVerifyEnabled bool) (*TotpS
 	}
 	settingSvc := NewSettingService(&totpVMSettingRepoStub{values: values}, nil)
 	return NewTotpService(userRepo, nil, nil, settingSvc, nil, nil), userRepo
+}
+
+func newTotpVMEmailService(t *testing.T, user *User) (*TotpService, *totpVMUserRepoStub, *totpVMCacheStub) {
+	t.Helper()
+	userRepo := &totpVMUserRepoStub{user: user}
+	settingSvc := NewSettingService(&totpVMSettingRepoStub{values: map[string]string{
+		SettingKeyTotpEnabled: "true",
+	}}, nil)
+	cache := &totpVMCacheStub{}
+	emailCache := &totpVMEmailCacheStub{data: &VerificationCodeData{
+		Code:      "123456",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	emailService := NewEmailService(nil, emailCache)
+	emailQueue := &EmailQueueService{taskChan: make(chan EmailTask, 1)}
+	return NewTotpService(userRepo, nil, cache, settingSvc, emailService, emailQueue), userRepo, cache
 }
 
 func TestTotpSuperAdminAlwaysUsesPassword(t *testing.T) {
@@ -94,6 +135,65 @@ func TestGetVerificationMethodRegularUserFollowsEmailVerifySetting(t *testing.T)
 	method, err = svcEmailOff.GetVerificationMethod(context.Background(), user.ID)
 	require.NoError(t, err)
 	require.Equal(t, "password", method.Method)
+}
+
+func TestTotpOAuthOnlyUserUsesEmailWhenGlobalEmailVerifyIsDisabled(t *testing.T) {
+	user := &User{
+		ID:                   4,
+		Email:                "oauth@example.com",
+		Role:                 RoleUser,
+		PasswordAuthDisabled: true,
+		PasswordAuthResolved: true,
+	}
+	svc, userRepo, cache := newTotpVMEmailService(t, user)
+
+	method, err := svc.GetVerificationMethod(context.Background(), user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "email", method.Method)
+	require.NoError(t, svc.SendVerifyCode(context.Background(), user.ID))
+	require.Len(t, svc.emailQueueService.taskChan, 1)
+
+	setup, err := svc.InitiateSetup(context.Background(), user.ID, "123456", "")
+	require.NoError(t, err)
+	require.NotNil(t, setup)
+	require.NotNil(t, cache.setup)
+
+	user.TotpEnabled = true
+	svc.emailService = NewEmailService(nil, &totpVMEmailCacheStub{data: &VerificationCodeData{
+		Code:      "654321",
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Minute),
+	}})
+	require.NoError(t, svc.Disable(context.Background(), user.ID, "654321", ""))
+	require.True(t, userRepo.disableCalled)
+}
+
+func TestTotpOAuthOnlyAdminRemainsPasswordOnly(t *testing.T) {
+	admin := &User{
+		ID:                   5,
+		Email:                "admin@example.com",
+		Role:                 RoleAdmin,
+		PasswordAuthDisabled: true,
+		PasswordAuthResolved: true,
+	}
+	svc, _, _ := newTotpVMEmailService(t, admin)
+
+	method, err := svc.GetVerificationMethod(context.Background(), admin.ID)
+	require.NoError(t, err)
+	require.Equal(t, "password", method.Method)
+	require.Error(t, svc.SendVerifyCode(context.Background(), admin.ID))
+	_, err = svc.InitiateSetup(context.Background(), admin.ID, "123456", "")
+	require.ErrorIs(t, err, ErrPasswordRequired)
+}
+
+func TestPasswordAuthDisabledRejectsStoredPasswordHash(t *testing.T) {
+	user := &User{Email: "oauth@example.com", PasswordAuthDisabled: true}
+	require.NoError(t, user.SetPassword("known-password"))
+	require.False(t, user.PasswordAuthDisabled)
+	require.True(t, user.CheckPassword("known-password"))
+
+	user.PasswordAuthDisabled = true
+	require.False(t, user.CheckPassword("known-password"))
 }
 
 func TestTotpDisableAdminUsesPasswordEvenWithEmailVerifyEnabled(t *testing.T) {

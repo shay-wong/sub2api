@@ -55,8 +55,11 @@ func (operatorUserRepoStub) GetByEmail(context.Context, string) (*service.User, 
 	return nil, nil
 }
 func (operatorUserRepoStub) GetFirstAdmin(context.Context) (*service.User, error) { return nil, nil }
-func (operatorUserRepoStub) Update(context.Context, *service.User) error          { return nil }
-func (operatorUserRepoStub) Delete(context.Context, int64) error                  { return nil }
+func (operatorUserRepoStub) IncrementTokenVersion(context.Context, int64) error   { return nil }
+func (operatorUserRepoStub) Update(context.Context, *service.User, service.UserUpdateFields) error {
+	return nil
+}
+func (operatorUserRepoStub) Delete(context.Context, int64) error { return nil }
 func (operatorUserRepoStub) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
 	return 0, nil
 }
@@ -83,6 +86,12 @@ func (operatorUserRepoStub) UpdateUserLastActiveAt(context.Context, int64, time.
 	return nil
 }
 func (operatorUserRepoStub) UpdateBalance(context.Context, int64, float64) error { return nil }
+func (operatorUserRepoStub) AdjustBalance(context.Context, int64, float64) (service.BalanceChange, error) {
+	return service.BalanceChange{}, nil
+}
+func (operatorUserRepoStub) SetBalance(context.Context, int64, float64) (service.BalanceChange, error) {
+	return service.BalanceChange{}, nil
+}
 func (operatorUserRepoStub) DeductBalance(context.Context, int64, float64) error { return nil }
 func (operatorUserRepoStub) UpdateConcurrency(context.Context, int64, int) error { return nil }
 func (operatorUserRepoStub) BatchSetConcurrency(context.Context, []int64, int) (int, error) {

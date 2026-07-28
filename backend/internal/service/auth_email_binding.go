@@ -52,7 +52,7 @@ func (s *AuthService) BindEmailIdentity(
 	if firstRealEmailBind && len(password) < 6 {
 		return nil, infraerrors.BadRequest("PASSWORD_TOO_SHORT", "password must be at least 6 characters")
 	}
-	if !firstRealEmailBind && !s.CheckPassword(password, currentUser.PasswordHash) {
+	if !firstRealEmailBind && !currentUser.CheckPassword(password) {
 		return nil, ErrPasswordIncorrect
 	}
 
@@ -79,7 +79,9 @@ func (s *AuthService) BindEmailIdentity(
 
 	currentUser.Email = normalizedEmail
 	currentUser.PasswordHash = hashedPassword
-	if err := s.userRepo.Update(ctx, currentUser); err != nil {
+	currentUser.PasswordAuthDisabled = false
+	currentUser.PasswordAuthResolved = true
+	if err := s.userRepo.Update(ctx, currentUser, UserUpdateFields{Email: true, PasswordHash: true, PasswordAuthDisabled: true}); err != nil {
 		if errors.Is(err, ErrEmailExists) {
 			return nil, ErrEmailExists
 		}
@@ -196,6 +198,7 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 	if _, err := client.User.UpdateOneID(currentUser.ID).
 		SetEmail(email).
 		SetPasswordHash(hashedPassword).
+		SetPasswordAuthDisabled(false).
 		Save(ctx); err != nil {
 		if dbent.IsConstraintError(err) {
 			return ErrEmailExists
@@ -222,6 +225,10 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 	}
 	currentUser.Email = updatedUser.Email
 	currentUser.PasswordHash = updatedUser.PasswordHash
+	if updatedUser.PasswordAuthDisabled != nil {
+		currentUser.PasswordAuthDisabled = *updatedUser.PasswordAuthDisabled
+		currentUser.PasswordAuthResolved = true
+	}
 	currentUser.Balance = updatedUser.Balance
 	currentUser.Concurrency = updatedUser.Concurrency
 	currentUser.UpdatedAt = updatedUser.UpdatedAt

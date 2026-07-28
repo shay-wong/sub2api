@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // TransformGeminiToClaude 将 Gemini 响应转换为 Claude 格式（非流式）
@@ -36,7 +38,7 @@ func TransformGeminiToClaude(geminiResp []byte, originalModel string) ([]byte, *
 
 	// 使用处理器转换
 	processor := NewNonStreamingProcessor()
-	claudeResp := processor.Process(&v1Resp.Response, v1Resp.ResponseID, originalModel)
+	claudeResp := processor.Process(&v1Resp.Response, originalModel)
 
 	// 序列化
 	respBytes, err := json.Marshal(claudeResp)
@@ -65,7 +67,7 @@ func NewNonStreamingProcessor() *NonStreamingProcessor {
 }
 
 // Process 处理 Gemini 响应
-func (p *NonStreamingProcessor) Process(geminiResp *GeminiResponse, responseID, originalModel string) *ClaudeResponse {
+func (p *NonStreamingProcessor) Process(geminiResp *GeminiResponse, originalModel string) *ClaudeResponse {
 	// 获取 parts
 	var parts []GeminiPart
 	if len(geminiResp.Candidates) > 0 && geminiResp.Candidates[0].Content != nil {
@@ -97,7 +99,7 @@ func (p *NonStreamingProcessor) Process(geminiResp *GeminiResponse, responseID, 
 	}
 
 	// 构建响应
-	return p.buildResponse(geminiResp, responseID, originalModel)
+	return p.buildResponse(geminiResp, originalModel)
 }
 
 // processPart 处理单个 part
@@ -255,7 +257,7 @@ func (p *NonStreamingProcessor) flushThinking() {
 }
 
 // buildResponse 构建最终响应
-func (p *NonStreamingProcessor) buildResponse(geminiResp *GeminiResponse, responseID, originalModel string) *ClaudeResponse {
+func (p *NonStreamingProcessor) buildResponse(geminiResp *GeminiResponse, originalModel string) *ClaudeResponse {
 	var finishReason string
 	if len(geminiResp.Candidates) > 0 {
 		finishReason = geminiResp.Candidates[0].FinishReason
@@ -287,17 +289,8 @@ func (p *NonStreamingProcessor) buildResponse(geminiResp *GeminiResponse, respon
 		usage.ImageOutputTokens = geminiResp.UsageMetadata.ImageOutputTokens()
 	}
 
-	// 生成响应 ID
-	respID := responseID
-	if respID == "" {
-		respID = geminiResp.ResponseID
-	}
-	if respID == "" {
-		respID = "msg_" + generateRandomID()
-	}
-
 	return &ClaudeResponse{
-		ID:         respID,
+		ID:         claude.GenerateMessageID(),
 		Type:       "message",
 		Role:       "assistant",
 		Model:      originalModel,

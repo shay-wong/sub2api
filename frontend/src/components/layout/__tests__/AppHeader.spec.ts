@@ -24,3 +24,11 @@ describe('AppHeader project switcher visibility', () => {
     expect(componentSource).not.toContain('select-native select-native-compact')
   })
 })
+
+describe('AppHeader model plaza visibility', () => {
+  it('hides the entry from non-global admins in backend mode', () => {
+    expect(componentSource).toContain(
+      'v-if="user && modelPlazaEnabled && (!appStore.backendModeEnabled || authStore.isAdmin)"',
+    )
+  })
+})

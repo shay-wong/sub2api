@@ -144,9 +144,19 @@ func (s *TotpService) GetStatus(ctx context.Context, userID int64) (*TotpStatus,
 // usesEmailVerification 判断 TOTP 启用/停用时的身份校验方式。
 // 管理员一律使用密码校验：管理员账号的邮箱常为占位地址收不到验证码，
 // 且管理员凭证失守时攻击者往往同时控制通知邮箱，邮箱验证码不构成有效防线。
-// 普通用户维持原有行为：开启邮箱验证时用邮箱验证码，否则用密码。
+// 无本地密码的普通用户必须使用邮箱；其余普通用户维持原有行为：
+// 开启邮箱验证时用邮箱验证码，否则用密码。
 func (s *TotpService) usesEmailVerification(ctx context.Context, user *User) bool {
-	return !RoleIsAdmin(user.Role) && s.settingService.IsEmailVerifyEnabled(ctx)
+	return userRequiresEmailIdentityVerification(user) ||
+		(!RoleIsAdmin(user.Role) && s.settingService.IsEmailVerifyEnabled(ctx))
+}
+
+func userRequiresEmailIdentityVerification(user *User) bool {
+	if user == nil || RoleIsAdmin(user.Role) {
+		return false
+	}
+	legacyOAuthSignup := !user.PasswordAuthResolved && !emailSignupSourceAllowsLogin(user.SignupSource)
+	return !user.HasLocalPassword() || legacyOAuthSignup
 }
 
 // verifyIdentity 按 usesEmailVerification 的结果校验邮箱验证码或密码。
@@ -542,15 +552,12 @@ func (s *TotpService) GetVerificationMethod(ctx context.Context, userID int64) (
 
 // SendVerifyCode sends an email verification code for TOTP operations
 func (s *TotpService) SendVerifyCode(ctx context.Context, userID int64, locale ...string) error {
-	// Check if email verification is enabled
-	if !s.settingService.IsEmailVerifyEnabled(ctx) {
-		return infraerrors.BadRequest("EMAIL_VERIFY_NOT_ENABLED", "email verification is not enabled")
-	}
-
-	// Get user email
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
+	}
+	if !s.usesEmailVerification(ctx, user) {
+		return infraerrors.BadRequest("EMAIL_VERIFY_NOT_ENABLED", "email verification is not enabled")
 	}
 
 	// Get site name for email

@@ -221,6 +221,10 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 		if heartbeat == nil || s.clock.Now().Sub(*heartbeat) > 10*time.Second {
 			runtime.ProcessStatus = "degraded"
 		}
+		if hasConfig && len(cfg.EnabledEndpoints()) == 0 {
+			runtime.ProcessStatus = "degraded"
+			runtime.LastErrorCode, runtime.LastErrorMessage = sanitizeStoredError(ErrorCodeNoEnabledEndpoint)
+		}
 	}
 	return runtime
 }

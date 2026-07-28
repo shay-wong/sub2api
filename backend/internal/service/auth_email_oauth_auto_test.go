@@ -71,6 +71,8 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	require.Equal(t, int64(88), user.ID)
+	require.True(t, user.PasswordAuthDisabled)
+	require.False(t, user.HasLocalPassword())
 
 	require.Len(t, quotaRepo.bulkInsertCalls, 1, "createEmailOAuthUser must snapshot platform quotas via BulkInsertInitial")
 
