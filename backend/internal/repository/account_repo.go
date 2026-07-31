@@ -1197,6 +1197,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		SELECT a.id
 		FROM accounts AS a
 		WHERE a.deleted_at IS NULL
+			AND a.schedulable = TRUE
 			AND a.platform = ANY($1)
 			AND a.id > $2`
 	if options.ActiveOnly {
