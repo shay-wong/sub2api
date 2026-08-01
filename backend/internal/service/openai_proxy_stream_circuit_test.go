@@ -20,17 +20,15 @@ func TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset(t *testing.T) {
 	tripped, _ := circuit.recordFailure(1, base)
 	require.False(t, tripped)
 	require.False(t, circuit.isBlocked(1, base))
-	require.True(t, circuit.recordSuccess(1, base.Add(time.Second)))
+	require.True(t, circuit.recordSuccess(1))
 
 	tripped, _ = circuit.recordFailure(1, base.Add(10*time.Second))
 	require.False(t, tripped, "success must clear the previous failure observation")
 	tripped, until := circuit.recordFailure(1, base.Add(20*time.Second))
 	require.True(t, tripped)
 	require.Equal(t, base.Add(20*time.Second+10*time.Minute), until)
-	require.False(t, circuit.recordSuccess(1, base.Add(30*time.Second)), "an in-flight success must not clear an active quarantine")
-	require.True(t, circuit.isBlocked(1, until.Add(-time.Nanosecond)))
-	require.True(t, circuit.recordSuccess(1, until), "success may clear the observation after quarantine expires")
-	require.False(t, circuit.isBlocked(1, until))
+	require.True(t, circuit.recordSuccess(1), "a completed stream must clear an active quarantine")
+	require.False(t, circuit.isBlocked(1, base.Add(30*time.Second)))
 
 	tripped, _ = circuit.recordFailure(2, base)
 	require.False(t, tripped)
@@ -77,24 +75,6 @@ func TestOpenAIProxyStreamCircuitDisabled(t *testing.T) {
 	tripped, _ := circuit.recordFailure(1, base)
 	require.False(t, tripped)
 	require.False(t, circuit.isBlocked(1, base))
-	require.Equal(t, 0, circuit.activeBlockCount(base))
-}
-
-func TestOpenAIProxyStreamCircuitActiveBlockCount(t *testing.T) {
-	base := time.Unix(1_800_000_000, 0)
-	circuit := newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-		failureThreshold: 1,
-		failureWindow:    time.Minute,
-		quarantineTTL:    10 * time.Minute,
-		maxEntries:       16,
-	})
-
-	require.Equal(t, 0, circuit.activeBlockCount(base))
-	tripped, until := circuit.recordFailure(1, base)
-	require.True(t, tripped)
-	circuit.recordFailure(2, base) // second proxy also tripped (threshold 1)
-	require.Equal(t, 2, circuit.activeBlockCount(base.Add(time.Second)))
-	require.Equal(t, 0, circuit.activeBlockCount(until), "expired quarantines must not count")
 }
 
 func TestOpenAIProxyStreamQuarantineBypassContext(t *testing.T) {
@@ -110,8 +90,15 @@ func TestOpenAIProxyStreamQuarantineBypassContext(t *testing.T) {
 	svc.openaiProxyStreamCircuit.recordFailure(proxyID, time.Now())
 
 	ctx := context.Background()
-	require.True(t, svc.isOpenAIProxyStreamQuarantined(ctx, account))
+	observedCtx, observation := withOpenAIProxyStreamQuarantineObservation(ctx)
+	require.True(t, svc.isOpenAIProxyStreamQuarantined(observedCtx, account))
+	require.True(t, svc.isOpenAIProxyStreamQuarantined(observedCtx, account))
+	excludedAccounts, blockedProxies := observation.counts()
+	require.Equal(t, 1, excludedAccounts)
+	require.Equal(t, 1, blockedProxies)
 	require.False(t, svc.isOpenAIProxyStreamQuarantined(withOpenAIProxyStreamQuarantineBypass(ctx), account))
+	svc.clearOpenAIProxyStreamDisconnect(account)
+	require.False(t, svc.isOpenAIProxyStreamQuarantined(ctx, account), "a completed stream must clear the active quarantine")
 }
 
 func TestOpenAIProxyStreamCircuitBoundsEntries(t *testing.T) {

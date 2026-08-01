@@ -26,6 +26,20 @@ type schedulerTestOpenAIAccountRepo struct {
 	accounts []Account
 }
 
+type schedulerCountingOpenAIAccountRepo struct {
+	schedulerTestOpenAIAccountRepo
+	listCalls       *int
+	emptyAfterFirst bool
+}
+
+func (r schedulerCountingOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	(*r.listCalls)++
+	if r.emptyAfterFirst && *r.listCalls > 1 {
+		return nil, nil
+	}
+	return r.schedulerTestOpenAIAccountRepo.ListSchedulableUngroupedByPlatform(ctx, platform)
+}
+
 func (r schedulerTestOpenAIAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {
@@ -1533,6 +1547,109 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_FailsOpenWhenAllProxies
 	require.Equal(t, proxyA, *selection.Account.ProxyID)
 	require.True(t, svc.openaiProxyStreamCircuit.isBlocked(proxyA, time.Now()),
 		"fail-open must not clear the quarantine; only a completed stream or TTL expiry does")
+	require.NotZero(t, svc.openaiProxyStreamFailOpenLogAt.Load(), "successful fail-open must emit its rate-limited warning")
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_UnrelatedQuarantineDoesNotRetry(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	listCalls := 0
+	proxyID := int64(505601)
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerCountingOpenAIAccountRepo{
+			schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{},
+			listCalls:                      &listCalls,
+		},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
+			failureThreshold: 1,
+			failureWindow:    time.Minute,
+			quarantineTTL:    10 * time.Minute,
+			maxEntries:       16,
+		}),
+	}
+	svc.openaiProxyStreamCircuit.recordFailure(proxyID, time.Now())
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(), nil, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false,
+	)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+	require.Equal(t, 1, listCalls, "a quarantine outside the request candidate set must not trigger a second scheduling pass")
+	require.Zero(t, svc.openaiProxyStreamFailOpenLogAt.Load())
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_QuarantinedIneligibleAccountDoesNotRetry(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	listCalls := 0
+	proxyID := int64(505603)
+	account := Account{
+		ID: 505603, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Schedulable: true, Concurrency: 1, ProxyID: &proxyID,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerCountingOpenAIAccountRepo{
+			schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+			listCalls:                      &listCalls,
+		},
+		cfg:                &config.Config{},
+		cache:              &schedulerTestGatewayCache{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
+			failureThreshold: 1,
+			failureWindow:    time.Minute,
+			quarantineTTL:    10 * time.Minute,
+			maxEntries:       16,
+		}),
+	}
+	svc.openaiProxyStreamCircuit.recordFailure(proxyID, time.Now())
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(), nil, "", "", "grok-4.5", nil, OpenAIUpstreamTransportAny, false,
+	)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+	require.Contains(t, err.Error(), "model_not_supported=1")
+	require.Equal(t, 1, listCalls, "an otherwise-ineligible quarantined account must not trigger a bypass pass")
+	require.Zero(t, svc.openaiProxyStreamFailOpenLogAt.Load())
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_FailedQuarantineBypassDoesNotLog(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	listCalls := 0
+	proxyID := int64(505602)
+	account := Account{
+		ID: 505602, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Schedulable: true, Concurrency: 1, ProxyID: &proxyID,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerCountingOpenAIAccountRepo{
+			schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+			listCalls:                      &listCalls,
+			emptyAfterFirst:                true,
+		},
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
+			failureThreshold: 1,
+			failureWindow:    time.Minute,
+			quarantineTTL:    10 * time.Minute,
+			maxEntries:       16,
+		}),
+	}
+	svc.openaiProxyStreamCircuit.recordFailure(proxyID, time.Now())
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		context.Background(), nil, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false,
+	)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	require.Nil(t, selection)
+	require.Equal(t, 2, listCalls, "the quarantined candidate should trigger exactly one bypass attempt")
+	require.Zero(t, svc.openaiProxyStreamFailOpenLogAt.Load(), "a bypass that still cannot select an account must not log fail-open success")
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimitedAccountFallsBackToFreshCandidate(t *testing.T) {
