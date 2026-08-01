@@ -22,9 +22,14 @@ func TestParseQwen3GuardStrictAndPolicy(t *testing.T) {
 		{"unsafe", "Safety: Unsafe\nCategories: Jailbreak", AllScannerIDs, EventCritical, ActionBlock, false},
 		{"unknown unsafe", "Safety: Unsafe\nCategories: Future Risk", AllScannerIDs, EventCritical, ActionBlock, false},
 		{"disabled unsafe warns", "Safety: Unsafe\nCategories: Violent", []string{"PII"}, EventFlag, ActionWarn, false},
-		{"extra explanation", "Safety: Safe\nCategories: None\nThis is safe", AllScannerIDs, EventPass, ActionAllow, false},
+		{"extra explanation", "Safety: Safe\nCategories: None\nThis is safe", AllScannerIDs, "", "", true},
+		{"unknown field", "Safety: Safe\nCategories: None\nReason: benign", AllScannerIDs, "", "", true},
+		{"invalid refusal", "Safety: Safe\nCategories: None\nRefusal: Maybe", AllScannerIDs, "", "", true},
+		{"duplicate refusal", "Safety: Safe\nCategories: None\nRefusal: No\nRefusal: No", AllScannerIDs, "", "", true},
 		{"duplicate", "Safety: Safe\nSafety: Safe", AllScannerIDs, "", "", true},
+		{"empty first safety duplicate", "Safety:\nSafety: Safe\nCategories: None", AllScannerIDs, "", "", true},
 		{"duplicate categories", "Safety: Safe\nCategories: None\nCategories: PII", AllScannerIDs, "", "", true},
+		{"empty first categories duplicate", "Safety: Safe\nCategories:\nCategories: None", AllScannerIDs, "", "", true},
 		{"missing categories", "Safety: Safe\n", AllScannerIDs, "", "", true},
 		{"unknown safety", "Safety: Maybe\nCategories: PII", AllScannerIDs, "", "", true},
 	}
@@ -42,16 +47,19 @@ func TestParseQwen3GuardStrictAndPolicy(t *testing.T) {
 	}
 }
 
-func TestParseQwen3GuardIgnoresAuxiliaryResponseFields(t *testing.T) {
-	result, err := ParseQwen3Guard("Safety: Unsafe\nCategories: Jailbreak\nRefusal: No", AllScannerIDs)
-	require.NoError(t, err)
-	require.Equal(t, "Unsafe", result.Safety)
-	require.Equal(t, []string{"jailbreak"}, result.Categories)
+func TestParseQwen3GuardAcceptsValidatedRefusalField(t *testing.T) {
+	for _, refusal := range []string{"Yes", "yes", "YES", "No", "no", "NO"} {
+		t.Run(refusal, func(t *testing.T) {
+			result, err := ParseQwen3Guard("Safety: Unsafe\nCategories: Jailbreak\nRefusal: "+refusal, AllScannerIDs)
+			require.NoError(t, err)
+			require.Equal(t, "Unsafe", result.Safety)
+			require.Equal(t, []string{"jailbreak"}, result.Categories)
 
-	serialized, err := json.Marshal(result)
-	require.NoError(t, err)
-	require.NotContains(t, string(serialized), "Refusal")
-	require.NotContains(t, string(serialized), "No")
+			serialized, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.NotContains(t, string(serialized), "Refusal")
+		})
+	}
 }
 
 func TestQwen3GuardOfficialCategoriesAliasesAndUnknownAreStable(t *testing.T) {

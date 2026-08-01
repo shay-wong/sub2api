@@ -149,7 +149,7 @@
 - **THEN** 运行态 MUST 显示 error/degraded 和稳定错误码，而不是显示健康
 
 ### Requirement: Qwen3Guard 返回必须被严格归一化
-系统 SHALL 严格解析单一 `Safety` 行和单一 `Categories` 行，并支持 Violent、Non-violent Illegal Acts、Sexual Content or Sexual Acts、PII、Suicide & Self-Harm、Unethical Acts、Politically Sensitive Topics、Copyright Violation、Jailbreak 九类输入风险。额外非空说明、重复字段、未知 Safety 或无法解析响应 MUST 视为 invalid_response。
+系统 SHALL 严格解析单一 `Safety` 行和单一 `Categories` 行，并支持 Violent、Non-violent Illegal Acts、Sexual Content or Sexual Acts、PII、Suicide & Self-Harm、Unethical Acts、Politically Sensitive Topics、Copyright Violation、Jailbreak 九类输入风险。系统 MAY 接受单一 `Refusal` 行，但值 MUST 为 `Yes` 或 `No`（大小写不敏感）。额外非空说明、未知字段、重复字段、未知 Safety 或无法解析响应 MUST 视为 invalid_response。
 
 #### Scenario: Safe 结果
 - **WHEN** Guard 返回 `Safety: Safe`

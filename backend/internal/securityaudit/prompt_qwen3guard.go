@@ -88,6 +88,8 @@ func NormalizeCategory(value string) string {
 func ParseQwen3Guard(content string, enabledScanners []string) (*NormalizedResult, error) {
 	var safety string
 	var categoryLine string
+	var refusal string
+	var seenSafety, seenCategories, seenRefusal bool
 	for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -96,17 +98,28 @@ func ParseQwen3Guard(content string, enabledScanners []string) (*NormalizedResul
 		lower := strings.ToLower(line)
 		switch {
 		case strings.HasPrefix(lower, "safety:"):
-			if safety != "" {
+			if seenSafety {
 				return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 			}
+			seenSafety = true
 			safety = strings.TrimSpace(line[len("safety:"):])
 		case strings.HasPrefix(lower, "categories:"):
-			if categoryLine != "" {
+			if seenCategories {
 				return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 			}
+			seenCategories = true
 			categoryLine = strings.TrimSpace(line[len("categories:"):])
+		case strings.HasPrefix(lower, "refusal:"):
+			if seenRefusal {
+				return nil, &GuardError{Code: ErrorCodeInvalidResponse}
+			}
+			seenRefusal = true
+			refusal = strings.TrimSpace(line[len("refusal:"):])
+			if !strings.EqualFold(refusal, "yes") && !strings.EqualFold(refusal, "no") {
+				return nil, &GuardError{Code: ErrorCodeInvalidResponse}
+			}
 		default:
-			// Auxiliary Guard fields, such as Refusal, do not affect audit decisions.
+			return nil, &GuardError{Code: ErrorCodeInvalidResponse}
 		}
 	}
 	switch strings.ToLower(safety) {
