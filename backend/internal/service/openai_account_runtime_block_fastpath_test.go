@@ -398,6 +398,33 @@ func TestOpenAIRuntimeBlock_ClearAccountSchedulingBlock(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
+func TestOpenAIRuntimeBlock_ClearAccountRateLimitSchedulingBlockPreservesNon429(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 48, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	authUntil := time.Now().Add(time.Minute)
+	svc.BlockAccountScheduling(account, authUntil, "oauth_401")
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "429")
+
+	svc.ClearAccountRateLimitSchedulingBlock(account.ID)
+
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	require.WithinDuration(t, authUntil, value.(time.Time), time.Second)
+}
+
+func TestOpenAIRuntimeBlock_New429AfterClearBlocksAgain(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 49, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "429")
+	svc.ClearAccountRateLimitSchedulingBlock(account.ID)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "429")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
 func TestShouldStopOpenAIOAuth429Failover_OnlyDuringStorm(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}

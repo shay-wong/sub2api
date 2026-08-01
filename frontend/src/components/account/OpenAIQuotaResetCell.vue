@@ -147,6 +147,10 @@ const props = defineProps<{
   account: Account
 }>()
 
+const emit = defineEmits<{
+  reset: []
+}>()
+
 const { t } = useI18n()
 
 // Visible only for OpenAI OAuth accounts.
@@ -296,6 +300,7 @@ const confirmReset = async () => {
   resetMessage.value = null
   try {
     const result: OpenAIQuotaResetResult = await resetOpenAIQuota(props.account.id)
+    emit('reset')
     // Refresh the reset-credit count so the badge reflects the consumed credit.
     // handleQuery clears resetMessage on entry, so the success toast is set
     // AFTER it resolves.

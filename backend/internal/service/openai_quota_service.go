@@ -113,12 +113,21 @@ type OpenAIQuotaResetResult struct {
 // for OpenAI OAuth accounts. It reuses the privacy client factory so all calls
 // flow through the impersonated HTTP client (Cloudflare-friendly TLS fingerprint).
 type OpenAIQuotaService struct {
-	accountRepo          AccountRepository
-	proxyRepo            ProxyRepository
-	tokenProvider        *OpenAITokenProvider
-	privacyClientFactory PrivacyClientFactory
-	agentIdentityTaskMu  sync.Mutex
-	agentIdentityWS      agentIdentityWSConnectionInvalidator
+	accountRepo           AccountRepository
+	proxyRepo             ProxyRepository
+	tokenProvider         *OpenAITokenProvider
+	privacyClientFactory  PrivacyClientFactory
+	agentIdentityTaskMu   sync.Mutex
+	agentIdentityWS       agentIdentityWSConnectionInvalidator
+	accountRuntimeBlocker accountRateLimitRuntimeBlocker
+}
+
+type accountRateLimitRuntimeBlocker interface {
+	ClearAccountRateLimitSchedulingBlock(accountID int64)
+}
+
+type openAIQuotaResetRepository interface {
+	ClearOpenAIRateLimit(ctx context.Context, accountID int64) error
 }
 
 // NewOpenAIQuotaService constructs a quota service. token provider is required —
@@ -310,6 +319,15 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		}
 		break
 	}
+	if err := s.clearRateLimitAfterReset(ctx, accountID); err != nil {
+		slog.Error("openai_quota_reset_local_state_failed", "account_id", accountID, "error", err)
+		return nil, infraerrors.Newf(
+			http.StatusInternalServerError,
+			"OPENAI_QUOTA_RESET_LOCAL_STATE_FAILED",
+			"upstream reset succeeded but failed to clear local rate-limit state: %v",
+			err,
+		)
+	}
 
 	slog.Info("openai_quota_reset_success",
 		"account_id", accountID,
@@ -317,6 +335,22 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		"windows_reset", payload.WindowsReset,
 	)
 	return &payload, nil
+}
+
+func (s *OpenAIQuotaService) clearRateLimitAfterReset(ctx context.Context, accountID int64) error {
+	repo, ok := s.accountRepo.(openAIQuotaResetRepository)
+	if !ok {
+		return fmt.Errorf("account repository does not support OpenAI rate-limit reset")
+	}
+	stateCtx, cancel := openAIAccountStateContext(ctx)
+	defer cancel()
+	if err := repo.ClearOpenAIRateLimit(stateCtx, accountID); err != nil {
+		return err
+	}
+	if s.accountRuntimeBlocker != nil {
+		s.accountRuntimeBlocker.ClearAccountRateLimitSchedulingBlock(accountID)
+	}
+	return nil
 }
 
 // prepareUpstreamCall loads the account, validates it, obtains a fresh access

@@ -163,7 +163,24 @@ func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until ti
 	mu := s.openAIAccountRuntimeBlockLock(account.ID)
 	mu.Lock()
 	defer mu.Unlock()
+	if isOpenAIOAuthAccount(account) && (reason == "429" || reason == "429_fallback") {
+		s.blockAccountSchedulingRateLimitLocked(account.ID, until)
+		return
+	}
 	_, _ = s.blockAccountSchedulingLocked(account, until, reason)
+}
+
+func (s *OpenAIGatewayService) blockAccountSchedulingRateLimitLocked(accountID int64, until time.Time) {
+	now := time.Now()
+	if until.IsZero() || !until.After(now) {
+		until = now.Add(openAIStopSchedulingBridgeCooldown)
+	}
+	if current, ok := s.openaiAccountRuntimeRateLimitUntil.Load(accountID); ok {
+		if currentUntil, valid := current.(time.Time); valid && currentUntil.After(until) {
+			until = currentUntil
+		}
+	}
+	s.openaiAccountRuntimeRateLimitUntil.Store(accountID, until)
 }
 
 func (s *OpenAIGatewayService) openAIAccountRuntimeBlockLock(accountID int64) *sync.Mutex {
@@ -219,7 +236,18 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 	mu.Lock()
 	defer mu.Unlock()
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
+	s.openaiAccountRuntimeRateLimitUntil.Delete(accountID)
 	s.openaiAccountRuntimeBlockGeneration.Store(accountID, s.openaiAccountRuntimeBlockSequence.Add(1))
+}
+
+func (s *OpenAIGatewayService) ClearAccountRateLimitSchedulingBlock(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	mu := s.openAIAccountRuntimeBlockLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	s.openaiAccountRuntimeRateLimitUntil.Delete(accountID)
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) bool {
@@ -229,21 +257,24 @@ func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) b
 	mu := s.openAIAccountRuntimeBlockLock(account.ID)
 	mu.Lock()
 	defer mu.Unlock()
-	value, ok := s.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	now := time.Now()
+	if value, ok := s.openaiAccountRuntimeBlockUntil.Load(account.ID); ok {
+		cooldownUntil, valid := value.(time.Time)
+		if valid && cooldownUntil.After(now) {
+			return true
+		}
+		s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
+		s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
+	}
+	value, ok := s.openaiAccountRuntimeRateLimitUntil.Load(account.ID)
 	if !ok {
 		return false
 	}
 	cooldownUntil, ok := value.(time.Time)
-	if !ok || cooldownUntil.IsZero() {
-		s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
-		s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
-		return false
-	}
-	if time.Now().Before(cooldownUntil) {
+	if ok && cooldownUntil.After(now) {
 		return true
 	}
-	s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
-	s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
+	s.openaiAccountRuntimeRateLimitUntil.Delete(account.ID)
 	return false
 }
 

@@ -27,7 +27,9 @@ import (
 // stubQuotaAccountRepo 是多账号 AccountRepository stub，仅实现 GetByID。
 type stubQuotaAccountRepo struct {
 	AccountRepository
-	accounts map[int64]*Account
+	accounts   map[int64]*Account
+	clearCalls []int64
+	clearErr   error
 }
 
 func (r *stubQuotaAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -45,6 +47,19 @@ func (r *stubQuotaAccountRepo) UpdateCredentials(_ context.Context, id int64, cr
 	}
 	acc.Credentials = credentials
 	return nil
+}
+
+func (r *stubQuotaAccountRepo) ClearOpenAIRateLimit(_ context.Context, id int64) error {
+	r.clearCalls = append(r.clearCalls, id)
+	return r.clearErr
+}
+
+type quotaRuntimeBlockerRecorder struct {
+	clearCalls []int64
+}
+
+func (r *quotaRuntimeBlockerRecorder) ClearAccountRateLimitSchedulingBlock(accountID int64) {
+	r.clearCalls = append(r.clearCalls, accountID)
 }
 
 // stubQuotaTokenCache 实现 OpenAITokenCache，返回预设静态 token。
@@ -220,8 +235,10 @@ func TestResetCreditAgentIdentityUsesAssertionAndRecoversInvalidTaskOnce(t *test
 	t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = oldBase })
 
 	invalidator := &agentIdentityWSInvalidationRecorder{}
+	runtimeBlocker := &quotaRuntimeBlockerRecorder{}
 	svc := NewOpenAIQuotaService(repo, nil, nil, newQuotaRedirectingFactory(srv))
 	svc.agentIdentityWS = invalidator
+	svc.accountRuntimeBlocker = runtimeBlocker
 
 	result, err := svc.ResetCredit(context.Background(), account.ID)
 	require.NoError(t, err)
@@ -235,6 +252,72 @@ func TestResetCreditAgentIdentityUsesAssertionAndRecoversInvalidTaskOnce(t *test
 	require.NotEqual(t, assertions[0], assertions[1])
 	require.Equal(t, "task-reset-new", account.GetCredential("task_id"))
 	require.Equal(t, []int64{account.ID}, invalidator.accountIDs)
+	require.Equal(t, []int64{account.ID}, repo.clearCalls)
+	require.Equal(t, []int64{account.ID}, runtimeBlocker.clearCalls)
+}
+
+func TestResetCreditUpstream429DoesNotClearLocalRateLimit(t *testing.T) {
+	account := &Account{
+		ID:       203,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "quota-reset-token",
+			"expires_at":         time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"chatgpt_account_id": "account-reset-429",
+		},
+	}
+	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer upstream.Close()
+	svc := NewOpenAIQuotaService(
+		repo,
+		nil,
+		NewOpenAITokenProvider(repo, nil, nil),
+		newQuotaRedirectingFactory(upstream),
+	)
+
+	_, err := svc.ResetCredit(context.Background(), account.ID)
+
+	require.Equal(t, http.StatusTooManyRequests, infraerrors.Code(err))
+	require.Empty(t, repo.clearCalls)
+}
+
+func TestResetCreditLocalClearFailureDoesNotReturnSuccess(t *testing.T) {
+	account := &Account{
+		ID:       204,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":       "quota-reset-token",
+			"expires_at":         time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"chatgpt_account_id": "account-reset-local-failure",
+		},
+	}
+	repo := &stubQuotaAccountRepo{
+		accounts: map[int64]*Account{account.ID: account},
+		clearErr: errors.New("database unavailable"),
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"code":"ok","windows_reset":1}`))
+	}))
+	defer upstream.Close()
+	svc := NewOpenAIQuotaService(
+		repo,
+		nil,
+		NewOpenAITokenProvider(repo, nil, nil),
+		newQuotaRedirectingFactory(upstream),
+	)
+
+	_, err := svc.ResetCredit(context.Background(), account.ID)
+
+	require.Equal(t, http.StatusInternalServerError, infraerrors.Code(err))
+	require.Contains(t, err.Error(), "OPENAI_QUOTA_RESET_LOCAL_STATE_FAILED")
+	require.Equal(t, []int64{account.ID}, repo.clearCalls)
 }
 
 func TestResetCreditAgentIdentityReusesConcurrentlyRecoveredTask(t *testing.T) {

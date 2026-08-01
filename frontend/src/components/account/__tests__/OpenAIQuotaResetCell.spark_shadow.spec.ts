@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import OpenAIQuotaResetCell from '../OpenAIQuotaResetCell.vue'
 import type { Account } from '@/types'
-import { queryOpenAIQuota } from '@/api/admin/accounts'
+import { queryOpenAIQuota, resetOpenAIQuota } from '@/api/admin/accounts'
 
 vi.mock('@/api/admin/accounts', () => ({
   queryOpenAIQuota: vi.fn(),
@@ -55,6 +55,7 @@ const resetButton = (wrapper: ReturnType<typeof mount>) =>
 
 beforeEach(() => {
   vi.mocked(queryOpenAIQuota).mockReset()
+  vi.mocked(resetOpenAIQuota).mockReset()
 })
 
 describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
@@ -134,6 +135,33 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
     expect(wrapper.find('[data-testid="reset-credit-expiry-toggle"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="reset-credit-expiry-details"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('admin.accounts.openaiQuotaReset.expiresAt:')
+    wrapper.unmount()
+  })
+
+  it('重置成功后通知账号列表刷新状态', async () => {
+    vi.mocked(queryOpenAIQuota).mockResolvedValue({
+      rate_limit_reset_credits: { available_count: 1 },
+      fetched_at: 1770000000,
+    })
+    vi.mocked(resetOpenAIQuota).mockResolvedValue({ code: 'ok', windows_reset: 1 })
+    const wrapper = mount(OpenAIQuotaResetCell, {
+      props: { account: makeAccount({ rate_limit_reset_at: '2026-08-01T00:00:00Z' }) },
+      global: {
+        stubs: {
+          ConfirmDialog: {
+            template: '<button data-testid="confirm-reset" @click="$emit(\'confirm\')">confirm</button>',
+          },
+        },
+      },
+    })
+
+    await wrapper.findAll('button')[0].trigger('click')
+    await flushPromises()
+    await resetButton(wrapper).trigger('click')
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('reset')).toHaveLength(1)
     wrapper.unmount()
   })
 })

@@ -49,6 +49,53 @@ func newProjectProfileResourceScopeSQLite(t *testing.T) *dbent.Client {
 	return client
 }
 
+func TestAccountRepositoryClearOpenAIRateLimitClearsOnly429State(t *testing.T) {
+	client := newProjectProfileResourceScopeSQLite(t)
+	ctx := context.Background()
+	project, err := client.Project.Create().
+		SetName("OpenAI Rate Limit Reset").
+		SetSlug("openai-rate-limit-reset").
+		SetProfiles(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	overloadUntil := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	resetAt := time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
+	account, err := client.Account.Create().
+		SetProjectID(project.ID).
+		SetName("openai-rate-limited-account").
+		SetPlatform(service.PlatformOpenAI).
+		SetType(service.AccountTypeOAuth).
+		SetStatus(service.StatusActive).
+		SetSchedulable(true).
+		SetRateLimitedAt(time.Now().UTC()).
+		SetRateLimitResetAt(resetAt).
+		SetOverloadUntil(overloadUntil).
+		SetExtra(map[string]any{
+			"preserved":                    true,
+			"codex_primary_used_percent":   100.0,
+			"codex_secondary_used_percent": 100.0,
+			"codex_5h_used_percent":        100.0,
+			"codex_7d_used_percent":        100.0,
+		}).
+		Save(ctx)
+	require.NoError(t, err)
+	repo := newAccountRepositoryWithSQL(client, nil, nil)
+
+	require.NoError(t, repo.ClearOpenAIRateLimit(ctx, account.ID))
+
+	got, err := client.Account.Get(ctx, account.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.RateLimitedAt)
+	require.Nil(t, got.RateLimitResetAt)
+	require.NotNil(t, got.OverloadUntil)
+	require.WithinDuration(t, overloadUntil, *got.OverloadUntil, time.Second)
+	require.Equal(t, true, got.Extra["preserved"])
+	require.Nil(t, got.Extra["codex_primary_used_percent"])
+	require.Nil(t, got.Extra["codex_secondary_used_percent"])
+	require.Nil(t, got.Extra["codex_5h_used_percent"])
+	require.Nil(t, got.Extra["codex_7d_used_percent"])
+}
+
 func TestProjectScopedAccountPredicateRequiresActiveProfileBinding(t *testing.T) {
 	client := newProjectProfileResourceScopeSQLite(t)
 	ctx := context.Background()

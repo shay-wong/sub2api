@@ -30,6 +30,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
+	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqljson"
 )
@@ -2288,6 +2289,37 @@ func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int
 	return true, nil
 }
 
+func (r *accountRepository) ClearOpenAIRateLimit(ctx context.Context, id int64) error {
+	updated, err := r.client.Account.Update().
+		Where(append([]dbpredicate.Account{
+			dbaccount.IDEQ(id),
+			dbaccount.PlatformEQ(service.PlatformOpenAI),
+			dbaccount.TypeEQ(service.AccountTypeOAuth),
+		}, projectScopedAccountPredicate(ctx)...)...).
+		ClearRateLimitedAt().
+		ClearRateLimitResetAt().
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return service.ErrAccountNotFound
+	}
+	if err := r.UpdateExtra(ctx, id, map[string]any{
+		"codex_primary_used_percent":   nil,
+		"codex_secondary_used_percent": nil,
+		"codex_5h_used_percent":        nil,
+		"codex_7d_used_percent":        nil,
+	}); err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue OpenAI rate-limit clear failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error {
 	if scope == "" {
 		return nil
@@ -2645,10 +2677,17 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
-	if clearProbeSnapshot {
-		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
+	if client.Driver().Dialect() == dialect.SQLite {
+		extraExpression = "json_patch(COALESCE(extra, '{}'), $1)"
 	}
-	query := "UPDATE accounts SET extra = " + extraExpression + ", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL"
+	if clearProbeSnapshot {
+		if client.Driver().Dialect() == dialect.SQLite {
+			extraExpression = "json_remove(" + extraExpression + ", '$.upstream_billing_probe')"
+		} else {
+			extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
+		}
+	}
+	query := "UPDATE accounts SET extra = " + extraExpression + ", updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL"
 	args := []any{string(payload), id}
 	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
