@@ -96,6 +96,7 @@ func TestAlphaSearchRunsContentModerationBeforeScheduling(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	body := `{"id":"alpha-session","model":"gpt-5.1","commands":{"search_query":[{"q":"blocked alpha query"}]}}`

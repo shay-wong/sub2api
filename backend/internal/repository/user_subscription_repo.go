@@ -423,16 +423,19 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 
 func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+	predicates := append([]predicate.UserSubscription{
+		usersubscription.IDEQ(id),
+		usersubscription.DailyWindowStartIsNil(),
+		usersubscription.WeeklyWindowStartIsNil(),
+		usersubscription.MonthlyWindowStartIsNil(),
+	}, projectScopedUserSubscriptionPredicate(ctx)...)
+	n, err := client.UserSubscription.Update().
+		Where(predicates...).
 		SetDailyWindowStart(start).
 		SetWeeklyWindowStart(start).
 		SetMonthlyWindowStart(start).
 		Save(ctx)
-	if err == nil && affected == 0 {
-		return service.ErrSubscriptionNotFound
-	}
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	return r.translateConditionalWindowReset(ctx, client, id, n, err)
 }
 
 func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
