@@ -18,6 +18,7 @@ import (
 type FrameConn interface {
 	ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error)
 	WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error
+	// Close must unblock in-flight ReadFrame and WriteFrame calls.
 	Close() error
 }
 
@@ -152,8 +153,35 @@ func Relay(
 	state := &relayState{requestModel: result.RequestModel}
 	onTrace := options.OnTrace
 
-	relayCtx, relayCancel := context.WithCancel(ctx)
-	defer relayCancel()
+	relayCtx, relayCancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer relayCancel(context.Canceled)
+	outerCanceled := make(chan struct{})
+	var outerCancelOnce sync.Once
+	cancelFromOuter := func() {
+		outerCancelOnce.Do(func() {
+			relayCancel(context.Cause(ctx))
+			close(outerCanceled)
+			_ = upstreamConn.Close()
+		})
+	}
+	stopOuterCancel := context.AfterFunc(ctx, cancelFromOuter)
+	defer stopOuterCancel()
+	if ctx.Err() != nil {
+		cancelFromOuter()
+	}
+	latchOuterCancel := func() (relayExitSignal, bool) {
+		if stopOuterCancel() {
+			if ctx.Err() == nil {
+				return relayExitSignal{}, false
+			}
+			cancelFromOuter()
+		}
+		<-outerCanceled
+		return relayExitSignal{
+			stage: "context_canceled",
+			err:   context.Cause(relayCtx),
+		}, true
+	}
 
 	lastActivity := atomic.Int64{}
 	lastActivity.Store(nowFn().UnixNano())
@@ -203,6 +231,15 @@ func Relay(
 	} else {
 		if err := writeUpstream(firstMessageType, firstClientMessage); err != nil {
 			result.Duration = nowFn().Sub(startAt)
+			if cancelExit, canceled := latchOuterCancel(); canceled {
+				cancelExitValue := RelayExit{Stage: cancelExit.stage, Err: cancelExit.err}
+				if options.BeforeRelayCancel != nil {
+					options.BeforeRelayCancel(cancelExitValue)
+				}
+				_ = upstreamConn.Close()
+				_ = clientConn.Close()
+				return result, &cancelExitValue
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:        "write_first_message_failed",
 				Direction:    "client_to_upstream",
@@ -225,63 +262,54 @@ func Relay(
 	exitCh := make(chan relayExitSignal, 3)
 	dropDownstreamWrites := atomic.Bool{}
 	clientReaderStarted := atomic.Bool{}
+	var relayWorkers sync.WaitGroup
 	startClientReader := func() {
 		if !clientReaderStarted.CompareAndSwap(false, true) {
 			return
 		}
-		go runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeClientFrameUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
+		relayWorkers.Go(func() {
+			runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeClientFrameUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
+		})
 	}
 	if !options.StartClientAfterFirstDownstream {
 		startClientReader()
 	}
-	go runUpstreamToClient(
-		relayCtx,
-		upstreamConn,
-		writeClient,
-		startAt,
-		nowFn,
-		state,
-		options.OnUsageParseFailure,
-		options.OnTurnComplete,
-		options.BeforeWriteClient,
-		options.BeforeClientWrite,
-		options.AfterClientWrite,
-		func(msgType coderws.MessageType, payload []byte) {
-			if options.StartClientAfterFirstDownstream {
-				startClientReader()
-			}
-		},
-		&dropDownstreamWrites,
-		upstreamToClientFrames,
-		droppedDownstreamFrames,
-		markActivity,
-		onTrace,
-		exitCh,
-	)
-	go runIdleWatchdog(relayCtx, nowFn, options.IdleTimeout, &lastActivity, onTrace, exitCh)
-
-	firstExit := <-exitCh
-	// An outer ingress cancellation is a control-plane close, not a graceful
-	// upstream disconnect. Leave the client connection open here so the
-	// adapter can emit the precise lease/request close code. Internal
-	// relayCancel does not cancel ctx and therefore does not take this path.
-	if ctx.Err() != nil {
-		firstExit.graceful = false
-	}
-	emitRelayTrace(onTrace, RelayTraceEvent{
-		Stage:           "first_exit",
-		Direction:       relayDirectionFromStage(firstExit.stage),
-		Graceful:        firstExit.graceful,
-		WroteDownstream: firstExit.wroteDownstream,
-		Error:           relayErrorString(firstExit.err),
+	relayWorkers.Go(func() {
+		runUpstreamToClient(
+			relayCtx,
+			upstreamConn,
+			writeClient,
+			startAt,
+			nowFn,
+			state,
+			options.OnUsageParseFailure,
+			options.OnTurnComplete,
+			options.BeforeWriteClient,
+			options.BeforeClientWrite,
+			options.AfterClientWrite,
+			func(msgType coderws.MessageType, payload []byte) {
+				if options.StartClientAfterFirstDownstream {
+					startClientReader()
+				}
+			},
+			&dropDownstreamWrites,
+			upstreamToClientFrames,
+			droppedDownstreamFrames,
+			markActivity,
+			onTrace,
+			exitCh,
+		)
 	})
-	if options.BeforeRelayCancel != nil {
-		options.BeforeRelayCancel(RelayExit{
-			Stage:           firstExit.stage,
-			Err:             firstExit.err,
-			Graceful:        firstExit.graceful,
-			WroteDownstream: firstExit.wroteDownstream,
+	if options.IdleTimeout > 0 {
+		relayWorkers.Go(func() {
+			runIdleWatchdog(relayCtx, nowFn, options.IdleTimeout, &lastActivity, onTrace, exitCh)
 		})
+	}
+	var firstExit relayExitSignal
+	select {
+	case firstExit = <-exitCh:
+	case <-outerCanceled:
+		firstExit = relayExitSignal{stage: "context_canceled", err: context.Cause(relayCtx)}
 	}
 	combinedWroteDownstream := firstExit.wroteDownstream
 	secondExit := relayExitSignal{graceful: true}
@@ -290,16 +318,56 @@ func Relay(
 	// 客户端断开后尽力继续读取上游短窗口，捕获延迟 usage/terminal 事件用于计费。
 	if firstExit.stage == "read_client" && firstExit.graceful {
 		dropDownstreamWrites.Store(true)
-		secondExit, hasSecondExit = waitRelayExit(exitCh, drainTimeout)
+		secondExit, hasSecondExit = waitRelayExitOrCancel(exitCh, outerCanceled, drainTimeout)
 	} else {
-		relayCancel()
 		_ = upstreamConn.Close()
 		if clientReaderStarted.Load() {
-			secondExit, hasSecondExit = waitRelayExit(exitCh, 200*time.Millisecond)
+			secondExit, hasSecondExit = waitRelayExitOrCancel(exitCh, outerCanceled, 200*time.Millisecond)
 		}
 	}
 	if hasSecondExit {
 		combinedWroteDownstream = combinedWroteDownstream || secondExit.wroteDownstream
+	}
+
+	duration := nowFn().Sub(startAt)
+	if cancelExit, canceled := latchOuterCancel(); canceled {
+		cancelExit.wroteDownstream = combinedWroteDownstream
+		firstExit = cancelExit
+		if options.BeforeRelayCancel != nil {
+			options.BeforeRelayCancel(RelayExit{
+				Stage:           firstExit.stage,
+				Err:             firstExit.err,
+				Graceful:        firstExit.graceful,
+				WroteDownstream: firstExit.wroteDownstream,
+			})
+		}
+		_ = clientConn.Close()
+		relayWorkers.Wait()
+		duration = nowFn().Sub(startAt)
+	} else {
+		if options.BeforeRelayCancel != nil {
+			options.BeforeRelayCancel(RelayExit{
+				Stage:           firstExit.stage,
+				Err:             firstExit.err,
+				Graceful:        firstExit.graceful,
+				WroteDownstream: firstExit.wroteDownstream,
+			})
+		}
+		relayCancel(context.Canceled)
+		_ = upstreamConn.Close()
+	}
+	enrichResult(&result, state, duration)
+	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
+	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
+	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
+	emitRelayTrace(onTrace, RelayTraceEvent{
+		Stage:           "first_exit",
+		Direction:       relayDirectionFromStage(firstExit.stage),
+		Graceful:        firstExit.graceful,
+		WroteDownstream: firstExit.wroteDownstream,
+		Error:           relayErrorString(firstExit.err),
+	})
+	if hasSecondExit {
 		emitRelayTrace(onTrace, RelayTraceEvent{
 			Stage:           "second_exit",
 			Direction:       relayDirectionFromStage(secondExit.stage),
@@ -308,14 +376,6 @@ func Relay(
 			Error:           relayErrorString(secondExit.err),
 		})
 	}
-
-	relayCancel()
-	_ = upstreamConn.Close()
-
-	enrichResult(&result, state, nowFn().Sub(startAt))
-	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
-	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
-	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
 	if options.FirstMessageSent && firstExit.stage == "read_client" && firstExit.graceful {
 		emitRelayTrace(onTrace, RelayTraceEvent{
 			Stage:           "relay_client_closed",
@@ -995,6 +1055,22 @@ func waitRelayExit(exitCh <-chan relayExitSignal, timeout time.Duration) (relayE
 	case sig := <-exitCh:
 		return sig, true
 	case <-time.After(timeout):
+		return relayExitSignal{}, false
+	}
+}
+
+func waitRelayExitOrCancel(exitCh <-chan relayExitSignal, canceled <-chan struct{}, timeout time.Duration) (relayExitSignal, bool) {
+	if timeout <= 0 {
+		timeout = 200 * time.Millisecond
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case sig := <-exitCh:
+		return sig, true
+	case <-canceled:
+		return relayExitSignal{}, false
+	case <-timer.C:
 		return relayExitSignal{}, false
 	}
 }

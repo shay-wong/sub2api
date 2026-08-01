@@ -21,7 +21,6 @@ import (
 
 type openAIWSClientFrameConn struct {
 	conn                 *coderws.Conn
-	controlCtx           context.Context
 	interTurnIdleTimeout time.Duration
 	interTurnStarted     chan struct{}
 	waitingForNextTurn   atomic.Bool
@@ -592,12 +591,8 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 	if c == nil || c.conn == nil {
 		return coderws.MessageText, nil, errOpenAIWSConnClosed
 	}
-	controlCtx := ctx
-	if c.controlCtx != nil {
-		controlCtx = c.controlCtx
-	}
 	msgType, payload, err := readOpenAIWSClientMessageWithTimeoutStart(
-		controlCtx,
+		context.WithoutCancel(ctx),
 		c.conn,
 		c.interTurnIdleTimeout,
 		coderws.StatusNormalClosure,
@@ -913,7 +908,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	clientFrameConn := &openAIWSClientFrameConn{
 		conn:                 clientConn,
-		controlCtx:           ctx,
 		interTurnIdleTimeout: s.openAIWSIngressInterTurnIdleTimeout(),
 		interTurnStarted:     make(chan struct{}, 1),
 		restoreResponseModel: func(payload []byte) []byte {
@@ -1085,6 +1079,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 		}
 	}
+	contextClientClose := func(cause error) (coderws.StatusCode, string) {
+		if errors.Is(cause, ErrOpenAIWSIngressLeaseLost) {
+			return coderws.StatusTryAgainLater, "websocket ingress capacity lease lost; please reconnect"
+		}
+		return coderws.StatusGoingAway, "websocket request canceled"
+	}
 
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
@@ -1161,7 +1161,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
-				if context.Cause(ctx) != nil {
+				if exit.Stage == "context_canceled" {
+					status, reason := contextClientClose(exit.Err)
+					_ = clientConn.Close(status, reason)
+					_ = clientConn.CloseNow()
 					return
 				}
 				status, reason, ok := openAIWSPassthroughRelayClientClose(exit, int(completedTurns.Load()))
@@ -1218,16 +1221,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 		},
 	})
-	if cause := context.Cause(ctx); cause != nil {
-		status := coderws.StatusGoingAway
-		reason := "websocket request canceled"
-		if errors.Is(cause, ErrOpenAIWSIngressLeaseLost) {
-			status = coderws.StatusTryAgainLater
-			reason = "websocket ingress capacity lease lost; please reconnect"
-		}
-		_ = clientConn.Close(status, reason)
-		_ = clientConn.CloseNow()
-		return NewOpenAIWSClientCloseError(status, reason, cause)
+	if relayExit != nil && relayExit.Stage == "context_canceled" {
+		status, reason := contextClientClose(relayExit.Err)
+		return NewOpenAIWSClientCloseError(status, reason, relayExit.Err)
 	}
 
 	resultRequestModel, resultUpstreamModel := usageMeta.turnModels(relayResult.RequestModel)

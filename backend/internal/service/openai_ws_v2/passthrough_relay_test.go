@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,28 @@ type readStartSpyFrameConn struct {
 
 type closeSpyFrameConn struct {
 	closeCalls atomic.Int32
+}
+
+type closeUnblocksWriteFrameConn struct {
+	writeStarted  chan struct{}
+	writeFinished chan struct{}
+	closed        chan struct{}
+	startOnce     sync.Once
+	finishOnce    sync.Once
+	closeOnce     sync.Once
+	closeCalls    atomic.Int32
+}
+
+type readFailsAfterWriteFrameConn struct {
+	*closeUnblocksWriteFrameConn
+	readFinished chan struct{}
+	readOnce     sync.Once
+}
+
+type closeSignalFrameConn struct {
+	FrameConn
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 func newPassthroughTestFrameConn(frames []passthroughTestFrame, autoClose bool) *passthroughTestFrameConn {
@@ -177,6 +200,57 @@ func (c *closeSpyFrameConn) CloseCalls() int32 {
 		return 0
 	}
 	return c.closeCalls.Load()
+}
+
+func newCloseUnblocksWriteFrameConn() *closeUnblocksWriteFrameConn {
+	return &closeUnblocksWriteFrameConn{
+		writeStarted:  make(chan struct{}),
+		writeFinished: make(chan struct{}),
+		closed:        make(chan struct{}),
+	}
+}
+
+func (c *closeUnblocksWriteFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case <-ctx.Done():
+		return coderws.MessageText, nil, ctx.Err()
+	case <-c.closed:
+		return coderws.MessageText, nil, net.ErrClosed
+	}
+}
+
+func (c *closeUnblocksWriteFrameConn) WriteFrame(ctx context.Context, _ coderws.MessageType, _ []byte) error {
+	c.startOnce.Do(func() { close(c.writeStarted) })
+	defer c.finishOnce.Do(func() { close(c.writeFinished) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.closed:
+		return net.ErrClosed
+	}
+}
+
+func (c *closeUnblocksWriteFrameConn) Close() error {
+	c.closeCalls.Add(1)
+	c.closeOnce.Do(func() { close(c.closed) })
+	return nil
+}
+
+func (c *readFailsAfterWriteFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
+	select {
+	case <-ctx.Done():
+		return coderws.MessageText, nil, ctx.Err()
+	case <-c.closed:
+		return coderws.MessageText, nil, net.ErrClosed
+	case <-c.writeStarted:
+		c.readOnce.Do(func() { close(c.readFinished) })
+		return coderws.MessageText, nil, errors.New("client read failed after downstream write started")
+	}
+}
+
+func (c *closeSignalFrameConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.FrameConn.Close()
 }
 
 func TestRelay_BasicRelayAndUsage(t *testing.T) {
@@ -728,6 +802,133 @@ func TestRelay_ContextCanceled(t *testing.T) {
 	_, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{})
 	// context 取消导致写首包失败
 	require.NotNil(t, relayExit)
+}
+
+func TestRelay_ContextCancellationJoinsBlockedDownstreamWrite(t *testing.T) {
+	clientConn := newCloseUnblocksWriteFrameConn()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_blocked"}}`),
+	}}, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	resultCh := make(chan *RelayExit, 1)
+	go func() {
+		_, relayExit := Relay(
+			ctx,
+			clientConn,
+			upstreamConn,
+			[]byte(`{"type":"response.create","model":"gpt-5.1"}`),
+			RelayOptions{
+				WriteTimeout:                    5 * time.Second,
+				StartClientAfterFirstDownstream: true,
+			},
+		)
+		resultCh <- relayExit
+	}()
+
+	select {
+	case <-clientConn.writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("downstream write did not start")
+	}
+	cancel()
+
+	select {
+	case relayExit := <-resultCh:
+		require.NotNil(t, relayExit)
+	case <-time.After(time.Second):
+		t.Fatal("Relay did not return after cancellation")
+	}
+	require.Positive(t, clientConn.closeCalls.Load())
+	select {
+	case <-clientConn.writeFinished:
+	default:
+		t.Fatal("Relay returned before the downstream write exited")
+	}
+}
+
+func TestRelay_LateContextCancellationOverridesWorkerExitAndJoinsBlockedWrite(t *testing.T) {
+	clientConn := &readFailsAfterWriteFrameConn{
+		closeUnblocksWriteFrameConn: newCloseUnblocksWriteFrameConn(),
+		readFinished:                make(chan struct{}),
+	}
+	t.Cleanup(func() { _ = clientConn.Close() })
+	upstreamConn := &closeSignalFrameConn{
+		FrameConn: newPassthroughTestFrameConn([]passthroughTestFrame{{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"response.created","response":{"id":"resp_late_cancel"}}`),
+		}}, false),
+		closed: make(chan struct{}),
+	}
+	cancelCause := errors.New("late request cancellation")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(context.Canceled) })
+	var cancelOnce sync.Once
+	nowFn := func() time.Time {
+		select {
+		case <-upstreamConn.closed:
+			cancelOnce.Do(func() { cancel(cancelCause) })
+		default:
+		}
+		return time.Now()
+	}
+	callbackExitCh := make(chan RelayExit, 2)
+	resultCh := make(chan *RelayExit, 1)
+	go func() {
+		_, relayExit := Relay(
+			ctx,
+			clientConn,
+			upstreamConn,
+			[]byte(`{"type":"response.create","model":"gpt-5.1"}`),
+			RelayOptions{
+				WriteTimeout: 5 * time.Second,
+				Now:          nowFn,
+				BeforeRelayCancel: func(exit RelayExit) {
+					callbackExitCh <- exit
+				},
+			},
+		)
+		resultCh <- relayExit
+	}()
+
+	select {
+	case <-clientConn.readFinished:
+	case <-time.After(time.Second):
+		t.Fatal("client reader did not fail after the downstream write started")
+	}
+	select {
+	case <-upstreamConn.closed:
+	case <-time.After(time.Second):
+		t.Fatal("worker exit did not start relay teardown")
+	}
+
+	select {
+	case relayExit := <-resultCh:
+		require.NotNil(t, relayExit)
+		require.Equal(t, "context_canceled", relayExit.Stage)
+		require.ErrorIs(t, relayExit.Err, cancelCause)
+	case <-time.After(time.Second):
+		t.Fatal("Relay did not return after late cancellation")
+	}
+	select {
+	case callbackExit := <-callbackExitCh:
+		require.Equal(t, "context_canceled", callbackExit.Stage)
+		require.ErrorIs(t, callbackExit.Err, cancelCause)
+	default:
+		t.Fatal("cancellation callback was not invoked")
+	}
+	select {
+	case unexpected := <-callbackExitCh:
+		t.Fatalf("cancellation callback invoked more than once: %+v", unexpected)
+	default:
+	}
+	select {
+	case <-clientConn.writeFinished:
+	default:
+		t.Fatal("Relay returned before the blocked downstream write exited")
+	}
 }
 
 func TestRelay_DownstreamPreambleStartsClientReader(t *testing.T) {
