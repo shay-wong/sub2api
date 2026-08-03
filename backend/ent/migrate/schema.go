@@ -988,6 +988,9 @@ var (
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
 		{Name: "max_reasoning_effort", Type: field.TypeString, Size: 20, Default: ""},
 		{Name: "reasoning_effort_mappings", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "profit_control_enabled", Type: field.TypeBool, Default: false},
+		{Name: "profit_min_margin", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
+		{Name: "profit_safety_buffer", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "project_id", Type: field.TypeInt64},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
@@ -998,7 +1001,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_projects_groups",
-				Columns:    []*schema.Column{GroupsColumns[54]},
+				Columns:    []*schema.Column{GroupsColumns[57]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1012,7 +1015,7 @@ var (
 			{
 				Name:    "group_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[54]},
+				Columns: []*schema.Column{GroupsColumns[57]},
 			},
 			{
 				Name:    "group_platform",
@@ -1042,7 +1045,7 @@ var (
 			{
 				Name:    "group_project_id_platform_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[54], GroupsColumns[15], GroupsColumns[13]},
+				Columns: []*schema.Column{GroupsColumns[57], GroupsColumns[15], GroupsColumns[13]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",

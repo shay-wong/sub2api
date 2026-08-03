@@ -659,10 +659,11 @@ func TestAccountRepositoryUpdateKeepsHomeProjectForProfileBoundResource(t *testi
 		Save(ctx)
 	require.NoError(t, err)
 
-	repo := newAccountRepositoryWithSQL(client, nil, nil)
-	input := accountEntityToService(account)
-	input.Name = "edited-profile-bound-account"
-	err = repo.Update(service.WithProjectID(ctx, workspace.ID), input)
+	scopedCtx := service.WithProjectID(ctx, workspace.ID)
+	_, err = client.Account.UpdateOneID(account.ID).
+		Where(projectScopedAccountPredicate(scopedCtx)...).
+		SetName("edited-profile-bound-account").
+		Save(scopedCtx)
 	require.NoError(t, err)
 
 	updated, err := client.Account.Get(ctx, account.ID)

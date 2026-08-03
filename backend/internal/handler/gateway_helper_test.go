@@ -138,12 +138,12 @@ func TestAcquireResponsesAccountSlot_StreamingReleaseWaitsForForwardCompletion(t
 		c, cancel := newContext(t)
 		var releases atomic.Int32
 		h := &OpenAIGatewayHandler{}
-		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+		release, result := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
 			Account:     &service.Account{ID: 101},
 			Acquired:    true,
 			ReleaseFunc: func() { releases.Add(1) },
 		}, true, new(bool), zap.NewNop())
-		require.True(t, acquired)
+		require.Equal(t, openAISlotAcquireOK, result)
 		assertHeld(t, cancel, release, func() int { return int(releases.Load()) })
 	})
 
@@ -154,11 +154,11 @@ func TestAcquireResponsesAccountSlot_StreamingReleaseWaitsForForwardCompletion(t
 			gatewayService:    &service.OpenAIGatewayService{},
 			concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Millisecond),
 		}
-		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+		release, result := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
 			Account:  &service.Account{ID: 102},
 			WaitPlan: &service.AccountWaitPlan{MaxConcurrency: 1, Timeout: time.Second, MaxWaiting: 1},
 		}, true, new(bool), zap.NewNop())
-		require.True(t, acquired)
+		require.Equal(t, openAISlotAcquireOK, result)
 		assertHeld(t, cancel, release, func() int { return cacheReleaseCount(cache) })
 	})
 
@@ -169,11 +169,11 @@ func TestAcquireResponsesAccountSlot_StreamingReleaseWaitsForForwardCompletion(t
 			gatewayService:    &service.OpenAIGatewayService{},
 			concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Millisecond),
 		}
-		release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+		release, result := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
 			Account:  &service.Account{ID: 103},
 			WaitPlan: &service.AccountWaitPlan{MaxConcurrency: 1, Timeout: time.Second, MaxWaiting: 1},
 		}, true, new(bool), zap.NewNop())
-		require.True(t, acquired)
+		require.Equal(t, openAISlotAcquireOK, result)
 		assertHeld(t, cancel, release, func() int { return cacheReleaseCount(cache) })
 	})
 }
@@ -184,12 +184,12 @@ func TestAcquireResponsesAccountSlot_NonStreamingReleaseFollowsClientCancellatio
 	c.Request = c.Request.WithContext(ctx)
 	var releases atomic.Int32
 	h := &OpenAIGatewayHandler{}
-	release, acquired := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
+	release, result := h.acquireResponsesAccountSlot(c, nil, "", &service.AccountSelectionResult{
 		Account:     &service.Account{ID: 104},
 		Acquired:    true,
 		ReleaseFunc: func() { releases.Add(1) },
 	}, false, new(bool), zap.NewNop())
-	require.True(t, acquired)
+	require.Equal(t, openAISlotAcquireOK, result)
 	defer release()
 
 	cancel()
