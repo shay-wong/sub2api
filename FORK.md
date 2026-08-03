@@ -5,6 +5,7 @@
 本文档面向 fork 维护者和 AI 编码代理，只记录相对已合并上游基线仍然生效、且有意保留的行为差异。
 
 - 新增、修改或删除 fork 行为时，必须在同一提交更新对应条目。
+- 对用户可见的 fork 能力，还必须同步英文 `README.md`、中文 `README_CN.md`、日文 `README_JA.md` 及其索引；仓库引入 `CHANGELOG.md` 后同时维护当前未发布段。纯维护者内部差异只写入本文档。
 - 只有已合并上游提供等价行为，并且回归测试覆盖等价时，才能删除对应条目。
 - 上游合并审查以本文档中的行为不变量为准，不以冲突文件归属、字段同名或“选 ours/theirs”作为判断标准。
 - 生成文件不是行为来源。Ent、Wire 等输出发生冲突时，应先解决 schema、migration、provider 或 wire source，再重新生成。
@@ -17,12 +18,23 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 最新已合并上游 merge | `baeed1248d53fe2831cda010f63fcde0b816bc9a` |
-| Fork 父提交 | `caae38b9abf429d1326ec174b54210a21b023309` |
-| 上游父提交 / 比较基线 | `b74024c7868ee88a0bf921306cbc22a2f922872a` |
-| 当前比较范围 | `b74024c7868ee88a0bf921306cbc22a2f922872a..HEAD` |
+| 最新已合并上游 merge | `d585df8d934807b5eaa3d65aac8cbb2954fa1519` |
+| Fork 父提交 | `a1427996ed9cb70880e0b405fba741af5adc8dee` |
+| 上游父提交 / 比较基线 | `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` |
+| 当前比较范围 | `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `b74024c7868ee88a0bf921306cbc22a2f922872a`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
+
+## Fork 发布版本
+
+| 项目 | 值 |
+| --- | --- |
+| 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
+| Fork 版本源 | `backend/cmd/server/VERSION` |
+| 当前上游版本 | `0.1.170` |
+| 当前 Fork 版本 | `0.1.170-fork.1` |
+
+所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
 ## 能力索引
 
@@ -50,7 +62,7 @@
 - **当前代码**：`backend/ent/schema/project.go`、`backend/ent/schema/project_member.go`、`backend/ent/schema/project_profile.go`、`backend/ent/schema/project_profile_binding.go`、`backend/internal/repository/project_context.go`、`backend/internal/repository/project_repo.go`、`backend/internal/service/project_context.go`、`backend/internal/service/project_service.go`、`backend/internal/handler/admin/project_handler.go`、`frontend/src/api/admin/projects.ts`、`frontend/src/views/admin/ProjectsView.vue`。
 - **迁移与测试**：`backend/migrations/154_project_isolation_default_project.sql` 至 `backend/migrations/159_project_scoped_proxies.sql`、`backend/migrations/170_batch_image_project_scope.sql`、`backend/internal/repository/project_context_test.go`、`backend/internal/service/project_service_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/views/admin/__tests__/ProjectsView.spec.ts`。
 - **来源提交**：`0a69e2c6055e7b1b0b9d861c8b4c787f70fbc107`、`98d869de85ff67cd53477c6a8736d593f64337c7`、`e5340bf36cee7123da34599ca346647fd1b0a2a9`、`c59d0a28f3e7c930872dd804ef8d0243a4bdd06e`、`65c3150e89032d66e7fceafe7dc316bc9bdc0a60`、`f4f57f0f97c8898c78869ec1b032bab36190e689`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承。
 - **合并审查**：搜索新增的 admin route、repository query、cache key、scheduler snapshot 和后台原始 `fetch`；确认都显式继承 Project 上下文，不得只依靠前端隐藏入口。
 - **删除条件**：不主动删除。只有维护者明确放弃项目空间产品能力时，才可按独立迁移方案移除。
 - **聚焦验证**：
@@ -69,7 +81,7 @@
 - **当前代码**：`backend/ent/schema/user_group_rate_limit_window.go`、`backend/internal/repository/user_group_rate_limit_window_repo.go`、`backend/internal/service/user_group_rate_limit_window_port.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/endpoint.go`、`frontend/src/views/admin/GroupsView.vue`。
 - **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql`、`backend/internal/repository/user_group_rate_limit_window_repo_test.go`、`backend/internal/service/admin_service_group_rate_limit_window_test.go`、`backend/internal/handler/admin/user_group_rate_limit_handler_test.go`、`frontend/src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts`。
 - **来源提交**：`ae870a2978fc316e51721927d3a91f9bf2f1ceb6`、`17dcffb1c887bf432688e0f25f544b629d4b9eab`、`a80e366bbe27d3212c68ae028cf54cbd714dbe69`、`a6e3a1ceede4cdc048e1f471990b82cc406dd001`、`bbe433256021676ab389439d3bb8157cb0662372`、`7b51c2bd4b53d669d5c37aedaaa9f0ce41edf7df`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将这些实际分组不变量与上游 profit gate、`PricingAt` 和倍率计费合并。
 - **合并审查**：重点检查 gateway 预检、账户切换、sticky binding、usage worker 和图像/Grok 分支；同名 `group_id` 不代表已使用实际调度分组。
 - **删除条件**：不主动删除。只有产品不再提供分组订阅窗口和 fallback 分组归因时才可移除。
 - **聚焦验证**：
@@ -102,12 +114,12 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：从 `stable` 构建 fork 二进制和镜像，复用主 release pipeline，同时保持登录身份、发布目标、rolling tag 和更新检查彼此独立。
-- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；上游提升 base version 时，先接受新的 plain upstream version，其他情况下保留或递增 fork suffix；相同 base version 下 plain release 小于 fork release；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags。
+- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags。
 - **当前代码**：`.github/workflows/stable-fork-release.yml`、`.github/workflows/release.yml`、`.goreleaser.yaml`、`backend/cmd/server/VERSION`、`backend/internal/service/update_service.go`、`backend/internal/repository/github_release_service.go`、`deploy/install.sh`。
 - **测试**：`backend/internal/service/update_service_test.go`、`backend/internal/repository/github_release_service_test.go`。
 - **来源提交**：`c6af7d1ce7c5a3962e283aa7dd843e5602fd6e74`、`59af010693739c41834f1f5e16d1c4e564abefb6`、`4a7594f2f756dd6c60cfcbd425509dc94e740cb5`、`5ad3a11a1c46561c82a9a9452d8884bfe6423a54`。
 - **人工合并解决**：无相关人工解决锚点；VERSION-only 提交只是该策略的派生元数据。
-- **合并审查**：先判断上游是否 bump base version；若已 bump，接受新的 plain upstream version 作为 base；否则保留或递增 fork suffix。不得把 registry login 名重新当作镜像 namespace。
+- **合并审查**：先判断上游是否 bump base version；若已 bump，版本源改为新 base 的 `fork.1`；否则按该 base 已发布的最高 fork revision 递增。不得把 registry login 名重新当作镜像 namespace。
 - **删除条件**：不主动删除。只有 fork 停止独立发布和更新时才可移除。
 - **聚焦验证**：
 
@@ -160,7 +172,7 @@
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
-- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理。
+- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -219,7 +231,7 @@
 - **当前代码**：`backend/internal/service/payment_amounts.go`、`backend/internal/service/payment_config_service.go`、`backend/internal/service/payment_order.go`、`backend/internal/service/payment_refund.go`、`backend/internal/handler/payment_handler.go`、`frontend/src/views/admin/SettingsView.vue`、`frontend/src/views/user/PaymentView.vue`。
 - **测试**：`backend/internal/service/payment_config_service_test.go`、`backend/internal/service/payment_order_result_test.go`、`backend/internal/service/payment_refund_test.go`、`frontend/src/views/admin/__tests__/SettingsView.spec.ts`、`frontend/src/views/user/__tests__/PaymentView.spec.ts`。
 - **来源提交**：`cdc7fa66b303333c00b87d5d0852a6d4af9993b7`、`d6f78bf2dc6c11b0c5fe72c4a8f2c92eaf1b7425`、`b5af02ae64ae12254add841f555fbf9538d9eeef`、`427c983f92b1dd7e3815e50bdbdc32caf641cf57`、`51775c230a7575ae0ca70dab751cece53163d35d`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并。
 - **合并审查**：配置读写、下单展示、provider snapshot、退款 audit 和公开 DTO 必须一起比较；只吸收一个字段名不构成等价。
 - **删除条件**：上游分别提供 canonical rate、公开 DTO 边界和 snapshot refund 回归测试后逐项缩减，全部等价后删除。
 - **聚焦验证**：
@@ -299,13 +311,16 @@ make test-frontend
 git diff --check
 ```
 
-6. 重新检查 `baseline..HEAD` 的净行为，删除已经被上游等价吸收且有回归覆盖的条目。
-7. 代码、测试和 `FORK.md` 必须在同一提交同步；不要单独提交过期的 fork 文档。
+6. 确定合并后的 fork 版本：上游版本变化时使用 `<upstream-version>-fork.1`，否则递增同一 base 已发布的最高 revision。
+7. 重新检查 `baseline..HEAD` 的净行为，删除已经被上游等价吸收且有回归覆盖的条目。
+8. 代码、测试和 `FORK.md` 必须在同一提交同步；公共能力还要同步全部维护语言的用户文档和当前 changelog。
 
 ## 明确排除
 
-- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；本次只引用 `caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与当前能力相关的解决。
+- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
 - **已替代方案**：`6b37423465f1780dda62232d88e53676c4af15d5` 与 `bb9e60b13bab1a7f7c31d8987dfa00d5ed6da8ef` 的旧 operator/group-scope 方案已由 Project 模型替代，不单列。
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
+- **本次上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
+- **本次上游新增**：分组利润控制、API-key 上游倍率探测/同步、Codex load-shed originator 规范化和前端 refresh token race 修复均来自当前上游基线，不登记为 fork 能力。

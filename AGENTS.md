@@ -1,0 +1,20 @@
+<claude-mem-context>
+# Memory Context
+
+# claude-mem status
+
+This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past work.
+
+Memory injection starts on your second session in a project.
+
+`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo, optional). Otherwise memory builds passively as work happens.
+
+Live activity: http://localhost:37702
+How it works: `/how-it-works`
+
+This message disappears once the first observation lands.
+</claude-mem-context>
+
+## Fork 工作流
+
+- 在完成任何新增、修改或删除有意 fork 行为，或合并上游的任务前，必须调用 `$fork-doc`；技能不可用时按 `FORK.md` 手工执行同一维护契约。复用 `FORK.md` 中仍受当前代码支持的既有决定，只在新证据新增、冲突、失效或仍留有未决项时重新评估。每个 fork release 必须使用 `<upstream-version>-fork.<N>`：上游版本变化时从 `fork.1` 重新开始，同一上游版本的后续发布递增 `N`。
