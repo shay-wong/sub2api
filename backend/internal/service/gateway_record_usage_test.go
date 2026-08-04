@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -529,7 +530,7 @@ func TestGatewayServiceRecordUsage_UsesExplicitPricingAtForPeakRate(t *testing.T
 			svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
 			svc.resolver = newOpenAITokenImageChannelPricingResolverForTest(t, groupID, "gemini-image")
 
-			pricingAt := time.Date(2026, time.January, 1, 0, 30, 0, 0, time.UTC)
+			pricingAt := time.Date(2026, time.January, 1, 0, 30, 0, 0, timezone.Location())
 			err := svc.RecordUsage(context.Background(), &RecordUsageInput{
 				Result: &ForwardResult{
 					RequestID:  "gateway_explicit_pricing_at_" + platform,

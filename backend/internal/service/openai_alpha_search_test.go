@@ -56,7 +56,6 @@ func alphaSearchResponsesSSE(output string) string {
 }
 
 func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{
 		"id":"search-session",
 		"model":"gpt-5.6-sol",
@@ -111,7 +110,6 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 }
 
 func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{
 		"id":"search-session",
 		"model":"gpt-5.6-sol",
@@ -187,7 +185,6 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 }
 
 func TestForwardAlphaSearchPATBackfillsMissingChatGPTAccountMetadata(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"OpenAI news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -248,7 +245,6 @@ func TestForwardAlphaSearchPATBackfillsMissingChatGPTAccountMetadata(t *testing.
 }
 
 func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -301,7 +297,6 @@ func TestForwardAlphaSearchReturnsFailoverBeforeWriting(t *testing.T) {
 		{name: "method not allowed", statusCode: http.StatusMethodNotAllowed, body: `{"error":{"message":"method not allowed"}}`, neutral: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
 			body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
@@ -337,7 +332,6 @@ func TestForwardAlphaSearchReturnsFailoverBeforeWriting(t *testing.T) {
 }
 
 func TestForwardAlphaSearchEndpointUnavailableDoesNotMutateAccountHealth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -383,7 +377,6 @@ func TestForwardAlphaSearchEndpointUnavailableDoesNotMutateAccountHealth(t *test
 }
 
 func TestForwardAlphaSearchModelNotFoundIsNeutralForAPIKeyHealth(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -422,7 +415,6 @@ func TestForwardAlphaSearchModelNotFoundIsNeutralForAPIKeyHealth(t *testing.T) {
 }
 
 func TestForwardAlphaSearchCyberPolicyMarksAndReturnsError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -456,7 +448,6 @@ func TestForwardAlphaSearchCyberPolicyMarksAndReturnsError(t *testing.T) {
 }
 
 func TestForwardAlphaSearchUnauthorizedDoesNotMarkAccountError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -499,7 +490,6 @@ func TestForwardAlphaSearchUnauthorizedDoesNotMarkAccountError(t *testing.T) {
 }
 
 func TestForwardAlphaSearchPATResponsesFallbackUnauthorizedDoesNotMarkAccountError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -549,7 +539,6 @@ func TestForwardAlphaSearchPATResponsesFallbackUnauthorizedDoesNotMarkAccountErr
 // 承接搜索，请求不能死在先被选中的 API key 账号上。端点缺失也不能写账号
 // 错误状态——账号本身是健康的。
 func TestForwardAlphaSearchAPIKeyEndpointNotFoundFailsOver(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -592,7 +581,6 @@ func TestForwardAlphaSearchAPIKeyEndpointNotFoundFailsOver(t *testing.T) {
 
 // OAuth 账号的 chatgpt.com 端点固定存在，404 保持原有透传行为不变。
 func TestForwardAlphaSearchOAuthNotFoundPassesThrough(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

@@ -104,7 +104,6 @@ func namespaceToolMapping() apicompat.ResponsesClientToolMapping {
 
 func TestHandleResponsesBufferedStreamingResponse_RestoresNamespaceTool(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -122,7 +121,6 @@ func TestHandleResponsesBufferedStreamingResponse_RestoresNamespaceTool(t *testi
 // Buffered conversion must reject an explicit upstream error even when an
 // earlier message_start already created a partial response object.
 func TestHandleResponsesBufferedStreamingResponse_AnthropicErrorRejectsPartialSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	stream := strings.Join([]string{
@@ -152,7 +150,6 @@ func TestHandleResponsesBufferedStreamingResponse_AnthropicErrorRejectsPartialSu
 
 func TestHandleResponsesStreamingResponse_RestoresNamespaceTool(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -169,7 +166,6 @@ func TestHandleResponsesStreamingResponse_RestoresNamespaceTool(t *testing.T) {
 
 func TestHandleResponsesStreamingResponse_RestoresNamespaceToolWhenFinalizingMissingMessageStop(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	stream := strings.Replace(
 		namespaceToolAnthropicStream(),
@@ -195,7 +191,6 @@ func TestHandleResponsesStreamingResponse_RestoresNamespaceToolWhenFinalizingMis
 // A malformed upstream event must terminate the committed Responses stream as
 // failed instead of being skipped and finalized as a successful response.
 func TestHandleResponsesStreamingResponse_ParseErrorDoesNotFinalizeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: message_start\ndata: not-json\n\n"))}
@@ -219,7 +214,6 @@ func TestHandleResponsesStreamingResponse_ParseErrorDoesNotFinalizeSuccess(t *te
 }
 
 func TestHandleResponsesStreamingResponse_RequestCancelDrainsLateUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	requestCtx, cancel := context.WithCancel(context.Background())
@@ -260,7 +254,6 @@ func TestHandleResponsesStreamingResponse_RequestCancelDrainsLateUsage(t *testin
 }
 
 func TestHandleResponsesStreamingResponse_RequestCancelHasConfiguredDrainDeadline(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	requestCtx, cancel := context.WithCancel(context.Background())
@@ -296,7 +289,6 @@ func TestHandleResponsesStreamingResponse_RequestCancelHasConfiguredDrainDeadlin
 // An event line without its data pair is a truncated SSE event, not a frame the
 // bridge may silently discard before emitting response.completed.
 func TestHandleResponsesStreamingResponse_MissingDataDoesNotFinalizeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader("event: message_start\nid: orphaned\n\n"))}
@@ -320,7 +312,6 @@ func TestHandleResponsesStreamingResponse_MissingDataDoesNotFinalizeSuccess(t *t
 // A present but empty data field is malformed and must not let a partial
 // Anthropic response be finalized as successful.
 func TestHandleResponsesStreamingResponse_EmptyDataDoesNotFinalizeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	stream := strings.Join([]string{
@@ -352,7 +343,6 @@ func TestHandleResponsesStreamingResponse_EmptyDataDoesNotFinalizeSuccess(t *tes
 // A valid Anthropic error event is terminal failure data; it must not fall
 // through the converter and let EOF synthesize response.completed.
 func TestHandleResponsesStreamingResponse_AnthropicErrorDoesNotFinalizeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	stream := strings.Join([]string{
@@ -384,7 +374,6 @@ func TestHandleResponsesStreamingResponse_AnthropicErrorDoesNotFinalizeSuccess(t
 // A transport read failure after partial output must not synthesize a normal
 // response.completed event for a truncated upstream stream.
 func TestHandleResponsesStreamingResponse_ReadErrorDoesNotFinalizeSuccess(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	resp := &http.Response{Body: &errTailReader{
@@ -412,7 +401,6 @@ func TestHandleResponsesStreamingResponse_ReadErrorDoesNotFinalizeSuccess(t *tes
 // A successful terminal event owns the stream outcome even if the transport
 // reports a trailing read error instead of closing cleanly.
 func TestHandleResponsesStreamingResponse_TerminalStopsBeforeTrailingReadError(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	resp := &http.Response{Body: &errTailReader{
@@ -439,7 +427,6 @@ func TestHandleResponsesStreamingResponse_TerminalStopsBeforeTrailingReadError(t
 // Client disconnects stop downstream writes, but the upstream stream must still
 // be drained so terminal usage remains available for billing.
 func TestHandleResponsesStreamingResponse_ClientDisconnectDrainsUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
@@ -477,7 +464,6 @@ func TestHandleResponsesStreamingResponse_ClientDisconnectDrainsUsage(t *testing
 // Once the client has gone away, an upstream read failure cannot be reported to
 // it; return the usage snapshot without attempting a response.failed write.
 func TestHandleResponsesStreamingResponse_ReadErrorAfterClientDisconnectReturnsUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
@@ -505,7 +491,6 @@ func TestHandleResponsesStreamingResponse_ReadErrorAfterClientDisconnectReturnsU
 }
 
 func TestHandleResponsesStreamingResponse_ClientDisconnectHasDrainDeadline(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
@@ -558,7 +543,6 @@ func TestExtractResponsesReasoningEffortFromBody(t *testing.T) {
 
 func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -591,7 +575,6 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 
 func TestHandleResponsesStreamingResponse_PreservesMessageStartCacheUsage(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -704,7 +687,6 @@ func TestParseAnthropicSSEField(t *testing.T) {
 
 func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -735,7 +717,6 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 
 func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

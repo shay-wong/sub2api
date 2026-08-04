@@ -44,7 +44,6 @@ func TestExtractCCReasoningEffortFromBody(t *testing.T) {
 
 func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -82,7 +81,6 @@ func TestHandleCCBufferedFromAnthropic_PreservesMessageStartCacheUsageAndReasoni
 // without a response"（#4653 同根因；#4657 只修了 /v1/responses 桥）。
 func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -115,7 +113,6 @@ func TestHandleCCBufferedFromAnthropic_CompactSSEFormat(t *testing.T) {
 
 func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -151,7 +148,6 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 
 func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
 	t.Parallel()
-	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -191,7 +187,6 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 // A broken upstream stream must not turn an already-created partial message into
 // a successful buffered Chat Completions response.
 func TestHandleCCBufferedFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	messageStart := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1}}}\n\n"
 	tests := []struct {
 		name string
@@ -233,7 +228,6 @@ func TestHandleCCBufferedFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T)
 // Once a Chat Completions SSE response is committed, protocol failures must end
 // with an error frame and never the normal [DONE] marker.
 func TestHandleCCStreamingFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	messageStart := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_partial\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":1}}}\n\n"
 	tests := []struct {
 		name string
@@ -275,7 +269,6 @@ func TestHandleCCStreamingFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T
 }
 
 func TestHandleCCStreamingFromAnthropic_RequestCancelDrainsLateUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	requestCtx, cancel := context.WithCancel(context.Background())
@@ -316,7 +309,6 @@ func TestHandleCCStreamingFromAnthropic_RequestCancelDrainsLateUsage(t *testing.
 }
 
 func TestHandleCCStreamingFromAnthropic_RequestCancelHasConfiguredDrainDeadline(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	requestCtx, cancel := context.WithCancel(context.Background())
@@ -345,7 +337,6 @@ func TestHandleCCStreamingFromAnthropic_RequestCancelHasConfiguredDrainDeadline(
 }
 
 func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsLateUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
@@ -374,7 +365,6 @@ func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsLateUsage(t *testi
 }
 
 func TestHandleCCStreamingFromAnthropic_ClientDisconnectHasDrainDeadline(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}

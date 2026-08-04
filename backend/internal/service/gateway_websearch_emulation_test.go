@@ -152,7 +152,6 @@ func TestBuildTextSummary_NoResults(t *testing.T) {
 
 // Provider-facing web-search responses must use the shared Anthropic message ID format.
 func TestWriteWebSearchResponses_UseAnthropicMessageIDs(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	response := &websearch.SearchResponse{}
 
 	t.Run("non-streaming", func(t *testing.T) {
