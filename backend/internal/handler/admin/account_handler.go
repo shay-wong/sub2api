@@ -953,7 +953,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
 	}
-	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+	if err := scope.ensureUpstreamBillingProbeMutation(req.Extra, req.ProbeEnabled); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -1126,7 +1126,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 			return
 		}
 	}
-	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+	if err := scope.ensureUpstreamBillingProbeMutation(req.Extra, req.ProbeEnabled, req.RateSyncEnabled); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -1679,7 +1679,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+	if err := scope.ensureUpstreamBillingProbeMutation(req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -2439,7 +2439,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 			}
 		}
 	}
-	if err := scope.ensureUpstreamBillingProbeExtraMutation(req.Extra); err != nil {
+	if err := scope.ensureUpstreamBillingProbeMutation(req.Extra, req.ProbeEnabled); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

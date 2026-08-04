@@ -38,15 +38,23 @@ func ensureProjectAdminGrokOAuthBaseURL(ctx context.Context, platform, accountTy
 	return ErrProjectAdminGrokOAuthCustomBaseURL
 }
 
-func ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx context.Context, extra map[string]any) error {
-	if !isProjectAdminContext(ctx) || len(extra) == 0 {
+func ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx context.Context, extra map[string]any, settings ...*bool) error {
+	if !isProjectAdminContext(ctx) {
 		return nil
 	}
-	if _, ok := extra[UpstreamBillingProbeEnabledExtraKey]; ok {
-		return ErrProjectAdminUpstreamBillingProbeForbidden
+	for _, setting := range settings {
+		if setting != nil {
+			return ErrProjectAdminUpstreamBillingProbeForbidden
+		}
 	}
-	if _, ok := extra[UpstreamBillingProbeExtraKey]; ok {
-		return ErrProjectAdminUpstreamBillingProbeForbidden
+	for _, key := range []string{
+		UpstreamBillingProbeEnabledExtraKey,
+		UpstreamBillingRateSyncEnabledExtraKey,
+		UpstreamBillingProbeExtraKey,
+	} {
+		if _, ok := extra[key]; ok {
+			return ErrProjectAdminUpstreamBillingProbeForbidden
+		}
 	}
 	return nil
 }
@@ -584,7 +592,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra); err != nil {
+	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
 		return nil, err
 	}
 	if err := s.ensureProxyAvailable(ctx, input.ProxyID); err != nil {
@@ -679,7 +687,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra); err != nil {
+	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled, input.RateSyncEnabled); err != nil {
 		return nil, err
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
@@ -1036,7 +1044,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra); err != nil {
+	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
 		return nil, err
 	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.

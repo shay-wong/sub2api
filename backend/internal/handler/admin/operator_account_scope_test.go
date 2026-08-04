@@ -199,7 +199,9 @@ func newProjectAdminAccountScopeRouter(adminSvc *stubAdminService, projectID int
 	})
 	router.GET("/api/v1/admin/accounts", handler.List)
 	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	router.POST("/api/v1/admin/accounts", handler.Create)
 	router.PUT("/api/v1/admin/accounts/:id", handler.Update)
+	router.POST("/api/v1/admin/accounts/bulk-update", handler.BulkUpdate)
 	router.POST("/api/v1/admin/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
 	return router
 }
@@ -249,8 +251,9 @@ func TestProjectAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *tes
 		Status:   service.StatusActive,
 		Extra: map[string]any{
 			"visible": "kept",
-			service.UpstreamBillingProbeEnabledExtraKey: true,
-			service.UpstreamBillingProbeExtraKey:        map[string]any{"status": "ok"},
+			service.UpstreamBillingProbeEnabledExtraKey:    true,
+			service.UpstreamBillingRateSyncEnabledExtraKey: true,
+			service.UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
 		},
 	}}
 	router := newProjectAdminAccountScopeRouter(adminSvc, 7)
@@ -266,23 +269,39 @@ func TestProjectAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *tes
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Contains(t, rec.Body.String(), `"visible":"kept"`)
 		require.NotContains(t, rec.Body.String(), service.UpstreamBillingProbeEnabledExtraKey)
+		require.NotContains(t, rec.Body.String(), service.UpstreamBillingRateSyncEnabledExtraKey)
 		require.NotContains(t, rec.Body.String(), service.UpstreamBillingProbeExtraKey)
 	}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/1", bytes.NewBufferString(`{
-		"extra": {"upstream_billing_probe_enabled": true}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "create typed probe", method: http.MethodPost, path: "/api/v1/admin/accounts", body: `{"name":"project-created","platform":"openai","type":"apikey","credentials":{"api_key":"sk-test"},"upstream_billing_probe_enabled":false}`},
+		{name: "update typed probe", method: http.MethodPut, path: "/api/v1/admin/accounts/1", body: `{"upstream_billing_probe_enabled":false}`},
+		{name: "update typed rate sync", method: http.MethodPut, path: "/api/v1/admin/accounts/1", body: `{"upstream_billing_rate_sync_enabled":true}`},
+		{name: "update extra rate sync", method: http.MethodPut, path: "/api/v1/admin/accounts/1", body: `{"extra":{"upstream_billing_rate_sync_enabled":true}}`},
+		{name: "bulk typed probe", method: http.MethodPost, path: "/api/v1/admin/accounts/bulk-update", body: `{"account_ids":[1],"upstream_billing_probe_enabled":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Contains(t, rec.Body.String(), "UPSTREAM_BILLING_PROBE_FORBIDDEN")
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			require.Contains(t, rec.Body.String(), "UPSTREAM_BILLING_PROBE_FORBIDDEN")
+		})
+	}
+	require.Empty(t, adminSvc.createdAccounts)
 	require.Zero(t, adminSvc.updateAccountCalls)
+	require.Nil(t, adminSvc.lastBulkUpdateInput)
 
 	adminSvc.accounts[0].Type = service.AccountTypeOAuth
-	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/1/apply-oauth-credentials", bytes.NewBufferString(`{
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/1/apply-oauth-credentials", bytes.NewBufferString(`{
 		"type": "oauth",
 		"credentials": {"access_token": "new-token"},
 		"extra": {"upstream_billing_probe_enabled": true}

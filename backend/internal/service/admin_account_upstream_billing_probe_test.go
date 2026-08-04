@@ -563,7 +563,7 @@ func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) 
 	repo := &upstreamBillingProbeAccountRepo{}
 	svc := &adminServiceImpl{accountRepo: repo}
 
-	for _, key := range []string{UpstreamBillingProbeEnabledExtraKey, UpstreamBillingProbeExtraKey} {
+	for _, key := range []string{UpstreamBillingProbeEnabledExtraKey, UpstreamBillingRateSyncEnabledExtraKey, UpstreamBillingProbeExtraKey} {
 		t.Run(key, func(t *testing.T) {
 			_, err := svc.UpdateAccount(ctx, 113, &UpdateAccountInput{Extra: map[string]any{key: true}})
 
@@ -571,11 +571,39 @@ func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) 
 		})
 	}
 
-	for _, key := range []string{UpstreamBillingProbeEnabledExtraKey, UpstreamBillingProbeExtraKey} {
+	for _, key := range []string{UpstreamBillingProbeEnabledExtraKey, UpstreamBillingRateSyncEnabledExtraKey, UpstreamBillingProbeExtraKey} {
 		t.Run("extra merge "+key, func(t *testing.T) {
 			err := svc.UpdateAccountExtra(ctx, 113, map[string]any{key: true})
 
 			require.ErrorIs(t, err, ErrProjectAdminUpstreamBillingProbeForbidden)
+			require.Empty(t, repo.updates)
+		})
+	}
+
+	setting := false
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "create typed probe", call: func() error {
+			_, err := svc.CreateAccount(ctx, &CreateAccountInput{ProbeEnabled: &setting})
+			return err
+		}},
+		{name: "update typed probe", call: func() error {
+			_, err := svc.UpdateAccount(ctx, 113, &UpdateAccountInput{ProbeEnabled: &setting})
+			return err
+		}},
+		{name: "update typed rate sync", call: func() error {
+			_, err := svc.UpdateAccount(ctx, 113, &UpdateAccountInput{RateSyncEnabled: &setting})
+			return err
+		}},
+		{name: "bulk typed probe", call: func() error {
+			_, err := svc.BulkUpdateAccounts(ctx, &BulkUpdateAccountsInput{ProbeEnabled: &setting})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, tc.call(), ErrProjectAdminUpstreamBillingProbeForbidden)
 			require.Empty(t, repo.updates)
 		})
 	}

@@ -193,7 +193,9 @@ func copyAccountExtraWithoutUpstreamBillingProbe(extra map[string]any) map[strin
 	}
 	out := make(map[string]any, len(extra))
 	for key, value := range extra {
-		if key == service.UpstreamBillingProbeEnabledExtraKey || key == service.UpstreamBillingProbeExtraKey {
+		if key == service.UpstreamBillingProbeEnabledExtraKey ||
+			key == service.UpstreamBillingRateSyncEnabledExtraKey ||
+			key == service.UpstreamBillingProbeExtraKey {
 			continue
 		}
 		out[key] = value
@@ -201,15 +203,23 @@ func copyAccountExtraWithoutUpstreamBillingProbe(extra map[string]any) map[strin
 	return out
 }
 
-func (s *adminAccessScope) ensureUpstreamBillingProbeExtraMutation(extra map[string]any) error {
-	if s == nil || s.Unrestricted || len(extra) == 0 {
+func (s *adminAccessScope) ensureUpstreamBillingProbeMutation(extra map[string]any, settings ...*bool) error {
+	if s == nil || s.Unrestricted {
 		return nil
 	}
-	if _, ok := extra[service.UpstreamBillingProbeEnabledExtraKey]; ok {
-		return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+	for _, setting := range settings {
+		if setting != nil {
+			return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+		}
 	}
-	if _, ok := extra[service.UpstreamBillingProbeExtraKey]; ok {
-		return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+	for _, key := range []string{
+		service.UpstreamBillingProbeEnabledExtraKey,
+		service.UpstreamBillingRateSyncEnabledExtraKey,
+		service.UpstreamBillingProbeExtraKey,
+	} {
+		if _, ok := extra[key]; ok {
+			return errors.Forbidden("UPSTREAM_BILLING_PROBE_FORBIDDEN", "upstream billing probe settings require super admin access")
+		}
 	}
 	return nil
 }
