@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 最新已合并上游 merge | `d585df8d934807b5eaa3d65aac8cbb2954fa1519` |
-| Fork 父提交 | `a1427996ed9cb70880e0b405fba741af5adc8dee` |
-| 上游父提交 / 比较基线 | `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` |
-| 当前比较范围 | `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2..HEAD` |
+| 最新已合并上游 merge | `9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` |
+| Fork 父提交 | `6816c919d63c223a396841bc758dfe4b3c236550` |
+| 上游父提交 / 比较基线 | `00b8596176809906993169c283671811ad04f58d` |
+| 当前比较范围 | `00b8596176809906993169c283671811ad04f58d..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `00b8596176809906993169c283671811ad04f58d`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
 
 ## Fork 发布版本
 
@@ -31,8 +31,8 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.170` |
-| 当前 Fork 版本 | `0.1.170-fork.1` |
+| 当前上游版本 | `0.1.171` |
+| 当前 Fork 版本 | `0.1.171-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
@@ -58,17 +58,19 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：用 Project 成员、应用配置和资源绑定替代旧 operator-role/分组权限边界，使账号、分组、代理、API Key、用量、日志、批量图片任务和管理操作可按项目隔离。
-- **行为不变量**：外部调用使用 API Key 所属项目；项目管理员不得跨项目读取或修改资源；Project Profile 的 restricted/unrestricted 模式、绑定和激活状态必须一致；资源移动后日志归属、缓存和调度快照必须同步；shadow/linked account 必须继承父账号项目。
-- **当前代码**：`backend/ent/schema/project.go`、`backend/ent/schema/project_member.go`、`backend/ent/schema/project_profile.go`、`backend/ent/schema/project_profile_binding.go`、`backend/internal/repository/project_context.go`、`backend/internal/repository/project_repo.go`、`backend/internal/service/project_context.go`、`backend/internal/service/project_service.go`、`backend/internal/handler/admin/project_handler.go`、`frontend/src/api/admin/projects.ts`、`frontend/src/views/admin/ProjectsView.vue`。
-- **迁移与测试**：`backend/migrations/154_project_isolation_default_project.sql` 至 `backend/migrations/159_project_scoped_proxies.sql`、`backend/migrations/170_batch_image_project_scope.sql`、`backend/internal/repository/project_context_test.go`、`backend/internal/service/project_service_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/views/admin/__tests__/ProjectsView.spec.ts`。
+- **行为不变量**：外部调用使用 API Key 所属项目；项目管理员不得跨项目读取或修改资源，也不得通过通用账号更新修改仅超级管理员可控的上游计费探测或倍率同步设置；Project Profile 的 restricted/unrestricted 模式、绑定和激活状态必须一致；资源移动后日志归属、缓存和调度快照必须同步；shadow/linked account 必须继承父账号项目。
+- **当前代码**：`backend/ent/schema/project.go`、`backend/ent/schema/project_member.go`、`backend/ent/schema/project_profile.go`、`backend/ent/schema/project_profile_binding.go`、`backend/internal/repository/project_context.go`、`backend/internal/repository/project_repo.go`、`backend/internal/service/project_context.go`、`backend/internal/service/project_service.go`、`backend/internal/service/admin_account.go`、`backend/internal/handler/admin/access_scope.go`、`backend/internal/handler/admin/project_handler.go`、`backend/internal/handler/admin/account_handler.go`、`frontend/src/api/admin/projects.ts`、`frontend/src/views/admin/ProjectsView.vue`。
+- **迁移与测试**：`backend/migrations/154_project_isolation_default_project.sql` 至 `backend/migrations/159_project_scoped_proxies.sql`、`backend/migrations/170_batch_image_project_scope.sql`、`backend/internal/repository/project_context_test.go`、`backend/internal/service/project_service_test.go`、`backend/internal/service/admin_account_upstream_billing_probe_test.go`、`backend/internal/handler/admin/operator_account_scope_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/views/admin/__tests__/ProjectsView.spec.ts`。
 - **来源提交**：`0a69e2c6055e7b1b0b9d861c8b4c787f70fbc107`、`98d869de85ff67cd53477c6a8736d593f64337c7`、`e5340bf36cee7123da34599ca346647fd1b0a2a9`、`c59d0a28f3e7c930872dd804ef8d0243a4bdd06e`、`65c3150e89032d66e7fceafe7dc316bc9bdc0a60`、`f4f57f0f97c8898c78869ec1b032bab36190e689`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承。
+- **当前修复定位**：提交后运行 `git log -S'input.ProbeEnabled, input.RateSyncEnabled' -- backend/internal/service/admin_account.go`。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 在 OAuth quota 路由、handler、Wire 与 scheduler snapshot 中同时保留项目权限/可见性、项目范围缓存隔离，并合入上游 quota refresh/recovery。
 - **合并审查**：搜索新增的 admin route、repository query、cache key、scheduler snapshot 和后台原始 `fetch`；确认都显式继承 Project 上下文，不得只依靠前端隐藏入口。
 - **删除条件**：不主动删除。只有维护者明确放弃项目空间产品能力时，才可按独立迁移方案移除。
 - **聚焦验证**：
 
 ```bash
 (cd backend && go test -tags=unit ./internal/service -run '^TestProjectService')
+(cd backend && go test -tags=unit ./internal/service ./internal/handler/admin -run 'TestProjectAdmin.*UpstreamBillingProbe')
 (cd backend && go test -tags=unit ./internal/repository -run 'Test(Project|.*ProjectScope|.*ProjectProfile)')
 (cd frontend && ./node_modules/.bin/vitest run src/views/admin/__tests__/ProjectsView.spec.ts)
 ```
@@ -76,11 +78,12 @@
 ## 2. 分组订阅 5 小时额度与实际调度归因
 
 - **生命周期**：`长期保留`
-- **原始意图**：为 subscription group 提供用户级 5 小时 USD 窗口，并确保 fallback/composite 调度后使用实际选中分组执行限额、计费、并发、sticky session 和 Cyber policy 归因。
-- **行为不变量**：API Key 自身限流与分组 5 小时窗口保持两条独立逻辑；普通分组不得误用 subscription 窗口；任何 fallback 后的检查和记账必须使用 `AccountSelectionResult` 的有效分组，不得回退到 `apiKey.Group`。
-- **当前代码**：`backend/ent/schema/user_group_rate_limit_window.go`、`backend/internal/repository/user_group_rate_limit_window_repo.go`、`backend/internal/service/user_group_rate_limit_window_port.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/endpoint.go`、`frontend/src/views/admin/GroupsView.vue`。
-- **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql`、`backend/internal/repository/user_group_rate_limit_window_repo_test.go`、`backend/internal/service/admin_service_group_rate_limit_window_test.go`、`backend/internal/handler/admin/user_group_rate_limit_handler_test.go`、`frontend/src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts`。
+- **原始意图**：为 subscription group 提供用户级 5 小时 USD 窗口，并确保 fallback/composite 调度后的限额、计费、并发、sticky session 和 Cyber policy 归因符合各自契约。
+- **行为不变量**：API Key 自身限流与分组 5 小时窗口保持两条独立逻辑；普通分组不得误用 subscription 窗口；真实 fallback 后的检查、利润准入和记账必须使用 `AccountSelectionResult` 的有效分组，不得回退到原 `apiKey.Group`；composite 只路由目标平台、不携带成员分组关系，因此 selection 与 usage 继续归属于 API Key 所属父分组，且 composite 本身不得凭空安装成员分组利润门；同一请求共享一个 `PricingAt`。
+- **当前代码**：`backend/ent/schema/user_group_rate_limit_window.go`、`backend/internal/repository/user_group_rate_limit_window_repo.go`、`backend/internal/service/user_group_rate_limit_window_port.go`、`backend/internal/service/gateway_request_pricing.go`、`backend/internal/service/gateway_profit_control.go`、`backend/internal/service/openai_profit_control.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/endpoint.go`、`frontend/src/views/admin/GroupsView.vue`。
+- **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql`、`backend/internal/repository/user_group_rate_limit_window_repo_test.go`、`backend/internal/service/admin_service_group_rate_limit_window_test.go`、`backend/internal/service/gateway_profit_control_v2_test.go`、`backend/internal/service/openai_profit_control_paths_test.go`、`backend/internal/handler/admin/user_group_rate_limit_handler_test.go`、`frontend/src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts`。
 - **来源提交**：`ae870a2978fc316e51721927d3a91f9bf2f1ceb6`、`17dcffb1c887bf432688e0f25f544b629d4b9eab`、`a80e366bbe27d3212c68ae028cf54cbd714dbe69`、`a6e3a1ceede4cdc048e1f471990b82cc406dd001`、`bbe433256021676ab389439d3bb8157cb0662372`、`7b51c2bd4b53d669d5c37aedaaa9f0ce41edf7df`。
+- **当前修复定位**：提交后运行 `git log -S'composite 请求即父分组' -- backend/internal/service/openai_profit_control.go`。
 - **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将这些实际分组不变量与上游 profit gate、`PricingAt` 和倍率计费合并。
 - **合并审查**：重点检查 gateway 预检、账户切换、sticky binding、usage worker 和图像/Grok 分支；同名 `group_id` 不代表已使用实际调度分组。
 - **删除条件**：不主动删除。只有产品不再提供分组订阅窗口和 fallback 分组归因时才可移除。
@@ -88,6 +91,7 @@
 
 ```bash
 (cd backend && go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test.*GroupRateLimit')
+(cd backend && go test -tags=unit ./internal/service -run 'Test(GatewayProfitControlCompositeSelectionKeepsParentGroupWithoutSyntheticGate|GatewayProfitControlFallbackUsesResolvedGroupRate|ProfitControl_CompositeSelectionKeepsParentGroupWithoutSyntheticGate)')
 (cd backend && go test ./internal/repository -run '^TestUserGroupRateLimitWindowRepository')
 (cd frontend && ./node_modules/.bin/vitest run src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts)
 ```
@@ -114,7 +118,7 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：从 `stable` 构建 fork 二进制和镜像，复用主 release pipeline，同时保持登录身份、发布目标、rolling tag 和更新检查彼此独立。
-- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags。
+- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；发布 base 必须取自当前检出代码的 `backend/cmd/server/VERSION` 并验证对应上游稳定 tag，不得取远端最新 tag 替代尚未合并的版本；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；只有当前运行版本本身属于 fork channel 时，rollback 才可接受 GitHub 标为 prerelease 的严格 `vX.Y.Z-fork.N`，不得混入 rc/beta 或让 plain upstream channel 跨入 fork；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags。
 - **当前代码**：`.github/workflows/stable-fork-release.yml`、`.github/workflows/release.yml`、`.goreleaser.yaml`、`backend/cmd/server/VERSION`、`backend/internal/service/update_service.go`、`backend/internal/repository/github_release_service.go`、`deploy/install.sh`。
 - **测试**：`backend/internal/service/update_service_test.go`、`backend/internal/repository/github_release_service_test.go`。
 - **来源提交**：`c6af7d1ce7c5a3962e283aa7dd843e5602fd6e74`、`59af010693739c41834f1f5e16d1c4e564abefb6`、`4a7594f2f756dd6c60cfcbd425509dc94e740cb5`、`5ad3a11a1c46561c82a9a9452d8884bfe6423a54`。
@@ -126,6 +130,7 @@
 ```bash
 (cd backend && go test -tags=unit ./internal/service -run 'Test(UpdateService|CompareVersions)')
 (cd backend && go test ./internal/repository -run '^TestGitHubRelease')
+actionlint .github/workflows/stable-fork-release.yml
 ```
 
 ## 5. 提示词审计的数据最小化与授权
@@ -136,6 +141,7 @@
 - **当前代码**：`backend/internal/securityaudit/prompt_repository.go`、`backend/internal/securityaudit/prompt_event_repository.go`、`backend/internal/securityaudit/prompt_worker.go`、`backend/internal/securityaudit/prompt_qwen3guard.go`、`backend/internal/server/routes/admin.go`、`frontend/src/features/prompt-audit/`。
 - **迁移与测试**：`backend/migrations/183_drop_prompt_audit_full_prompt.sql`、`backend/migrations/prompt_audit_privacy_migration_test.go`、`backend/internal/securityaudit/prompt_repository_integration_test.go`、`backend/internal/securityaudit/prompt_qwen3guard_test.go`、`backend/internal/server/routes/prompt_audit_route_coverage_test.go`。
 - **来源提交**：`0a6eb610c1f28b738a0b56837ecb44432b6fe739`、`2908160738b82925d3b10854c62092beead2da37`、`86484c52138a4ddabb5ffd0dfcc3791a068202be`。
+- **上游部分吸收**：`1b04e03cc4c7c23c216ae0f4830b593700b06eda` 已增加 Responses `output_text` 解析及回归；它不覆盖原始 prompt 不落库、路由授权、Qwen3Guard 完整性 fail closed 和并发清理契约，因此本能力继续保留。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：任何 schema、event snapshot、API response 或前端详情字段新增都要检查原始 prompt 泄漏；解析器不可用“缺省 Safety”代替验证。
 - **删除条件**：不主动删除。即使上游实现类似审计，也必须先证明数据最小化、路由授权和 fail-closed 测试等价。
@@ -168,11 +174,12 @@
 
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复 Codex reasoning/Agent Identity、OpenAI privacy、Alpha Search、Responses passthrough、proxy stream circuit、429 清理和 account failover 的通用正确性。
-- **行为不变量**：保留可回放的 encrypted reasoning，剥离不可回查引用；Agent Identity 只恢复一次且不泄漏 assertion；代理 quarantine 只阻断对应请求范围并维持 fail-open 语义；额度重置清理 429/runtime block；失效 OAuth 账号不能阻断切换；Responses namespace 和 compact/passthrough 决策保持协议一致；passthrough 外部取消必须先选择精确 close code，关闭客户端连接以解除阻塞写，并在 `Relay` 返回前 join 已启动的 relay worker；ingress lease loss 在连接可写时保持 1013。
-- **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
-- **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`。
+- **行为不变量**：保留可回放的 encrypted reasoning，剥离不可回查引用；Agent Identity 只恢复一次且不泄漏 assertion；代理 quarantine 只阻断对应请求范围并维持 fail-open 语义；额度重置的上游成功是不可逆结果，本地 429/runtime block 清理失败必须进入 HTTP 200 的部分成功恢复/告警流程，不得返回可重试失败并再次消耗 reset credit；`RequestScopedTransient` 只能驱动请求级重试/failover，不得降低所选账号的 scheduler health；失效 OAuth 账号不能阻断切换；Responses namespace 和 compact/passthrough 决策保持协议一致；passthrough 外部取消必须先选择精确 close code，关闭客户端连接以解除阻塞写，并在 `Relay` 返回前 join 已启动的 relay worker；ingress lease loss 在连接可写时保持 1013。
+- **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
+- **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
-- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并。
+- **上游部分吸收**：`30d2589ef0f0dc839b934b0b21a270d18b7af52b` 已在 ingress lease loss 时保留 terminal event 并补回归；它不覆盖外部取消关闭客户端连接、join 阻塞写 worker、Project/代理范围、完整 failover 与 quota 清理契约，因此本能力只缩减重叠子项，不删除。
+- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -183,6 +190,8 @@
 (cd backend && go test ./internal/util/httputil -run '^TestIsCloudflareChallengeResponse$')
 (cd backend && go test ./internal/service/openai_ws_v2 -run '^TestRelay_ContextCancellationJoinsBlockedDownstreamWrite$')
 (cd backend && go test ./internal/service -run '^TestPassthroughLifecycle_LeaseLossSendsRetryClose$')
+(cd backend && go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test(ResetCreditLocalClearFailureReturnsConsumedResult|OpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsHealthNeutralFailures|.*ResetQuota)')
+(cd frontend && ./node_modules/.bin/vitest run src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts src/views/admin/__tests__/AccountsView.batchTest.spec.ts)
 ```
 
 ## 8. Grok/xAI OAuth、协议与故障转移正确性
@@ -206,10 +215,10 @@
 ## 9. 鉴权、会话绑定与审计状态正确性
 
 - **生命周期**：`等待上游吸收`
-- **原始意图**：修复反向代理环境下 session binding 与安全元数据 IP 混用、超级管理员 TOTP 验证方式和多实例审计清理并发。
-- **行为不变量**：会话绑定使用稳定的 binding identity，审计日志仍记录真实安全元数据 IP；TOTP 必须通过用户配置的验证方式；多实例 clear 使用高水位和数据库状态 fencing，清理前已排队或并发写入的审计记录不得越过边界。
-- **当前代码**：`backend/internal/pkg/ip/ip.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/audit_log.go`、`backend/internal/service/session_binding.go`、`backend/internal/service/totp_service.go`、`backend/internal/repository/audit_log_repo.go`、`backend/internal/service/audit_log_service.go`。
-- **迁移与测试**：`backend/migrations/182_audit_log_clear_state.sql`、`backend/internal/server/middleware/session_binding_test.go`、`backend/internal/service/totp_verification_method_test.go`、`backend/internal/repository/audit_log_repo_test.go`、`backend/internal/repository/audit_log_repo_sequence_integration_test.go`、`backend/internal/service/audit_log_service_test.go`、`backend/migrations/audit_log_clear_state_migration_test.go`。
+- **原始意图**：修复反向代理环境下 session binding 与安全元数据 IP 混用、超级管理员 TOTP 验证方式、多实例审计清理并发，以及 fail-closed 验证码和 pending OAuth 会话的状态一致性。
+- **行为不变量**：会话绑定使用稳定的 binding identity，审计日志仍记录真实安全元数据 IP；TOTP 必须通过用户配置的验证方式；多实例 clear 使用高水位和数据库状态 fencing，清理前已排队或并发写入的审计记录不得越过边界；旧版或自定义 CSP 必须补齐 Aliyun CAPTCHA 的脚本和样式域名，否则不得启用会锁死鉴权入口的 fail-closed 配置；pending OAuth 发送验证码若已经进入 `choose_account_action_required`，所有 callback UI 必须立即消费该服务端状态，不得继续停留在失效的创建账号表单。
+- **当前代码**：`backend/internal/pkg/ip/ip.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/audit_log.go`、`backend/internal/server/middleware/security_headers.go`、`backend/internal/service/session_binding.go`、`backend/internal/service/totp_service.go`、`backend/internal/repository/audit_log_repo.go`、`backend/internal/service/audit_log_service.go`、`backend/internal/handler/auth_oauth_pending_flow.go`、`frontend/src/components/auth/PendingOAuthCreateAccountForm.vue`、`frontend/src/views/auth/OidcCallbackView.vue`、`frontend/src/views/auth/LinuxDoCallbackView.vue`、`frontend/src/views/auth/WechatCallbackView.vue`、`frontend/src/views/auth/DingTalkCallbackView.vue`。
+- **迁移与测试**：`backend/migrations/182_audit_log_clear_state.sql`、`backend/internal/server/middleware/session_binding_test.go`、`backend/internal/server/middleware/security_headers_test.go`、`backend/internal/service/totp_verification_method_test.go`、`backend/internal/repository/audit_log_repo_test.go`、`backend/internal/repository/audit_log_repo_sequence_integration_test.go`、`backend/internal/service/audit_log_service_test.go`、`backend/migrations/audit_log_clear_state_migration_test.go`、`frontend/src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts`、`frontend/src/views/auth/__tests__/OidcCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/LinuxDoCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts`。
 - **来源提交**：`4d47d8916691de90d50c454a9935ef5f8a764994`、`8f10a05736dff37c6d275ef33f2fb6b3436ae3ef`、`fb693041dc6fbb4aff7dd4bbf0baa410e2a2ffa3`、`a106870c834e6cf021ffb5adea24c8f2d0ccb1dd`。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：区分 trusted proxy 解析、binding key 和 audit IP；审计清理必须同时核对队列 drain、数据库锁顺序与持久化 clear watermark，不能用一个 `ClientIP` 字段重新承担全部语义。
@@ -218,19 +227,22 @@
 
 ```bash
 (cd backend && go test -tags=unit ./internal/server/middleware -run 'Test.*SessionBinding')
+(cd backend && go test -tags=unit ./internal/server/middleware -run 'Test(SecurityHeaders|EnhanceCSPPolicy)')
 (cd backend && go test -tags=unit ./internal/service -run 'Test.*(SessionBinding|TOTP|AuditLogService)')
 (cd backend && go test ./internal/repository -run '^TestAuditLogRepository')
 (cd backend && go test ./migrations -run '^TestMigration182AddsPersistentAuditClearState$')
+(cd frontend && ./node_modules/.bin/vitest run src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/views/auth/__tests__/OidcCallbackView.spec.ts src/views/auth/__tests__/LinuxDoCallbackView.spec.ts src/views/auth/__tests__/WechatCallbackView.spec.ts)
 ```
 
 ## 10. 支付定价、结果 DTO 与退款状态机正确性
 
 - **生命周期**：`等待上游吸收`
 - **原始意图**：分离余额充值倍率与订阅 CNY 定价，以 canonical USD/CNY rate 兼容旧配置；让公开支付结果不泄漏内部 DTO；退款回查以持久化 provider binding/snapshot 为准。
-- **行为不变量**：订阅金额只读取 `subscription_usd_to_cny_rate`，legacy multiplier 仅为派生兼容字段；显式 zero/disable 不得复活旧值；公开结果类型不得包含管理端字段；refund finalize 不得从当前订单猜 provider/refund ID，旧 pending audit 必须向后兼容。
-- **当前代码**：`backend/internal/service/payment_amounts.go`、`backend/internal/service/payment_config_service.go`、`backend/internal/service/payment_order.go`、`backend/internal/service/payment_refund.go`、`backend/internal/handler/payment_handler.go`、`frontend/src/views/admin/SettingsView.vue`、`frontend/src/views/user/PaymentView.vue`。
-- **测试**：`backend/internal/service/payment_config_service_test.go`、`backend/internal/service/payment_order_result_test.go`、`backend/internal/service/payment_refund_test.go`、`frontend/src/views/admin/__tests__/SettingsView.spec.ts`、`frontend/src/views/user/__tests__/PaymentView.spec.ts`。
+- **行为不变量**：订阅金额只读取 `subscription_usd_to_cny_rate`，legacy multiplier 仅为派生兼容字段；显式 zero/disable 不得复活旧值；公开结果类型不得包含管理端字段；refund finalize 不得从当前订单猜 provider/refund ID，legacy Alipay audit 缺少精确渠道请求 ID 时必须人工核销，旧 pending audit 必须向后兼容，audit 查询失败或内容损坏必须 fail closed；provider 构建、merchant snapshot 校验和本地密钥预检必须先于退款 claim 与权益扣减，退款快照含商户身份或币种而 provider 不提供元数据时必须 fail closed，Wxpay 必须同时报告基础 `appId` 与 JSAPI `mpAppId` 并允许快照匹配实际下单模式使用的任一 AppID，provider 确定性业务失败必须返回 failed 而不能伪装成 pending，Alipay `20000` 或未知错误码等不确定响应必须保留 `REFUNDING` 并复用同一渠道请求 ID；扣减、`REFUNDING` claim 和带 UUID/开始时间的 `dispatching` attempt 快照必须同事务提交，force 余额扣减必须在事务内以 `refundAmount` 为上限按最新可用余额 clamp，不能受 prepare 旧值限制，非 force 余额扣减不足必须整体回滚并要求 force，即时 provider success 不得二次扣减，provider pending 后回查成功也仍须满足同一全额扣减约束；所有 provider outcome、补偿和终态转换必须在事务内校验当前 attempt ID 并重读最新 audit，旧 attempt 的延迟结果或锁前快照不得认领新重试、重复补偿或跳过重新扣减；本地 recovery lease 的 attempt ID 与渠道请求 ID 必须分离：同一次未知结果恢复只轮换 attempt ID 并保持渠道请求 ID，`REFUND_FAILED` 新重试必须生成新的渠道请求 ID；`REFUNDING` 恢复必须等待 5 分钟租约后优先查询 provider，查询与重放分别使用独立的 1 分钟和 3 分钟上下文，只有 Stripe、Alipay、Wxpay、Airwallex 可复用同一渠道请求 ID 重放，query capability 不得绕过该白名单，其余 provider 必须人工核销；provider 明确结果必须先把当前 attempt 原子推进到 `REFUND_PENDING` 并替换 audit，再执行成功或失败终态，未知结果则保留 `REFUNDING`；`REFUND_SUCCESS` 必须保留 attempt ID、渠道请求 ID、退款 ID 和扣减结果后才能删除 mutable pending audit，回查返回的非空退款 ID 必须在终态事务锁定并重读当前 attempt 后合并；legacy pending audit 缺少退款 ID 时，Wxpay 必须按本次退款折算后的渠道金额派生查询 ID，不得使用入账金额；成功和失败终态都必须先原子 claim `REFUND_PENDING`，旧失败查询不得覆盖已提交成功或触发二次退款，失败回查返回的新退款 ID 和 provider failure 必须在锁后重读 attempt，并在终态事务或补偿失败记录事务中重写 pending audit；即使补偿仍失败而保持 `REFUND_PENDING`，也必须在写入 `REFUND_ROLLBACK_FAILED` 的同一事务保留该新退款 ID，失败补偿成功后还必须写入 `deductionRollbackOK=true` 及 `balanceRolledBack`/`subDaysRolledBack`；`REFUND_PENDING` 只能查询或人工核销，不得重新进入 provider refund；`REFUND_FAILED` 重试必须保持原金额、原因、force 和扣减意图，准备阶段必须存在 pending audit 并记录当时订单状态与上一 attempt ID，claim 必须在同一事务内同时匹配该状态和 attempt generation，缺失审计或代际变化必须 fail closed，未补偿的 `REFUND_ROLLBACK_FAILED` 必须在 provider 调用前阻断，补偿成功时必须在同一事务标记 `resolved`；审计表本次先以 expand migration 新增退款状态 `(order_id, action)`、同订单返利 APPLIED/SKIPPED claim 和同订单 `SUBSCRIPTION_ASSIGNED` 三项部分唯一约束，同时保留历史 `(order_id, action)` 全局唯一索引供旧二进制继续匹配无谓词 `ON CONFLICT`；只有下一 fork release 确认旧实例全部下线后，才可用独立 contract migration 删除全局索引并启用普通审计 action 重复追加；进入 pending 的订单状态与当前退款 ID/扣减明细必须通过匹配退款部分唯一索引的原生 upsert 在同一事务内原子替换；余额补偿只能调整 `balance`，不得增加 `total_recharged`；订阅退款必须区分“缩短”与“全量扣减”并可精确补偿，全量扣减必须保留同一订阅行、置为过期并把扣减前后期限写入 audit，失败补偿须在该行锁内合并期间发生的续期，legacy soft-deleted audit 仍可恢复；退款扣减、续期、补偿和兑换码负向调整必须在同一事务内锁定订阅行后基于最新 `expires_at` 重算；幂等分配在锁后发现订阅已被并发请求续期或暂停时，不得再次延长或重新激活；外层事务内不得提前失效订阅缓存，只有 commit 成功后才能同步清除本机 L1、分布式缓存并发布跨实例失效；分布式删除与跨实例发布必须分别使用独立有界上下文并全部尝试，错误合并上报，且缓存失效错误不得记作订阅扣减或补偿失败。
+- **当前代码**：`backend/ent/schema/payment_audit_log.go`、`backend/migrations/194_payment_audit_action_idempotency_scopes.sql`、`backend/internal/repository/user_repo.go`、`backend/internal/repository/user_subscription_repo.go`、`backend/internal/service/payment_amounts.go`、`backend/internal/service/payment_config_service.go`、`backend/internal/service/payment_order.go`、`backend/internal/service/payment_order_provider_snapshot.go`、`backend/internal/service/payment_refund.go`、`backend/internal/service/subscription_service.go`、`backend/internal/service/redeem_service.go`、`backend/internal/payment/provider/stripe.go`、`backend/internal/payment/provider/alipay.go`、`backend/internal/payment/provider/wxpay.go`、`backend/internal/payment/provider/airwallex.go`、`backend/internal/handler/payment_handler.go`、`frontend/src/views/admin/SettingsView.vue`、`frontend/src/views/admin/orders/AdminOrdersView.vue`、`frontend/src/views/user/PaymentView.vue`。
+- **测试**：`backend/internal/service/payment_config_service_test.go`、`backend/internal/service/payment_order_result_test.go`、`backend/internal/service/payment_order_provider_snapshot_test.go`、`backend/internal/service/payment_refund_test.go`、`backend/internal/service/payment_refund_integration_test.go`、`backend/internal/service/subscription_renewal_lock_test.go`、`backend/internal/service/subscription_revoke_cache_test.go`、`backend/internal/repository/user_subscription_lock_test.go`、`backend/internal/repository/user_repo_integration_test.go`、`backend/internal/repository/user_subscription_repo_integration_test.go`、`backend/internal/payment/provider/stripe_test.go`、`backend/internal/payment/provider/alipay_test.go`、`backend/internal/payment/provider/wxpay_test.go`、`frontend/src/views/admin/__tests__/SettingsView.spec.ts`、`frontend/src/views/user/__tests__/PaymentView.spec.ts`。
 - **来源提交**：`cdc7fa66b303333c00b87d5d0852a6d4af9993b7`、`d6f78bf2dc6c11b0c5fe72c4a8f2c92eaf1b7425`、`b5af02ae64ae12254add841f555fbf9538d9eeef`、`427c983f92b1dd7e3815e50bdbdc32caf641cf57`、`51775c230a7575ae0ca70dab751cece53163d35d`。
+- **当前修复定位**：提交后运行 `git log -S'recoverRefundingAttempt' -- backend/internal/service/payment_refund.go`、`git log -S'phase\": \"dispatching' -- backend/internal/service/payment_refund.go` 与 `git log -S'MerchantIdentityMetadata' -- backend/internal/payment/provider/wxpay.go`。
 - **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并。
 - **合并审查**：配置读写、下单展示、provider snapshot、退款 audit 和公开 DTO 必须一起比较；只吸收一个字段名不构成等价。
 - **删除条件**：上游分别提供 canonical rate、公开 DTO 边界和 snapshot refund 回归测试后逐项缩减，全部等价后删除。
@@ -238,6 +250,14 @@
 
 ```bash
 (cd backend && go test -tags=unit ./internal/service -run 'Test(ParsePaymentConfig|.*PaymentConfig|.*Refund)')
+(cd backend && go test -tags=unit ./internal/service ./internal/payment/provider -run 'Test(WxpayMerchantIdentityMetadataIncludesBothAppIDs|ValidateRefundProviderSnapshotMetadataFailsClosedWithoutIdentity|ValidateRefundProviderSnapshotMetadataAcceptsWxpayJSAPIAppID|ExecuteRefundRejectsWxpayMerchantMismatchBeforeClaimAndDeduction)$')
+(cd backend && go test -tags=unit ./internal/service -run 'Test(FinalizeRefundFailedRejectsStaleCallerAfterSuccess|ExecuteRefundImmediateSuccessDeductsAvailableBalanceOnce|RefundFinalizePlanUsesOrderForceForLegacyAudit)$')
+(cd backend && go test -tags=unit ./internal/service ./internal/payment/provider -run 'Test(PrepareRefundRejectsPendingOrder|ExecuteRefundRejectsPendingOrderBeforeProviderCall|RefundingAttemptRecoversFromProviderOutcomePersistenceFailure|RefundingAttemptRequiresManualReconciliationForUnsafeProvider|RefundingAttemptDoesNotReplayUnsafeQueryProvider|RefundingAttemptUsesFreshContextForReplay|QueryAndFinalizeRefundRequiresManualReconciliationForLegacyAlipayAudit|QueryAndFinalizeRefundForceUsesLatestAvailableBalance|QueryAndFinalizeRefundFailedPersistsObservedRefundID|QueryAndFinalizeRefundPreservesLegacyWxpayRefundID|AlipayRefundEndpointsRequirePersistedProviderRequestID|AlipayRefundReturnsFailedForBusinessFailure|AlipayRefundKeepsIndeterminateFailureUnresolved|AlipayRefundRejectsNilResponse|AlipayQueryRefundUsesPersistedProviderRequestID)$')
+(cd backend && go test -tags=unit ./internal/service -run 'Test(RefundRetryBlockedWhileRollbackRequiresReconciliation|RefundRetryAllowedAfterRollbackFailureIsResolved|RefundFailedWithoutPendingAuditRequiresReconciliation|RefundAttemptClaimFencesPreparedStatusAndFailedGeneration|QueryAndFinalizeRefundRetriesRollbackBeforeMarkingFailed|QueryAndFinalizeRefundKeepsPendingWhenFailedRollbackStillFails|QueryAndFinalizeRefundFailsClosedOnPendingAuditQueryError|QueryAndFinalizeRefundFailsClosedOnCorruptPendingAudit|RefundRetryPreservesParametersAndReplacesPendingAudit|RedeemSubscriptionInvalidatesReloadedL1AfterCommit)$')
+(cd backend && go test -race -tags=unit ./internal/service -run 'Test(ExecuteRefundRequiresForceWhenConcurrentSpendLeavesShortDeduction|ExecuteRefundValidatesProviderBeforeClaimAndDeduction|DelayedRefundOutcomeCannotClaimNewAttempt|RefundingAttemptRecoversFromProviderOutcomePersistenceFailure)$')
+(cd backend && go test -tags=integration ./internal/service -run 'Test(RefundAuditUpsertSurvivesConcurrentPostgresConflict|PaymentAuditIdempotencyScopesOnPostgres|PaymentAuditExpandMigrationDeduplicatesAffiliateClaims|RefundFinalizationUsesLatestAuditAfterPostgresLock|FullRefundDeductionCompensationMergesConcurrentRenewalOnPostgres)$')
+(cd backend && go test -tags=integration ./internal/repository -run '^TestUserRepoSuite/TestRefundDeductionRollbackLeavesRechargeTotalUnchanged$')
+(cd backend && go test -tags=integration ./internal/repository -run '^TestSubscriptionExpiryAdjustmentsSerializeOnPostgres$')
 (cd frontend && ./node_modules/.bin/vitest run src/views/admin/__tests__/SettingsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts)
 ```
 
@@ -279,10 +299,10 @@
 ## 13. 相对部署、示例配置与迁移恢复
 
 - **生命周期**：`等待上游吸收`
-- **原始意图**：保证 `/sub2api/api/v1` 等相对 API base 可生成绝对 gateway URL，示例 YAML 可被真实配置加载器解析，并让中断的 `CREATE UNIQUE INDEX CONCURRENTLY` 在重试前清理 invalid index。
-- **行为不变量**：浏览器和无 `window` 环境都不得把相对 base 错拼进 Axios；示例 YAML 必须持续通过配置解析；non-transactional migration 重试不得被上一次 invalid index 永久阻塞。
-- **当前代码**：`frontend/src/api/url.ts`、`deploy/config.example.yaml`、`backend/internal/repository/migrations_runner.go`。
-- **测试**：`frontend/src/api/__tests__/url.spec.ts`、`backend/internal/config/config_test.go`、`backend/internal/repository/migrations_runner_notx_test.go`。
+- **原始意图**：保证 `/sub2api/api/v1` 等相对 API base 可生成绝对 gateway URL，示例 YAML 可被真实配置加载器解析，让中断的 `CREATE UNIQUE INDEX CONCURRENTLY` 在重试前清理 invalid index，并避免首次初始化留下无默认 Project owner 的半成品管理员。
+- **行为不变量**：浏览器和无 `window` 环境都不得把相对 base 错拼进 Axios；示例 YAML 必须持续通过配置解析；non-transactional migration 重试不得被上一次 invalid index 永久阻塞；首次 super-admin 与默认 Project owner membership 必须在同一事务提交，membership 未命中唯一默认项目或写入失败时必须整体回滚并允许重试。
+- **当前代码**：`frontend/src/api/url.ts`、`deploy/config.example.yaml`、`backend/internal/repository/migrations_runner.go`、`backend/internal/setup/setup.go`。
+- **测试**：`frontend/src/api/__tests__/url.spec.ts`、`backend/internal/config/config_test.go`、`backend/internal/repository/migrations_runner_notx_test.go`、`backend/internal/setup/setup_test.go`。
 - **来源提交**：`38d6294088369255e79463d836515f7df527f271`、`b255b687ba7872ad7bc590a88a85919cc0253ec9`、`0306521a5557a2520a54c32a014ee7831929397f`。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：相对 URL、示例配置和 migration runner 分别比较；上游只修复其中一项时只删除对应子项。
@@ -293,6 +313,7 @@
 (cd frontend && ./node_modules/.bin/vitest run src/api/__tests__/url.spec.ts)
 (cd backend && go test ./internal/config -run '^TestExampleConfigIsValidYAML$')
 (cd backend && go test ./internal/repository -run '^TestApplyMigrationsFS_NonTransactionalMigration')
+(cd backend && go test ./internal/setup -run '^TestCreateInitialAdminRollsBackAndRetriesWhenDefaultProjectMembershipIsMissing$')
 ```
 
 ## 上游合并检查清单
@@ -317,10 +338,11 @@ git diff --check
 
 ## 明确排除
 
-- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
+- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `9527e0fc1d85897baf72fbb9ff32027ff3d63aaa`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
 - **已替代方案**：`6b37423465f1780dda62232d88e53676c4af15d5` 与 `bb9e60b13bab1a7f7c31d8987dfa00d5ed6da8ef` 的旧 operator/group-scope 方案已由 Project 模型替代，不单列。
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
 - **本次上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
-- **本次上游新增**：分组利润控制、API-key 上游倍率探测/同步、Codex load-shed originator 规范化和前端 refresh token race 修复均来自当前上游基线，不登记为 fork 能力。
+- **本次上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
+- **本次上游新增**：订阅续期行锁、captcha、quota refresh/recovery、dashboard/model plaza、OAuth endpoint、Grok pin、赞助商和版本变化均来自当前上游基线，不登记为 fork 能力。
