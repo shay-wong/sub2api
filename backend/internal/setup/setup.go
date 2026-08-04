@@ -415,7 +415,10 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 	if !decision.shouldCreate {
 		return false, decision.reason, nil
 	}
+	return createInitialAdmin(ctx, db, cfg, decision.reason)
+}
 
+func createInitialAdmin(ctx context.Context, db *sql.DB, cfg *SetupConfig, reason string) (bool, string, error) {
 	if strings.TrimSpace(cfg.Admin.Password) == "" {
 		password, genErr := generateSecret(16)
 		if genErr != nil {
@@ -440,8 +443,14 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var adminID int64
-	err = db.QueryRowContext(
+	err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -458,7 +467,7 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 	if err != nil {
 		return false, "", err
 	}
-	if _, err = db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, created_at, updated_at)
 		SELECT id, $1, $2, '[]'::jsonb, true, NOW(), NOW()
 		FROM projects
@@ -467,10 +476,21 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		SET role = EXCLUDED.role,
 			is_owner = EXCLUDED.is_owner,
 			updated_at = NOW()
-	`, adminID, service.ProjectRoleAdmin, service.DefaultProjectSlug); err != nil {
+	`, adminID, service.ProjectRoleAdmin, service.DefaultProjectSlug)
+	if err != nil {
 		return false, "", err
 	}
-	return true, decision.reason, nil
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, "", err
+	}
+	if affected != 1 {
+		return false, "", fmt.Errorf("default project owner membership affected %d rows, want 1", affected)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, "", err
+	}
+	return true, reason, nil
 }
 
 func writeConfigFile(cfg *SetupConfig) error {
