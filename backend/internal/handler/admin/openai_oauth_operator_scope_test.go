@@ -20,7 +20,7 @@ func newOperatorOpenAIOAuthScopeRouter(adminSvc *stubAdminService, groupIDs []in
 		operatorUserRepoStub{},
 		operatorGroupRepoStub{},
 	)
-	handler := NewOpenAIOAuthHandler(nil, adminSvc, permissionSvc, nil)
+	handler := NewOpenAIOAuthHandler(nil, adminSvc, permissionSvc, nil, nil)
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleOperator)
@@ -39,7 +39,7 @@ func newOperatorOpenAIOAuthScopeRouter(adminSvc *stubAdminService, groupIDs []in
 func newProjectOpenAIOAuthScopeRouter(adminSvc *stubAdminService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewOpenAIOAuthHandler(nil, adminSvc, nil, nil)
+	handler := NewOpenAIOAuthHandler(nil, adminSvc, nil, nil, nil)
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -47,6 +48,13 @@ type passkeyFinishRequest struct {
 	Credential   json.RawMessage `json:"credential" binding:"required"`
 }
 
+type passkeyBeginLoginRequest struct {
+	// TurnstileToken 承载阿里云验证码的 captchaVerifyParam（复用既有请求字段名）
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
 type passkeyRenameRequest struct {
 	Name string `json:"name" binding:"required"`
 }
@@ -67,6 +75,16 @@ const passkeyFinishBodyMaxBytes = 64 * 1024
 // BeginLogin starts a usernameless, discoverable-credential login ceremony.
 func (h *PasskeyHandler) BeginLogin(c *gin.Context) {
 	if !h.requirePasskeysEnabled(c) {
+		return
+	}
+	var req passkeyBeginLoginRequest
+	_ = c.ShouldBindJSON(&req)
+	if err := h.authService.VerifyActionCaptchaIfEnabled(c.Request.Context(), service.CaptchaProof{
+		TurnstileToken: req.TurnstileToken,
+		TencentTicket:  req.TencentCaptchaTicket,
+		TencentRandstr: req.TencentCaptchaRandstr,
+	}, ip.GetClientIP(c)); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	assertion, token, err := h.passkeys.BeginLogin(c.Request.Context())
