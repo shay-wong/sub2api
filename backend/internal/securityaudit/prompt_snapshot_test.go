@@ -335,7 +335,8 @@ func TestResponsesOutputTextIncludedInFullAndLatestTurnSnapshots(t *testing.T) {
 	full, err := ExtractPromptSnapshot(req)
 	require.NoError(t, err)
 	require.Contains(t, full.ScanText, "captured previous assistant output")
-	require.Contains(t, full.FullPrompt, "captured previous assistant output")
+	digest := sha256.Sum256([]byte(metadataTextForTest(full.ScanText)))
+	require.Equal(t, hex.EncodeToString(digest[:]), full.PromptHash)
 	require.Equal(t, 3, full.MessageCount)
 
 	latestTurn, err := ExtractBlockingPromptSnapshot(req, true)

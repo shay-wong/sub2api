@@ -9,7 +9,8 @@ const {
   getBatchTodayStats,
   getAllProxies,
   getAllGroups,
-  deleteAccount,
+  batchDelete,
+  getUpstreamBillingProbeSettings,
   showError,
   showSuccess,
   showInfo
@@ -19,7 +20,8 @@ const {
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
-  deleteAccount: vi.fn(),
+  batchDelete: vi.fn(),
+  getUpstreamBillingProbeSettings: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn()
@@ -31,7 +33,8 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchTodayStats,
-      delete: deleteAccount,
+      batchDelete,
+      getUpstreamBillingProbeSettings,
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
@@ -133,7 +136,8 @@ describe('admin AccountsView batch test', () => {
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
-    deleteAccount.mockReset()
+    batchDelete.mockReset()
+    getUpstreamBillingProbeSettings.mockReset()
 
     listAccounts.mockResolvedValue({
       items: [
@@ -171,7 +175,14 @@ describe('admin AccountsView batch test', () => {
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
-    deleteAccount.mockResolvedValue({ message: 'ok' })
+    batchDelete.mockResolvedValue({
+      total: 2,
+      success: 2,
+      failed: 0,
+      success_ids: [1, 2],
+      failed_ids: []
+    })
+    getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: false })
   })
 
   it('opens the batch test dialog for selected accounts', async () => {
@@ -407,8 +418,8 @@ describe('admin AccountsView batch test', () => {
       await wrapper.get('[data-test="confirm-submit"]').trigger('click')
       await flushPromises()
 
-      expect(deleteAccount).toHaveBeenCalledTimes(2)
-      expect(deleteAccount.mock.calls.map(([id]) => id)).toEqual([1, 2])
+      expect(batchDelete).toHaveBeenCalledOnce()
+      expect(batchDelete).toHaveBeenCalledWith([1, 2])
       expect(showSuccess).toHaveBeenCalledWith('admin.accounts.bulkDeleteSuccess {"count":2}')
       expect(listAccounts).toHaveBeenCalledTimes(2)
     } finally {

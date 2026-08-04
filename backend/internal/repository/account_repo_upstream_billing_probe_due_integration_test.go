@@ -163,6 +163,7 @@ func TestListDueUpstreamBillingProbeAccountsIncludesAllAPIKeyPlatforms(t *testin
 	ctx := context.Background()
 	tx := testEntTx(t)
 	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	projectID := mustDefaultProjectID(t, tx.Client())
 	now := time.Date(2026, time.July, 26, 3, 0, 0, 0, time.UTC)
 	_, err := tx.ExecContext(ctx, `
 		UPDATE accounts
@@ -178,10 +179,10 @@ func TestListDueUpstreamBillingProbeAccountsIncludesAllAPIKeyPlatforms(t *testin
 			"upstream_billing_probe": {"status": "ok", "next_probe_at": %q}
 		}`, nextProbeAt)
 		err := scanSingleRow(ctx, tx, `
-			INSERT INTO accounts (name, platform, type, status, extra)
-			VALUES ($1, $2, $3, 'active', $4::jsonb)
+			INSERT INTO accounts (project_id, name, platform, type, status, extra)
+			VALUES ($1, $2, $3, $4, 'active', $5::jsonb)
 			RETURNING id
-		`, []any{name, platform, accountType, extra}, &id)
+		`, []any{projectID, name, platform, accountType, extra}, &id)
 		require.NoError(t, err)
 		return id
 	}
@@ -194,10 +195,10 @@ func TestListDueUpstreamBillingProbeAccountsIncludesAllAPIKeyPlatforms(t *testin
 	// 未启用探测的 API-key 账号不入选。
 	var disabledID int64
 	err = scanSingleRow(ctx, tx, `
-		INSERT INTO accounts (name, platform, type, status, extra)
-		VALUES ('probe-grok-disabled', 'grok', $1, 'active', '{}'::jsonb)
+		INSERT INTO accounts (project_id, name, platform, type, status, extra)
+		VALUES ($1, 'probe-grok-disabled', 'grok', $2, 'active', '{}'::jsonb)
 		RETURNING id
-	`, []any{service.AccountTypeAPIKey}, &disabledID)
+	`, []any{projectID, service.AccountTypeAPIKey}, &disabledID)
 	require.NoError(t, err)
 
 	accounts, err := repo.ListDueUpstreamBillingProbeAccounts(ctx, now, 20)
