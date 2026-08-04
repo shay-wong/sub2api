@@ -5,12 +5,14 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -869,6 +871,131 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
 	s.Require().InDelta(expectedUsage, got.DailyUsageUSD, 1e-6, "daily usage should be correctly accumulated")
 	s.Require().InDelta(expectedUsage, got.WeeklyUsageUSD, 1e-6, "weekly usage should be correctly accumulated")
 	s.Require().InDelta(expectedUsage, got.MonthlyUsageUSD, 1e-6, "monthly usage should be correctly accumulated")
+}
+
+type observedSubscriptionForUpdateRepo struct {
+	service.UserSubscriptionRepository
+	reader interface {
+		GetByIDForUpdate(context.Context, int64) (*service.UserSubscription, error)
+	}
+	started  chan struct{}
+	acquired chan struct{}
+	start    sync.Once
+	acquire  sync.Once
+}
+
+func (r *observedSubscriptionForUpdateRepo) read(ctx context.Context, id int64, forUpdate bool) (*service.UserSubscription, error) {
+	r.start.Do(func() { close(r.started) })
+	var sub *service.UserSubscription
+	var err error
+	if forUpdate {
+		sub, err = r.reader.GetByIDForUpdate(ctx, id)
+	} else {
+		sub, err = r.UserSubscriptionRepository.GetByID(ctx, id)
+	}
+	r.acquire.Do(func() { close(r.acquired) })
+	return sub, err
+}
+
+func (r *observedSubscriptionForUpdateRepo) GetByID(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	return r.read(ctx, id, false)
+}
+
+func (r *observedSubscriptionForUpdateRepo) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	return r.read(ctx, id, true)
+}
+
+func TestSubscriptionExpiryAdjustmentsSerializeOnPostgres(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	user, err := client.User.Create().
+		SetEmail("subscription-lock-" + suffix + "@example.com").
+		SetPasswordHash("test").
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetProjectID(mustDefaultProjectID(t, client)).
+		SetName("subscription-lock-" + suffix).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM user_subscriptions WHERE user_id = $1`, user.ID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id = $1`, group.ID)
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, user.ID)
+	})
+
+	for _, tc := range []struct {
+		name        string
+		firstDays   int
+		secondDays  int
+		wantNetDays int
+	}{
+		{name: "refund deduction preserves concurrent renewal", firstDays: -30, secondDays: 10, wantNetDays: -20},
+		{name: "refund compensation preserves concurrent deduction", firstDays: 30, secondDays: -10, wantNetDays: 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseExpiry := time.Now().UTC().AddDate(0, 0, 60).Truncate(time.Microsecond)
+			sub, err := client.UserSubscription.Create().
+				SetUserID(user.ID).
+				SetGroupID(group.ID).
+				SetStartsAt(time.Now().UTC()).
+				SetExpiresAt(baseExpiry).
+				SetStatus(service.SubscriptionStatusActive).
+				SetAssignedAt(time.Now().UTC()).
+				SetNotes("").
+				Save(ctx)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = client.UserSubscription.DeleteOneID(sub.ID).Exec(ctx) })
+
+			baseRepo := NewUserSubscriptionRepository(client)
+			firstService := service.NewSubscriptionService(nil, baseRepo, nil, client, nil)
+			firstTx, err := client.Tx(ctx)
+			require.NoError(t, err)
+			firstTxOpen := true
+			defer func() {
+				if firstTxOpen {
+					_ = firstTx.Rollback()
+				}
+			}()
+
+			_, err = firstService.ExtendSubscription(dbent.NewTxContext(ctx, firstTx), sub.ID, tc.firstDays)
+			require.NoError(t, err)
+
+			reader := baseRepo.(interface {
+				GetByIDForUpdate(context.Context, int64) (*service.UserSubscription, error)
+			})
+			observedRepo := &observedSubscriptionForUpdateRepo{
+				UserSubscriptionRepository: baseRepo,
+				reader:                     reader,
+				started:                    make(chan struct{}),
+				acquired:                   make(chan struct{}),
+			}
+			secondService := service.NewSubscriptionService(nil, observedRepo, nil, client, nil)
+			secondErr := make(chan error, 1)
+			go func() {
+				_, adjustErr := secondService.ExtendSubscription(ctx, sub.ID, tc.secondDays)
+				secondErr <- adjustErr
+			}()
+
+			<-observedRepo.started
+			select {
+			case <-observedRepo.acquired:
+				t.Fatal("concurrent adjustment acquired the subscription before the first transaction committed")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			require.NoError(t, firstTx.Commit())
+			firstTxOpen = false
+			require.NoError(t, <-secondErr)
+
+			got, err := baseRepo.GetByID(ctx, sub.ID)
+			require.NoError(t, err)
+			require.WithinDuration(t, baseExpiry.AddDate(0, 0, tc.wantNetDays), got.ExpiresAt, time.Microsecond)
+		})
+	}
 }
 
 func (s *UserSubscriptionRepoSuite) TestTxContext_RollbackIsolation() {

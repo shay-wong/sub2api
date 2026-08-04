@@ -105,25 +105,24 @@ func bindSubscriptionToActiveProjectProfile(ctx context.Context, client *dbent.C
 }
 
 func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*service.UserSubscription, error) {
-	client := clientFromContext(ctx, r.client)
-	m, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
-		WithUser().
-		WithGroup().
-		WithAssignedByUser().
-		Only(ctx)
-	if err != nil {
-		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
-	}
-	return userSubscriptionEntityToService(m), nil
+	return r.getByID(ctx, id, false)
 }
 
 func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	return r.getByID(ctx, id, true)
+}
+
+func (r *userSubscriptionRepository) getByID(ctx context.Context, id int64, forUpdate bool) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
-	m, err := client.UserSubscription.Query().
-		Where(usersubscription.IDEQ(id)).
-		ForUpdate().
-		Only(ctx)
+	query := client.UserSubscription.Query().
+		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		WithUser().
+		WithGroup().
+		WithAssignedByUser()
+	if forUpdate {
+		query = query.ForUpdate()
+	}
+	m, err := query.Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}

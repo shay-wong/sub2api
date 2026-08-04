@@ -73,11 +73,15 @@ func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	lockedExpiry := now.AddDate(0, 0, 20)
 	windowStart := now.Add(-24 * time.Hour)
+	user := &User{ID: 11}
+	group := &Group{ID: 13}
+	assignedBy := &User{ID: 17}
 	repo := &lockingRenewalRepo{
 		stale: UserSubscription{ID: 7, UserID: 11, GroupID: 13, ExpiresAt: now.Add(-time.Hour), Status: SubscriptionStatusExpired, Notes: "stale"},
 		current: UserSubscription{
 			ID: 7, UserID: 11, GroupID: 13, StartsAt: now.AddDate(0, 0, -10), ExpiresAt: lockedExpiry,
 			Status: SubscriptionStatusSuspended, Notes: "current", DailyWindowStart: &windowStart, DailyUsageUSD: 4,
+			User: user, Group: group, AssignedByUser: assignedBy,
 		},
 	}
 	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{ID: 13, SubscriptionType: SubscriptionTypeSubscription}}, repo, nil, nil, nil)
@@ -95,6 +99,9 @@ func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
 	require.Equal(t, "current\nrenewed", sub.Notes)
 	require.Equal(t, windowStart, *sub.DailyWindowStart)
 	require.Equal(t, float64(4), sub.DailyUsageUSD)
+	require.Same(t, user, sub.User)
+	require.Same(t, group, sub.Group)
+	require.Same(t, assignedBy, sub.AssignedByUser)
 }
 
 func TestAssignOrExtendSubscriptionSerializedRenewalsAccumulateDays(t *testing.T) {
@@ -140,4 +147,28 @@ func TestAssignSubscriptionDoesNotReactivateRowSuspendedAfterStaleRead(t *testin
 	require.Equal(t, SubscriptionStatusSuspended, sub.Status)
 	require.Equal(t, current.ExpiresAt, sub.ExpiresAt)
 	require.Equal(t, current.Notes, sub.Notes)
+}
+
+func TestAssignSubscriptionDoesNotExtendRowRenewedAfterStaleRead(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	current := UserSubscription{
+		ID: 37, UserID: 41, GroupID: 43, StartsAt: now, ExpiresAt: now.AddDate(0, 0, 30),
+		Status: SubscriptionStatusActive, Notes: "assignment",
+	}
+	repo := &lockingRenewalRepo{
+		stale:   UserSubscription{ID: 37, UserID: 41, GroupID: 43, ExpiresAt: now.Add(-time.Hour), Status: SubscriptionStatusExpired},
+		current: current,
+	}
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{ID: 43, SubscriptionType: SubscriptionTypeSubscription}}, repo, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	sub, reused, err := svc.assignSubscriptionWithReuse(context.Background(), &AssignSubscriptionInput{
+		UserID: 41, GroupID: 43, ValidityDays: 30, Notes: "assignment",
+	})
+
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Equal(t, 1, repo.lockReads)
+	require.Equal(t, current, repo.current)
+	require.Equal(t, current, *sub)
 }

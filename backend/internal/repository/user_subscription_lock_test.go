@@ -8,7 +8,9 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/group"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/stretchr/testify/require"
 
@@ -17,8 +19,8 @@ import (
 )
 
 func TestUserSubscriptionGetByIDForUpdateLocksRow(t *testing.T) {
-	var capturedSQL string
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &capturedSQL}))
+	var capturedSQL []string
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueriesMatcher{actual: &capturedSQL}))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -31,13 +33,26 @@ func TestUserSubscriptionGetByIDForUpdateLocksRow(t *testing.T) {
 	mock.ExpectQuery("locked subscription").WillReturnRows(
 		sqlmock.NewRows(usersubscription.Columns).AddRow(
 			int64(7), now, now, nil, int64(11), int64(13), now, now.AddDate(0, 0, 30), "active",
-			nil, nil, nil, 0.0, 0.0, 0.0, nil, now, "renewal",
+			nil, nil, nil, 0.0, 0.0, 0.0, int64(17), now, "renewal",
 		),
 	)
+	mock.ExpectQuery("subscription user").WillReturnRows(sqlmock.NewRows(user.Columns))
+	mock.ExpectQuery("subscription group").WillReturnRows(sqlmock.NewRows(group.Columns))
+	mock.ExpectQuery("subscription assigned by user").WillReturnRows(sqlmock.NewRows(user.Columns))
 
 	sub, err := repo.GetByIDForUpdate(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, int64(7), sub.ID)
 	require.NoError(t, mock.ExpectationsWereMet())
-	require.Contains(t, strings.ToUpper(normalizeSQLWhitespace(capturedSQL)), "FOR UPDATE")
+	require.Len(t, capturedSQL, 4)
+	require.Contains(t, strings.ToUpper(normalizeSQLWhitespace(capturedSQL[0])), "FOR UPDATE")
+}
+
+type captureEntQueriesMatcher struct {
+	actual *[]string
+}
+
+func (m captureEntQueriesMatcher) Match(_, actual string) error {
+	*m.actual = append(*m.actual, actual)
+	return nil
 }

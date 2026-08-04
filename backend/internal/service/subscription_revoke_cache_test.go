@@ -4,12 +4,45 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+type failingSubscriptionInvalidationCache struct {
+	billingCacheWorkerStub
+	invalidateErr error
+	publishCalls  int
+}
+
+func (c *failingSubscriptionInvalidationCache) InvalidateSubscriptionCache(context.Context, int64, int64) error {
+	return c.invalidateErr
+}
+
+func (c *failingSubscriptionInvalidationCache) PublishSubscriptionCacheInvalidation(context.Context, string) error {
+	c.publishCalls++
+	return nil
+}
+
+func (c *failingSubscriptionInvalidationCache) SubscribeSubscriptionCacheInvalidation(context.Context, func(string)) error {
+	return nil
+}
+
+func TestInvalidateSubscriptionCaches_PublishesAfterDistributedInvalidationFailure(t *testing.T) {
+	invalidateErr := errors.New("injected distributed invalidation failure")
+	cache := &failingSubscriptionInvalidationCache{invalidateErr: invalidateErr}
+	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+
+	svc := &SubscriptionService{billingCacheService: billingCacheSvc}
+	err := svc.invalidateSubscriptionCaches(10, 20)
+
+	require.ErrorIs(t, err, invalidateErr)
+	require.Equal(t, 1, cache.publishCalls, "分布式删除失败也必须广播跨实例 L1 失效")
+}
 
 type revokeCacheUserSubRepoStub struct {
 	userSubRepoNoop
@@ -25,6 +58,18 @@ func (r *revokeCacheUserSubRepoStub) GetByID(_ context.Context, id int64) (*User
 	}
 	cp := *r.sub
 	return &cp, nil
+}
+
+func (r *revokeCacheUserSubRepoStub) GetByIDForUpdate(ctx context.Context, id int64) (*UserSubscription, error) {
+	return r.GetByID(ctx, id)
+}
+
+func (r *revokeCacheUserSubRepoStub) ExtendExpiry(_ context.Context, id int64, expiresAt time.Time) error {
+	if r.sub == nil || r.sub.ID != id || r.deleted {
+		return ErrSubscriptionNotFound
+	}
+	r.sub.ExpiresAt = expiresAt
+	return nil
 }
 
 func (r *revokeCacheUserSubRepoStub) Delete(_ context.Context, id int64) error {
@@ -73,6 +118,93 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 	_, err = svc.GetActiveSubscription(context.Background(), 10, 20)
 	require.ErrorIs(t, err, ErrSubscriptionNotFound)
 	require.Equal(t, 2, repo.getActiveCalls, "撤销后应回源确认订阅已不存在，不能命中旧 L1")
+}
+
+func TestRedeemSubscriptionInvalidatesReloadedL1AfterCommit(t *testing.T) {
+	const (
+		userID  = int64(10)
+		groupID = int64(20)
+	)
+	repo := &revokeCacheUserSubRepoStub{
+		sub: &UserSubscription{
+			ID:        1,
+			UserID:    userID,
+			GroupID:   groupID,
+			Status:    SubscriptionStatusActive,
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	subscriptionSvc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, &config.Config{
+		SubscriptionCache: config.SubscriptionCacheConfig{
+			L1Size:       16,
+			L1TTLSeconds: 60,
+		},
+	})
+	t.Cleanup(subscriptionSvc.Stop)
+
+	_, err := subscriptionSvc.GetActiveSubscription(context.Background(), userID, groupID)
+	require.NoError(t, err)
+	subscriptionSvc.subCacheL1.Wait()
+	require.Equal(t, 1, repo.getActiveCalls)
+
+	// Model a reader repopulating the old entitlement after an early invalidation
+	// but before the outer redeem transaction commits.
+	subscriptionSvc.InvalidateSubCacheSync(userID, groupID)
+	_, err = subscriptionSvc.GetActiveSubscription(context.Background(), userID, groupID)
+	require.NoError(t, err)
+	subscriptionSvc.subCacheL1.Wait()
+	require.Equal(t, 2, repo.getActiveCalls)
+
+	repo.deleted = true
+	redeemSvc := &RedeemService{subscriptionService: subscriptionSvc}
+	redeemGroupID := groupID
+	redeemSvc.invalidateRedeemCaches(context.Background(), userID, &RedeemCode{
+		Type:    RedeemTypeSubscription,
+		GroupID: &redeemGroupID,
+	})
+
+	_, err = subscriptionSvc.GetActiveSubscription(context.Background(), userID, groupID)
+	require.ErrorIs(t, err, ErrSubscriptionNotFound)
+	require.Equal(t, 3, repo.getActiveCalls, "提交后必须再次清除并发回填的旧 L1 权益")
+}
+
+func TestExtendSubscriptionPublishesAfterDistributedInvalidationFailure(t *testing.T) {
+	const (
+		userID  = int64(10)
+		groupID = int64(20)
+	)
+	repo := &revokeCacheUserSubRepoStub{sub: &UserSubscription{
+		ID:        1,
+		UserID:    userID,
+		GroupID:   groupID,
+		Status:    SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(48 * time.Hour),
+	}}
+	cache := &failingSubscriptionInvalidationCache{
+		invalidateErr: errors.New("injected distributed invalidation failure"),
+	}
+	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, billingCacheSvc, nil, &config.Config{
+		SubscriptionCache: config.SubscriptionCacheConfig{
+			L1Size:       16,
+			L1TTLSeconds: 60,
+		},
+	})
+	t.Cleanup(svc.Stop)
+
+	_, err := svc.GetActiveSubscription(context.Background(), userID, groupID)
+	require.NoError(t, err)
+	svc.subCacheL1.Wait()
+	require.Equal(t, 1, repo.getActiveCalls)
+
+	_, err = svc.ExtendSubscription(context.Background(), 1, -1)
+	require.NoError(t, err)
+	require.Equal(t, 1, cache.publishCalls, "分布式删除失败也必须广播管理员订阅调整")
+
+	_, err = svc.GetActiveSubscription(context.Background(), userID, groupID)
+	require.NoError(t, err)
+	require.Equal(t, 2, repo.getActiveCalls, "管理员订阅调整提交后必须同步清除本机 L1")
 }
 
 type restoreUserSubRepoStub struct {
