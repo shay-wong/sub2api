@@ -146,9 +146,9 @@ func WithOpenAIProfitControlSuppressed(ctx context.Context) context.Context {
 
 // WithOpenAITurnPricingContext 在长连接（Responses WS）的每个 turn 开始重新
 // 冻结 pricingAt 并按当前配置重装利润门，使 turn 的准入与计费同源：峰前建连
-// 保活不再让后续 turn 继续按建连时刻的谷价定价。连接可能被调度到与入口分组
-// 不同的分组（composite 成员分组），turn 级重装以连接上已装门的调度分组为准；
-// 连接从未装门时才回退入口分组。抑制标记下只刷新 pricingAt。
+// 保活不再让后续 turn 继续按建连时刻的谷价定价。fallback 可能把连接调度到与
+// 入口不同的分组，turn 级重装以连接上已装门的实际分组为准；连接从未装门时
+// 才回退入口分组。抑制标记下只刷新 pricingAt。
 func (s *OpenAIGatewayService) WithOpenAITurnPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
@@ -203,8 +203,8 @@ func (s *OpenAIGatewayService) withOpenAIProfitControlGate(ctx context.Context, 
 	gate := s.resolveOpenAIProfitControlGate(ctx, groupID)
 	if gate == nil {
 		// 被调度分组无门（未启用/非 openai/配置读取失败）而 ctx 带着其他分组的
-		// 请求门时清除之：门配置取被调度分组，父分组阈值不得泄漏到成员分组
-		//（composite/模型路由等跨分组调度）。typed-nil 覆盖值由否决点按无门放行。
+		// 请求门时清除之：fallback 后原分组阈值不得泄漏到实际分组。
+		// typed-nil 覆盖值由否决点按无门放行。
 		if existing, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && existing != nil && groupID != nil && existing.groupID != *groupID {
 			return context.WithValue(ctx, openAIProfitControlGateCtxKey{}, (*openAIProfitControlGate)(nil))
 		}
@@ -219,8 +219,8 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 		return nil
 	}
 	// 门配置取被调度分组。直连请求（ctx 认证分组即调度分组，生产绝大多数流量）
-	// 直接复用 auth cache 分组，热路径零额外查询；composite 父分组路由到成员
-	// 分组等 ID 不一致场景才回源仓库读取。auth 快照的分组字段完备性由
+	// 直接复用 auth cache 分组，热路径零额外查询；fallback 等 ID 不一致场景
+	// 才回源仓库读取。auth 快照的分组字段完备性由
 	// GetByKeyForAuth 投影 + 集成测试保证（防投影漏列导致门静默失效）。
 	var group *Group
 	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == *groupID {
@@ -245,10 +245,9 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	if !ok {
 		pricingAt = timezone.Now()
 	}
-	// D 与计费完全同源（RecordUsage 组合）：计费永远按 apiKey 自身分组
-	//（composite 请求即父分组）的"用户覆盖 ?? 分组默认 × 高峰因子"计算，
-	// 因此优先取认证中间件放入 ctx 的分组；ctx 中无有效分组（内部调用）时
-	// 退回调度分组组合，直连 openai 分组场景两者等价。
+	// D 与计费完全同源（RecordUsage 组合）：优先使用 ctx 中的实际分组；真实
+	// fallback 为 fallback 分组，composite 因只切换目标平台而仍是 API Key 父分组。
+	// ctx 中无有效分组（内部调用）时退回门配置分组。
 	billingGroup := group
 	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) {
 		billingGroup = ctxGroup
@@ -270,8 +269,8 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 }
 
 // attachSelectionProfitGate 把调度上下文里生效的利润门记录到选号结果上。门在
-// 选号函数内部的局部 ctx 上安装（composite/fallback 路由还可能解析出与入口
-// 分组不同的门），不随返回值离开调度栈；结果携带后 handler 才能对"真实过滤了
+// 选号函数内部的局部 ctx 上安装（fallback 可能解析出与入口不同的分组），
+// 不随返回值离开调度栈；结果携带后 handler 才能对"真实过滤了
 // 候选的那个门"做抢槽后终检与准入后绑定。
 func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) *AccountSelectionResult {
 	if sel == nil {

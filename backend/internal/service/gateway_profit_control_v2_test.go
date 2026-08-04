@@ -76,8 +76,8 @@ func TestGatewayProfitControlInstallsForFivePlatformsOnlyOnTokenRequests(t *test
 	}
 }
 
-func TestGatewayProfitControlCompositeBillingUsesScheduledMemberConfig(t *testing.T) {
-	billingGroup := &Group{
+func TestGatewayProfitControlCompositeSelectionKeepsParentGroupWithoutSyntheticGate(t *testing.T) {
+	group := &Group{
 		ID:               201,
 		Platform:         PlatformComposite,
 		Status:           StatusActive,
@@ -85,28 +85,59 @@ func TestGatewayProfitControlCompositeBillingUsesScheduledMemberConfig(t *testin
 		RateMultiplier:   0.4,
 		SubscriptionType: SubscriptionTypeStandard,
 	}
-	memberGroup := gatewayProfitTestGroup(202, PlatformAnthropic)
-	memberGroup.RateMultiplier = 99
-	memberGroup.ProfitMinMargin = 0.25
-
-	ctx := context.WithValue(context.Background(), ctxkey.Group, billingGroup)
-	ctx, pricingAt := WithGatewayTokenRequestPricing(ctx)
-	svc := &GatewayService{
-		schedulerSnapshot: NewSchedulerSnapshotService(
-			nil,
-			nil,
-			nil,
-			profitControlGroupRepo{group: memberGroup},
-			nil,
-		),
+	account := gatewayProfitTestAccount(202, PlatformAnthropic, 0.9, group.ID)
+	repo := &mockAccountRepoForPlatform{
+		accounts:     []Account{account},
+		accountsByID: map[int64]*Account{account.ID: &account},
 	}
-	ctx = svc.withGatewayProfitControlGate(ctx, &memberGroup.ID)
-	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
-	require.NotNil(t, gate)
-	require.Equal(t, memberGroup.ID, gate.groupID)
-	require.Equal(t, PlatformAnthropic, gate.platform)
-	require.Equal(t, pricingAt, gate.pricingAt)
-	require.InDelta(t, 0.4*(1-0.25), gate.threshold, 1e-12, "D 必须取 composite 计费父分组，margin 取被调度成员分组")
+	svc := &GatewayService{accountRepo: repo, groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{group.ID: group}}, cfg: testConfig()}
+	ctx, _ := WithGatewayTokenRequestPricing(context.WithValue(context.Background(), ctxkey.Group, group))
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &group.ID, "", "claude-test", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, group.ID, *selection.GroupID)
+	require.Same(t, group, selection.Group)
+	require.False(t, selection.ProfitGateActive(), "composite 只解析目标平台，不得凭空构造成员分组利润门")
+}
+
+func TestGatewayProfitControlFallbackUsesResolvedGroupRate(t *testing.T) {
+	groupID := int64(211)
+	fallbackID := int64(212)
+	group := &Group{
+		ID:              groupID,
+		Platform:        PlatformAnthropic,
+		Status:          StatusActive,
+		Hydrated:        true,
+		ClaudeCodeOnly:  true,
+		FallbackGroupID: &fallbackID,
+		RateMultiplier:  1,
+	}
+	fallback := gatewayProfitTestGroup(fallbackID, PlatformAnthropic)
+	fallback.RateMultiplier = 0.4
+	fallback.ProfitMinMargin = 0.25
+	cheap := gatewayProfitTestAccount(213, PlatformAnthropic, 0.2, fallbackID)
+	expensive := gatewayProfitTestAccount(214, PlatformAnthropic, 0.35, fallbackID)
+	repo := &mockAccountRepoForPlatform{
+		accounts:     []Account{expensive, cheap},
+		accountsByID: map[int64]*Account{cheap.ID: &cheap, expensive.ID: &expensive},
+	}
+	svc := &GatewayService{
+		accountRepo: repo,
+		groupRepo:   &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group, fallbackID: fallback}},
+		cfg:         testConfig(),
+	}
+	ctx, _ := WithGatewayTokenRequestPricing(context.WithValue(context.Background(), ctxkey.Group, group))
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "", "claude-test", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, cheap.ID, selection.Account.ID)
+	require.Equal(t, fallbackID, *selection.GroupID)
+	require.Same(t, fallback, selection.Group)
+	require.NotNil(t, selection.profitGate)
+	require.Equal(t, fallbackID, selection.profitGate.groupID)
+	require.InDelta(t, 0.4*(1-0.25), selection.profitGate.threshold, 1e-12)
 }
 
 func TestGatewayProfitControlGroupLoadFailureClearsForeignGate(t *testing.T) {
@@ -152,7 +183,7 @@ func (profitControlFailingGroupRepo) GetByIDLite(context.Context, int64) (*Group
 	return nil, errors.New("group cache unavailable")
 }
 
-// 见 profitControlGroupRepo.GetByID：利润门必须走不带账号计数聚合的 lite 读取。
+// 利润门必须走不带账号计数聚合的 lite 读取。
 func (profitControlFailingGroupRepo) GetByID(context.Context, int64) (*Group, error) {
 	panic("profit control gate must read groups via GetByIDLite (no account-count aggregation)")
 }

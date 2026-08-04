@@ -1456,7 +1456,7 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics_DisabledNoOp(t *test
 	require.Equal(t, OpenAIAccountSchedulerMetricsSnapshot{}, snapshot)
 }
 
-func TestOpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsNeutralCapabilityMiss(t *testing.T) {
+func TestOpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsHealthNeutralFailures(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -1468,6 +1468,12 @@ func TestOpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsNeutralCap
 	svc.ReportOpenAIAccountScheduleFailover(accountID, &UpstreamFailoverError{
 		StatusCode:              http.StatusNotFound,
 		NeutralForAccountHealth: true,
+	})
+	require.Nil(t, svc.openaiAccountStats)
+
+	svc.ReportOpenAIAccountScheduleFailover(accountID, &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		RequestScopedTransient: true,
 	})
 	require.Nil(t, svc.openaiAccountStats)
 

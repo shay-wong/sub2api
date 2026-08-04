@@ -2270,7 +2270,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64
 }
 
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleFailover(accountID int64, failoverErr *UpstreamFailoverError) {
-	if failoverErr != nil && failoverErr.NeutralForAccountHealth {
+	if failoverErr != nil && (failoverErr.NeutralForAccountHealth || failoverErr.RequestScopedTransient) {
 		return
 	}
 	s.ReportOpenAIAccountScheduleResult(accountID, "", false, nil)

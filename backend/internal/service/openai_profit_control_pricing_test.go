@@ -63,12 +63,12 @@ func TestProfitControl_GateReuseKeepsThresholdAcrossFailover(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, gate, reGate, "failover 重入必须复用同一门，阈值不得中途变化")
 
-	// 换分组（composite/模型路由成员调度）重新解析；成员分组无门时必须清除
+	// fallback 换分组时重新解析；实际分组无门时必须清除
 	// 父分组门，阈值不得跨组泄漏。
 	otherID := int64(63)
 	otherCtx := svc.withOpenAIProfitControlGate(reCtx, &otherID)
 	otherGate, _ := otherCtx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
-	require.Nil(t, otherGate, "成员分组未启用利润控制时父分组门必须清除")
+	require.Nil(t, otherGate, "fallback 分组未启用利润控制时原分组门必须清除")
 	now := time.Now()
 	expensive := upstreamCostTestAccount(8, UpstreamBillingProbeStatusOK, 0.9, now.Add(-time.Minute), 30*time.Minute)
 	vetoed, _ := openAIProfitControlVetoReason(otherCtx, expensive)
@@ -228,7 +228,7 @@ func TestProfitControl_TurnPricingContext(t *testing.T) {
 		scheduledGroupID := int64(64)
 		scheduled := profitControlTestGroup(scheduledGroupID, 0.5, 0)
 		connCtx, _ := svc.WithOpenAIRequestPricingContext(profitControlTestCtx(scheduled), &scheduledGroupID)
-		// 入口分组与调度分组不同（composite 成员分组场景）：turn 重装取门的分组。
+		// 入口分组与 fallback 调度分组不同：turn 重装取实际门的分组。
 		entryGroupID := int64(65)
 		turnCtx, _ := svc.WithOpenAITurnPricingContext(connCtx, &entryGroupID)
 		gate, ok := turnCtx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)

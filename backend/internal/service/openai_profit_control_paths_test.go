@@ -5,7 +5,7 @@ package service
 // 覆盖：高级调度器候选池（openai_profit_control_test.go）、legacy 引擎、
 // previous_response WSv2 粘连（跳过复用但保留绑定 + 倍率恢复重粘连）、
 // failover 排除不回收、抢槽后终检、倍率恢复重新准入、
-// 用户覆盖倍率 D、composite 计费分组与调度分组分离。
+// 用户覆盖倍率 D、composite 父分组归因与 fallback 实际分组归因。
 
 import (
 	"context"
@@ -261,43 +261,50 @@ func TestProfitControl_GateUsesUserOverrideRate(t *testing.T) {
 	require.InDelta(t, 2.0, gate.threshold, 1e-12)
 }
 
-type profitControlGroupRepo struct {
-	GroupRepository
-	group *Group
-}
-
-func (r profitControlGroupRepo) GetByIDLite(context.Context, int64) (*Group, error) {
-	return r.group, nil
-}
-
-// GetByID 故意 panic：利润门只需要分组配置，不需要 GetByID 附带的账号计数
-// 聚合查询。装门走 GetByID 会在 composite/模型路由/fallback 的每次装门（WS
-// 每 turn 一次）上多打一条聚合，且发生在「是否启用利润控制」判定之前。
-func (r profitControlGroupRepo) GetByID(context.Context, int64) (*Group, error) {
-	panic("profit control gate must read groups via GetByIDLite (no account-count aggregation)")
-}
-
-// composite 路由：门配置取被调度成员分组，D 取请求真实计费分组（ctx 认证分组）。
-func TestProfitControl_CompositeUsesBillingGroupRate(t *testing.T) {
-	memberGroupID := int64(7)
-	memberGroup := profitControlTestGroup(memberGroupID, 0.5, 0)
-	memberGroup.RateMultiplier = 99 // 若 D 误取成员分组倍率，阈值会是 49.5
-
-	billingGroup := &Group{
-		ID:             1001,
-		Platform:       PlatformComposite,
-		Status:         StatusActive,
-		Hydrated:       true,
-		RateMultiplier: 1.0,
+// composite 路由只决定目标平台；当前模型没有成员分组 ID，因此选号和 usage
+// 归因都必须保留 API Key 所属父分组，且 composite 本身不能安装利润门。
+func TestProfitControl_CompositeSelectionKeepsParentGroupWithoutSyntheticGate(t *testing.T) {
+	groupID := int64(1001)
+	group := &Group{
+		ID:               groupID,
+		Platform:         PlatformComposite,
+		Status:           StatusActive,
+		Hydrated:         true,
+		RateMultiplier:   1,
+		SubscriptionType: SubscriptionTypeStandard,
 	}
+	account := upstreamCostTestAccount(7, UpstreamBillingProbeStatusOK, 0.9, time.Now().Add(-time.Minute), 30*time.Minute)
+	profitControlTestAccountWithRate(account, 0.9)
+	account.Status = StatusActive
+	account.Schedulable = true
+	account.Concurrency = 2
+	account.AccountGroups = []AccountGroup{{AccountID: account.ID, GroupID: groupID}}
+	account.GroupIDs = []int64{groupID}
 	svc := &OpenAIGatewayService{
-		schedulerSnapshot: &SchedulerSnapshotService{groupRepo: profitControlGroupRepo{group: memberGroup}},
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
+		cfg:         &config.Config{},
 	}
+	ctx := WithCompositeRouteDecision(profitControlTestCtx(group), CompositeRouteDecision{
+		Matched:        true,
+		Source:         CompositeRouteSourceDetector,
+		GroupID:        groupID,
+		PublicModel:    "gpt-test",
+		TargetPlatform: PlatformOpenAI,
+		UpstreamModel:  "gpt-test",
+		Endpoint:       CompositeRouteEndpointAny,
+	})
+	ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &groupID)
 
-	ctx := profitControlTestCtx(billingGroup)
-	gate := svc.resolveOpenAIProfitControlGate(ctx, &memberGroupID)
-	require.NotNil(t, gate)
-	require.InDelta(t, 0.5, gate.threshold, 1e-12, "D 必须来自计费分组（composite 父分组）倍率 1.0")
+	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "", "", "gpt-test", nil,
+		OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions,
+		false, false, true, PlatformOpenAI,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, groupID, *selection.GroupID)
+	require.Same(t, group, selection.Group)
+	require.False(t, selection.ProfitGateActive())
 }
 
 // legacy 引擎与 DB recheck 共用的资格判定直接覆盖利润门。
