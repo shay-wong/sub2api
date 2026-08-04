@@ -195,6 +195,34 @@ func TestUpdateServiceListRollbackVersionsSortsUnorderedInput(t *testing.T) {
 	require.Equal(t, "0.1.144", versions[2].Version)
 }
 
+func TestUpdateServiceListRollbackVersionsAcceptsForkPrereleasesOnly(t *testing.T) {
+	releases := []*GitHubRelease{
+		{TagName: "v0.1.146-fork.2", Prerelease: true},
+		{TagName: "v0.1.146-rc1", Prerelease: true},
+		{TagName: "v0.1.145-beta.1", Prerelease: true},
+		{TagName: "v0.1.144-fork.1", Prerelease: true, Draft: true},
+	}
+	svc := newRollbackTestService("0.1.147-fork.1", releases)
+
+	versions, err := svc.ListRollbackVersions(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, []RollbackVersion{{Version: "0.1.146-fork.2"}}, versions)
+}
+
+func TestUpdateServiceListRollbackVersionsDoesNotCrossIntoForkChannel(t *testing.T) {
+	svc := newRollbackTestService("0.1.147", []*GitHubRelease{
+		{TagName: "v0.1.146-fork.2", Prerelease: true},
+		{TagName: "v0.1.145-fork.1", Prerelease: false},
+		{TagName: "v0.1.146", PublishedAt: "2026-07-07T00:00:00Z"},
+	})
+
+	versions, err := svc.ListRollbackVersions(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, []RollbackVersion{{Version: "0.1.146", PublishedAt: "2026-07-07T00:00:00Z"}}, versions)
+}
+
 func TestUpdateServiceListRollbackVersionsEmptyWhenNoneOlder(t *testing.T) {
 	releases := []*GitHubRelease{
 		{TagName: "v0.1.147"},

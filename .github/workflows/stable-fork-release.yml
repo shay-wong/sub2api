@@ -34,17 +34,18 @@ jobs:
           set -euo pipefail
 
           upstream_url="https://github.com/${UPSTREAM_REPOSITORY}.git"
-          upstream_tags=$(git ls-remote --tags --refs "$upstream_url" \
-            | awk '{print $2}' \
-            | sed 's#refs/tags/##' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
-
-          if [[ -z "$upstream_tags" ]]; then
-            echo "No stable upstream version tags found in ${UPSTREAM_REPOSITORY}." >&2
+          local_version=$(tr -d '\r\n' < backend/cmd/server/VERSION)
+          if [[ ! "$local_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-fork\.[1-9][0-9]*)?$ ]]; then
+            echo "Invalid VERSION: ${local_version}" >&2
             exit 1
           fi
 
-          upstream_tag=$(printf '%s\n' "$upstream_tags" | sort -V | tail -n 1)
+          upstream_tag="v${BASH_REMATCH[1]}"
+          if ! git ls-remote --exit-code --tags --refs "$upstream_url" "refs/tags/${upstream_tag}" >/dev/null; then
+            echo "VERSION base ${upstream_tag} is not a stable tag in ${UPSTREAM_REPOSITORY}." >&2
+            exit 1
+          fi
+
           existing_fork_tags=$(git ls-remote --tags --refs origin "refs/tags/${upstream_tag}-fork.*" \
             | awk '{print $2}' \
             | sed 's#refs/tags/##' || true)

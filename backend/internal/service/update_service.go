@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -44,6 +45,8 @@ const (
 	// Fetch a few extra releases so filtering (current/newer/prerelease) still leaves enough candidates
 	rollbackFetchPageSize = 15
 )
+
+var strictForkReleaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+-fork\.[1-9][0-9]*$`)
 
 // UpdateCache defines cache operations for update service
 type UpdateCache interface {
@@ -305,7 +308,7 @@ func (s *UpdateService) Rollback() error {
 
 // ListRollbackVersions returns up to maxRollbackVersions release versions that are
 // strictly older than the current version (the current version itself is excluded),
-// newest first. Draft and prerelease entries are skipped.
+// newest first. Drafts and prereleases outside the active fork channel are skipped.
 func (s *UpdateService) ListRollbackVersions(ctx context.Context) ([]RollbackVersion, error) {
 	releases, err := s.fetchRollbackCandidates(ctx)
 	if err != nil {
@@ -370,8 +373,13 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 
 	seen := make(map[string]bool, len(releases))
 	candidates := make([]*GitHubRelease, 0, maxRollbackVersions)
+	currentIsForkRelease := strictForkReleaseTag.MatchString("v" + strings.TrimPrefix(s.currentVersion, "v"))
 	for _, r := range releases {
-		if r == nil || r.Draft || r.Prerelease {
+		if r == nil || r.Draft {
+			continue
+		}
+		candidateIsForkRelease := strictForkReleaseTag.MatchString(r.TagName)
+		if (!currentIsForkRelease && candidateIsForkRelease) || (r.Prerelease && !candidateIsForkRelease) {
 			continue
 		}
 		v := strings.TrimPrefix(r.TagName, "v")
