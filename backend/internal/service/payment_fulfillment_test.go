@@ -198,9 +198,19 @@ func (s *paymentFulfillmentSettingRepoStub) Delete(_ context.Context, key string
 	return nil
 }
 
-func ensurePaymentAuditOrderActionUniqueIndex(t *testing.T, ctx context.Context, client *dbent.Client) {
+func ensurePaymentAuditIdempotencyIndexes(t *testing.T, ctx context.Context, client *dbent.Client) {
 	t.Helper()
-	_, err := client.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_audit_logs_order_action_uniq ON payment_audit_logs(order_id, action)")
+	_, err := client.ExecContext(ctx, `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_audit_logs_refund_state_uniq
+ON payment_audit_logs(order_id, action)
+WHERE action IN ('REFUND_PENDING', 'REFUND_ROLLBACK_FAILED');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_audit_logs_affiliate_rebate_uniq
+ON payment_audit_logs(order_id)
+WHERE action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_audit_logs_subscription_assignment_uniq
+ON payment_audit_logs(order_id)
+WHERE action = 'SUBSCRIPTION_ASSIGNED';
+`)
 	require.NoError(t, err)
 }
 
@@ -605,13 +615,13 @@ func TestRetryFulfillmentRejectsFreshRechargingLease(t *testing.T) {
 func TestAlreadyProcessedRecoversStaleRechargingLease(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	ensurePaymentAuditIdempotencyIndexes(t, ctx, client)
 	order := createPaymentFulfillmentSubscriptionOrder(
 		t,
 		ctx,
 		client,
 		OrderStatusRecharging,
-		time.Now().Add(-paymentFulfillmentLeaseDuration-time.Minute),
+		time.Now().UTC().Add(-paymentFulfillmentLeaseDuration-time.Minute),
 	)
 	_, err := client.PaymentAuditLog.Create().
 		SetOrderID(strconv.FormatInt(order.ID, 10)).
@@ -639,7 +649,7 @@ func TestAlreadyProcessedRecoversStaleRechargingLease(t *testing.T) {
 func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
+	staleAt := time.Now().UTC().Add(-paymentFulfillmentLeaseDuration - time.Minute)
 	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
 	svc := &PaymentService{entClient: client}
 
@@ -671,8 +681,8 @@ func TestFulfillmentLeaseVersionRejectsStaleWorker(t *testing.T) {
 func TestExecuteBalanceFulfillmentRecoversAfterRedeemWithoutCreditingAgain(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
-	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
+	ensurePaymentAuditIdempotencyIndexes(t, ctx, client)
+	staleAt := time.Now().UTC().Add(-paymentFulfillmentLeaseDuration - time.Minute)
 	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
 	order, err := client.PaymentOrder.UpdateOneID(order.ID).
 		SetOrderType(payment.OrderTypeBalance).
@@ -773,8 +783,8 @@ func TestPaymentNotificationRejectsAmountMismatchBeforeFulfillment(t *testing.T)
 func TestExecuteSubscriptionFulfillmentRecoversCommittedAssignmentWithoutExtendingAgain(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
-	staleAt := time.Now().Add(-paymentFulfillmentLeaseDuration - time.Minute)
+	ensurePaymentAuditIdempotencyIndexes(t, ctx, client)
+	staleAt := time.Now().UTC().Add(-paymentFulfillmentLeaseDuration - time.Minute)
 	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusRecharging, staleAt)
 
 	expiresAt := time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
@@ -888,7 +898,7 @@ func assertPaymentSubscriptionExpiry(t *testing.T, repo *subscriptionUserSubRepo
 func TestExecuteSubscriptionFulfillmentAppliesAffiliateRebate(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	ensurePaymentAuditIdempotencyIndexes(t, ctx, client)
 
 	user, err := client.User.Create().
 		SetEmail("subscription-affiliate@example.com").
@@ -974,7 +984,7 @@ func TestExecuteSubscriptionFulfillmentAppliesAffiliateRebate(t *testing.T) {
 func TestExecuteSubscriptionFulfillmentDoesNotDuplicateWorkAfterLegacySuccessAudit(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
-	ensurePaymentAuditOrderActionUniqueIndex(t, ctx, client)
+	ensurePaymentAuditIdempotencyIndexes(t, ctx, client)
 
 	user, err := client.User.Create().
 		SetEmail("subscription-affiliate-idempotent@example.com").

@@ -1158,6 +1158,35 @@ var (
 				Unique:  false,
 				Columns: []*schema.Column{PaymentAuditLogsColumns[1]},
 			},
+			{
+				Name:    "idx_payment_audit_logs_order_action_uniq",
+				Unique:  true,
+				Columns: []*schema.Column{PaymentAuditLogsColumns[1], PaymentAuditLogsColumns[2]},
+			},
+			{
+				Name:    "idx_payment_audit_logs_refund_state_uniq",
+				Unique:  true,
+				Columns: []*schema.Column{PaymentAuditLogsColumns[1], PaymentAuditLogsColumns[2]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "action IN ('REFUND_PENDING', 'REFUND_ROLLBACK_FAILED')",
+				},
+			},
+			{
+				Name:    "idx_payment_audit_logs_affiliate_rebate_uniq",
+				Unique:  true,
+				Columns: []*schema.Column{PaymentAuditLogsColumns[1]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')",
+				},
+			},
+			{
+				Name:    "idx_payment_audit_logs_subscription_assignment_uniq",
+				Unique:  true,
+				Columns: []*schema.Column{PaymentAuditLogsColumns[1]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "action = 'SUBSCRIPTION_ASSIGNED'",
+				},
+			},
 		},
 	}
 	// PaymentOrdersColumns holds the columns for the "payment_orders" table.

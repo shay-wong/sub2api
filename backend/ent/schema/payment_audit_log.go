@@ -50,5 +50,20 @@ func (PaymentAuditLog) Fields() []ent.Field {
 func (PaymentAuditLog) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("order_id"),
+		index.Fields("order_id", "action").
+			Unique().
+			StorageKey("idx_payment_audit_logs_order_action_uniq"),
+		index.Fields("order_id", "action").
+			Unique().
+			StorageKey("idx_payment_audit_logs_refund_state_uniq").
+			Annotations(entsql.IndexWhere("action IN ('REFUND_PENDING', 'REFUND_ROLLBACK_FAILED')")),
+		index.Fields("order_id").
+			Unique().
+			StorageKey("idx_payment_audit_logs_affiliate_rebate_uniq").
+			Annotations(entsql.IndexWhere("action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')")),
+		index.Fields("order_id").
+			Unique().
+			StorageKey("idx_payment_audit_logs_subscription_assignment_uniq").
+			Annotations(entsql.IndexWhere("action = 'SUBSCRIPTION_ASSIGNED'")),
 	}
 }
