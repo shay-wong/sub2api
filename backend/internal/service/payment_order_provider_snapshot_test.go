@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"testing"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/stretchr/testify/require"
 )
@@ -128,6 +129,38 @@ func TestBuildPaymentOrderProviderSnapshot_UsesWxpayJSAPIAppIDForOpenIDOrders(t 
 	require.Equal(t, "wx-mp-app", snapshot["merchant_app_id"])
 	require.Equal(t, "mch-88", snapshot["merchant_id"])
 	require.Equal(t, "CNY", snapshot["currency"])
+}
+
+func TestValidateRefundProviderSnapshotMetadataFailsClosedWithoutIdentity(t *testing.T) {
+	t.Parallel()
+
+	order := &dbent.PaymentOrder{ProviderSnapshot: map[string]any{
+		"provider_key":    payment.TypeWxpay,
+		"merchant_app_id": "wx-app",
+		"merchant_id":     "mch-88",
+		"currency":        "CNY",
+	}}
+
+	err := validateRefundProviderSnapshotMetadata(order, payment.TypeWxpay, nil)
+	require.ErrorContains(t, err, "merchant identity metadata is unavailable")
+}
+
+func TestValidateRefundProviderSnapshotMetadataAcceptsWxpayJSAPIAppID(t *testing.T) {
+	t.Parallel()
+
+	order := &dbent.PaymentOrder{ProviderSnapshot: map[string]any{
+		"provider_key":    payment.TypeWxpay,
+		"merchant_app_id": "wx-mp-app",
+		"merchant_id":     "mch-88",
+		"currency":        "CNY",
+	}}
+
+	require.NoError(t, validateRefundProviderSnapshotMetadata(order, payment.TypeWxpay, map[string]string{
+		"appid":    "wx-base-app",
+		"mp_appid": "wx-mp-app",
+		"mchid":    "mch-88",
+		"currency": "CNY",
+	}))
 }
 
 func TestBuildPaymentOrderProviderSnapshot_IncludesAlipayMerchantIdentity(t *testing.T) {

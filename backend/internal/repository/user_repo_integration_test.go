@@ -434,6 +434,27 @@ func (s *UserRepoSuite) TestUpdateBalance_Negative() {
 	s.Require().InDelta(7.0, got.Balance, 1e-6)
 }
 
+func (s *UserRepoSuite) TestRefundDeductionRollbackLeavesRechargeTotalUnchanged() {
+	user := s.mustCreateUser(&service.User{Email: "refund-compensation@test.com", Balance: 100})
+	_, err := s.client.User.UpdateOneID(user.ID).SetTotalRecharged(250).Save(s.ctx)
+	s.Require().NoError(err)
+
+	tx, err := s.client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	deducted, err := s.repo.DeductAvailableBalance(txCtx, user.ID, 60)
+	s.Require().NoError(err)
+	s.Require().Equal(60.0, deducted)
+	_, err = s.repo.AdjustBalance(txCtx, user.ID, deducted)
+	s.Require().NoError(err)
+	s.Require().NoError(tx.Commit())
+
+	reloaded, err := s.client.User.Get(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(100.0, reloaded.Balance)
+	s.Require().Equal(250.0, reloaded.TotalRecharged)
+}
+
 func (s *UserRepoSuite) TestApplyRedeemBalanceAdjustment_ConcurrentNeverNegative() {
 	user := s.mustCreateUser(&service.User{Email: "redeem-bal-concurrent@test.com", Balance: 10})
 

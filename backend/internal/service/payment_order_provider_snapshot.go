@@ -139,11 +139,18 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 	switch strings.TrimSpace(providerKey) {
 	case payment.TypeWxpay:
 		if expected := strings.TrimSpace(snapshot.MerchantAppID); expected != "" {
-			actual := strings.TrimSpace(metadata["appid"])
-			if actual == "" {
+			appID := strings.TrimSpace(metadata["appid"])
+			mpAppID := strings.TrimSpace(metadata["mp_appid"])
+			if appID == "" && mpAppID == "" {
 				return fmt.Errorf("wxpay notification missing appid")
 			}
-			if !strings.EqualFold(expected, actual) {
+			if !strings.EqualFold(expected, appID) && !strings.EqualFold(expected, mpAppID) {
+				actual := appID
+				if actual == "" {
+					actual = mpAppID
+				} else if mpAppID != "" {
+					actual += ", " + mpAppID
+				}
 				return fmt.Errorf("wxpay appid mismatch: expected %s, got %s", expected, actual)
 			}
 		}
@@ -223,6 +230,14 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 	}
 
 	return nil
+}
+
+func validateRefundProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey string, metadata map[string]string) error {
+	snapshot := psOrderProviderSnapshot(order)
+	if snapshot != nil && len(metadata) == 0 && (snapshot.MerchantAppID != "" || snapshot.MerchantID != "" || snapshot.Currency != "") {
+		return fmt.Errorf("%s refund provider merchant identity metadata is unavailable", strings.TrimSpace(providerKey))
+	}
+	return validateProviderSnapshotMetadata(order, providerKey, metadata)
 }
 
 func providerMerchantIdentityMetadata(prov payment.Provider) map[string]string {
