@@ -198,6 +198,7 @@
               :initial-email="pendingAccountEmail"
               :is-submitting="isSubmitting"
               :error-message="accountActionError"
+              @complete="finalizePendingAccountResponse"
               @submit="handleCreateAccount"
               @switch-to-bind="switchToBindLoginMode"
             />

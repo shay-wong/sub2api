@@ -99,7 +99,11 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TurnstileWidget from '@/components/CaptchaChallenge.vue'
-import { getPublicSettings, sendPendingOAuthVerifyCode } from '@/api/auth'
+import {
+  getPublicSettings,
+  sendPendingOAuthVerifyCode,
+  type PendingOAuthSendVerifyCodeResponse
+} from '@/api/auth'
 import { useAppStore } from '@/stores'
 
 export type PendingOAuthCreateAccountPayload = {
@@ -112,6 +116,15 @@ export type PendingOAuthCreateAccountPayload = {
   invitationCode?: string
 }
 
+export type PendingOAuthVerifyCodeCompletion = PendingOAuthSendVerifyCodeResponse & {
+  step?: string
+  existing_account_bindable?: boolean
+  email?: string
+  resolved_email?: string
+  existing_account_email?: string
+  suggested_email?: string
+}
+
 const props = defineProps<{
   initialEmail: string
   testIdPrefix: string
@@ -122,6 +135,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   submit: [payload: PendingOAuthCreateAccountPayload]
   switchToBind: [email: string]
+  complete: [response: PendingOAuthVerifyCodeCompletion]
 }>()
 
 const { t } = useI18n()
@@ -286,6 +300,10 @@ async function handleSendCode() {
       tencent_captcha_ticket: tencentCaptchaEnabled.value ? turnstileToken.value : undefined,
       tencent_captcha_randstr: tencentCaptchaEnabled.value ? tencentCaptchaRandstr.value : undefined
     })
+    if ((response as PendingOAuthVerifyCodeCompletion).step === 'choose_account_action_required') {
+      emit('complete', response as PendingOAuthVerifyCodeCompletion)
+      return
+    }
     sendCodeSuccess.value = true
     startCountdown(response.countdown)
   } catch (error: unknown) {

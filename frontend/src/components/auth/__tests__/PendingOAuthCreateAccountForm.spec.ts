@@ -255,6 +255,32 @@ describe('PendingOAuthCreateAccountForm', () => {
     expect(wrapper.text()).not.toContain('send failed')
   })
 
+  it('forwards an account-choice response to the callback flow', async () => {
+    const response = {
+      message: 'choose account action',
+      countdown: 0,
+      auth_result: 'pending_session',
+      step: 'choose_account_action_required',
+      existing_account_bindable: true,
+      existing_account_email: 'user@example.com'
+    }
+    sendPendingOAuthVerifyCode.mockResolvedValue(response)
+
+    const wrapper = mount(PendingOAuthCreateAccountForm, {
+      props: {
+        testIdPrefix: 'oidc',
+        initialEmail: 'user@example.com',
+        isSubmitting: false
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="oidc-create-account-send-code"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('complete')).toEqual([[response]])
+  })
+
   it('consumes the captcha proof when sending a verify code fails', async () => {
     getPublicSettings.mockResolvedValue({
       turnstile_enabled: true,
