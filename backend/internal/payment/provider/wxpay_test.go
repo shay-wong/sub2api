@@ -19,6 +19,7 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/h5"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/jsapi"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments/native"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 )
 
 // generateTestKeyPair returns a fresh RSA 2048 key pair as PEM strings.
@@ -92,6 +93,41 @@ func TestMapWxState(t *testing.T) {
 	}
 }
 
+func TestRefundProviderRequestIDUsesPersistedIdentityAndLegacyFallback(t *testing.T) {
+	if got := refundProviderRequestID("attempt-2", "legacy"); got != "attempt-2" {
+		t.Fatalf("provider request ID = %q, want attempt-2", got)
+	}
+	if got := refundProviderRequestID("", "legacy"); got != "legacy" {
+		t.Fatalf("legacy provider request ID = %q, want legacy", got)
+	}
+}
+
+func TestWxpayRefundCreateResponseUsesSharedStatusMapping(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status *refunddomestic.Status
+		want   string
+	}{
+		{name: "success", status: refundStatusPtr(refunddomestic.STATUS_SUCCESS), want: payment.ProviderStatusSuccess},
+		{name: "closed", status: refundStatusPtr(refunddomestic.STATUS_CLOSED), want: payment.ProviderStatusFailed},
+		{name: "abnormal", status: refundStatusPtr(refunddomestic.STATUS_ABNORMAL), want: payment.ProviderStatusFailed},
+		{name: "processing", status: refundStatusPtr(refunddomestic.STATUS_PROCESSING), want: payment.ProviderStatusPending},
+		{name: "unknown", status: refundStatusPtr(refunddomestic.Status("FUTURE_STATUS")), want: payment.ProviderStatusPending},
+		{name: "missing", status: nil, want: payment.ProviderStatusPending},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := wxpayRefundResponse("refund-123", &refunddomestic.Refund{Status: tt.status})
+			if resp.Status != tt.want {
+				t.Fatalf("status = %q, want %q", resp.Status, tt.want)
+			}
+		})
+	}
+}
+
+func refundStatusPtr(status refunddomestic.Status) *refunddomestic.Status {
+	return &status
+}
+
 func TestWxSV(t *testing.T) {
 	t.Parallel()
 
@@ -152,6 +188,30 @@ func TestBuildWxpayTransactionMetadata(t *testing.T) {
 	}
 	if metadata[wxpayMetadataTradeState] != wxpayTradeStateSuccess {
 		t.Fatalf("trade_state = %q", metadata[wxpayMetadataTradeState])
+	}
+}
+
+func TestWxpayMerchantIdentityMetadataIncludesBothAppIDs(t *testing.T) {
+	t.Parallel()
+
+	provider := &Wxpay{config: map[string]string{
+		"appId":   " wx-base-app ",
+		"mpAppId": " wx-mp-app ",
+		"mchId":   " mch-123 ",
+	}}
+	metadata := provider.MerchantIdentityMetadata()
+
+	if metadata[wxpayMetadataAppID] != "wx-base-app" {
+		t.Fatalf("appid = %q", metadata[wxpayMetadataAppID])
+	}
+	if metadata[wxpayMetadataMPAppID] != "wx-mp-app" {
+		t.Fatalf("mp_appid = %q", metadata[wxpayMetadataMPAppID])
+	}
+	if metadata[wxpayMetadataMerchantID] != "mch-123" {
+		t.Fatalf("mchid = %q", metadata[wxpayMetadataMerchantID])
+	}
+	if metadata[wxpayMetadataCurrency] != wxpayCurrency {
+		t.Fatalf("currency = %q", metadata[wxpayMetadataCurrency])
 	}
 }
 

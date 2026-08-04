@@ -429,6 +429,110 @@ func TestAlipayMerchantIdentityMetadata(t *testing.T) {
 	}
 }
 
+func TestAlipayPrepareRefundRejectsInvalidLocalKeys(t *testing.T) {
+	provider := &Alipay{config: map[string]string{
+		"appId":      "2021001234567890",
+		"privateKey": "invalid-private-key",
+		"publicKey":  "invalid-public-key",
+	}}
+
+	err := provider.PrepareRefund(context.Background())
+	if err == nil {
+		t.Fatal("PrepareRefund returned nil error")
+	}
+}
+
+func TestAlipayRefundEndpointsRequirePersistedProviderRequestID(t *testing.T) {
+	provider := &Alipay{}
+
+	refundResp, refundErr := provider.Refund(context.Background(), payment.RefundRequest{OrderID: "sub2_200"})
+	if !errors.Is(refundErr, payment.ErrRefundRequestIDMissing) || refundResp != nil {
+		t.Fatalf("Refund = (%+v, %v); want missing request ID error", refundResp, refundErr)
+	}
+
+	queryResp, queryErr := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{OrderID: "sub2_200"})
+	if !errors.Is(queryErr, payment.ErrRefundRequestIDMissing) || queryResp != nil {
+		t.Fatalf("QueryRefund = (%+v, %v); want missing request ID error", queryResp, queryErr)
+	}
+}
+
+func TestAlipayRefundReturnsFailedForBusinessFailure(t *testing.T) {
+	original := alipayTradeRefund
+	t.Cleanup(func() { alipayTradeRefund = original })
+	alipayTradeRefund = func(context.Context, *alipay.Client, alipay.TradeRefund) (*alipay.TradeRefundRsp, error) {
+		return &alipay.TradeRefundRsp{Error: alipay.Error{Code: alipay.CodeBusinessFailed}}, nil
+	}
+
+	resp, err := (&Alipay{client: &alipay.Client{}}).Refund(context.Background(), payment.RefundRequest{
+		OrderID:           "sub2_200",
+		ProviderRequestID: "provider-attempt-2",
+	})
+	if err != nil {
+		t.Fatalf("Refund returned error: %v", err)
+	}
+	if resp == nil || resp.Status != payment.ProviderStatusFailed || resp.RefundID != "provider-attempt-2" {
+		t.Fatalf("Refund = %+v, want failed response with persisted request ID", resp)
+	}
+}
+
+func TestAlipayRefundKeepsIndeterminateFailureUnresolved(t *testing.T) {
+	original := alipayTradeRefund
+	t.Cleanup(func() { alipayTradeRefund = original })
+	alipayTradeRefund = func(context.Context, *alipay.Client, alipay.TradeRefund) (*alipay.TradeRefundRsp, error) {
+		return &alipay.TradeRefundRsp{Error: alipay.Error{Code: alipay.CodeUnknowError}}, nil
+	}
+
+	resp, err := (&Alipay{client: &alipay.Client{}}).Refund(context.Background(), payment.RefundRequest{
+		OrderID:           "sub2_200",
+		ProviderRequestID: "provider-attempt-2",
+	})
+	if err == nil || resp != nil || !strings.Contains(err.Error(), "indeterminate response") {
+		t.Fatalf("Refund = (%+v, %v), want unresolved indeterminate response", resp, err)
+	}
+}
+
+func TestAlipayRefundRejectsNilResponse(t *testing.T) {
+	original := alipayTradeRefund
+	t.Cleanup(func() { alipayTradeRefund = original })
+	alipayTradeRefund = func(context.Context, *alipay.Client, alipay.TradeRefund) (*alipay.TradeRefundRsp, error) {
+		return nil, nil
+	}
+
+	resp, err := (&Alipay{client: &alipay.Client{}}).Refund(context.Background(), payment.RefundRequest{
+		OrderID:           "sub2_200",
+		ProviderRequestID: "provider-attempt-2",
+	})
+	if err == nil || resp != nil || !strings.Contains(err.Error(), "empty response") {
+		t.Fatalf("Refund = (%+v, %v), want explicit empty response error", resp, err)
+	}
+}
+
+func TestAlipayQueryRefundUsesPersistedProviderRequestID(t *testing.T) {
+	original := alipayTradeFastPayRefundQuery
+	t.Cleanup(func() { alipayTradeFastPayRefundQuery = original })
+
+	var got alipay.TradeFastPayRefundQuery
+	alipayTradeFastPayRefundQuery = func(_ context.Context, _ *alipay.Client, param alipay.TradeFastPayRefundQuery) (*alipay.TradeFastPayRefundQueryRsp, error) {
+		got = param
+		return &alipay.TradeFastPayRefundQueryRsp{
+			Error:        alipay.Error{Code: alipay.CodeSuccess},
+			RefundStatus: "REFUND_SUCCESS",
+		}, nil
+	}
+
+	provider := &Alipay{client: &alipay.Client{}}
+	resp, err := provider.QueryRefund(context.Background(), payment.RefundQueryRequest{
+		OrderID:           "sub2_200",
+		ProviderRequestID: "provider-attempt-2",
+	})
+	if err != nil {
+		t.Fatalf("QueryRefund returned error: %v", err)
+	}
+	if got.OutRequestNo != "provider-attempt-2" || resp.RefundID != "provider-attempt-2" {
+		t.Fatalf("provider request ID not preserved: query=%q response=%q", got.OutRequestNo, resp.RefundID)
+	}
+}
+
 func TestParseAlipayAmount(t *testing.T) {
 	t.Parallel()
 

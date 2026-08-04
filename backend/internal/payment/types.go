@@ -2,7 +2,12 @@
 // registry, load balancing, and shared utilities for the payment subsystem.
 package payment
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrRefundRequestIDMissing = errors.New("refund request ID is missing")
 
 // PaymentType represents a supported payment method.
 type PaymentType = string
@@ -179,19 +184,21 @@ type PaymentNotification struct {
 
 // RefundRequest contains the parameters for requesting a refund.
 type RefundRequest struct {
-	TradeNo string
-	OrderID string
-	Amount  string // Refund amount formatted to 2 decimal places
-	Reason  string
+	TradeNo           string
+	OrderID           string
+	ProviderRequestID string
+	Amount            string // Refund amount formatted to 2 decimal places
+	Reason            string
 }
 
 // RefundQueryRequest contains identifiers needed to query a previously
 // requested refund.
 type RefundQueryRequest struct {
-	TradeNo  string
-	OrderID  string
-	RefundID string
-	Amount   string
+	TradeNo           string
+	OrderID           string
+	ProviderRequestID string
+	RefundID          string
+	Amount            string
 }
 
 // RefundResponse is returned after a refund request.
@@ -232,6 +239,13 @@ type Provider interface {
 type RefundQueryProvider interface {
 	Provider
 	QueryRefund(ctx context.Context, req RefundQueryRequest) (*RefundResponse, error)
+}
+
+// RefundPreflightProvider validates local provider state before the refund
+// attempt is persisted and any user entitlement is deducted.
+type RefundPreflightProvider interface {
+	Provider
+	PrepareRefund(ctx context.Context) error
 }
 
 // CancelableProvider extends Provider with the ability to cancel pending payments.

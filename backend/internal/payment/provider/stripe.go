@@ -230,7 +230,8 @@ func (s *Stripe) Refund(ctx context.Context, req payment.RefundRequest) (*paymen
 		Amount:        stripe.Int64(amountInMinorUnit),
 		Reason:        stripe.String(string(stripe.RefundReasonRequestedByCustomer)),
 	}
-	params.SetIdempotencyKey(fmt.Sprintf("re-%s-%d", req.OrderID, amountInMinorUnit))
+	idempotencyKey := refundProviderRequestID(req.ProviderRequestID, fmt.Sprintf("%s-%d", req.OrderID, amountInMinorUnit))
+	params.SetIdempotencyKey("re-" + idempotencyKey)
 	params.Context = ctx
 
 	r, err := s.sc.V1Refunds.Create(ctx, params)
@@ -238,14 +239,9 @@ func (s *Stripe) Refund(ctx context.Context, req payment.RefundRequest) (*paymen
 		return nil, fmt.Errorf("stripe refund: %w", err)
 	}
 
-	refundStatus := payment.ProviderStatusPending
-	if r.Status == stripe.RefundStatusSucceeded {
-		refundStatus = payment.ProviderStatusSuccess
-	}
-
 	return &payment.RefundResponse{
 		RefundID: r.ID,
-		Status:   refundStatus,
+		Status:   stripeRefundProviderStatus(r.Status),
 	}, nil
 }
 

@@ -274,7 +274,7 @@ func (a *Airwallex) Refund(ctx context.Context, req payment.RefundRequest) (*pay
 	}
 
 	payload := airwallexCreateRefundRequest{
-		RequestID:       airwallexDeterministicRequestID("refund", intentID, req.Amount),
+		RequestID:       refundProviderRequestID(req.ProviderRequestID, airwallexDeterministicRequestID("refund", intentID, req.Amount)),
 		PaymentIntentID: intentID,
 		Amount:          newAirwallexRequestAmount(amount),
 		Reason:          strings.TrimSpace(req.Reason),

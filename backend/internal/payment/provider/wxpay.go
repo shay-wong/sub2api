@@ -34,6 +34,7 @@ const (
 
 const (
 	wxpayMetadataAppID      = "appid"
+	wxpayMetadataMPAppID    = "mp_appid"
 	wxpayMetadataMerchantID = "mchid"
 	wxpayMetadataCurrency   = "currency"
 	wxpayMetadataTradeState = "trade_state"
@@ -116,6 +117,25 @@ func (w *Wxpay) Name() string        { return "Wxpay" }
 func (w *Wxpay) ProviderKey() string { return payment.TypeWxpay }
 func (w *Wxpay) SupportedTypes() []payment.PaymentType {
 	return []payment.PaymentType{payment.TypeWxpay}
+}
+
+func (w *Wxpay) MerchantIdentityMetadata() map[string]string {
+	if w == nil {
+		return nil
+	}
+	metadata := map[string]string{
+		wxpayMetadataCurrency: wxpayCurrency,
+	}
+	if appID := strings.TrimSpace(w.config["appId"]); appID != "" {
+		metadata[wxpayMetadataAppID] = appID
+	}
+	if mpAppID := strings.TrimSpace(w.config["mpAppId"]); mpAppID != "" {
+		metadata[wxpayMetadataMPAppID] = mpAppID
+	}
+	if merchantID := strings.TrimSpace(w.config["mchId"]); merchantID != "" {
+		metadata[wxpayMetadataMerchantID] = merchantID
+	}
+	return metadata
 }
 
 // ResolveWxpayJSAPIAppID returns the AppID that JSAPI prepay will use for a
@@ -470,7 +490,7 @@ func (w *Wxpay) Refund(ctx context.Context, req payment.RefundRequest) (*payment
 	}
 	rs := refunddomestic.RefundsApiService{Client: c}
 	cur := wxpayCurrency
-	outRefundNo := wxpayRefundID(req.OrderID, req.Amount)
+	outRefundNo := refundProviderRequestID(req.ProviderRequestID, wxpayRefundID(req.OrderID, req.Amount))
 	res, _, err := rs.Create(ctx, refunddomestic.CreateRequest{
 		OutTradeNo:  core.String(req.OrderID),
 		OutRefundNo: core.String(outRefundNo),
@@ -480,11 +500,7 @@ func (w *Wxpay) Refund(ctx context.Context, req payment.RefundRequest) (*payment
 	if err != nil {
 		return nil, fmt.Errorf("wxpay refund: %w", err)
 	}
-	st := payment.ProviderStatusPending
-	if res.Status != nil && *res.Status == refunddomestic.STATUS_SUCCESS {
-		st = payment.ProviderStatusSuccess
-	}
-	return &payment.RefundResponse{RefundID: outRefundNo, Status: st}, nil
+	return wxpayRefundResponse(outRefundNo, res), nil
 }
 
 func (w *Wxpay) QueryRefund(ctx context.Context, req payment.RefundQueryRequest) (*payment.RefundResponse, error) {
@@ -494,7 +510,7 @@ func (w *Wxpay) QueryRefund(ctx context.Context, req payment.RefundQueryRequest)
 	}
 	outRefundNo := strings.TrimSpace(req.RefundID)
 	if outRefundNo == "" {
-		outRefundNo = wxpayRefundID(req.OrderID, req.Amount)
+		outRefundNo = refundProviderRequestID(req.ProviderRequestID, wxpayRefundID(req.OrderID, req.Amount))
 	}
 	if outRefundNo == "" {
 		return nil, fmt.Errorf("wxpay query refund: missing refund id")
@@ -506,18 +522,20 @@ func (w *Wxpay) QueryRefund(ctx context.Context, req payment.RefundQueryRequest)
 	if err != nil {
 		return nil, fmt.Errorf("wxpay query refund: %w", err)
 	}
+	return wxpayRefundResponse(outRefundNo, res), nil
+}
+
+func wxpayRefundResponse(refundID string, refund *refunddomestic.Refund) *payment.RefundResponse {
 	status := payment.ProviderStatusPending
-	if res != nil && res.Status != nil {
-		switch *res.Status {
+	if refund != nil && refund.Status != nil {
+		switch *refund.Status {
 		case refunddomestic.STATUS_SUCCESS:
 			status = payment.ProviderStatusSuccess
 		case refunddomestic.STATUS_CLOSED, refunddomestic.STATUS_ABNORMAL:
 			status = payment.ProviderStatusFailed
-		default:
-			status = payment.ProviderStatusPending
 		}
 	}
-	return &payment.RefundResponse{RefundID: outRefundNo, Status: status}, nil
+	return &payment.RefundResponse{RefundID: refundID, Status: status}
 }
 
 func wxpayRefundID(orderID, amount string) string {
@@ -530,6 +548,13 @@ func wxpayRefundID(orderID, amount string) string {
 		return orderID + "-refund"
 	}
 	return orderID + "-refund-" + amount
+}
+
+func refundProviderRequestID(providerRequestID, fallback string) string {
+	if providerRequestID = strings.TrimSpace(providerRequestID); providerRequestID != "" {
+		return providerRequestID
+	}
+	return fallback
 }
 
 func (w *Wxpay) queryOrderTotalFen(ctx context.Context, c *core.Client, orderID string) (int64, error) {
@@ -563,6 +588,7 @@ func (w *Wxpay) CancelPayment(ctx context.Context, tradeNo string) error {
 }
 
 var (
-	_ payment.Provider           = (*Wxpay)(nil)
-	_ payment.CancelableProvider = (*Wxpay)(nil)
+	_ payment.Provider                 = (*Wxpay)(nil)
+	_ payment.CancelableProvider       = (*Wxpay)(nil)
+	_ payment.MerchantIdentityProvider = (*Wxpay)(nil)
 )
