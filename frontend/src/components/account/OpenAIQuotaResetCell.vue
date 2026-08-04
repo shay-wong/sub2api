@@ -155,6 +155,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'account-updated': [account: Account]
+  reset: []
 }>()
 
 const { t } = useI18n()
@@ -378,6 +379,12 @@ const confirmReset = async () => {
       data.value = null
     }
     if (result.account) emit('account-updated', result.account)
+    if (
+      result.account_state_recovered &&
+      (!result.account || result.warning_code === 'account_state_refresh_failed')
+    ) {
+      emit('reset')
+    }
 
     if (result.warning_code === 'reset_credit_cache_refresh_failed') {
       resetWarning.value = t('admin.accounts.openaiQuotaReset.resetCacheRefreshFailed')

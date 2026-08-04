@@ -358,6 +358,7 @@
               :today-stats-loading="todayStatsLoading"
               :manual-refresh-token="usageManualRefreshToken"
               @account-updated="handleAccountUpdated"
+              @account-state-reset="reload"
             />
           </template>
           <template #cell-proxy="{ row }">

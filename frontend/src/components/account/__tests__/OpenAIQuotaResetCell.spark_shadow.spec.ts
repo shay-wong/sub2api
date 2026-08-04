@@ -314,6 +314,35 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
     wrapper.unmount()
   })
 
+  it('账号已恢复但响应缺少账号数据时请求列表重载', async () => {
+    vi.mocked(resetOpenAIQuota).mockResolvedValue({
+      code: 'success',
+      windows_reset: 1,
+      cache_refreshed: false,
+      account_state_recovered: true,
+      warning_code: 'account_state_refresh_failed',
+    })
+    const account = makeAccount({
+      parent_account_id: null,
+      extra: {
+        codex_reset_credit_snapshot: {
+          available_count: 1,
+          credits: [{ expires_at: FUTURE_EXPIRY_EARLY }],
+        },
+      },
+    })
+    const wrapper = mount(OpenAIQuotaResetCell, { props: { account } })
+
+    await resetButton(wrapper).trigger('click')
+    wrapper.findComponent(ConfirmDialog).vm.$emit('confirm')
+    await flushPromises()
+
+    expect(wrapper.emitted('account-updated')).toBeUndefined()
+    expect(wrapper.emitted('reset')).toHaveLength(1)
+    expect(wrapper.text()).toContain('admin.accounts.openaiQuotaReset.resetAccountRefreshFailed')
+    wrapper.unmount()
+  })
+
   it('账号状态恢复失败时停止后续步骤并提示手动恢复', async () => {
     vi.mocked(resetOpenAIQuota).mockResolvedValue({
       code: 'success',

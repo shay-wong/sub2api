@@ -352,13 +352,9 @@ func (s *OpenAIQuotaService) ResetCredit(ctx context.Context, accountID int64) (
 		break
 	}
 	if err := s.clearRateLimitAfterReset(ctx, accountID); err != nil {
+		// The handler retries account recovery under a detached timeout and reports
+		// partial success. Returning an error here would invite another consume.
 		slog.Error("openai_quota_reset_local_state_failed", "account_id", accountID, "error", err)
-		return nil, infraerrors.Newf(
-			http.StatusInternalServerError,
-			"OPENAI_QUOTA_RESET_LOCAL_STATE_FAILED",
-			"upstream reset succeeded but failed to clear local rate-limit state: %v",
-			err,
-		)
 	}
 
 	slog.Info("openai_quota_reset_success",

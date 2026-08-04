@@ -299,7 +299,7 @@ func TestResetCreditUpstream429DoesNotClearLocalRateLimit(t *testing.T) {
 	require.Empty(t, repo.clearCalls)
 }
 
-func TestResetCreditLocalClearFailureDoesNotReturnSuccess(t *testing.T) {
+func TestResetCreditLocalClearFailureReturnsConsumedResult(t *testing.T) {
 	account := &Account{
 		ID:       204,
 		Platform: PlatformOpenAI,
@@ -326,10 +326,11 @@ func TestResetCreditLocalClearFailureDoesNotReturnSuccess(t *testing.T) {
 		newQuotaRedirectingFactory(upstream),
 	)
 
-	_, err := svc.ResetCredit(context.Background(), account.ID)
+	result, err := svc.ResetCredit(context.Background(), account.ID)
 
-	require.Equal(t, http.StatusInternalServerError, infraerrors.Code(err))
-	require.Contains(t, err.Error(), "OPENAI_QUOTA_RESET_LOCAL_STATE_FAILED")
+	require.NoError(t, err, "a retryable error after upstream consumption could spend a second credit")
+	require.Equal(t, "ok", result.Code)
+	require.Equal(t, 1, result.WindowsReset)
 	require.Equal(t, []int64{account.ID}, repo.clearCalls)
 }
 
