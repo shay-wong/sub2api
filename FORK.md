@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 最新已合并上游 merge | `9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` |
-| Fork 父提交 | `6816c919d63c223a396841bc758dfe4b3c236550` |
-| 上游父提交 / 比较基线 | `00b8596176809906993169c283671811ad04f58d` |
-| 当前比较范围 | `00b8596176809906993169c283671811ad04f58d..HEAD` |
+| 最新已合并上游 merge | `8e34f01c53a650a00b80b7bf87476cb74f3118be` |
+| Fork 父提交 | `f64179957b62b54edc146338884a64d2e9094f40` |
+| 上游父提交 / 比较基线 | `93367b6db43315abe4f9fd9b09cbfc971b1f5ad0` |
+| 当前比较范围 | `93367b6db43315abe4f9fd9b09cbfc971b1f5ad0..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `00b8596176809906993169c283671811ad04f58d`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并时远端 `main` 与上表基线同为 `93367b6db43315abe4f9fd9b09cbfc971b1f5ad0`；远端后续推进时，仍须以最新已合并上游 merge 的第二父重新确定基线。
 
 ## Fork 发布版本
 
@@ -33,6 +33,8 @@
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.171` |
 | 当前 Fork 版本 | `0.1.171-fork.1` |
+| 已发布同基线版本 | `v0.1.171-fork.1` |
+| 下次发布所需版本 | `0.1.171-fork.2`（本次合并不修改版本源） |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
@@ -220,7 +222,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **当前代码**：`backend/internal/pkg/ip/ip.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/audit_log.go`、`backend/internal/server/middleware/security_headers.go`、`backend/internal/service/session_binding.go`、`backend/internal/service/totp_service.go`、`backend/internal/repository/audit_log_repo.go`、`backend/internal/service/audit_log_service.go`、`backend/internal/handler/auth_oauth_pending_flow.go`、`frontend/src/components/auth/PendingOAuthCreateAccountForm.vue`、`frontend/src/views/auth/OidcCallbackView.vue`、`frontend/src/views/auth/LinuxDoCallbackView.vue`、`frontend/src/views/auth/WechatCallbackView.vue`、`frontend/src/views/auth/DingTalkCallbackView.vue`。
 - **迁移与测试**：`backend/migrations/182_audit_log_clear_state.sql`、`backend/internal/server/middleware/session_binding_test.go`、`backend/internal/server/middleware/security_headers_test.go`、`backend/internal/service/totp_verification_method_test.go`、`backend/internal/repository/audit_log_repo_test.go`、`backend/internal/repository/audit_log_repo_sequence_integration_test.go`、`backend/internal/service/audit_log_service_test.go`、`backend/migrations/audit_log_clear_state_migration_test.go`、`frontend/src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts`、`frontend/src/views/auth/__tests__/OidcCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/LinuxDoCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts`。
 - **来源提交**：`4d47d8916691de90d50c454a9935ef5f8a764994`、`8f10a05736dff37c6d275ef33f2fb6b3436ae3ef`、`fb693041dc6fbb4aff7dd4bbf0baa410e2a2ffa3`、`a106870c834e6cf021ffb5adea24c8f2d0ccb1dd`。
-- **人工合并解决**：无相关人工解决锚点。
+- **人工合并解决**：`8e34f01c53a650a00b80b7bf87476cb74f3118be` 在 CSP 冲突中合并上游腾讯验证码国内/国际区域来源，并保留 fork 的 Aliyun CAPTCHA 脚本与样式来源。
 - **合并审查**：区分 trusted proxy 解析、binding key 和 audit IP；审计清理必须同时核对队列 drain、数据库锁顺序与持久化 clear watermark，不能用一个 `ClientIP` 字段重新承担全部语义。
 - **删除条件**：上游行为和并发/反代/TOTP 回归测试逐项等价后删除。
 - **聚焦验证**：
@@ -338,11 +340,11 @@ git diff --check
 
 ## 明确排除
 
-- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `9527e0fc1d85897baf72fbb9ff32027ff3d63aaa`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
+- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `8e34f01c53a650a00b80b7bf87476cb74f3118be`、`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
 - **已替代方案**：`6b37423465f1780dda62232d88e53676c4af15d5` 与 `bb9e60b13bab1a7f7c31d8987dfa00d5ed6da8ef` 的旧 operator/group-scope 方案已由 Project 模型替代，不单列。
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
 - **本次上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
 - **本次上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
-- **本次上游新增**：订阅续期行锁、captcha、quota refresh/recovery、dashboard/model plaza、OAuth endpoint、Grok pin、赞助商和版本变化均来自当前上游基线，不登记为 fork 能力。
+- **本次上游新增**：腾讯验证码区域适配、Codex OAuth 默认 `codex-tui` identity、稀疏流量下的瞬时失败 streak、用量计费 `NUMERIC(20,8)` 量化、EasyPay UTF-8 错误保留及赞助商更新均来自当前上游基线，不登记为 fork 能力；CSP 人工解决仅保留与 Aliyun CAPTCHA fork 不变量的并集。
