@@ -18,7 +18,7 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 最新已合并上游 merge | 本次 merge commit；提交后运行 `git log --first-parent --merges -1 --format=%H` 定位 |
+| 最新已合并上游 merge | `a8a3c18641fb1c00030c2baa22fc3918c9e44e68` |
 | Fork 父提交 | `2edd0eb55ba24a0c9d2d52ccc93ae552062f14e1` |
 | 上游父提交 / 比较基线 | `10a4c6e3ad319587e817109c071259269855ec30` |
 | 当前比较范围 | `10a4c6e3ad319587e817109c071259269855ec30..HEAD` |
@@ -65,7 +65,7 @@
 - **迁移与测试**：`backend/migrations/154_project_isolation_default_project.sql` 至 `backend/migrations/159_project_scoped_proxies.sql`、`backend/migrations/170_batch_image_project_scope.sql`、`backend/internal/repository/project_context_test.go`、`backend/internal/service/project_service_test.go`、`backend/internal/service/admin_account_upstream_billing_probe_test.go`、`backend/internal/handler/admin/operator_account_scope_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/views/admin/__tests__/ProjectsView.spec.ts`。
 - **来源提交**：`0a69e2c6055e7b1b0b9d861c8b4c787f70fbc107`、`98d869de85ff67cd53477c6a8736d593f64337c7`、`e5340bf36cee7123da34599ca346647fd1b0a2a9`、`c59d0a28f3e7c930872dd804ef8d0243a4bdd06e`、`65c3150e89032d66e7fceafe7dc316bc9bdc0a60`、`f4f57f0f97c8898c78869ec1b032bab36190e689`。
 - **当前修复定位**：提交后运行 `git log -S'input.ProbeEnabled, input.RateSyncEnabled' -- backend/internal/service/admin_account.go`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 在 OAuth quota 路由、handler、Wire 与 scheduler snapshot 中同时保留项目权限/可见性、项目范围缓存隔离，并合入上游 quota refresh/recovery。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 在 OAuth quota 路由、handler、Wire 与 scheduler snapshot 中同时保留项目权限/可见性、项目范围缓存隔离，并合入上游 quota refresh/recovery；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在权限、鉴权缓存、账号管理和用量冲突中保留 Project scope，同时合入上游 Grok 媒体与 response-model 审计字段。
 - **合并审查**：搜索新增的 admin route、repository query、cache key、scheduler snapshot 和后台原始 `fetch`；确认都显式继承 Project 上下文，不得只依靠前端隐藏入口。
 - **删除条件**：不主动删除。只有维护者明确放弃项目空间产品能力时，才可按独立迁移方案移除。
 - **聚焦验证**：
@@ -86,7 +86,7 @@
 - **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql`、`backend/internal/repository/user_group_rate_limit_window_repo_test.go`、`backend/internal/service/admin_service_group_rate_limit_window_test.go`、`backend/internal/service/gateway_profit_control_v2_test.go`、`backend/internal/service/openai_profit_control_paths_test.go`、`backend/internal/handler/admin/user_group_rate_limit_handler_test.go`、`frontend/src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts`。
 - **来源提交**：`ae870a2978fc316e51721927d3a91f9bf2f1ceb6`、`17dcffb1c887bf432688e0f25f544b629d4b9eab`、`a80e366bbe27d3212c68ae028cf54cbd714dbe69`、`a6e3a1ceede4cdc048e1f471990b82cc406dd001`、`bbe433256021676ab389439d3bb8157cb0662372`、`7b51c2bd4b53d669d5c37aedaaa9f0ce41edf7df`。
 - **当前修复定位**：提交后运行 `git log -S'composite 请求即父分组' -- backend/internal/service/openai_profit_control.go`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将这些实际分组不变量与上游 profit gate、`PricingAt` 和倍率计费合并。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将这些实际分组不变量与上游 profit gate、`PricingAt` 和倍率计费合并；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 gateway、usage 和计费冲突中继续使用实际选中分组，同时吸收上游搜索、音视频与响应模型计费扩展。
 - **合并审查**：重点检查 gateway 预检、账户切换、sticky binding、usage worker 和图像/Grok 分支；同名 `group_id` 不代表已使用实际调度分组。
 - **删除条件**：不主动删除。只有产品不再提供分组订阅窗口和 fallback 分组归因时才可移除。
 - **聚焦验证**：
@@ -106,7 +106,7 @@
 - **当前代码**：`backend/internal/handler/admin/account_data.go`、`backend/internal/handler/admin/account_data_cpa.go`、`frontend/src/components/admin/account/ImportDataModal.vue`、`frontend/src/components/admin/account/AccountBatchTestModal.vue`、`frontend/src/components/admin/account/AccountBulkActionsBar.vue`、`frontend/src/utils/accountTestRunner.ts`、`frontend/src/views/admin/AccountsView.vue`。
 - **测试**：`backend/internal/handler/admin/account_data_handler_test.go`、`frontend/src/__tests__/integration/data-import.spec.ts`、`frontend/src/components/admin/account/__tests__/AccountBatchTestModal.spec.ts`、`frontend/src/components/admin/account/__tests__/AccountBulkActionsBar.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`3a295166d17636c9f3b44e53c47a7804ab83819e`、`454639e07532e35a0823048ad18948b508554615`、`3543db03bbcf1750852642115f48b61f7b61bac9`、`affd89e9f8f5c49b0f9909824c779187782ae5ab`、`67a183600a13e8a0170bf6780e2fb60ee3e9501b`、`a6ab6d15cab3d5fb2dcc2d2c65da1c6f6400625b`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 保留 `allSelectedAccountsLoaded` 测试门禁、批量删除结果对账和既有批量测试入口。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 保留 `allSelectedAccountsLoaded` 测试门禁、批量删除结果对账和既有批量测试入口；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 让共享账号测试 runner 同时保留 `X-Project-ID` 并接入上游 Grok 图片、音频和视频测试字段。
 - **合并审查**：同时检查 backend import/export DTO、frontend file parser、bulk selection 和 raw SSE `fetch`；不能只验证单账号弹窗。
 - **删除条件**：不主动删除。只有维护者明确取消 CPA/批量运维工作流时才可移除。
 - **聚焦验证**：
@@ -181,7 +181,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
 - **上游部分吸收**：`30d2589ef0f0dc839b934b0b21a270d18b7af52b` 已在 ingress lease loss 时保留 terminal event；当前基线还原生包含 compact keepalive `response.failed`（`2f109e74c`）、Responses null tool schema 修复（`f3c94d209`）、pre-output capacity-shed failover（`c33c3208e`、`14a27f196`）、OAuth beta header 移除与 routing hints（`915cc7e7b`、`815035fcc`、`de349187d`）、调度阈值百分比保持（`99b31067f`）、个人订阅过期修正（`358e4a89a`）和 response-model 审计（`db0bff82c`、`6e34fb09c`）。这些上游行为不登记为 fork 差异；它们仍不覆盖 encrypted reasoning、Agent Identity、外部取消 join、Project/代理范围、health-neutral failover 与 quota 部分成功清理契约。
-- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义。
+- **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留项目归属、协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -205,7 +205,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`backend/internal/service/grok_oauth_reconciliation_test.go`、`backend/internal/service/openai_gateway_grok_chat_bridge_test.go`、`backend/internal/service/openai_gateway_grok_tool_protocol_test.go`、`backend/internal/service/openai_gateway_response_flush_test.go`、`backend/internal/handler/admin/account_handler_grok_refresh_test.go`。
 - **来源提交**：`971a0e5ca717f064afe72a750725f84d43d327fc`、`bce99892926c1e6d83201f74bb82ed74c6353afd`、`88c3138f1a717891eac3276c96eefd44237b45c3`、`e5944b9c7a0230edb0ebd577611c6d849bcb3d68`、`aee1f47c98b60af5fe630be84fc64d4b0e220d3a`。
 - **上游部分吸收**：上游 Grok 完整集成由 `fb0475656` 合入，包含 `370bdcf69`、`25d2b03e9`、`e12e0dc1a`、`ec9e73360` 与 `74249b8fe` 等 OAuth、SSO、媒体和协议实现。本条只保留 refresh-token CAS 轮换、Project 隔离、安全 Chat fallback、client-tool 往返和内容策略错误不 failover 五项仍有独立实现与回归的差异。
-- **人工合并解决**：无相关人工解决锚点。
+- **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 Grok OAuth、媒体和 OpenAI bridge 冲突中保留 Project 校验、统一刷新入口、安全 fallback 与实际分组归因，并合入上游 SSO、密码授权和音视频一次性计费。
 - **合并审查**：OAuth storage、admin refresh endpoint、scheduler token provider 和 protocol bridge 必须一起审查；只接受上游 UI 或单一 refresh helper 不构成吸收。
 - **删除条件**：上游分别提供 OAuth 轮换、项目隔离、协议 fallback 和 client-tool 测试后逐项缩减，全部等价后删除。
 - **聚焦验证**：
@@ -248,7 +248,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **来源提交**：`cdc7fa66b303333c00b87d5d0852a6d4af9993b7`、`d6f78bf2dc6c11b0c5fe72c4a8f2c92eaf1b7425`、`b5af02ae64ae12254add841f555fbf9538d9eeef`、`427c983f92b1dd7e3815e50bdbdc32caf641cf57`、`51775c230a7575ae0ca70dab751cece53163d35d`。
 - **上游相邻行为**：`99b357083e1b5a860f9987523434092e5ef2fcfa` 已原生提供 daily-midnight reset，并将 daily 与 weekly/monthly 使用不同窗口锚点；该行为不登记为 fork 能力，但合并时必须与 fork 的 Project scope、行锁和 commit 后缓存失效同时保留。
 - **当前修复定位**：提交后运行 `git log -S'recoverRefundingAttempt' -- backend/internal/service/payment_refund.go`、`git log -S'phase\": \"dispatching' -- backend/internal/service/payment_refund.go` 与 `git log -S'MerchantIdentityMetadata' -- backend/internal/payment/provider/wxpay.go`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在订阅仓储冲突中同时保留 Project 过滤、行锁与缓存失效契约，并合入 daily 与 weekly/monthly 分离的时间锚点。
 - **合并审查**：配置读写、下单展示、provider snapshot、退款 audit 和公开 DTO 必须一起比较；只吸收一个字段名不构成等价。
 - **删除条件**：上游分别提供 canonical rate、公开 DTO 边界和 snapshot refund 回归测试后逐项缩减，全部等价后删除。
 - **聚焦验证**：
@@ -275,7 +275,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **迁移与测试**：`backend/migrations/185_deleted_api_key_audit_digest.sql`、`backend/internal/service/ops_dashboard_test.go`、`backend/internal/service/ops_log_runtime_test.go`、`backend/internal/repository/ops_deleted_key_audit_test.go`、`frontend/src/views/admin/__tests__/UsageView.spec.ts`、`frontend/src/views/admin/ops/__tests__/OpsDashboard.operator.spec.ts`、`frontend/src/components/admin/usage/__tests__/UsageTable.spec.ts`、`frontend/src/components/common/__tests__/IpGeoCell.spec.ts`、`frontend/src/utils/__tests__/ipGeoLookup.spec.ts`。
 - **来源提交**：`2f78dfc6a00a7cc6de285da6ceabe9868c58a4d7`、`7a17a98b56b7747748f40587cef377bc82143eb2`、`4ec3ddb89297fc8960a8acd9546f72e14bc218f4`、`4cb1350172558b987651097212b22234568dcf79`、`763a01225ffaaf5acd890c765d62a18129f4cee1`、`60cfa88334299f1a471a6eb146668bd46a521e30`、`df0f38f62de8430eb3780bb64716fc645fe2ebc0`、`440386f5ff1ba22c2911e7392177025ef4a42d58`。
 - **上游相邻行为**：Channel Monitor V2、upstream response-model 审计（`db0bff82c`、`6e34fb09c`）和系统日志落库退避（`e687ca3e9`）均来自当前上游基线，不登记为 fork 差异；本条只保留精确 COUNT 缓存、deleted-key digest 归因、Project-safe health、共享筛选口径和 opt-in IP geo。
-- **人工合并解决**：无相关人工解决锚点。
+- **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 dashboard、usage query/cache 和 60 列写入冲突中保留 Project scope、共享筛选与精确 COUNT 缓存，同时合入 request type、upstream response-model 和 mismatch 审计。
 - **合并审查**：同时核对 query、count、dashboard、error tabs 和权限过滤；前端隐藏全局指标不能替代后端 scope 修复。
 - **删除条件**：上游提供等价筛选、COUNT 缓存、deleted-key attribution 和 project-safe dashboard 测试后逐项缩减。
 - **聚焦验证**：
@@ -312,7 +312,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`frontend/src/api/__tests__/url.spec.ts`、`backend/internal/config/config_test.go`、`backend/internal/repository/migrations_runner_notx_test.go`、`backend/internal/setup/setup_test.go`。
 - **来源提交**：`38d6294088369255e79463d836515f7df527f271`、`b255b687ba7872ad7bc590a88a85919cc0253ec9`、`0306521a5557a2520a54c32a014ee7831929397f`。
 - **上游相邻行为**：`db0bff82c7f954607f4b66421a79200e150ac836` 为上游 migration `195_add_usage_log_upstream_model_mismatch_index_notx.sql` 增加了同类 invalid-index recovery；当前 runner 同时支持 `177` 与 `195`，但同类机制不等于上游已吸收 fork 的 `177` 迁移兼容契约。
-- **人工合并解决**：无相关人工解决锚点。
+- **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 non-transactional migration runner 冲突中同时保留 fork migration `177` 与上游 migration `195` 的 invalid-index 恢复。
 - **合并审查**：相对 URL、示例配置和 migration runner 分别比较；上游只修复其中一项时只删除对应子项。
 - **删除条件**：相对 URL、示例配置、migration `177` 恢复和初始 Project owner 原子性分别有等价上游实现与测试后逐项缩减，全部吸收后删除。
 - **聚焦验证**：
@@ -346,7 +346,7 @@ git diff --check
 
 ## 明确排除
 
-- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `0bd492e7e7887cec0832981b27c4b164029a6c2c`、`8e34f01c53a650a00b80b7bf87476cb74f3118be`、`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
+- **Merge 历史**：纯上游 merge 和已被后续实现替代的人工解决不作为独立能力；当前只引用 `a8a3c18641fb1c00030c2baa22fc3918c9e44e68`、`0bd492e7e7887cec0832981b27c4b164029a6c2c`、`8e34f01c53a650a00b80b7bf87476cb74f3118be`、`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519`、`caae38b9abf429d1326ec174b54210a21b023309` 与 `0b7eed0738a608971d9711e99ba824d89536f947` 中仍与能力不变量相关的解决。
 - **已替代方案**：`6b37423465f1780dda62232d88e53676c4af15d5` 与 `bb9e60b13bab1a7f7c31d8987dfa00d5ed6da8ef` 的旧 operator/group-scope 方案已由 Project 模型替代，不单列。
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
