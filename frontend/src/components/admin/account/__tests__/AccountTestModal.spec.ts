@@ -34,6 +34,9 @@ vi.mock('vue-i18n', async () => {
         if (key === 'admin.accounts.imageReceived' && params?.count) {
           return `received-${params.count}`
         }
+        if (key === 'admin.accounts.imagePreviewAlt' && params?.index) {
+          return `test-image-${params.index}`
+        }
         return messages[key] || key
       }
     })
@@ -191,7 +194,9 @@ describe('AccountTestModal', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1)
     const [, request] = (global.fetch as any).mock.calls[0]
     expect(JSON.parse(request.body)).toEqual({
-      model_id: 'grok-4.3'
+      model_id: 'grok-4.3',
+      prompt: '',
+      mode: 'text'
     })
   })
 

@@ -101,6 +101,14 @@ func parseAdminUsageLogFilters(c *gin.Context) (usagestats.UsageLogFilters, bool
 		ModelFilterSource: usagestats.ModelSourceRequested,
 		BillingMode:       strings.TrimSpace(c.Query("billing_mode")),
 	}
+	if raw := strings.TrimSpace(c.Query("upstream_model_mismatch")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
+			return usagestats.UsageLogFilters{}, false
+		}
+		filters.UpstreamModelMismatch = &value
+	}
 
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)

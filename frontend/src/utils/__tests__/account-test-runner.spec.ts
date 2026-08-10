@@ -90,4 +90,37 @@ describe('runAccountConnectionTest', () => {
       })
     }))
   })
+
+  it('forwards optional Grok media inputs and media output events', async () => {
+    localStorage.setItem('sub2api_selected_project_id', '169')
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"audio","audio_url":"data:audio/wav;base64,T0s=","mime_type":"audio/wav"}\n',
+        'data: {"type":"video","video_url":"https://example.test/video.mp4","mime_type":"video/mp4"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+    const events: Array<{ type: string; audio_url?: string; video_url?: string }> = []
+
+    await runAccountConnectionTest({
+      accountId: 13,
+      authToken: 'admin-token',
+      mode: 'stt',
+      imageDataURL: 'data:image/png;base64,SU1H',
+      audioDataURL: 'data:audio/wav;base64,QVVESU8=',
+      onEvent: (event) => events.push(event)
+    })
+
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      mode: 'stt',
+      image_data_url: 'data:image/png;base64,SU1H',
+      audio_data_url: 'data:audio/wav;base64,QVVESU8='
+    })
+    expect(request.headers).toMatchObject({ 'X-Project-ID': '169' })
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'audio', audio_url: 'data:audio/wav;base64,T0s=' }),
+      expect.objectContaining({ type: 'video', video_url: 'https://example.test/video.mp4' })
+    ]))
+  })
 })

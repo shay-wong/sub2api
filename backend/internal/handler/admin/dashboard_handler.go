@@ -93,6 +93,18 @@ func parseDashboardModelFilterSource(c *gin.Context) (string, bool) {
 	return raw, true
 }
 
+func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
 // GetStats handles getting dashboard statistics
 // GET /api/v1/admin/dashboard/stats
 func (h *DashboardHandler) GetStats(c *gin.Context) {
@@ -251,6 +263,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	var billingMode string
+	var upstreamModelMismatch *bool
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -307,18 +320,24 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 		}
 		billingMode = billingModeStr
 	}
+	upstreamModelMismatch, err := parseOptionalBoolDashboardFilter(c, "upstream_model_mismatch")
+	if err != nil {
+		response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
+		return
+	}
 
 	filters := usagestats.UsageLogFilters{
-		UserID:            userID,
-		APIKeyID:          apiKeyID,
-		AccountID:         accountID,
-		GroupID:           groupID,
-		Model:             model,
-		ModelFilterSource: modelFilterSource,
-		RequestType:       requestType,
-		Stream:            stream,
-		BillingType:       billingType,
-		BillingMode:       billingMode,
+		UserID:                userID,
+		APIKeyID:              apiKeyID,
+		AccountID:             accountID,
+		GroupID:               groupID,
+		Model:                 model,
+		ModelFilterSource:     modelFilterSource,
+		RequestType:           requestType,
+		Stream:                stream,
+		BillingType:           billingType,
+		BillingMode:           billingMode,
+		UpstreamModelMismatch: upstreamModelMismatch,
 	}
 	trend, hit, err := h.getUsageTrendForScope(c.Request.Context(), scope, startTime, endTime, granularity, filters)
 	if err != nil {
@@ -358,6 +377,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	var billingMode string
+	var upstreamModelMismatch *bool
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -421,18 +441,24 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		}
 		billingMode = billingModeStr
 	}
+	upstreamModelMismatch, err := parseOptionalBoolDashboardFilter(c, "upstream_model_mismatch")
+	if err != nil {
+		response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
+		return
+	}
 
 	filters := usagestats.UsageLogFilters{
-		UserID:            userID,
-		APIKeyID:          apiKeyID,
-		AccountID:         accountID,
-		GroupID:           groupID,
-		Model:             model,
-		ModelFilterSource: modelFilterSource,
-		RequestType:       requestType,
-		Stream:            stream,
-		BillingType:       billingType,
-		BillingMode:       billingMode,
+		UserID:                userID,
+		APIKeyID:              apiKeyID,
+		AccountID:             accountID,
+		GroupID:               groupID,
+		Model:                 model,
+		ModelFilterSource:     modelFilterSource,
+		RequestType:           requestType,
+		Stream:                stream,
+		BillingType:           billingType,
+		BillingMode:           billingMode,
+		UpstreamModelMismatch: upstreamModelMismatch,
 	}
 	stats, hit, err := h.getModelStatsForScope(c.Request.Context(), scope, startTime, endTime, filters, modelSource)
 	if err != nil {
@@ -469,6 +495,7 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	var stream *bool
 	var billingType *int8
 	var billingMode string
+	var upstreamModelMismatch *bool
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -525,18 +552,24 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		}
 		billingMode = billingModeStr
 	}
+	upstreamModelMismatch, err := parseOptionalBoolDashboardFilter(c, "upstream_model_mismatch")
+	if err != nil {
+		response.BadRequest(c, "Invalid upstream_model_mismatch value, use true or false")
+		return
+	}
 
 	filters := usagestats.UsageLogFilters{
-		UserID:            userID,
-		APIKeyID:          apiKeyID,
-		AccountID:         accountID,
-		GroupID:           groupID,
-		Model:             model,
-		ModelFilterSource: modelFilterSource,
-		RequestType:       requestType,
-		Stream:            stream,
-		BillingType:       billingType,
-		BillingMode:       billingMode,
+		UserID:                userID,
+		APIKeyID:              apiKeyID,
+		AccountID:             accountID,
+		GroupID:               groupID,
+		Model:                 model,
+		ModelFilterSource:     modelFilterSource,
+		RequestType:           requestType,
+		Stream:                stream,
+		BillingType:           billingType,
+		BillingMode:           billingMode,
+		UpstreamModelMismatch: upstreamModelMismatch,
 	}
 	stats, hit, err := h.getGroupStatsForScope(c.Request.Context(), scope, startTime, endTime, filters)
 	if err != nil {

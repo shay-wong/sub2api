@@ -385,6 +385,7 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStream(
 				return s.handleAntigravityCompatReadError(c, session, event.err, maxLineSize, prefix)
 			}
 			resetStreamDataTimer(timeoutTimer, timeout)
+			s.observeAntigravityGeminiSSELine(c, event.line)
 			wasDisconnected := writer.Disconnected()
 			if err := session.consume(event.line); err != nil {
 				return s.handleAntigravityCompatConversionError(c, session, nil, err, prefix)

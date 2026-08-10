@@ -11,18 +11,19 @@ import (
 var usageStatsCache = newSnapshotCache(30 * time.Second)
 
 type usageStatsCacheKeyData struct {
-	ProjectID   int64  `json:"project_id,omitempty"`
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
-	UserID      int64  `json:"user_id"`
-	APIKeyID    int64  `json:"api_key_id"`
-	AccountID   int64  `json:"account_id"`
-	GroupID     int64  `json:"group_id"`
-	Model       string `json:"model"`
-	BillingMode string `json:"billing_mode"`
-	RequestType *int16 `json:"request_type"`
-	Stream      *bool  `json:"stream"`
-	BillingType *int8  `json:"billing_type"`
+	ProjectID             int64  `json:"project_id,omitempty"`
+	StartTime             string `json:"start_time"`
+	EndTime               string `json:"end_time"`
+	UserID                int64  `json:"user_id"`
+	APIKeyID              int64  `json:"api_key_id"`
+	AccountID             int64  `json:"account_id"`
+	GroupID               int64  `json:"group_id"`
+	Model                 string `json:"model"`
+	BillingMode           string `json:"billing_mode"`
+	RequestType           *int16 `json:"request_type"`
+	Stream                *bool  `json:"stream"`
+	BillingType           *int8  `json:"billing_type"`
+	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
 }
 
 func usageStatsCacheKey(ctx context.Context, filters usagestats.UsageLogFilters) string {
@@ -35,18 +36,19 @@ func usageStatsCacheKey(ctx context.Context, filters usagestats.UsageLogFilters)
 		end = filters.EndTime.UTC().Format(time.RFC3339)
 	}
 	return mustMarshalDashboardCacheKey(usageStatsCacheKeyData{
-		ProjectID:   dashboardCacheProjectID(ctx),
-		StartTime:   start,
-		EndTime:     end,
-		UserID:      filters.UserID,
-		APIKeyID:    filters.APIKeyID,
-		AccountID:   filters.AccountID,
-		GroupID:     filters.GroupID,
-		Model:       filters.Model,
-		BillingMode: filters.BillingMode,
-		RequestType: filters.RequestType,
-		Stream:      filters.Stream,
-		BillingType: filters.BillingType,
+		ProjectID:             dashboardCacheProjectID(ctx),
+		StartTime:             start,
+		EndTime:               end,
+		UserID:                filters.UserID,
+		APIKeyID:              filters.APIKeyID,
+		AccountID:             filters.AccountID,
+		GroupID:               filters.GroupID,
+		Model:                 filters.Model,
+		BillingMode:           filters.BillingMode,
+		RequestType:           filters.RequestType,
+		Stream:                filters.Stream,
+		BillingType:           filters.BillingType,
+		UpstreamModelMismatch: filters.UpstreamModelMismatch,
 	})
 }
 

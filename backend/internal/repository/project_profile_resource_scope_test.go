@@ -944,6 +944,7 @@ func TestUserSubscriptionResetUsageWindowsUsesActiveProjectProfileScope(t *testi
 		true,
 		true,
 		fixture.newWindowStart,
+		fixture.newWindowStart,
 	))
 
 	got, err := fixture.client.UserSubscription.Get(fixture.ctx, fixture.bound.ID)
@@ -961,6 +962,7 @@ func TestUserSubscriptionResetUsageWindowsUsesActiveProjectProfileScope(t *testi
 		true,
 		true,
 		true,
+		fixture.newWindowStart,
 		fixture.newWindowStart,
 	)
 	require.ErrorIs(t, err, service.ErrSubscriptionNotFound)

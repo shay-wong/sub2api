@@ -8,6 +8,8 @@ export interface AccountTestEvent {
   success?: boolean
   error?: string
   image_url?: string
+  audio_url?: string
+  video_url?: string
   mime_type?: string
 }
 
@@ -17,6 +19,8 @@ export interface RunAccountConnectionTestOptions {
   modelId?: string
   prompt?: string
   mode?: string
+  imageDataURL?: string
+  audioDataURL?: string
   signal?: AbortSignal
   onEvent?: (event: AccountTestEvent) => void
 }
@@ -33,6 +37,8 @@ const buildRequestBody = (options: RunAccountConnectionTestOptions) => {
   if (options.modelId) body.model_id = options.modelId
   if (options.prompt !== undefined) body.prompt = options.prompt
   if (options.mode) body.mode = options.mode
+  if (options.imageDataURL) body.image_data_url = options.imageDataURL
+  if (options.audioDataURL) body.audio_data_url = options.audioDataURL
   return JSON.stringify(body)
 }
 
