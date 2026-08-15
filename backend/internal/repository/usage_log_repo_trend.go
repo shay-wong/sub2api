@@ -738,7 +738,48 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 
 // GetAllGroupUsageSummary 返回所有分组在服务端配置时区内的今日、昨日与当前保留记录累计金额。
 func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error) {
-	return r.getAllGroupUsageSummaryFromRollups(ctx, todayStart)
+	// 全局 rollup 不含 project_id，Project 视图必须回查原始日志，避免跨项目汇总泄露。
+	if _, scoped := service.ProjectIDFromContext(ctx); !scoped {
+		return r.getAllGroupUsageSummaryFromRollups(ctx, todayStart)
+	}
+
+	todayStart = service.GroupUsageTodayStart(todayStart)
+	yesterdayStart := service.GroupUsageYesterdayStart(todayStart)
+	args := []any{todayStart, yesterdayStart}
+	usageClauses, args, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "ul.project_id", usageLogSQLScopeResources("ul"))
+	query := `
+		SELECT
+			g.id AS group_id,
+			COALESCE(SUM(ul.actual_cost), 0) AS total_cost,
+			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost,
+			COALESCE(SUM(CASE WHEN ul.created_at >= $2 AND ul.created_at < $1 THEN ul.actual_cost ELSE 0 END), 0) AS yesterday_cost
+		FROM groups g
+		LEFT JOIN usage_logs ul ON ul.group_id = g.id`
+	if len(usageClauses) > 0 {
+		query += " AND " + usageClauses[0]
+	}
+	groupClauses := []string{"g.deleted_at IS NULL"}
+	groupClauses, args = appendProjectProfileScopedWhere(ctx, groupClauses, args, "g.project_id", projectSQLScopeResources{GroupID: "g.id"})
+	query += " WHERE " + strings.Join(groupClauses, " AND ")
+	query += " GROUP BY g.id"
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var results []usagestats.GroupUsageSummary
+	for rows.Next() {
+		var row usagestats.GroupUsageSummary
+		if err := rows.Scan(&row.GroupID, &row.TotalCost, &row.TodayCost, &row.YesterdayCost); err != nil {
+			return nil, err
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 // resolveModelDimensionExpression maps model source type to a safe SQL expression.

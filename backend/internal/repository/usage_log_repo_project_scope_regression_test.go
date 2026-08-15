@@ -99,11 +99,12 @@ func TestUsageLogTrendQueriesPreserveProjectProfileScope(t *testing.T) {
 	})
 
 	t.Run("group summary scopes groups and preserves empty left joins", func(t *testing.T) {
-		db, mock := newUsageLogProjectScopeSQLMock(t, projectID, "LEFT JOIN usage_logs ul ON ul.group_id = g.id AND", "ppb.resource_id = g.id", "pm.user_id = ul.user_id")
+		useGroupUsageRepositoryTestTimezone(t, "UTC")
+		db, mock := newUsageLogProjectScopeSQLMock(t, projectID, "LEFT JOIN usage_logs ul ON ul.group_id = g.id AND", "ul.created_at >= $2 AND ul.created_at < $1", "ppb.resource_id = g.id", "pm.user_id = ul.user_id")
 		repo := &usageLogRepository{sql: db}
 		mock.ExpectQuery("project-scoped").
-			WithArgs(start).
-			WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost"}))
+			WithArgs(start, start.AddDate(0, 0, -1)).
+			WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}))
 
 		_, err := repo.GetAllGroupUsageSummary(ctx, start)
 		require.NoError(t, err)

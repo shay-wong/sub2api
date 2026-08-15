@@ -83,6 +83,56 @@ func TestGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *tes
 	require.True(t, *usageRepo.lastLog.UpstreamModelMismatch)
 }
 
+func TestGatewayServiceRecordUsage_ResponseModelUsesActualSelectionGroupPricing(t *testing.T) {
+	const (
+		originalGroupID = int64(41)
+		actualGroupID   = int64(42)
+		responseInput   = 1e-6
+		responseOutput  = 2e-6
+		baselineInput   = 10e-6
+		baselineOutput  = 20e-6
+	)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	actualGroup := &Group{
+		ID:             actualGroupID,
+		RateMultiplier: 1,
+		ModelPricing: []ChannelModelPricing{
+			{Models: []string{anthropicPriceyFixtureModel}, BillingMode: BillingModeToken, InputPrice: testPtrFloat64(baselineInput), OutputPrice: testPtrFloat64(baselineOutput)},
+			{Models: []string{anthropicCheapFixtureModel}, BillingMode: BillingModeToken, InputPrice: testPtrFloat64(responseInput), OutputPrice: testPtrFloat64(responseOutput)},
+		},
+	}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID:             "gateway_response_model_actual_group",
+			Usage:                 ClaudeUsage{InputTokens: 100, OutputTokens: 50},
+			Model:                 anthropicPriceyFixtureModel,
+			UpstreamResponseModel: anthropicCheapFixtureModel,
+			Duration:              time.Second,
+		},
+		APIKey:                &APIKey{ID: 501, GroupID: i64p(originalGroupID), Group: &Group{ID: originalGroupID, RateMultiplier: 1}},
+		User:                  &User{ID: 601},
+		Account:               &Account{ID: 701},
+		GroupRateLimitGroupID: i64p(actualGroupID),
+		GroupRateLimitGroup:   actualGroup,
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      anthropicPriceyFixtureModel,
+			ChannelMappedModel: anthropicPriceyFixtureModel,
+			BillingModelSource: BillingModelSourceResponse,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 100*responseInput+50*responseOutput, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, usageRepo.lastLog.ActualCost, userRepo.lastAmount, 1e-12)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
+}
+
 func TestGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -221,6 +271,57 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(
 	require.Equal(t, cheaper, *usageRepo.lastLog.UpstreamResponseModel)
 	require.NotNil(t, usageRepo.lastLog.UpstreamModelMismatch)
 	require.True(t, *usageRepo.lastLog.UpstreamModelMismatch)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ResponseModelUsesActualSelectionGroupPricing(t *testing.T) {
+	const (
+		originalGroupID = int64(51)
+		actualGroupID   = int64(52)
+		responseInput   = 4e-6
+		responseOutput  = 8e-6
+		baselineInput   = 10e-6
+		baselineOutput  = 20e-6
+	)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	actualGroup := &Group{
+		ID:             actualGroupID,
+		RateMultiplier: 1,
+		ModelPricing: []ChannelModelPricing{
+			{Models: []string{openAIPriceyFixtureModel}, BillingMode: BillingModeToken, InputPrice: testPtrFloat64(baselineInput), OutputPrice: testPtrFloat64(baselineOutput)},
+			{Models: []string{openAICheapFixtureModel}, BillingMode: BillingModeToken, InputPrice: testPtrFloat64(responseInput), OutputPrice: testPtrFloat64(responseOutput)},
+		},
+	}
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:             "openai_response_model_actual_group",
+			Model:                 openAIPriceyFixtureModel,
+			UpstreamModel:         openAIPriceyFixtureModel,
+			UpstreamResponseModel: openAICheapFixtureModel,
+			Usage:                 OpenAIUsage{InputTokens: 20, OutputTokens: 10},
+			Duration:              time.Second,
+		},
+		APIKey:                &APIKey{ID: 10, GroupID: i64p(originalGroupID), Group: &Group{ID: originalGroupID, RateMultiplier: 1}},
+		User:                  &User{ID: 20},
+		Account:               &Account{ID: 30},
+		GroupRateLimitGroupID: i64p(actualGroupID),
+		GroupRateLimitGroup:   actualGroup,
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      openAIPriceyFixtureModel,
+			ChannelMappedModel: openAIPriceyFixtureModel,
+			BillingModelSource: BillingModelSourceResponse,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 20*responseInput+10*responseOutput, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, usageRepo.lastLog.ActualCost, userRepo.lastAmount, 1e-12)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *testing.T) {
