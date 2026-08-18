@@ -48,20 +48,8 @@ func RegisterAdminRoutes(
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
 
-		// 运维监控（Ops）
-		registerOpsRoutes(admin, h, panelRateLimiter)
-
-		adminOnly := admin.Group("")
-		adminOnly.Use(middleware.RequireAdminOnly())
-
-		// 项目空间管理：超级管理员可配置项目空间；项目管理员仅允许当前项目内的受限成员状态操作。
-		registerProjectRoutes(admin, h)
-
-		// 用户管理：项目管理员只能看到当前项目配置范围内的用户。
-		registerUserManagementRoutes(admin, h)
-
-		// 公告管理
-		registerAnnouncementRoutes(adminOnly, h)
+		// 国产供应商（kimi/zhipu/deepseek）额度与余额
+		registerCNProviderRoutes(admin, h)
 
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
@@ -533,6 +521,17 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		grok.GET("/accounts/:id/quota", accountWrite, h.Admin.GrokOAuth.QueryQuota)
 		grok.POST("/accounts/:id/reset-quota", accountWrite, h.Admin.GrokOAuth.ResetQuota)
 		grok.GET("/runtime-sanity", opsRead, h.Admin.GrokOAuth.RuntimeSanity)
+	}
+}
+
+// registerCNProviderRoutes 注册国产供应商（kimi/zhipu/deepseek）的额度与余额查询端点。
+func registerCNProviderRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	cn := admin.Group("/cn-providers")
+	{
+		// Coding Plan 滚动窗口用量（kimi/zhipu coding 账号）。
+		cn.GET("/accounts/:id/quota", h.Admin.CNProvider.QueryQuota)
+		// payg 账号余额（kimi/deepseek；zhipu 无余额端点）。
+		cn.GET("/accounts/:id/balance", h.Admin.CNProvider.QueryBalance)
 	}
 }
 
