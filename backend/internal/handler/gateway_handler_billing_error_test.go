@@ -69,6 +69,20 @@ func TestBillingErrorDetails_UnknownErrorFallsBackTo403(t *testing.T) {
 	require.NotEmpty(t, msg)
 }
 
+func TestBillingErrorDetails_MapsSubscriptionUsageLimitsToTooManyRequests(t *testing.T) {
+	for _, err := range []error{
+		service.ErrDailyLimitExceeded,
+		service.ErrWeeklyLimitExceeded,
+		service.ErrMonthlyLimitExceeded,
+	} {
+		status, code, msg, retryAfter := billingErrorDetails(err)
+		require.Equal(t, http.StatusTooManyRequests, status, "status for %v", err)
+		require.Equal(t, "rate_limit_exceeded", code)
+		require.NotEmpty(t, msg)
+		require.Zero(t, retryAfter)
+	}
+}
+
 func TestExtractQuotaResetSeconds_T19_HappyPath(t *testing.T) {
 	err := service.ErrUserPlatformDailyQuotaExhausted.WithMetadata(map[string]string{
 		"window_resets_at": time.Now().Add(10 * time.Second).UTC().Format(time.RFC3339),

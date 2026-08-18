@@ -31,8 +31,8 @@
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.177` |
 | 当前 Fork 版本 | `0.1.177-fork.1` |
-| 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.1.177-fork.1`（本次合并已同步版本源） |
+| 已发布同基线 Fork 版本 | `v0.1.177-fork.1` |
+| 下次发布所需版本 | `0.1.177-fork.2` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
@@ -175,6 +175,10 @@ actionlint .github/workflows/stable-fork-release.yml
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复 Codex reasoning/Agent Identity、OpenAI privacy、Alpha Search、Responses passthrough、proxy stream circuit、429 清理和 account failover 的通用正确性。
 - **行为不变量**：保留可回放的 encrypted reasoning，剥离不可回查引用；Agent Identity 只恢复一次且不泄漏 assertion；代理 quarantine 只阻断对应请求范围并维持 fail-open 语义；额度重置的上游成功是不可逆结果，本地 429/runtime block 清理失败必须进入 HTTP 200 的部分成功恢复/告警流程，不得返回可重试失败并再次消耗 reset credit；`RequestScopedTransient` 只能驱动请求级重试/failover，不得降低所选账号的 scheduler health；失效 OAuth 账号不能阻断切换；Responses namespace 和 compact/passthrough 决策保持协议一致；passthrough 外部取消必须先选择精确 close code，关闭客户端连接以解除阻塞写，并在 `Relay` 返回前 join 已启动的 relay worker；ingress lease loss 在连接可写时保持 1013。
+- **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
+- **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
+- **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`。
+- **待合并上游审查**：`upstream/main` 在 `49504adc98d2b6d539491e865a340e644548979e` 仍未覆盖 subscription 日、周、月限额的 429 映射。
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
@@ -187,6 +191,7 @@ actionlint .github/workflows/stable-fork-release.yml
 ```bash
 (cd backend && go test -tags=unit ./internal/service -run 'Test(AdminService_EnsureOpenAIPrivacy|TokenRefreshService_ensureOpenAIPrivacy|ForwardAlphaSearch|OpenAIProxyStreamCircuit|AccountTestServiceOpenAICompactAgentIdentity|OpenAIRuntimeBlock_|ApplyCodexOAuthTransform_)')
 (cd backend && go test -tags=unit ./internal/handler -run '^(TestOpenAIGateway|TestAlphaSearch)')
+(cd backend && go test ./internal/handler -run '^TestBillingErrorDetails_MapsSubscriptionUsageLimitsToTooManyRequests$')
 (cd backend && go test ./internal/util/httputil -run '^TestIsCloudflareChallengeResponse$')
 (cd backend && go test ./internal/service/openai_ws_v2 -run '^TestRelay_ContextCancellationJoinsBlockedDownstreamWrite$')
 (cd backend && go test ./internal/service -run '^TestPassthroughLifecycle_LeaseLossSendsRetryClose$')
