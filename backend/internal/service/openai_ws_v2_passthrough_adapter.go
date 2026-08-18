@@ -1048,6 +1048,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				acceptedTurns.Add(1)
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
 				acceptedTurn = true
@@ -1367,9 +1368,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		relayErr,
 		relayExit.WroteDownstream,
 	)
-	if hooks != nil && hooks.AfterTurn != nil {
+	if openAIWSPassthroughHasPendingTurn(completedTurns.Load(), acceptedTurns.Load()) && hooks != nil && hooks.AfterTurn != nil {
 		if hooks.TurnStarted != nil {
-			hooks.TurnStarted(turnCount+1, time.Now().Add(-result.Duration))
+			startedAt := firstTurnStartedAt
+			if acceptedAt := acceptedTurnStartedAt.Swap(nil); acceptedAt != nil {
+				startedAt = *acceptedAt
+			}
+			if startedAt.IsZero() {
+				startedAt = time.Now().Add(-result.Duration)
+			}
+			hooks.TurnStarted(turnCount+1, startedAt)
 		}
 		hooks.AfterTurn(turnCount+1, nil, turnErr)
 	}

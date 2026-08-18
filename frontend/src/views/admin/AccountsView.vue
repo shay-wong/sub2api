@@ -1518,6 +1518,7 @@ const handleManualRefresh = async () => {
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
+	if (!isFullAdmin.value) return
   try {
     const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
     upstreamBillingProbeGloballyEnabled.value = settings.enabled
@@ -2705,9 +2706,11 @@ onMounted(async () => {
   }
 
   load()
-  loadUpstreamBillingProbeGlobalState()
+  if (isFullAdmin.value) {
+    loadUpstreamBillingProbeSettings()
+  }
   const [proxiesResult, groupsResult] = await Promise.allSettled([
-    adminAPI.proxies.getAll(),
+    adminAPI.proxies.getAccountOptions(),
     adminAPI.groups.getAll()
   ])
   if (proxiesResult.status === 'fulfilled') {

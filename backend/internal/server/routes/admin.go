@@ -51,6 +51,21 @@ func RegisterAdminRoutes(
 		// 国产供应商（kimi/zhipu/deepseek）额度与余额
 		registerCNProviderRoutes(admin, h)
 
+		// 运维监控（Ops）
+		registerOpsRoutes(admin, h, panelRateLimiter)
+
+		adminOnly := admin.Group("")
+		adminOnly.Use(middleware.RequireAdminOnly())
+
+		// 项目空间管理：超级管理员可配置项目空间；项目管理员仅允许当前项目内的受限成员状态操作。
+		registerProjectRoutes(admin, h)
+
+		// 用户管理：项目管理员只能看到当前项目配置范围内的用户。
+		registerUserManagementRoutes(admin, h)
+
+		// 公告管理
+		registerAnnouncementRoutes(adminOnly, h)
+
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
 

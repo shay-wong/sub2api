@@ -16,33 +16,35 @@ import (
 
 type accountRepoStubForBulkUpdate struct {
 	accountRepoStub
-	bulkUpdateErr       error
-	bulkUpdateIDs       []int64
-	bulkUpdateCalls     int
-	lastBulkUpdate      AccountBulkUpdate
-	bindGroupErrByID    map[int64]error
-	bindGroupsCalls     []int64
-	bindGroupsByAccount map[int64][]int64
-	createAccount       *Account
-	createID            int64
-	createErr           error
-	updatedAccounts     []*Account
-	updateErr           error
-	getByIDsAccounts    []*Account
-	getByIDsErr         error
-	getByIDsCalled      bool
-	getByIDsIDs         []int64
-	getByIDAccounts     map[int64]*Account
-	getByIDErrByID      map[int64]error
-	getByIDCalled       []int64
-	listByGroupData     map[int64][]Account
-	listByGroupErr      map[int64]error
-	listData            []Account
-	listResult          *pagination.PaginationResult
-	listErr             error
-	listCalled          bool
-	lastListParams      pagination.PaginationParams
-	lastListFilters     struct {
+	bulkUpdateErr        error
+	bulkUpdateIDs        []int64
+	bulkUpdateCalls      int
+	lastBulkUpdate       AccountBulkUpdate
+	bindGroupErrByID     map[int64]error
+	bindGroupsCalls      []int64
+	boundGroupsByID      map[int64][]int64
+	bindGroupsByAccount  map[int64][]int64
+	createAccount        *Account
+	createID             int64
+	createErr            error
+	updatedAccounts      []*Account
+	updateErr            error
+	getByIDsAccounts     []*Account
+	getByIDsErr          error
+	getByIDsCalled       bool
+	getByIDsIDs          []int64
+	getByIDAccounts      map[int64]*Account
+	getByIDErrByID       map[int64]error
+	getByIDCalled        []int64
+	listByGroupData      map[int64][]Account
+	listByGroupErr       map[int64]error
+	listData             []Account
+	listResult           *pagination.PaginationResult
+	listErr              error
+	listCalled           bool
+	listGroupScopeCalled bool
+	lastListParams       pagination.PaginationParams
+	lastListFilters      struct {
 		platform    string
 		accountType string
 		status      string

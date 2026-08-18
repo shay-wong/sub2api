@@ -2770,14 +2770,20 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if client.Driver().Dialect() == dialect.SQLite {
 		extraExpression = "json_patch(COALESCE(extra, '{}'), $1)"
 	}
+	if clearProbeSnapshot {
+		if client.Driver().Dialect() == dialect.SQLite {
+			extraExpression = "json_remove(" + extraExpression + ", '$.upstream_billing_probe')"
+		} else {
+			extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
+		}
+	}
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
-	result, err := client.ExecContext(
-		ctx,
-		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
-		string(payload), id,
-	)
+	query := "UPDATE accounts SET extra = " + extraExpression + ", updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL"
+	args := []any{string(payload), id}
+	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
+	result, err := client.ExecContext(ctx, query, args...)
 
 	if err != nil {
 		return err

@@ -72,6 +72,30 @@ describe('AccountUsageCell', () => {
     })
   })
 
+  it('forwards an OpenAI quota reset so the account list can refresh the row', async () => {
+    getUsage.mockResolvedValue({})
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ platform: 'openai', type: 'oauth' })
+      },
+      global: {
+        stubs: {
+          OpenAIQuotaResetCell: {
+            emits: ['reset'],
+            template: '<button data-test="quota-reset" @click="$emit(\'reset\')">reset</button>'
+          },
+          UsageProgressBar: true,
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-test="quota-reset"]').trigger('click')
+
+    expect(wrapper.emitted('account-state-reset')).toHaveLength(1)
+  })
+
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {

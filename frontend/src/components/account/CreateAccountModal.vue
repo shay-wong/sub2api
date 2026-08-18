@@ -4511,6 +4511,11 @@ watch(
               ? 'https://api.x.ai/v1'
               : 'https://api.anthropic.com'
     }
+	openAIEndpointCapabilitiesTouched.value = false
+	openAIEndpointCapabilities.value =
+		newPlatform === 'openai'
+			? inferOpenAIEndpointCapabilities(apiKeyBaseUrl.value)
+			: ['chat_completions', 'embeddings']
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []

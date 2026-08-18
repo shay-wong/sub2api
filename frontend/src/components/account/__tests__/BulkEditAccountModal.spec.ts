@@ -5,7 +5,8 @@ import BulkEditAccountModal from '../BulkEditAccountModal.vue'
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 import { adminAPI } from '@/api/admin'
 
-const { showError, showSuccess, translate } = vi.hoisted(() => ({
+const { authIsAdmin, showError, showSuccess, translate } = vi.hoisted(() => ({
+  authIsAdmin: { value: true },
   showError: vi.fn(),
   showSuccess: vi.fn(),
   translate: vi.fn((key: string) => key)

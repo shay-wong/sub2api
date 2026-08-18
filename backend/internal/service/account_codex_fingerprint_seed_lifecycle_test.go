@@ -172,6 +172,14 @@ func (r *codexSeedDuplicateRepo) CreateWithAccountGroups(ctx context.Context, ac
 	return r.Create(ctx, account)
 }
 
+func (r *codexSeedDuplicateRepo) FindDuplicateByOperationID(ctx context.Context, operationID string) (*Account, error) {
+	matches, err := r.FindByExtraField(ctx, duplicateAccountOperationIDExtraKey, operationID)
+	if err != nil || len(matches) == 0 {
+		return nil, err
+	}
+	return &matches[0], nil
+}
+
 func TestDuplicateAccountDoesNotCopyCodexFingerprintSeed(t *testing.T) {
 	ctx := context.Background()
 	repo := &codexSeedDuplicateRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{accounts: make(map[int64]*Account)}}

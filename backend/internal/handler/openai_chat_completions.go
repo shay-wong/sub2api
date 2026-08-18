@@ -277,26 +277,30 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			clientIP := ip.GetClientIP(c)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-					Result:             res,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					APIKeyService:      h.apiKeyService,
-					QuotaPlatform:      quotaPlatform,
-					SessionID:          sessionID,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
-					PricingAt:          pricingAt,
-					CyberBlocked:       cyberBlocked,
+					Result:                res,
+					APIKey:                apiKey,
+					User:                  apiKey.User,
+					Account:               account,
+					Subscription:          subscription,
+					InboundEndpoint:       inboundEndpoint,
+					UpstreamEndpoint:      upstreamEndpoint,
+					UserAgent:             userAgent,
+					IPAddress:             clientIP,
+					APIKeyService:         h.apiKeyService,
+					GroupRateLimitGroupID: groupRateLimitGroupID,
+					GroupRateLimitGroup:   groupRateLimitGroup,
+					QuotaPlatform:         quotaPlatform,
+					SessionID:             sessionID,
+					ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
+					PricingAt:             pricingAt,
+					CyberBlocked:          cyberBlocked,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.openai_gateway.chat_completions"),

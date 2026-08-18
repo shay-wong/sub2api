@@ -215,6 +215,10 @@ type OpenAIWSIngressHooks struct {
 	// before channel or account mapping. Ingress modes preserve it for usage
 	// attribution while MapRequestModel determines the upstream model.
 	InitialRequestModel string
+	// FixedRequestModel pins every response.create frame to the model selected
+	// for this WS session. Composite public aliases use it to prevent later
+	// turns from omitting or resending the alias to the upstream.
+	FixedRequestModel string
 	// InitialTurnStartedAt freezes when the first response.create was accepted.
 	InitialTurnStartedAt time.Time
 	// MaxReasoningEffort limits explicit reasoning effort values for this WS session.

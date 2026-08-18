@@ -24,40 +24,41 @@ func requireCanonicalUUIDString(t *testing.T, value string) {
 func TestMigration225BackfillsOnlyEnabledOpenAIOAuthMissingOrMalformedSeeds(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
+	projectID := mustDefaultProjectID(t, integrationEntClient)
 	migrationSQL, err := dbmigrations.FS.ReadFile("225_backfill_codex_fingerprint_seed.sql")
 	require.NoError(t, err)
 
 	var missingID, blankID, malformedID, validID, offID, apiKeyID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-missing', 'openai', 'oauth', '{"codex_fingerprint_mode":"session"}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-missing', 'openai', 'oauth', '{"codex_fingerprint_mode":"session"}'::jsonb)
 RETURNING id
-`).Scan(&missingID))
+`, projectID).Scan(&missingID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-blank', 'openai', 'oauth', '{"codex_fingerprint_mode":"device","codex_fingerprint_seed":""}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-blank', 'openai', 'oauth', '{"codex_fingerprint_mode":"device","codex_fingerprint_seed":""}'::jsonb)
 RETURNING id
-`).Scan(&blankID))
+`, projectID).Scan(&blankID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-malformed', 'openai', 'oauth', '{"codex_fingerprint_mode":"full","codex_fingerprint_seed":"BAD"}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-malformed', 'openai', 'oauth', '{"codex_fingerprint_mode":"full","codex_fingerprint_seed":"BAD"}'::jsonb)
 RETURNING id
-`).Scan(&malformedID))
+`, projectID).Scan(&malformedID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-valid', 'openai', 'oauth', '{"codex_fingerprint_mode":"session","codex_fingerprint_seed":"11111111-1111-4111-8111-111111111111"}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-valid', 'openai', 'oauth', '{"codex_fingerprint_mode":"session","codex_fingerprint_seed":"11111111-1111-4111-8111-111111111111"}'::jsonb)
 RETURNING id
-`).Scan(&validID))
+`, projectID).Scan(&validID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-off', 'openai', 'oauth', '{"codex_fingerprint_mode":"off"}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-off', 'openai', 'oauth', '{"codex_fingerprint_mode":"off"}'::jsonb)
 RETURNING id
-`).Scan(&offID))
+`, projectID).Scan(&offID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ('migration-225-apikey', 'openai', 'apikey', '{"codex_fingerprint_mode":"session"}'::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, 'migration-225-apikey', 'openai', 'apikey', '{"codex_fingerprint_mode":"session"}'::jsonb)
 RETURNING id
-`).Scan(&apiKeyID))
+`, projectID).Scan(&apiKeyID))
 
 	_, err = tx.ExecContext(ctx, string(migrationSQL))
 	require.NoError(t, err)
@@ -89,6 +90,7 @@ RETURNING id
 
 func TestBulkUpdateGeneratesDistinctStableCodexFingerprintSeedsPerEligibleRow(t *testing.T) {
 	ctx := context.Background()
+	projectID := mustDefaultProjectID(t, integrationEntClient)
 	testName := "bulk-codex-seed-" + uuid.NewString()
 	type fixture struct {
 		name        string
@@ -106,10 +108,10 @@ func TestBulkUpdateGeneratesDistinctStableCodexFingerprintSeedsPerEligibleRow(t 
 	for _, f := range fixtures {
 		var id int64
 		require.NoError(t, integrationDB.QueryRowContext(ctx, `
-INSERT INTO accounts (name, platform, type, extra)
-VALUES ($1, 'openai', $2, $3::jsonb)
+INSERT INTO accounts (project_id, name, platform, type, extra)
+VALUES ($1, $2, 'openai', $3, $4::jsonb)
 RETURNING id
-`, f.name, f.accountType, f.extra).Scan(&id))
+`, projectID, f.name, f.accountType, f.extra).Scan(&id))
 		ids = append(ids, id)
 	}
 	t.Cleanup(func() {

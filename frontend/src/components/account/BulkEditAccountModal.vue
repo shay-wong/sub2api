@@ -1479,7 +1479,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type {
-  Proxy as ProxyConfig,
+  ProxyOption as ProxyConfig,
   AdminGroup,
   AccountPlatform,
   AccountType,
