@@ -34,7 +34,8 @@ vi.mock('@/api/admin', () => ({
       bulkUpdate: vi.fn()
     },
     proxies: {
-      getAll: getAllProxies
+      getAll: getAllProxies,
+      getAccountOptions: getAllProxies
     },
     groups: {
       getAll: getAllGroups
