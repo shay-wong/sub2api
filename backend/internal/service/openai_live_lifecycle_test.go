@@ -303,6 +303,14 @@ func (c *liveTestConcurrencyCache) ReleaseAccountSlot(context.Context, int64, st
 	return nil
 }
 
+func (c *liveTestConcurrencyCache) GetAccountsLoadBatch(_ context.Context, accounts []AccountWithConcurrency) (map[int64]*AccountLoadInfo, error) {
+	loads := make(map[int64]*AccountLoadInfo, len(accounts))
+	for _, account := range accounts {
+		loads[account.ID] = &AccountLoadInfo{}
+	}
+	return loads, nil
+}
+
 func (c *liveTestConcurrencyCache) RefreshLiveLease(
 	context.Context,
 	int64,

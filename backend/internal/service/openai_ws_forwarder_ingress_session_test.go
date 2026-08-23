@@ -643,7 +643,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		"codex_cli_rs/0.98.0",
 		"",
 		false,
-		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat"}`,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","sequence":900719925474099312345}`,
 		"auto",
 		true,
 		"",
@@ -657,7 +657,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_NonCodexImageBri
 		"OpenAI/Python 2.47.0",
 		"axonhub",
 		true,
-		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required","sequence":900719925474099312345}`,
 		"required",
 		true,
 		"",
@@ -671,7 +671,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_NonCodexBlockPol
 		"OpenAI/Python 2.47.0",
 		"axonhub",
 		true,
-		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required"}`,
+		`{"type":"response.create","model":"gpt-5.5","stream":false,"input":"draw a cat","tools":[{"type":"image_generation","output_format":"png"}],"tool_choice":"required","sequence":900719925474099312345}`,
 		"",
 		false,
 		codexImageGenerationExplicitToolPolicyStrip,
@@ -873,6 +873,7 @@ func runOpenAIWSImageBridgeSession(t *testing.T, userAgent string, originator st
 	require.Equal(t, wantToolChoice, gjson.Get(nonLitePayload, "tool_choice").String())
 	require.Equal(t, wantBridgeApplied, strings.Contains(gjson.Get(nonLitePayload, "instructions").String(), codexImageGenerationBridgeMarker))
 	require.False(t, gjson.Get(nonLitePayload, "reasoning.context").Exists())
+	require.Equal(t, "900719925474099312345", gjson.Get(nonLitePayload, "sequence").Raw)
 
 	litePayload := requestToJSONString(captureConn.writes[1])
 	require.False(t, gjson.Get(litePayload, `tools.#(type=="image_generation")`).Exists())

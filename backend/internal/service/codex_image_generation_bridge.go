@@ -167,7 +167,7 @@ func (s *OpenAIGatewayService) applyOpenAIWSImageGenerationPolicy(
 	}
 
 	payloadMap := make(map[string]any)
-	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+	if err := decodeOpenAIJSONUseNumber(payload, &payloadMap); err != nil {
 		return payload, err
 	}
 	modified := false

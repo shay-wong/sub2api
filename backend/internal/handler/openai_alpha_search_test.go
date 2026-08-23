@@ -19,19 +19,37 @@ import (
 
 type alphaSearchCyberCache struct {
 	service.GatewayCache
-	blocked map[string]bool
+	blockedScopes map[string]bool
+	blockedKeys   map[string]bool
 }
 
-func (c *alphaSearchCyberCache) SetCyberSessionBlocked(_ context.Context, key string, _ time.Duration) error {
-	if c.blocked == nil {
-		c.blocked = make(map[string]bool)
+func (c *alphaSearchCyberCache) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, _ time.Duration) error {
+	if c.blockedScopes == nil {
+		c.blockedScopes = make(map[string]bool)
 	}
-	c.blocked[key] = true
+	if c.blockedKeys == nil {
+		c.blockedKeys = make(map[string]bool)
+	}
+	if scopeKey != "" {
+		c.blockedScopes[scopeKey] = true
+	}
+	for _, key := range keys {
+		c.blockedKeys[key] = true
+	}
 	return nil
 }
 
-func (c *alphaSearchCyberCache) IsCyberSessionBlocked(_ context.Context, key string) (bool, error) {
-	return c.blocked[key], nil
+func (c *alphaSearchCyberCache) IsCyberSessionScopeActive(_ context.Context, scopeKey string) (bool, error) {
+	return c.blockedScopes[scopeKey], nil
+}
+
+func (c *alphaSearchCyberCache) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
+	for _, key := range keys {
+		if c.blockedKeys[key] {
+			return key, nil
+		}
+	}
+	return "", nil
 }
 
 func newAlphaSearchHandlerTestContext(body string) (*gin.Context, *httptest.ResponseRecorder, *service.APIKey) {
@@ -116,7 +134,7 @@ func TestAlphaSearchUsesRequestIDForCyberSessionPreflight(t *testing.T) {
 	blockKey := service.CyberSessionBlockKeyWithFallback(apiKey.ID, c, []byte(body), "alpha-session")
 	require.NotEmpty(t, blockKey)
 
-	cache := &alphaSearchCyberCache{blocked: map[string]bool{blockKey: true}}
+	cache := &alphaSearchCyberCache{blockedKeys: map[string]bool{blockKey: true}}
 	settingService := service.NewSettingService(
 		&contentModerationHandlerSettingRepo{values: map[string]string{
 			service.SettingKeyCyberSessionBlockEnabled:    "true",

@@ -26,7 +26,7 @@ func TestRecordCyberPolicyIfMarked_NoMark(t *testing.T) {
 	c := newTestGinContext()
 	h := &OpenAIGatewayHandler{}
 
-	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, nil, service.ChannelUsageFields{}, "")
 
 	// Flag must NOT be set when there was no mark.
 	require.False(t, c.GetBool(cyberPolicyRecordedKey),
@@ -49,14 +49,14 @@ func TestRecordCyberPolicyIfMarked_WithMark(t *testing.T) {
 
 	// First call: should set the flag.
 	require.NotPanics(t, func() {
-		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, nil, service.ChannelUsageFields{}, "")
 	})
 	require.True(t, c.GetBool(cyberPolicyRecordedKey),
 		"cyberPolicyRecordedKey must be true after first call with a mark")
 
 	// Second call: flag already set — must be a no-op (idempotent).
 	require.NotPanics(t, func() {
-		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, "", service.ChannelUsageFields{}, "")
+		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, nil, service.ChannelUsageFields{}, "")
 	})
 	// Flag should still be true (not toggled or cleared).
 	require.True(t, c.GetBool(cyberPolicyRecordedKey),
@@ -77,7 +77,7 @@ func TestRecordCyberPolicyIfMarked_ForwardSuccessSkipsUsageLog(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 
 	require.NotPanics(t, func() {
-		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false /* forwardErrored=false */, "", service.ChannelUsageFields{}, "")
+		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false /* forwardErrored=false */, nil, service.ChannelUsageFields{}, "")
 	})
 	require.True(t, c.GetBool(cyberPolicyRecordedKey))
 }
@@ -154,7 +154,7 @@ func TestClearCyberPolicyTurnState(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "turn1", UpstreamStatus: 200})
-	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, nil, service.ChannelUsageFields{}, "")
 	require.True(t, c.GetBool(cyberPolicyRecordedKey))
 
 	clearCyberPolicyTurnState(c)
@@ -163,7 +163,7 @@ func TestClearCyberPolicyTurnState(t *testing.T) {
 
 	// turn2: a fresh cyber hit must be recordable again.
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "turn2", UpstreamStatus: 200})
-	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", false, nil, service.ChannelUsageFields{}, "")
 	require.True(t, c.GetBool(cyberPolicyRecordedKey))
 	require.Equal(t, "turn2", service.GetOpsCyberPolicy(c).Message)
 }
@@ -206,15 +206,42 @@ func TestRejectIfCyberSessionBlocked_FailOpen(t *testing.T) {
 	require.False(t, h2.rejectIfCyberSessionBlocked(c, key, []byte(`{}`), "gpt-5", cyberBlockFormatResponses), "nil gateway service → pass")
 }
 
-// TestRecordCyberPolicyIfMarked_BlockKeyPlumbed verifies the 6th param is
-// accepted and a non-empty key with nil gateway service does not panic
-// (write-side guards live in the service layer).
+func TestBuildCyberSessionBlockWritePlanCombinesExplicitAndTranscriptKeys(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"setup"},{"role":"assistant","content":"ready"},{"role":"user","content":"trigger"}]}`)
+	c := newTestGinContext()
+	c.Request = httptest.NewRequest("POST", "/openai/v1/responses", strings.NewReader(string(body)))
+	c.Request.RemoteAddr = "203.0.113.44:12345"
+	c.Request.Header.Set("User-Agent", "client/1.2.3")
+
+	plan := buildCyberSessionBlockWritePlan(7, c, body)
+	require.Len(t, plan.keys, 2)
+	require.NotEmpty(t, plan.scopeKey)
+
+	c.Request.Header.Set("session_id", "sess-explicit")
+	plan = buildCyberSessionBlockWritePlan(7, c, body)
+	require.Len(t, plan.keys, 3)
+	require.NotEmpty(t, plan.scopeKey)
+}
+
+func TestCyberSessionBodyWithFallback(t *testing.T) {
+	require.JSONEq(t,
+		`{"model":"gpt-5","prompt_cache_key":"alpha-search-id"}`,
+		string(cyberSessionBodyWithFallback([]byte(`{"model":"gpt-5"}`), " alpha-search-id ")),
+	)
+	require.JSONEq(t,
+		`{"prompt_cache_key":"existing"}`,
+		string(cyberSessionBodyWithFallback([]byte(`{"prompt_cache_key":"existing"}`), "fallback")),
+	)
+}
+
+// TestRecordCyberPolicyIfMarked_BlockKeyPlumbed verifies a body used for the
+// block-key write plan is accepted when the gateway service is nil.
 func TestRecordCyberPolicyIfMarked_BlockKeyPlumbed(t *testing.T) {
 	c := newTestGinContext()
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "x", UpstreamStatus: 400})
 	h := &OpenAIGatewayHandler{}
 	require.NotPanics(t, func() {
-		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, "deadbeef", service.ChannelUsageFields{}, "")
+		h.recordCyberPolicyIfMarked(c, nil, nil, nil, nil, "gpt-5", true, []byte(`{"input":"deadbeef"}`), service.ChannelUsageFields{}, "")
 	})
 }
 
