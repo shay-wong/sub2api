@@ -7,6 +7,7 @@ import settings from './settings'
 import projects from './projects'
 import audit from './audit'
 import promptAudit from './promptAudit'
+import plugins from './plugins'
 
 export default {
   ...overview,
@@ -18,4 +19,5 @@ export default {
   ...projects,
   ...audit,
   ...promptAudit,
+  ...plugins,
 }

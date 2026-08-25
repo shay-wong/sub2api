@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `d45135d87df16d48637f04ccd245727bc955ba54` |
-| 当前比较范围 | `d45135d87df16d48637f04ccd245727bc955ba54..HEAD` |
+| 已合并上游提交 / 比较基线 | `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` |
+| 当前比较范围 | `3b7753a8e4a72791001ef558eebbd6e05bee8d9d..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `d45135d87df16d48637f04ccd245727bc955ba54`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -29,14 +29,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.179` |
-| 当前 Fork 版本 | `0.1.178-fork.1` |
+| 当前上游版本 | `0.1.181` |
+| 当前 Fork 版本 | `0.1.178-fork.2` |
 | 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.1.179-fork.1` |
+| 下次发布所需版本 | `0.1.181-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍是上一已发布版本 `0.1.178-fork.1`；本次仅合并上游，不提前修改发布版本。下一次发布必须将版本源更新为尚未使用的 `0.1.179-fork.1`。
+当前版本源仍是上一已发布版本 `0.1.178-fork.2`；本次仅合并上游，不提前修改发布版本。下一次发布必须将版本源更新为尚未使用的 `0.1.181-fork.1`。
 
 ## 能力索引
 
@@ -180,15 +180,16 @@ actionlint .github/workflows/stable-fork-release.yml
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
 - **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
 - **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`、`git log -S'FixedRequestModel string' -- backend/internal/service/openai_ws_forwarder.go` 与 `git log -S'acceptedTurnStartedAt.Swap(nil)' -- backend/internal/service/openai_ws_v2_passthrough_adapter.go`。
-- **待合并上游审查**：`upstream/main` 在 `d45135d87df16d48637f04ccd245727bc955ba54` 仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
+- **待合并上游审查**：`upstream/main` 在 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
 - **上游部分吸收**：`30d2589ef0f0dc839b934b0b21a270d18b7af52b` 已在 ingress lease loss 时保留 terminal event；既有基线还原生包含 compact keepalive `response.failed`（`2f109e74c`）、Responses null tool schema 修复（`f3c94d209`）、pre-output capacity-shed failover（`c33c3208e`、`14a27f196`）、OAuth beta header 移除与 routing hints（`915cc7e7b`、`815035fcc`、`de349187d`）、调度阈值百分比保持（`99b31067f`）、个人订阅过期修正（`358e4a89a`）、response-model 审计（`db0bff82c`、`6e34fb09c`）、Chat reasoning alias（`8aa425d22`）、非法 reasoning item ID 清理（`9f31df3fa`）、空 `response.completed` failover（`280c1c862`）、可见输出 TTFT（`900194fab`）、HTML 403 账号中立分类（`12abb5470`）、OAuth 图片流错误 failover（`9763765eb`）和 Codex OAuth 设备指纹收敛（`c0ab3a00e`）。本次基线又吸收 remote compaction v2 与 native/legacy 路由分离（`9662cff2e`、`a8b9ea22b`，由 `1d3b9665c` 合入）、turn-state provenance/cross-account echo guard 与 session-level beta/native probe（`8219dcfc8`、`8ae6d8f67`），并将指纹收敛改为显式 opt-in 且覆盖 passthrough（`fce41e318`，三者由 `073e92d17` 合入）。这些上游行为不登记为 fork 差异；它们仍不覆盖 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 quota 部分成功清理契约。
 - **本次上游吸收**：`539064798`、`c3063e01a` 完成 request-scoped capacity recovery，`82cbe6aff` 允许 Responses WS 后续 turn 在尚未写出时对 429 failover，`b228b93e9` 修复 Chat 非流式缓冲读取错误的故障转移，`bfac49fef` 增加 Responses input-token 预检，`b94e484e2` 与 `5b2089c5a` 补齐 WS follow-up client-tool mapping 和 tool-search discovery output，`612436a5a`、`401dd43b4` 补齐 reasoning-content 回注。本条不再把这些子项作为 fork 差异；其余 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 quota 部分成功清理契约继续保留。
 - **本次基线继续吸收**：`cf3577a3c`、`acce29af2` 补齐 Responses 输入、tool schema、item ID、terminal usage/error 与 rejected-field retry，`25da02ddd` 避免 HTTP bridge 重放重复 tool call，`fa4587041` 增加 guardian parent affinity，`c374ff295` 统一网关故障转移与运维错误语义。它们不覆盖 fork 的 Project/实际分组归因、encrypted reasoning、外部取消 join、Agent Identity 一次性恢复、health-neutral failover 和 subscription 限额 429 契约。
+- **本次基线新增吸收**：`f06bf181d` 提供 Responses/Chat/WS Fast `service_tier`，`6f972145b` 增加按用量阈值自动重置并复用共享 reset post-process，`243921dc0`、`31d5b67ba`、`7498d8fdc`、`7a09a2eaf`、`1563db3f8` 与 `e440ac48c` 完善 terminal output、工具别名、Responses Lite 和 rejected-field 兼容，`d493ce0bb`、`913ec5d74` 收敛 OAuth 账号身份与模型同步。它们不覆盖 fork 的 Project/实际分组归因、部分成功告警、外部取消 join、health-neutral failover 和 subscription 限额 429 契约。
 - **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留项目归属、协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。
-- **本次合并解决**：合入上游父提交 `d45135d87df16d48637f04ccd245727bc955ba54` 时，继续保留 Project/实际分组选择、reasoning cache 隔离、统一图片策略、client-tool 恢复、pending-turn 计费、外部取消关闭并 join；同时接入上游 Cyber scope/多键、guardian affinity、session preemption、replay 去重、首输出暂存、rejected-field retry 和 reader settlement。Alpha Search 的 `body.id` 只在客户端未提供会话键时作为 fallback。
+- **本次合并解决**：合入上游父提交 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 时，OpenAI gateway 继续保留 Project/实际分组、reasoning cache、统一图片策略、部分成功告警和 health-neutral 字段，同时接入 Fast `service_tier`、自动 reset、OAuth transport plugin 与上游 identity/tool 修复；Wire 继续注入 fork 的 Project 服务并新增 plugin/reset providers。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -257,6 +258,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`backend/internal/service/payment_config_service_test.go`、`backend/internal/service/payment_order_result_test.go`、`backend/internal/service/payment_order_provider_snapshot_test.go`、`backend/internal/service/payment_refund_test.go`、`backend/internal/service/payment_refund_integration_test.go`、`backend/internal/service/subscription_renewal_lock_test.go`、`backend/internal/service/subscription_revoke_cache_test.go`、`backend/internal/repository/user_subscription_lock_test.go`、`backend/internal/repository/user_repo_integration_test.go`、`backend/internal/repository/user_subscription_repo_integration_test.go`、`backend/internal/payment/provider/stripe_test.go`、`backend/internal/payment/provider/alipay_test.go`、`backend/internal/payment/provider/wxpay_test.go`、`frontend/src/views/admin/__tests__/SettingsView.spec.ts`、`frontend/src/views/user/__tests__/PaymentView.spec.ts`。
 - **来源提交**：`cdc7fa66b303333c00b87d5d0852a6d4af9993b7`、`d6f78bf2dc6c11b0c5fe72c4a8f2c92eaf1b7425`、`b5af02ae64ae12254add841f555fbf9538d9eeef`、`427c983f92b1dd7e3815e50bdbdc32caf641cf57`、`51775c230a7575ae0ca70dab751cece53163d35d`。
 - **上游相邻行为**：`99b357083e1b5a860f9987523434092e5ef2fcfa` 已原生提供 daily-midnight reset，并将 daily 与 weekly/monthly 使用不同窗口锚点；本次基线又以 `9096492b5`、`b689e5b40`、`e5b325e48` 和 `9261dd773` 完善 response-model 与 service-tier 计费。它们不覆盖 canonical CNY rate、公开 DTO、provider snapshot 和退款状态机；合并时仍须同时保留 fork 的 Project scope、行锁和 commit 后缓存失效。
+- **本次基线新增吸收**：`6466978d2` 统一 token 计费路径并提供上下文阶梯价，`75faedda9` 让 Fast/Priority 按上游实际档位只降不升计费，`695ebede7` 规范化 CN Anthropic usage token。它们不改变 fork 的 canonical CNY rate、公开 DTO、provider snapshot 与退款状态机边界。
 - **当前修复定位**：提交后运行 `git log -S'recoverRefundingAttempt' -- backend/internal/service/payment_refund.go`、`git log -S'phase\": \"dispatching' -- backend/internal/service/payment_refund.go` 与 `git log -S'MerchantIdentityMetadata' -- backend/internal/payment/provider/wxpay.go`。
 - **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在订阅仓储冲突中同时保留 Project 过滤、行锁与缓存失效契约，并合入 daily 与 weekly/monthly 分离的时间锚点。
 - **合并审查**：配置读写、下单展示、provider snapshot、退款 audit 和公开 DTO 必须一起比较；只吸收一个字段名不构成等价。
@@ -287,6 +289,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **上游部分吸收**：Channel Monitor V2、upstream response-model 审计（`db0bff82c`、`6e34fb09c`）和系统日志落库退避（`e687ca3e9`）均来自当前上游基线；`c204d33b0` 又合入分组每日 rollup、时区迁移、trigger 驱动重算和今日/昨日/总用量 API/UI（核心实现 `cb7b03795`，测试时区隔离修复 `45dcce0e4`）。这些上游行为不登记为 fork 差异；本条只保留精确 COUNT 缓存、deleted-key digest 归因、Project-safe health、共享筛选口径和 opt-in IP geo。
 - **本次上游吸收**：`a9514a68d` 将总计、入口、上游入口和路径统计合并为一次 `GROUPING SETS` 扫描；本次合并让该查询继续复用 fork 的 `buildUsageLogFilterWhere`，因此 Project scope 与共享筛选口径不变。
 - **本次基线继续吸收**：`c374ff295`、`e4f869e0c` 与 `6b0ec50f2` 完善运维错误捕获、详情兼容展示和 SLA 排除语义；本次合并继续保留 fork 的 Project 归因、deleted-key digest 与隐私约束。
+- **本次基线新增吸收**：`cfecc8d11` 让错误详情返回列表时保留筛选状态，`cd05772e9` 避免混用 cgroup 与宿主机内存指标；它们不覆盖 fork 的 Project-safe health、共享筛选口径和 deleted-key digest 归因。
 - **当前修复定位**：提交后运行 `git log -S'全局 rollup 不含 project_id' -- backend/internal/repository/usage_log_repo_trend.go`。
 - **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 dashboard、usage query/cache 和 60 列写入冲突中保留 Project scope、共享筛选与精确 COUNT 缓存，同时合入 request type、upstream response-model 和 mismatch 审计。
 - **合并审查**：同时核对 query、count、dashboard、error tabs 和权限过滤；前端隐藏全局指标不能替代后端 scope 修复。
@@ -307,7 +310,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`frontend/src/components/account/__tests__/AccountStatusIndicator.spec.ts`、`frontend/src/components/common/__tests__/Pagination.spec.ts`、`frontend/src/components/common/__tests__/DataTable.spec.ts`、`frontend/src/__tests__/iosInputZoom.spec.ts`。
 - **来源提交**：`66601d69641ed0ae3bf665721c7ea5aaf8413be3`、`470c597201dbb00e2b68060f98f19c240f4f33ea`、`0407629d24dd5fd312d39a4f37633134b8702e75`、`5b9e2eb6948544409b0304f080b211b2522369c6`。
 - **当前修复定位**：提交后运行 `git log -S'roleLabel' -- frontend/src/components/layout/AppHeader.vue` 与 `git log -S"wrapper.emitted('account-state-reset')" -- frontend/src/components/account/__tests__/AccountUsageCell.spec.ts`。
-- **上游相邻行为**：当前上游已扩展 Grok temporary-unschedulable 状态展示；它不覆盖短错误码/完整 tooltip、Pagination、DataTable row-click 和 iOS 输入缩放契约，因此本条继续保留。
+- **上游相邻行为**：当前上游已扩展 Grok temporary-unschedulable 状态、账号优先级、无限并发输入和 Plugins 超级管理员入口；它不覆盖短错误码/完整 tooltip、Pagination、DataTable row-click 和 iOS 输入缩放契约，因此本条继续保留。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：以交互和布局契约为准，不以组件是否仍存在同名 class/prop 为准；桌面表格、移动卡片和虚拟列表都要覆盖。
 - **删除条件**：上游分别提供等价交互及回归测试后逐项缩减。
@@ -325,7 +328,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **当前代码**：`frontend/src/api/url.ts`、`deploy/config.example.yaml`、`backend/internal/repository/migrations_runner.go`、`backend/internal/setup/setup.go`。
 - **测试**：`frontend/src/api/__tests__/url.spec.ts`、`backend/internal/config/config_test.go`、`backend/internal/repository/migrations_runner_notx_test.go`、`backend/internal/setup/setup_test.go`。
 - **来源提交**：`38d6294088369255e79463d836515f7df527f271`、`b255b687ba7872ad7bc590a88a85919cc0253ec9`、`0306521a5557a2520a54c32a014ee7831929397f`。
-- **上游相邻行为**：`db0bff82c7f954607f4b66421a79200e150ac836` 为上游 migration `195_add_usage_log_upstream_model_mismatch_index_notx.sql` 增加了同类 invalid-index recovery；当前 runner 同时支持 `177` 与 `195`，但同类机制不等于上游已吸收 fork 的 `177` 迁移兼容契约。
+- **上游相邻行为**：`db0bff82c7f954607f4b66421a79200e150ac836` 为上游 migration `195_add_usage_log_upstream_model_mismatch_index_notx.sql` 增加了同类 invalid-index recovery；本次基线又以 `6a1efda0c`、`e2263d256`、`10081a812` 保留 compose gateway 默认配置并转发 force HTTP 设置。它们不等于上游已吸收 fork 的相对 URL、migration `177` 或初始 Project owner 原子性契约。
 - **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 non-transactional migration runner 冲突中同时保留 fork migration `177` 与上游 migration `195` 的 invalid-index 恢复。
 - **合并审查**：相对 URL、示例配置和 migration runner 分别比较；上游只修复其中一项时只删除对应子项。
 - **删除条件**：相对 URL、示例配置、migration `177` 恢复和初始 Project owner 原子性分别有等价上游实现与测试后逐项缩减，全部吸收后删除。
@@ -368,4 +371,4 @@ git diff --check
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、daily-midnight subscription reset、Channel Monitor V2、response-model/service-tier 与渠道区间倍率计费、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry、Codex OAuth 指纹 opt-in、分组每日 rollup、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场入口、Fast/Flex 管理文案和 Go 1.26.6 builder 对齐均来自 `d45135d87df16d48637f04ccd245727bc955ba54` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、Plugins 管理入口和 Go 1.27.0 builder 对齐均来自 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
