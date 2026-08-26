@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` |
-| 当前比较范围 | `3b7753a8e4a72791001ef558eebbd6e05bee8d9d..HEAD` |
+| 已合并上游提交 / 比较基线 | `6ca1e15b0ad2455b6df16535023be754fe087ea7` |
+| 当前比较范围 | `6ca1e15b0ad2455b6df16535023be754fe087ea7..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `6ca1e15b0ad2455b6df16535023be754fe087ea7`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -29,14 +29,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.181` |
+| 当前上游版本 | `0.1.183` |
 | 当前 Fork 版本 | `0.1.178-fork.2` |
 | 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.1.181-fork.1` |
+| 下次发布所需版本 | `0.1.183-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍是上一已发布版本 `0.1.178-fork.2`；本次仅合并上游，不提前修改发布版本。下一次发布必须将版本源更新为尚未使用的 `0.1.181-fork.1`。
+当前版本源仍是上一基线版本 `0.1.178-fork.2`；本次仅合并上游，不提前修改发布版本。下一次发布必须将版本源更新为尚未使用的 `0.1.183-fork.1`。
 
 ## 能力索引
 
@@ -180,7 +180,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
 - **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
 - **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`、`git log -S'FixedRequestModel string' -- backend/internal/service/openai_ws_forwarder.go` 与 `git log -S'acceptedTurnStartedAt.Swap(nil)' -- backend/internal/service/openai_ws_v2_passthrough_adapter.go`。
-- **待合并上游审查**：`upstream/main` 在 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
+- **待合并上游审查**：上游基线 `6ca1e15b0ad2455b6df16535023be754fe087ea7` 的 `f1aadd48d` 已让 OpenAI OAuth 上游配额耗尽 429 暂停账号，但仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
@@ -188,8 +188,9 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次上游吸收**：`539064798`、`c3063e01a` 完成 request-scoped capacity recovery，`82cbe6aff` 允许 Responses WS 后续 turn 在尚未写出时对 429 failover，`b228b93e9` 修复 Chat 非流式缓冲读取错误的故障转移，`bfac49fef` 增加 Responses input-token 预检，`b94e484e2` 与 `5b2089c5a` 补齐 WS follow-up client-tool mapping 和 tool-search discovery output，`612436a5a`、`401dd43b4` 补齐 reasoning-content 回注。本条不再把这些子项作为 fork 差异；其余 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 quota 部分成功清理契约继续保留。
 - **本次基线继续吸收**：`cf3577a3c`、`acce29af2` 补齐 Responses 输入、tool schema、item ID、terminal usage/error 与 rejected-field retry，`25da02ddd` 避免 HTTP bridge 重放重复 tool call，`fa4587041` 增加 guardian parent affinity，`c374ff295` 统一网关故障转移与运维错误语义。它们不覆盖 fork 的 Project/实际分组归因、encrypted reasoning、外部取消 join、Agent Identity 一次性恢复、health-neutral failover 和 subscription 限额 429 契约。
 - **本次基线新增吸收**：`f06bf181d` 提供 Responses/Chat/WS Fast `service_tier`，`6f972145b` 增加按用量阈值自动重置并复用共享 reset post-process，`243921dc0`、`31d5b67ba`、`7498d8fdc`、`7a09a2eaf`、`1563db3f8` 与 `e440ac48c` 完善 terminal output、工具别名、Responses Lite 和 rejected-field 兼容，`d493ce0bb`、`913ec5d74` 收敛 OAuth 账号身份与模型同步。它们不覆盖 fork 的 Project/实际分组归因、部分成功告警、外部取消 join、health-neutral failover 和 subscription 限额 429 契约。
+- **本次基线继续吸收**：`d6012b0b3`、`53d76ad80`、`d5e43ef7d` 与 `095b52536` 补齐 Responses Lite 数字精度、tool-call mode、WS HTTP bridge 和 `parallel_tool_calls=false`，`8e60d5747` 保留 Codex `session-id`，`e55727d4c` 保持容量溢出时的 sticky binding，`e0e5e45cd` 保留恢复后的 tool-call item ID 类型。它们不覆盖 fork 的 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 subscription 限额 429 契约。
 - **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留项目归属、协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。
-- **本次合并解决**：合入上游父提交 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 时，OpenAI gateway 继续保留 Project/实际分组、reasoning cache、统一图片策略、部分成功告警和 health-neutral 字段，同时接入 Fast `service_tier`、自动 reset、OAuth transport plugin 与上游 identity/tool 修复；Wire 继续注入 fork 的 Project 服务并新增 plugin/reset providers。
+- **本次合并解决**：合入上游父提交 `6ca1e15b0ad2455b6df16535023be754fe087ea7` 时，WS passthrough 继续保留 fork 的图片策略、生命周期、计费标记和 health-neutral 语义，同时改用上游账号感知的 Responses Lite 规范化；其余 OpenAI gateway 继续保留 Project/实际分组、reasoning cache、部分成功告警和 subscription 限额 429 契约。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -229,14 +230,14 @@ actionlint .github/workflows/stable-fork-release.yml
 ## 9. 鉴权、会话绑定与审计状态正确性
 
 - **生命周期**：`等待上游吸收`
-- **原始意图**：修复反向代理环境下 session binding 与安全元数据 IP 混用、超级管理员 TOTP 验证方式、多实例审计清理并发、fail-closed 验证码，以及 pending OAuth callback 的前端状态一致性。
-- **行为不变量**：会话绑定使用稳定的 binding identity，审计日志仍记录真实安全元数据 IP；TOTP 必须通过用户配置的验证方式；多实例 clear 使用高水位和数据库状态 fencing，清理前已排队或并发写入的审计记录不得越过边界；旧版或自定义 CSP 必须补齐 Aliyun CAPTCHA 的脚本和样式域名，否则不得启用会锁死鉴权入口的 fail-closed 配置；pending OAuth 发送验证码若已经进入 `choose_account_action_required`，所有 callback UI 必须立即消费该服务端状态，不得继续停留在失效的创建账号表单。
-- **当前代码**：`backend/internal/pkg/ip/ip.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/audit_log.go`、`backend/internal/server/middleware/security_headers.go`、`backend/internal/service/session_binding.go`、`backend/internal/service/totp_service.go`、`backend/internal/repository/audit_log_repo.go`、`backend/internal/service/audit_log_service.go`、`frontend/src/components/auth/PendingOAuthCreateAccountForm.vue`、`frontend/src/views/auth/OidcCallbackView.vue`、`frontend/src/views/auth/LinuxDoCallbackView.vue`、`frontend/src/views/auth/WechatCallbackView.vue`、`frontend/src/views/auth/DingTalkCallbackView.vue`。
-- **迁移与测试**：`backend/migrations/182_audit_log_clear_state.sql`、`backend/internal/server/middleware/session_binding_test.go`、`backend/internal/server/middleware/security_headers_test.go`、`backend/internal/service/totp_verification_method_test.go`、`backend/internal/repository/audit_log_repo_test.go`、`backend/internal/repository/audit_log_repo_sequence_integration_test.go`、`backend/internal/service/audit_log_service_test.go`、`backend/migrations/audit_log_clear_state_migration_test.go`、`frontend/src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts`、`frontend/src/views/auth/__tests__/OidcCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/LinuxDoCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts`。
-- **来源提交**：`4d47d8916691de90d50c454a9935ef5f8a764994`、`8f10a05736dff37c6d275ef33f2fb6b3436ae3ef`、`fb693041dc6fbb4aff7dd4bbf0baa410e2a2ffa3`、`a106870c834e6cf021ffb5adea24c8f2d0ccb1dd`。
-- **上游吸收**：`02e50cc22d038dabf3c6af92dbb92d1e0321f8d5` 已完整提供 pending-exchange 服务端账号接管防护及回归，该后端子项不再作为 fork 差异；fork 仍保留创建账号表单立即发出 `complete` 并由各 callback 消费 choice state 的前端契约。
+- **原始意图**：修复反向代理环境下 session binding 与安全元数据 IP 混用、超级管理员 TOTP 验证方式、多实例审计清理并发、邮箱别名去重与密码登录状态、fail-closed 验证码，以及 pending OAuth callback 的前端状态一致性。
+- **行为不变量**：会话绑定使用稳定的 binding identity，审计日志仍记录真实安全元数据 IP；TOTP 必须通过用户配置的验证方式；多实例 clear 使用高水位和数据库状态 fencing，清理前已排队或并发写入的审计记录不得越过边界；邮箱别名候选超过单页上限时仍须完整查重，绑定真实邮箱后必须清除 `password_auth_disabled`；旧版或自定义 CSP 必须补齐 Aliyun CAPTCHA 的脚本和样式域名，否则不得启用会锁死鉴权入口的 fail-closed 配置；pending OAuth 发送验证码若已经进入 `choose_account_action_required`，所有 callback UI 必须立即消费该服务端状态，不得继续停留在失效的创建账号表单。
+- **当前代码**：`backend/internal/pkg/ip/ip.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/audit_log.go`、`backend/internal/server/middleware/security_headers.go`、`backend/internal/service/session_binding.go`、`backend/internal/service/totp_service.go`、`backend/internal/repository/user_repo.go`、`backend/internal/service/auth_email_binding.go`、`backend/internal/repository/audit_log_repo.go`、`backend/internal/service/audit_log_service.go`、`frontend/src/components/auth/PendingOAuthCreateAccountForm.vue`、`frontend/src/views/auth/OidcCallbackView.vue`、`frontend/src/views/auth/LinuxDoCallbackView.vue`、`frontend/src/views/auth/WechatCallbackView.vue`、`frontend/src/views/auth/DingTalkCallbackView.vue`。
+- **迁移与测试**：`backend/migrations/182_audit_log_clear_state.sql`、`backend/internal/server/middleware/session_binding_test.go`、`backend/internal/server/middleware/security_headers_test.go`、`backend/internal/service/totp_verification_method_test.go`、`backend/internal/repository/user_repo_email_alias_test.go`、`backend/internal/service/auth_service_email_bind_test.go`、`backend/internal/repository/audit_log_repo_test.go`、`backend/internal/repository/audit_log_repo_sequence_integration_test.go`、`backend/internal/service/audit_log_service_test.go`、`backend/migrations/audit_log_clear_state_migration_test.go`、`frontend/src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts`、`frontend/src/views/auth/__tests__/OidcCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/LinuxDoCallbackView.spec.ts`、`frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts`。
+- **来源提交**：`4d47d8916691de90d50c454a9935ef5f8a764994`、`8f10a05736dff37c6d275ef33f2fb6b3436ae3ef`、`fb693041dc6fbb4aff7dd4bbf0baa410e2a2ffa3`、`a106870c834e6cf021ffb5adea24c8f2d0ccb1dd`、`4ac9bb886564e861ed6668acd972e37798bd0aca`；密码登录状态恢复最初嵌入 merge `322ec3794da26e9db2aa5c39042a2769b32504b5`，属于既有历史结构缺口，本次不改写历史。
+- **上游吸收**：`02e50cc22d038dabf3c6af92dbb92d1e0321f8d5` 已完整提供 pending-exchange 服务端账号接管防护及回归；`4ca86c52e` 已提供邮箱换绑别名检查与并发守卫，但其固定 50 条候选查询不覆盖 fork 的分页查重，且原子更新未处理 `password_auth_disabled`。fork 仍保留这些子项及创建账号表单立即发出 `complete` 并由各 callback 消费 choice state 的前端契约。
 - **人工合并解决**：`8e34f01c53a650a00b80b7bf87476cb74f3118be` 在 CSP 冲突中合并上游腾讯验证码国内/国际区域来源，并保留 fork 的 Aliyun CAPTCHA 脚本与样式来源。
-- **合并审查**：区分 trusted proxy 解析、binding key 和 audit IP；审计清理必须同时核对队列 drain、数据库锁顺序与持久化 clear watermark，不能用一个 `ClientIP` 字段重新承担全部语义。
+- **合并审查**：区分 trusted proxy 解析、binding key 和 audit IP；审计清理必须同时核对队列 drain、数据库锁顺序与持久化 clear watermark，不能用一个 `ClientIP` 字段重新承担全部语义；邮箱换绑接入新的原子 guard 时，仍须分页查完别名候选并恢复密码登录。
 - **删除条件**：上游行为和并发/反代/TOTP 回归测试逐项等价后删除。
 - **聚焦验证**：
 
@@ -244,6 +245,7 @@ actionlint .github/workflows/stable-fork-release.yml
 (cd backend && go test -tags=unit ./internal/server/middleware -run 'Test.*SessionBinding')
 (cd backend && go test -tags=unit ./internal/server/middleware -run 'Test(SecurityHeaders|EnhanceCSPPolicy)')
 (cd backend && go test -tags=unit ./internal/service -run 'Test.*(SessionBinding|TOTP|AuditLogService)')
+(cd backend && go test ./internal/repository ./internal/service -run 'Test(UserRepositoryExistsByEmailAlias|AuthServiceBindEmailIdentity_)')
 (cd backend && go test ./internal/repository -run '^TestAuditLogRepository')
 (cd backend && go test ./migrations -run '^TestMigration182AddsPersistentAuditClearState$')
 (cd frontend && ./node_modules/.bin/vitest run src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/views/auth/__tests__/OidcCallbackView.spec.ts src/views/auth/__tests__/LinuxDoCallbackView.spec.ts src/views/auth/__tests__/WechatCallbackView.spec.ts)
