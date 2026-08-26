@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `6ca1e15b0ad2455b6df16535023be754fe087ea7` |
-| 当前比较范围 | `6ca1e15b0ad2455b6df16535023be754fe087ea7..HEAD` |
+| 已合并上游提交 / 比较基线 | `efb46db0a960fdad94502b1c3a982a0051cf5245` |
+| 当前比较范围 | `efb46db0a960fdad94502b1c3a982a0051cf5245..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `6ca1e15b0ad2455b6df16535023be754fe087ea7`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `efb46db0a960fdad94502b1c3a982a0051cf5245`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -30,13 +30,13 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.183` |
-| 当前 Fork 版本 | `0.1.178-fork.2` |
+| 当前 Fork 版本 | `0.1.183-fork.1` |
 | 已发布同基线 Fork 版本 | 无 |
 | 下次发布所需版本 | `0.1.183-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍是上一基线版本 `0.1.178-fork.2`；本次仅合并上游，不提前修改发布版本。下一次发布必须将版本源更新为尚未使用的 `0.1.183-fork.1`。
+当前版本源已准备为尚未发布的 `0.1.183-fork.1`；推送到 `stable` 后，发布工作流应使用同一版本创建首个 `0.1.183` 基线 Fork release。
 
 ## 能力索引
 
@@ -180,7 +180,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
 - **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
 - **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`、`git log -S'FixedRequestModel string' -- backend/internal/service/openai_ws_forwarder.go` 与 `git log -S'acceptedTurnStartedAt.Swap(nil)' -- backend/internal/service/openai_ws_v2_passthrough_adapter.go`。
-- **待合并上游审查**：上游基线 `6ca1e15b0ad2455b6df16535023be754fe087ea7` 的 `f1aadd48d` 已让 OpenAI OAuth 上游配额耗尽 429 暂停账号，但仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
+- **待合并上游审查**：上游基线 `efb46db0a960fdad94502b1c3a982a0051cf5245` 的 `f1aadd48d` 已让 OpenAI OAuth 上游配额耗尽 429 暂停账号，但仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
@@ -189,6 +189,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次基线继续吸收**：`cf3577a3c`、`acce29af2` 补齐 Responses 输入、tool schema、item ID、terminal usage/error 与 rejected-field retry，`25da02ddd` 避免 HTTP bridge 重放重复 tool call，`fa4587041` 增加 guardian parent affinity，`c374ff295` 统一网关故障转移与运维错误语义。它们不覆盖 fork 的 Project/实际分组归因、encrypted reasoning、外部取消 join、Agent Identity 一次性恢复、health-neutral failover 和 subscription 限额 429 契约。
 - **本次基线新增吸收**：`f06bf181d` 提供 Responses/Chat/WS Fast `service_tier`，`6f972145b` 增加按用量阈值自动重置并复用共享 reset post-process，`243921dc0`、`31d5b67ba`、`7498d8fdc`、`7a09a2eaf`、`1563db3f8` 与 `e440ac48c` 完善 terminal output、工具别名、Responses Lite 和 rejected-field 兼容，`d493ce0bb`、`913ec5d74` 收敛 OAuth 账号身份与模型同步。它们不覆盖 fork 的 Project/实际分组归因、部分成功告警、外部取消 join、health-neutral failover 和 subscription 限额 429 契约。
 - **本次基线继续吸收**：`d6012b0b3`、`53d76ad80`、`d5e43ef7d` 与 `095b52536` 补齐 Responses Lite 数字精度、tool-call mode、WS HTTP bridge 和 `parallel_tool_calls=false`，`8e60d5747` 保留 Codex `session-id`，`e55727d4c` 保持容量溢出时的 sticky binding，`e0e5e45cd` 保留恢复后的 tool-call item ID 类型。它们不覆盖 fork 的 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 subscription 限额 429 契约。
+- **本次基线继续吸收**：`22e1b8144` 至 `efb46db0a` 提供按实际路由生成的 Codex 模型目录、账号模型别名、稳定 capability 交集和 API Key 目录缓存隔离；`4795650d2` 记录错误请求的实际上游 endpoint，`d8694f03b` 覆盖 WSv2 陈旧 native tool ID 清理。这些上游行为不登记为 fork 差异；自动合并后仍保留 fork 的 Project/实际分组归因、encrypted reasoning、外部取消 join、health-neutral failover 与 subscription 限额 429 契约。
 - **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留项目归属、协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。
 - **本次合并解决**：合入上游父提交 `6ca1e15b0ad2455b6df16535023be754fe087ea7` 时，WS passthrough 继续保留 fork 的图片策略、生命周期、计费标记和 health-neutral 语义，同时改用上游账号感知的 Responses Lite 规范化；其余 OpenAI gateway 继续保留 Project/实际分组、reasoning cache、部分成功告警和 subscription 限额 429 契约。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
@@ -373,4 +374,4 @@ git diff --check
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、Plugins 管理入口和 Go 1.27.0 builder 对齐均来自 `3b7753a8e4a72791001ef558eebbd6e05bee8d9d` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、Plugins 管理入口和 Go 1.27.0 builder 对齐均已包含在 `efb46db0a960fdad94502b1c3a982a0051cf5245` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
