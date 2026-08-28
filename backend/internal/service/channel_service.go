@@ -740,6 +740,7 @@ func checkPricesNotNegative(p ChannelModelPricing) error {
 		val   *float64
 	}{
 		{"fast_multiplier", p.FastMultiplier},
+		{"ultrafast_multiplier", p.UltrafastMultiplier},
 		{"flex_multiplier", p.FlexMultiplier},
 	} {
 		if c.val != nil && *c.val <= 0 {

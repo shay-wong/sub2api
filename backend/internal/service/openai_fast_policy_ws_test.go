@@ -49,6 +49,12 @@ func TestWSResponseCreate_DefaultPassesPriorityAndNormalizesFast(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, blocked)
 	require.Equal(t, "priority", gjson.GetBytes(updated, "service_tier").String())
+
+	frame = []byte(`{"type":"response.create","model":"gpt-5.6-sol","service_tier":"ultrafast"}`)
+	updated, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, "gpt-5.6-sol", frame)
+	require.NoError(t, err)
+	require.Nil(t, blocked)
+	require.Equal(t, "ultrafast", gjson.GetBytes(updated, "service_tier").String())
 }
 
 func TestWSResponseCreate_ExplicitFilterStripsServiceTier(t *testing.T) {

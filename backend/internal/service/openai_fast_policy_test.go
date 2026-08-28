@@ -352,8 +352,18 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
 	svc := NewSettingService(repo, &config.Config{})
 
-	// Invalid action rejected
+	// Official Ultrafast tier is accepted as a policy match value.
 	err := svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier: OpenAIFastTierUltrafast,
+			Action:      BetaPolicyActionPass,
+			Scope:       BetaPolicyScopeAll,
+		}},
+	})
+	require.NoError(t, err)
+
+	// Invalid action rejected
+	err = svc.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{
 		Rules: []OpenAIFastPolicyRule{{
 			ServiceTier: OpenAIFastTierPriority,
 			Action:      "bogus",

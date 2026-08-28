@@ -392,6 +392,7 @@ export default {
     cacheRead: 'Read',
     cacheWrite: 'Write',
     serviceTier: 'Service tier',
+    serviceTierUltrafast: 'Ultrafast',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',

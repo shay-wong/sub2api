@@ -211,6 +211,7 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 
 	applyChannelTokenPriceOverrides(resolved.BasePricing, chPricing)
 	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
+	resolved.BasePricing.UltrafastMultiplier = chPricing.UltrafastMultiplier
 	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
 	// 渠道定价覆盖一切：显式配置则用配置值，未配置则归零（不回退到 LiteLLM）
 	if chPricing.ImageOutputPrice != nil {

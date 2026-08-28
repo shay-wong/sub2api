@@ -17,8 +17,10 @@ func TestConfiguredServiceTierMultiplier(t *testing.T) {
 	}{
 		{name: "gpt-5.5 fast", serviceTier: "fast", pricing: &ModelPricing{FastMultiplier: pricingMultiplier(2.5)}, want: 2.5},
 		{name: "priority alias", serviceTier: "priority", pricing: &ModelPricing{FastMultiplier: pricingMultiplier(2)}, want: 2},
+		{name: "ultrafast configured", serviceTier: "ultrafast", pricing: &ModelPricing{UltrafastMultiplier: pricingMultiplier(8)}, want: 8},
 		{name: "flex configured", serviceTier: "flex", pricing: &ModelPricing{FlexMultiplier: pricingMultiplier(0.4)}, want: 0.4},
 		{name: "legacy fast default", serviceTier: "fast", pricing: &ModelPricing{}, want: 2},
+		{name: "ultrafast default", serviceTier: "ultrafast", pricing: &ModelPricing{}, want: 10},
 		{name: "legacy flex default", serviceTier: "flex", pricing: &ModelPricing{}, want: 0.5},
 	}
 
@@ -36,6 +38,7 @@ func TestConfiguredServiceTierMultiplierAppliesToEveryTokenComponent(t *testing.
 		CacheCreationPricePerToken: 6.25e-6,
 		CacheReadPricePerToken:     0.5e-6,
 		FastMultiplier:             pricingMultiplier(2.5),
+		UltrafastMultiplier:        pricingMultiplier(10),
 		FlexMultiplier:             pricingMultiplier(0.5),
 	}
 	tokens := UsageTokens{
@@ -51,6 +54,12 @@ func TestConfiguredServiceTierMultiplierAppliesToEveryTokenComponent(t *testing.
 	require.InDelta(t, 75, fast.OutputCost, 1e-12)
 	require.InDelta(t, 15.625, fast.CacheCreationCost, 1e-12)
 	require.InDelta(t, 1.25, fast.CacheReadCost, 1e-12)
+
+	ultrafast := service.computeTokenBreakdown(pricing, tokens, 1, "ultrafast", false)
+	require.InDelta(t, 50, ultrafast.InputCost, 1e-12)
+	require.InDelta(t, 300, ultrafast.OutputCost, 1e-12)
+	require.InDelta(t, 62.5, ultrafast.CacheCreationCost, 1e-12)
+	require.InDelta(t, 5, ultrafast.CacheReadCost, 1e-12)
 
 	flex := service.computeTokenBreakdown(pricing, tokens, 1, "flex", false)
 	require.InDelta(t, 2.5, flex.InputCost, 1e-12)
@@ -215,6 +224,7 @@ func TestMultiplierOnlyIntervalIsValid(t *testing.T) {
 func TestChannelMultipliersMustBePositive(t *testing.T) {
 	zero := 0.0
 	require.Error(t, checkPricesNotNegative(ChannelModelPricing{FastMultiplier: &zero}))
+	require.Error(t, checkPricesNotNegative(ChannelModelPricing{UltrafastMultiplier: &zero}))
 	require.Error(t, checkPricesNotNegative(ChannelModelPricing{FlexMultiplier: &zero}))
 	require.Error(t, ValidateIntervals([]PricingInterval{{
 		MinTokens:       100,

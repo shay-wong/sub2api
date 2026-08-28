@@ -103,6 +103,7 @@ type ModelPricing struct {
 	CacheReadPricePerToken             float64  // 缓存读取每token价格 (USD)
 	CacheReadPricePerTokenPriority     float64  // priority service tier 下缓存读取每token价格 (USD)
 	FastMultiplier                     *float64 // 渠道显式 Fast/priority 倍率；nil 时沿用模型目录行为
+	UltrafastMultiplier                *float64 // 渠道显式 Ultrafast 倍率；nil 时默认按标准价格 10 倍计费
 	FlexMultiplier                     *float64 // 渠道显式 Flex 倍率；nil 时沿用默认行为
 	CacheCreation5mPrice               float64  // 5分钟缓存创建每token价格 (USD)
 	CacheCreation1hPrice               float64  // 1小时缓存创建每token价格 (USD)
@@ -142,6 +143,8 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
 	switch normalizeBillingServiceTier(serviceTier) {
+	case "ultrafast":
+		return 10.0
 	case "priority", "fast":
 		return 2.0
 	case "flex":
@@ -154,6 +157,10 @@ func serviceTierCostMultiplier(serviceTier string) float64 {
 func configuredServiceTierMultiplier(serviceTier string, pricing *ModelPricing) float64 {
 	if pricing != nil {
 		switch normalizeBillingServiceTier(serviceTier) {
+		case "ultrafast":
+			if pricing.UltrafastMultiplier != nil {
+				return *pricing.UltrafastMultiplier
+			}
 		case "priority", "fast":
 			if pricing.FastMultiplier != nil {
 				return *pricing.FastMultiplier
@@ -1104,6 +1111,7 @@ func (s *BillingService) GetModelPricingWithChannel(model string, channelPricing
 	pricing = &cloned
 	applyChannelTokenPriceOverrides(pricing, channelPricing)
 	pricing.FastMultiplier = channelPricing.FastMultiplier
+	pricing.UltrafastMultiplier = channelPricing.UltrafastMultiplier
 	pricing.FlexMultiplier = channelPricing.FlexMultiplier
 	if channelPricing.ImageOutputPrice != nil {
 		pricing.ImageOutputPricePerToken = *channelPricing.ImageOutputPrice

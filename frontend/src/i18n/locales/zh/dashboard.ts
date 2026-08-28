@@ -397,6 +397,7 @@ export default {
     cacheRead: '读取',
     cacheWrite: '写入',
     serviceTier: '服务档位',
+    serviceTierUltrafast: 'Ultrafast',
     serviceTierPriority: 'Fast',
     serviceTierFlex: 'Flex',
     serviceTierStandard: 'Standard',

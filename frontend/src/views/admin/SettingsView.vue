@@ -12078,6 +12078,10 @@ async function loadBetaPolicySettings() {
 const openaiFastPolicyTierOptions = computed(() => [
   { value: "all", label: t("admin.settings.openaiFastPolicy.tierAll") },
   {
+    value: "ultrafast",
+    label: t("admin.settings.openaiFastPolicy.tierUltrafast"),
+  },
+  {
     value: "priority",
     label: t("admin.settings.openaiFastPolicy.tierPriority"),
   },

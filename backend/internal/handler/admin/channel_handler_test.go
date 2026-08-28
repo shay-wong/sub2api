@@ -449,10 +449,11 @@ func TestPricingRequestToService_TimePricingNil(t *testing.T) {
 // 避免渠道倍率意外污染账号成本口径。
 func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 	req := channelModelPricingRequest{
-		Models:         []string{"gpt-5"},
-		BillingMode:    "token",
-		FastMultiplier: float64Ptr(2.5),
-		FlexMultiplier: float64Ptr(0.5),
+		Models:              []string{"gpt-5"},
+		BillingMode:         "token",
+		FastMultiplier:      float64Ptr(2.5),
+		UltrafastMultiplier: float64Ptr(8),
+		FlexMultiplier:      float64Ptr(0.5),
 		Intervals: []pricingIntervalRequest{{
 			MinTokens:            272000,
 			InputMultiplier:      float64Ptr(2),
@@ -464,6 +465,7 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 
 	allowed := pricingRequestToService([]channelModelPricingRequest{req}, true)
 	require.Equal(t, float64Ptr(2.5), allowed[0].FastMultiplier)
+	require.Equal(t, float64Ptr(8), allowed[0].UltrafastMultiplier)
 	require.Equal(t, float64Ptr(0.5), allowed[0].FlexMultiplier)
 	require.Equal(t, float64Ptr(2), allowed[0].Intervals[0].InputMultiplier)
 	require.Equal(t, float64Ptr(1.5), allowed[0].Intervals[0].OutputMultiplier)
@@ -472,6 +474,7 @@ func TestPricingRequestToService_MultipliersGatedByFlag(t *testing.T) {
 
 	dropped := pricingRequestToService([]channelModelPricingRequest{req}, false)
 	require.Nil(t, dropped[0].FastMultiplier)
+	require.Nil(t, dropped[0].UltrafastMultiplier)
 	require.Nil(t, dropped[0].FlexMultiplier)
 	require.Nil(t, dropped[0].Intervals[0].InputMultiplier)
 	require.Nil(t, dropped[0].Intervals[0].OutputMultiplier)

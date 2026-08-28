@@ -1309,12 +1309,12 @@ func normalizeOpenAIServiceTier(raw string) *string {
 	if value == "fast" {
 		value = "priority"
 	}
-	// 放过 OpenAI 官方文档定义的所有合法 tier 值：priority/flex/auto/default/scale。
-	// 对 Codex 客户端零影响（Codex 只发 priority 或 flex，见 codex-rs/core/src/client.rs），
-	// 但能让直连 OpenAI SDK 的用户透传 auto/default/scale 以便抓包/调试。
+	// 放过 OpenAI 官方文档定义的所有合法 tier 值。
+	// Codex 与直连 OpenAI SDK 的合法值都在这里原样透传；fast 仍规范化为
+	// OpenAI 响应使用的 priority 别名。
 	// 真未知值仍返回 nil，由 normalizeResponsesBodyServiceTier 从 body 中删除。
 	switch value {
-	case "priority", "flex", "auto", "default", "scale":
+	case "priority", "ultrafast", "flex", "auto", "default", "scale":
 		return &value
 	default:
 		return nil
@@ -1331,7 +1331,7 @@ type ErrInvalidOpenAIServiceTier struct {
 }
 
 func (e *ErrInvalidOpenAIServiceTier) Error() string {
-	return fmt.Sprintf("invalid service_tier %q: must be one of auto, default, fast, flex, priority, scale", e.Value)
+	return fmt.Sprintf("invalid service_tier %q: must be one of auto, default, fast, flex, priority, scale, ultrafast", e.Value)
 }
 
 const invalidOpenAIServiceTierValueMaxLen = 64
@@ -1349,7 +1349,7 @@ func boundInvalidOpenAIServiceTierValue(raw string) string {
 //   - absent / null → valid, returns "" (field omitted keeps current behavior)
 //   - "fast" → normalized to "priority" (the two are equivalent; the canonical
 //     value is what reaches the OpenAI upstream)
-//   - "priority" / "flex" / "auto" / "default" / "scale" → valid, returned as-is
+//   - "priority" / "ultrafast" / "flex" / "auto" / "default" / "scale" → valid, returned as-is
 //   - an explicitly present non-string value, an empty string, or any other
 //     unknown value → *ErrInvalidOpenAIServiceTier (handler maps to HTTP 400),
 //     matching OpenAI's enum validation semantics

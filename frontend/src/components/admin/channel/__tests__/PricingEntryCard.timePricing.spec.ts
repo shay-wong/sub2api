@@ -17,6 +17,7 @@ function createEntry(billingMode: PricingFormEntry['billing_mode'] = 'token'): P
     cache_write_price: null,
     cache_read_price: null,
     fast_multiplier: null,
+    ultrafast_multiplier: null,
     flex_multiplier: null,
     image_input_price: null,
     image_output_price: null,
@@ -73,7 +74,7 @@ describe('PricingEntryCard time pricing visibility', () => {
 })
 
 describe('PricingEntryCard service tier multipliers', () => {
-  it('shows Fast and Flex controls only when explicitly enabled', () => {
+  it('shows Fast, Ultrafast, and Flex controls only when explicitly enabled', () => {
     const hidden = shallowMount(PricingEntryCard, { props: { entry: createEntry() } })
     expect(hidden.text()).not.toContain('admin.channels.form.fastMultiplier')
 
@@ -81,6 +82,7 @@ describe('PricingEntryCard service tier multipliers', () => {
       props: { entry: createEntry(), enableTierMultipliers: true },
     })
     expect(shown.text()).toContain('admin.channels.form.fastMultiplier')
+    expect(shown.text()).toContain('admin.channels.form.ultrafastMultiplier')
     expect(shown.text()).toContain('admin.channels.form.flexMultiplier')
   })
 })

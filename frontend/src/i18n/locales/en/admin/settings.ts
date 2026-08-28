@@ -1077,8 +1077,8 @@ export default {
         commonPatterns: 'Common patterns'
       },
       openaiFastPolicy: {
-        title: 'OpenAI Fast/Flex Policy',
-        description: 'Intercept, filter, or pass OpenAI fast(priority) / flex requests based on the request body service_tier field. Applies to the OpenAI gateway only.',
+        title: 'OpenAI Service Tier Policy',
+        description: 'Intercept, filter, or pass OpenAI ultrafast / fast(priority) / flex requests based on the request body service_tier field. Applies to the OpenAI gateway only.',
         empty: 'No rules configured. Click the button below to add one.',
         ruleHeader: 'Rule #{index}',
         removeRule: 'Remove rule',
@@ -1086,6 +1086,7 @@ export default {
         saveHint: 'Saved together with system settings (click the global Save button at the bottom of the page).',
         serviceTier: 'service_tier match',
         tierAll: 'All tier values',
+        tierUltrafast: 'ultrafast',
         tierPriority: 'priority (fast)',
         tierFlex: 'flex',
         action: 'Action',
