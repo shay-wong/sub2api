@@ -96,7 +96,15 @@
         </template>
 
         <template #cell-reasoning_effort="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">
+          <div v-if="hasReasoningEffortMapping(row)" data-testid="reasoning-effort-cell" class="space-y-0.5 text-xs">
+            <div class="font-medium text-gray-900 dark:text-white">
+              {{ row.__display.reasoningEffort }}
+            </div>
+            <div class="text-gray-500 dark:text-gray-400">
+              <span class="mr-0.5">↳</span>{{ row.__display.upstreamReasoningEffort }}
+            </div>
+          </div>
+          <span v-else data-testid="reasoning-effort-cell" class="text-sm text-gray-900 dark:text-white">
             {{ row.__display.reasoningEffort }}
           </span>
         </template>
@@ -520,7 +528,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
@@ -610,6 +618,12 @@ const ipGeoLookupConfigured = isIpGeoLookupConfigured()
 
 const showIpGeoToolbar = computed(() => ipGeoLookupConfigured && props.columns.some((col) => col.key === 'ip_address'))
 
+const hasReasoningEffortMapping = (row: AdminUsageLog): boolean => {
+  const requested = row.reasoning_effort?.trim() || ''
+  const forwarded = row.upstream_reasoning_effort?.trim() || ''
+  return requested !== '' && forwarded !== '' && !reasoningEffortValuesEqual(requested, forwarded)
+}
+
 const sentUpstreamModel = (row: AdminUsageLog): string => row.upstream_model?.trim() || row.model?.trim() || ''
 
 const normalizeModelVariant = (model: string): string => model
@@ -656,6 +670,7 @@ const handleBatchFetchIpGeo = async () => {
 type UsageLogDisplay = {
   modelSteps: string[] | null
   reasoningEffort: string
+  upstreamReasoningEffort: string
   requestTypeLabel: string
   requestTypeBadgeClass: string
   billingModeLabel: string
@@ -750,6 +765,7 @@ const buildDisplayRow = (row: AdminUsageLog): DisplayAdminUsageLog => {
     __display: {
       modelSteps: getModelSteps(row),
       reasoningEffort: formatReasoningEffort(row.reasoning_effort),
+      upstreamReasoningEffort: formatReasoningEffort(row.upstream_reasoning_effort),
       requestTypeLabel: getRequestTypeLabel(row),
       requestTypeBadgeClass: getRequestTypeBadgeClass(row),
       billingModeLabel: getBillingModeLabel(displayBillingMode, t),

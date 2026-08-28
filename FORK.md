@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `efb46db0a960fdad94502b1c3a982a0051cf5245` |
-| 当前比较范围 | `efb46db0a960fdad94502b1c3a982a0051cf5245..HEAD` |
+| 已合并上游提交 / 比较基线 | `7b693ae4295e20329f18ff451b29a38879cb4705` |
+| 当前比较范围 | `7b693ae4295e20329f18ff451b29a38879cb4705..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `efb46db0a960fdad94502b1c3a982a0051cf5245`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `7b693ae4295e20329f18ff451b29a38879cb4705`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -31,12 +31,12 @@
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.183` |
 | 当前 Fork 版本 | `0.1.183-fork.1` |
-| 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.1.183-fork.1` |
+| 已发布同基线 Fork 版本 | `0.1.183-fork.1` |
+| 下次发布所需版本 | `0.1.183-fork.2` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已准备为尚未发布的 `0.1.183-fork.1`；推送到 `stable` 后，发布工作流应使用同一版本创建首个 `0.1.183` 基线 Fork release。
+当前版本源仍是已发布的 `0.1.183-fork.1`。本次只合并上游、不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.183-fork.2`。
 
 ## 能力索引
 
@@ -66,6 +66,7 @@
 - **来源提交**：`0a69e2c6055e7b1b0b9d861c8b4c787f70fbc107`、`98d869de85ff67cd53477c6a8736d593f64337c7`、`e5340bf36cee7123da34599ca346647fd1b0a2a9`、`c59d0a28f3e7c930872dd804ef8d0243a4bdd06e`、`65c3150e89032d66e7fceafe7dc316bc9bdc0a60`、`f4f57f0f97c8898c78869ec1b032bab36190e689`。
 - **当前修复定位**：提交后运行 `git log -S'input.ProbeEnabled, input.RateSyncEnabled' -- backend/internal/service/admin_account.go`、`git log -S'apiKeyAuthSnapshotVersion = 22' -- backend/internal/service/api_key_auth_cache_impl.go` 与 `git log -S'registerProjectRoutes(admin, h)' -- backend/internal/server/routes/admin.go`。
 - **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/cmd/server/wire_gen.go` 中保留 Auth/Passkey 对 `projectService` 的注入；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 在账号仓储和管理服务冲突中继续保留 Project scope 与 shadow 父项目继承；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 在 OAuth quota 路由、handler、Wire 与 scheduler snapshot 中同时保留项目权限/可见性、项目范围缓存隔离，并合入上游 quota refresh/recovery；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在权限、鉴权缓存、账号管理和用量冲突中保留 Project scope，同时合入上游 Grok 媒体与 response-model 审计字段。
+- **本次上游相邻行为**：`b56c61ecc` 增加用户级公开分组访问限制；它限制用户可绑定的公开分组，但不提供 Project 成员、资源、缓存和查询隔离，不能替代本能力。合并时同时保留该上游字段与 fork 的 Project role/status/permissions、密码登录状态和 TokenVersion 语义。
 - **合并审查**：搜索新增的 admin route、repository query、cache key、scheduler snapshot 和后台原始 `fetch`；确认都显式继承 Project 上下文，不得只依靠前端隐藏入口。
 - **删除条件**：不主动删除。只有维护者明确放弃项目空间产品能力时，才可按独立迁移方案移除。
 - **聚焦验证**：
@@ -182,7 +183,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
 - **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
 - **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`、`git log -S'FixedRequestModel string' -- backend/internal/service/openai_ws_forwarder.go` 与 `git log -S'acceptedTurnStartedAt.Swap(nil)' -- backend/internal/service/openai_ws_v2_passthrough_adapter.go`。
-- **待合并上游审查**：上游基线 `efb46db0a960fdad94502b1c3a982a0051cf5245` 的 `f1aadd48d` 已让 OpenAI OAuth 上游配额耗尽 429 暂停账号，但仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
+- **待合并上游审查**：上游基线 `7b693ae4295e20329f18ff451b29a38879cb4705` 已包含 `f1aadd48d`，让 OpenAI OAuth 上游配额耗尽 429 暂停账号，但仍未覆盖 subscription 日、周、月限额的通用 429 映射；fork 继续通过 `pkgerrors.IsTooManyRequests` 保持该协议。
 - **当前代码**：`backend/internal/service/openai_codex_transform.go`、`backend/internal/service/openai_agent_identity.go`、`backend/internal/service/openai_privacy_service.go`、`backend/internal/util/httputil/httputil.go`、`backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_proxy_stream_circuit.go`、`backend/internal/service/openai_account_runtime_block_fastpath.go`、`backend/internal/service/openai_quota_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/gateway_service.go`、`backend/internal/service/openai_gateway_forward.go`、`backend/internal/service/openai_ws_v2/passthrough_relay.go`、`backend/internal/service/openai_ws_v2_passthrough_adapter.go`、`backend/internal/handler/openai_gateway_handler.go`、`frontend/src/components/account/OpenAIQuotaResetCell.vue`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/utils/openaiEndpointCapabilities.ts`。
 - **测试**：`backend/internal/service/openai_codex_transform_test.go`、`backend/internal/service/openai_agent_identity_compat_test.go`、`backend/internal/service/openai_privacy_retry_test.go`、`backend/internal/util/httputil/httputil_test.go`、`backend/internal/handler/openai_alpha_search_test.go`、`backend/internal/service/openai_alpha_search_test.go`、`backend/internal/service/openai_account_scheduler_test.go`、`backend/internal/service/openai_quota_spark_window_test.go`、`backend/internal/service/openai_proxy_stream_circuit_test.go`、`backend/internal/service/openai_account_runtime_block_fastpath_test.go`、`backend/internal/service/openai_ws_v2/passthrough_relay_test.go`、`backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go`、`backend/internal/handler/openai_gateway_handler_test.go`、`frontend/src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`2dcbd49c92b5affe47c6c7c423650271a50f8209`、`6ed8c0cfb516748d6bffa8a06b5a0586f6e4f3fc`、`16c1da45175d910ae03ca030933eba2286e37b20`、`fc56b7d78728b83fd4cd47dedddbbc055b34040b`、`fea2f5b59dd508df6838074962795d7fc3083a9e`、`83b22ecd2145efb46dae5a5e721f26e4c38a3031`、`e7e0d5a2cfd28940b7eb5f631eb3d7abaacaaf63`、`bfe241b37f5da9d7435506653acf731519718fa4`、`86b122c09c0595fa0cbf6d2cc813fe9a2cda0edf`。
@@ -192,8 +193,9 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次基线新增吸收**：`f06bf181d` 提供 Responses/Chat/WS Fast `service_tier`，`6f972145b` 增加按用量阈值自动重置并复用共享 reset post-process，`243921dc0`、`31d5b67ba`、`7498d8fdc`、`7a09a2eaf`、`1563db3f8` 与 `e440ac48c` 完善 terminal output、工具别名、Responses Lite 和 rejected-field 兼容，`d493ce0bb`、`913ec5d74` 收敛 OAuth 账号身份与模型同步。它们不覆盖 fork 的 Project/实际分组归因、部分成功告警、外部取消 join、health-neutral failover 和 subscription 限额 429 契约。
 - **本次基线继续吸收**：`d6012b0b3`、`53d76ad80`、`d5e43ef7d` 与 `095b52536` 补齐 Responses Lite 数字精度、tool-call mode、WS HTTP bridge 和 `parallel_tool_calls=false`，`8e60d5747` 保留 Codex `session-id`，`e55727d4c` 保持容量溢出时的 sticky binding，`e0e5e45cd` 保留恢复后的 tool-call item ID 类型。它们不覆盖 fork 的 encrypted reasoning、Agent Identity 一次性恢复、外部取消 join、Project/代理范围、health-neutral failover 与 subscription 限额 429 契约。
 - **本次基线继续吸收**：`22e1b8144` 至 `efb46db0a` 提供按实际路由生成的 Codex 模型目录、账号模型别名、稳定 capability 交集和 API Key 目录缓存隔离；`4795650d2` 记录错误请求的实际上游 endpoint，`d8694f03b` 覆盖 WSv2 陈旧 native tool ID 清理。这些上游行为不登记为 fork 差异；自动合并后仍保留 fork 的 Project/实际分组归因、encrypted reasoning、外部取消 join、health-neutral failover 与 subscription 限额 429 契约。
+- **本次基线新增吸收**：`b7ec3cdad` 对无 terminal chunk 的 raw Chat 流返回故障，`81ac8ccd6` 让非流式 HTTP 200 terminal failure 进入账号 failover，`f4e3eb1c5` 在 WS v2 passthrough 中执行 Cyber policy，`c83dced4b` 将客户端正常关闭/断开排除出账号故障归因；这些上游行为不登记为 fork 差异，且不替代 fork 的 Project/实际分组、外部取消 join、health-neutral failover 与 subscription 限额 429 契约。
 - **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 同时保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth`、`RequestScopedTransient` 和项目范围 scheduler cache，并合入上游取消检查与身份/配额恢复；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留项目归属、协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。
-- **本次合并解决**：合入上游父提交 `6ca1e15b0ad2455b6df16535023be754fe087ea7` 时，WS passthrough 继续保留 fork 的图片策略、生命周期、计费标记和 health-neutral 语义，同时改用上游账号感知的 Responses Lite 规范化；其余 OpenAI gateway 继续保留 Project/实际分组、reasoning cache、部分成功告警和 subscription 限额 429 契约。
+- **本次合并解决**：合入上游父提交 `7b693ae4295e20329f18ff451b29a38879cb4705` 时，OpenAI HTTP/WS 继续保留 fork 的 Project/实际分组归因、passthrough 实际路径标记、reasoning cache、部分成功告警、外部取消和 health-neutral 语义，同时吸收上游 requested reasoning effort、Cyber passthrough 与客户端关闭归因。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
 - **删除条件**：上游逐项提供等价实现和测试后，可逐项缩减本条；全部不变量均等价后删除。
 - **聚焦验证**：
@@ -221,6 +223,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **上游部分吸收**：上游 Grok 完整集成由 `fb0475656` 合入，包含 `370bdcf69`、`25d2b03e9`、`e12e0dc1a`、`ec9e73360` 与 `74249b8fe` 等 OAuth、SSO、媒体和协议实现。本次基线进一步吸收 Grok 4.6（`a04ce4901`）、JWT tier 识别（`bb9e74285`）、分组长上下文控制（`fd82dfd52`）、媒体族 fallback（`e29b93a1f`）、原生及兼容 `x_search`（`0de6d7e9b`、`c4d883b8d`）和 usage guard（`5c52fa93d`、`8ea68bd68`）。本条只保留 refresh-token CAS 轮换、Project 隔离、安全 Chat fallback、client-tool 往返和内容策略错误不 failover 五项仍有独立实现与回归的差异。
 - **本次上游吸收**：`99a8b8470` 避免当前 turn 已含 inline image 时重复声明 `view_image`，`892787723` 保留 Grok 4.6 `xhigh` effort，`5b2089c5a` 补齐 tool-search discovery output；这些子项不再作为 fork 差异。
 - **本次基线继续吸收**：`9ede0f716` 将 tool-search discovery 提升为可调用工具，`acce29af2`、`953028718`、`39aaf2fea` 与 `2e68b10aa` 补齐 Grok 兼容输入、容量重试、内容拒绝和媒体计费，`f7145c750` 将默认文本模型迁移到 Grok 4.6。fork 仍保留 refresh-token CAS、Project 隔离、安全 Chat fallback、client-tool 往返和内容策略错误不跨账号 failover。
+- **本次基线新增吸收**：`de6ef7134` 清理 Codex Responses 请求，`f4820c00d` 与 `fd872550d` 规范化非法 tool union root；这些协议清理来自上游，不登记为 fork 差异，也不替代 fork 的 OAuth 轮换、Project 隔离、安全 Chat fallback 和 client-tool 往返契约。
 - **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 Grok OAuth、媒体和 OpenAI bridge 冲突中保留 Project 校验、统一刷新入口、安全 fallback 与实际分组归因，并合入上游 SSO、密码授权和音视频一次性计费。
 - **合并审查**：OAuth storage、admin refresh endpoint、scheduler token provider 和 protocol bridge 必须一起审查；只接受上游 UI 或单一 refresh helper 不构成吸收。
 - **删除条件**：上游分别提供 OAuth 轮换、项目隔离、协议 fallback 和 client-tool 测试后逐项缩减，全部等价后删除。
@@ -298,8 +301,9 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次上游吸收**：`a9514a68d` 将总计、入口、上游入口和路径统计合并为一次 `GROUPING SETS` 扫描；本次合并让该查询继续复用 fork 的 `buildUsageLogFilterWhere`，因此 Project scope 与共享筛选口径不变。
 - **本次基线继续吸收**：`c374ff295`、`e4f869e0c` 与 `6b0ec50f2` 完善运维错误捕获、详情兼容展示和 SLA 排除语义；本次合并继续保留 fork 的 Project 归因、deleted-key digest 与隐私约束。
 - **本次基线新增吸收**：`cfecc8d11` 让错误详情返回列表时保留筛选状态，`cd05772e9` 避免混用 cgroup 与宿主机内存指标；它们不覆盖 fork 的 Project-safe health、共享筛选口径和 deleted-key digest 归因。
+- **本次基线新增吸收**：`11ada80d5`、`5705f4a4a` 与 `a8cfe746b` 记录并展示策略映射前的 requested reasoning effort，同时只向管理员暴露映射后值；该上游审计能力不替代 fork 的 Project scope、入口/上游 endpoint、response-model 审计和共享查询口径。
 - **当前修复定位**：提交后运行 `git log -S'全局 rollup 不含 project_id' -- backend/internal/repository/usage_log_repo_trend.go`。
-- **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 dashboard、usage query/cache 和 60 列写入冲突中保留 Project scope、共享筛选与精确 COUNT 缓存，同时合入 request type、upstream response-model 和 mismatch 审计。
+- **人工合并解决**：`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 dashboard、usage query/cache 和 60 列写入冲突中保留 Project scope、共享筛选与精确 COUNT 缓存，同时合入 request type、upstream response-model 和 mismatch 审计。本次合入 `7b693ae4295e20329f18ff451b29a38879cb4705` 时，usage 写入、查询和管理端展示继续保留 Project、endpoint 与 response-model 字段，并加入 requested/forwarded reasoning effort 双写和双层展示。
 - **合并审查**：同时核对 query、count、dashboard、error tabs 和权限过滤；前端隐藏全局指标不能替代后端 scope 修复。
 - **删除条件**：上游提供等价筛选、COUNT 缓存、deleted-key attribution 和 project-safe dashboard 测试后逐项缩减。
 - **聚焦验证**：
@@ -375,8 +379,9 @@ git diff --check
 - **已替代方案**：`6b37423465f1780dda62232d88e53676c4af15d5` 与 `bb9e60b13bab1a7f7c31d8987dfa00d5ed6da8ef` 的旧 operator/group-scope 方案已由 Project 模型替代，不单列。
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
+- **迁移文件编号**：fork 的 `231_channel_ultrafast_multiplier.sql` 与上游的 `231_add_usage_log_requested_reasoning_effort.sql`、`231_user_restrict_public_groups.sql` 可以并存；migration runner 以完整 filename 作为 `schema_migrations` 主键并校验各自 checksum，三个迁移均幂等且互不依赖，不为消除数字前缀重复而改名。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、Plugins 管理入口和 Go 1.27.0 builder 对齐均已包含在 `efb46db0a960fdad94502b1c3a982a0051cf5245` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、Plugins 管理入口和 Go 1.27.0 builder 对齐均已包含在 `7b693ae4295e20329f18ff451b29a38879cb4705` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
