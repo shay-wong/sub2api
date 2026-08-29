@@ -403,6 +403,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		adminOnly := middleware.RequireAdminOnly()
 		accounts.GET("", h.Admin.Account.List)
 		accounts.GET("/proxy-options", h.Admin.Account.GetProxyOptions)
+		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", adminOnly, h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", adminOnly, h.Admin.Account.UpdateUpstreamBillingProbeSettings)
 		accounts.POST("/upstream-billing-probe/batch", adminOnly, h.Admin.Account.ProbeUpstreamBillingBatch)

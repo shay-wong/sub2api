@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `7b693ae4295e20329f18ff451b29a38879cb4705` |
-| 当前比较范围 | `7b693ae4295e20329f18ff451b29a38879cb4705..HEAD` |
+| 已合并上游提交 / 比较基线 | `ac18c588c81821b3c4fd4f2c2457dd9a3e341737` |
+| 当前比较范围 | `ac18c588c81821b3c4fd4f2c2457dd9a3e341737..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `7b693ae4295e20329f18ff451b29a38879cb4705`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `ac18c588c81821b3c4fd4f2c2457dd9a3e341737`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -384,4 +384,4 @@ git diff --check
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、Project、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、Plugins 管理入口和 Go 1.27.0 builder 对齐均已包含在 `7b693ae4295e20329f18ff451b29a38879cb4705` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/阶梯计费、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、Plugins 管理入口、Go 1.27.0 builder、Claude Code Messages 粘性路由、Responses 透传首输出前 keepalive、Grok cache key 优先级、Anthropic 工具参数保真、Antigravity 混合内置工具、周/月订阅重置锚点、配额 singleflight 去重、智谱团队 Coding Plan、轻量倍率快照刷新、批量关闭指纹收敛、Claude attribution header 保留、充值币种展示及连字符版本后缀解析均已包含在 `ac18c588c81821b3c4fd4f2c2457dd9a3e341737` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
