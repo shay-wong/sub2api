@@ -135,7 +135,7 @@ export default {
         ultrafastMultiplier: 'Ultrafast 倍率',
         flexMultiplier: 'Flex 倍率',
         multiplierPlaceholder: '未配置',
-        ultrafastMultiplierPlaceholder: '默认 10 倍',
+        ultrafastMultiplierPlaceholder: '默认 2 倍（与 Fast 一致）',
         multiplierPositive: 'Fast/Ultrafast/Flex 倍率必须大于 0',
         inputMultiplier: '输入倍率',
         outputMultiplier: '输出倍率',

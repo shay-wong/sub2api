@@ -135,7 +135,7 @@ export default {
         ultrafastMultiplier: 'Ultrafast Multiplier',
         flexMultiplier: 'Flex Multiplier',
         multiplierPlaceholder: 'Not set',
-        ultrafastMultiplierPlaceholder: 'Default 10x',
+        ultrafastMultiplierPlaceholder: 'Default 2x (same as Fast)',
         multiplierPositive: 'Fast/Ultrafast/Flex multipliers must be greater than 0',
         inputMultiplier: 'Input Mult.',
         outputMultiplier: 'Output Mult.',

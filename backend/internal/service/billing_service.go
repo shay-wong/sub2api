@@ -103,7 +103,7 @@ type ModelPricing struct {
 	CacheReadPricePerToken             float64  // 缓存读取每token价格 (USD)
 	CacheReadPricePerTokenPriority     float64  // priority service tier 下缓存读取每token价格 (USD)
 	FastMultiplier                     *float64 // 渠道显式 Fast/priority 倍率；nil 时沿用模型目录行为
-	UltrafastMultiplier                *float64 // 渠道显式 Ultrafast 倍率；nil 时默认按标准价格 10 倍计费
+	UltrafastMultiplier                *float64 // 渠道显式 Ultrafast 倍率；nil 时默认与 Fast 一致按标准价格 2 倍计费
 	FlexMultiplier                     *float64 // 渠道显式 Flex 倍率；nil 时沿用默认行为
 	CacheCreation5mPrice               float64  // 5分钟缓存创建每token价格 (USD)
 	CacheCreation1hPrice               float64  // 1小时缓存创建每token价格 (USD)
@@ -143,9 +143,7 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
 	switch normalizeBillingServiceTier(serviceTier) {
-	case "ultrafast":
-		return 10.0
-	case "priority", "fast":
+	case "ultrafast", "priority", "fast":
 		return 2.0
 	case "flex":
 		return 0.5
