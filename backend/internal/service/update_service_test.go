@@ -137,6 +137,12 @@ func TestCompareVersionsSupportsForkReleaseSuffix(t *testing.T) {
 			latest:  "0.1.135",
 			want:    1,
 		},
+		{
+			name:    "custom suffix preserves the upstream base version",
+			current: "v0.1.183-custom",
+			latest:  "0.1.183",
+			want:    0,
+		},
 	}
 
 	for _, tt := range tests {

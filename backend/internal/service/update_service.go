@@ -695,11 +695,14 @@ func parseVersion(v string) parsedUpdateVersion {
 	result := parsedUpdateVersion{}
 
 	base := v
-	if basePart, forkPart, ok := strings.Cut(v, "-fork."); ok {
-		base = basePart
-		if parsed, err := strconv.Atoi(forkPart); err == nil {
-			result.hasFork = true
-			result.fork = parsed
+	if suffixIndex := strings.IndexByte(v, '-'); suffixIndex != -1 {
+		base = v[:suffixIndex]
+		forkPart := strings.TrimPrefix(v[suffixIndex+1:], "fork.")
+		if forkPart != v[suffixIndex+1:] {
+			if parsed, err := strconv.Atoi(forkPart); err == nil {
+				result.hasFork = true
+				result.fork = parsed
+			}
 		}
 	}
 
