@@ -8,8 +8,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -166,7 +168,9 @@ func TestAdaptiveProtocolConvertsKimiResponsesToChatCompletions(t *testing.T) {
 
 func TestAdaptiveProtocolRoutesDeepSeekResponsesToNativeResponses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := []byte(`{"model":"deepseek-v4","input":"hello","max_output_tokens":32,"store":true,"previous_response_id":"resp_old","stream":false}`)
+	body := []byte(`{"model":"deepseek-v4","input":[{"type":"message","content":[{"type":"input_image","image_url":"data:image/png;base64,"},{"type":"input_text","text":"hello"}]}],"padding":"` +
+		strings.Repeat("x", int(pkghttputil.DefaultDiskSpillThreshold)) +
+		`","max_output_tokens":32,"store":true,"previous_response_id":"resp_old","stream":false}`)
 	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 	account := adaptiveProtocolTestAccount(PlatformDeepseek, map[string]any{
@@ -182,6 +186,7 @@ func TestAdaptiveProtocolRoutesDeepSeekResponsesToNativeResponses(t *testing.T) 
 	require.False(t, gjson.GetBytes(upstream.lastBody, "previous_response_id").Exists())
 	require.Equal(t, int64(32), gjson.GetBytes(upstream.lastBody, "max_output_tokens").Int())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+	require.Len(t, gjson.GetBytes(upstream.lastBody, "padding").String(), int(pkghttputil.DefaultDiskSpillThreshold))
 }
 
 func TestFixedCNChatProtocolOverridesStaleResponsesMode(t *testing.T) {

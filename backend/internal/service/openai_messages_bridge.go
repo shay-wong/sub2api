@@ -24,10 +24,13 @@ func isOpenAICompatMessagesBridgeRequestBody(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false
 	}
+	if isOpenAICompatMessagesBridgePromptCacheKey(firstNonEmptyString(reqBody["prompt_cache_key"])) {
+		return true
+	}
 	if input, ok := reqBody["input"].([]any); ok && inputContainsText(input, openAICompatClaudeCodeTodoGuardMarker) {
 		return true
 	}
-	return isOpenAICompatMessagesBridgePromptCacheKey(firstNonEmptyString(reqBody["prompt_cache_key"]))
+	return false
 }
 
 func isOpenAICompatMessagesBridgePromptCacheKey(key string) bool {

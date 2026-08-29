@@ -43,6 +43,7 @@ type OpenAIGatewayHandler struct {
 	opsService                 *service.OpsService
 	concurrencyHelper          *ConcurrencyHelper
 	imageLimiter               *imageConcurrencyLimiter
+	requestMemoryLimiter       *openAIRequestMemoryLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
 }
@@ -347,10 +348,14 @@ func NewOpenAIGatewayHandler(
 ) *OpenAIGatewayHandler {
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
+	requestMemoryBudget := defaultOpenAIRequestMemoryBudget
 	if cfg != nil {
 		pingInterval = time.Duration(cfg.Concurrency.PingInterval) * time.Second
 		if cfg.Gateway.MaxAccountSwitches > 0 {
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
+		}
+		if cfg.Gateway.MaxBodySize > 0 {
+			requestMemoryBudget = cfg.Gateway.MaxBodySize
 		}
 	}
 	return &OpenAIGatewayHandler{
@@ -363,6 +368,7 @@ func NewOpenAIGatewayHandler(
 		opsService:               opsService,
 		concurrencyHelper:        NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		imageLimiter:             &imageConcurrencyLimiter{},
+		requestMemoryLimiter:     newOpenAIRequestMemoryLimiter(requestMemoryBudget),
 		maxAccountSwitches:       maxAccountSwitches,
 		cfg:                      cfg,
 	}
@@ -403,8 +409,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	if h.requestMemoryLimiter != nil {
+		releaseMemory, acquireErr := h.requestMemoryLimiter.Acquire(c.Request.Context(), c.Request)
+		if acquireErr != nil {
+			reqLog.Debug("openai.request_memory_wait_canceled", zap.Error(acquireErr))
+			return
+		}
+		if releaseMemory != nil {
+			defer releaseMemory()
+		}
+	}
+
 	// Read request body
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	body, cleanupBody, err := readLenientJSONRequestBodyWithDiskSpill(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -413,6 +430,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		logRequestBodyReadFailure(reqLog, c.Request, err)
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
+	}
+	if cleanupBody != nil {
+		defer cleanupBody()
 	}
 
 	if len(body) == 0 {

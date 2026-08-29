@@ -1708,20 +1708,25 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]a
 			if !opts.PreserveReferences {
 				continue
 			}
-			newItem := make(map[string]any, len(m))
-			for key, value := range m {
-				newItem[key] = value
-			}
-			if id, ok := newItem["id"].(string); ok && strings.HasPrefix(strings.TrimSpace(id), "call_") {
+			newItem := m
+			if id, ok := m["id"].(string); ok && strings.HasPrefix(strings.TrimSpace(id), "call_") {
 				trimmedID := strings.TrimSpace(id)
+				nextID := id
 				_, referencesExistingItem := inputItemIDs[trimmedID]
 				if !referencesExistingItem {
 					if normalizedID, mapped := referenceIDMappings[trimmedID]; mapped {
-						newItem["id"] = normalizedID
+						nextID = normalizedID
 					} else if _, hasSameTurnCall := inputCallIDs[trimmedID]; !hasSameTurnCall {
 						// A bare call_* reference is a legacy function-call identifier.
 						// Normalize it even when its call item lives in an earlier turn.
-						newItem["id"] = normalizeCodexCallID(trimmedID)
+						nextID = normalizeCodexCallID(trimmedID)
+					}
+					if nextID != id {
+						newItem = make(map[string]any, len(m))
+						for key, value := range m {
+							newItem[key] = value
+						}
+						newItem["id"] = nextID
 					}
 				}
 			}
@@ -1763,8 +1768,10 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]a
 		}
 
 		if !isCodexToolCallItemType(typ) {
-			ensureCopy()
-			delete(newItem, "call_id")
+			if _, exists := m["call_id"]; exists {
+				ensureCopy()
+				delete(newItem, "call_id")
+			}
 		}
 
 		if codexInputItemRequiresName(typ) {
@@ -1784,8 +1791,10 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) ([]a
 		}
 
 		if !opts.PreserveReferences {
-			ensureCopy()
-			delete(newItem, "id")
+			if _, exists := m["id"]; exists {
+				ensureCopy()
+				delete(newItem, "id")
+			}
 		} else if id, ok := m["id"].(string); ok && shouldStripOpenAIResponsesInputItemID(typ, id) {
 			ensureCopy()
 			delete(newItem, "id")

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -61,6 +62,28 @@ func TestOpenAIRequestView_DecodeKeepsFullMapBehavior(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5", reqBody["model"])
 	require.IsType(t, []any{}, reqBody["input"])
+}
+
+func TestMarshalOpenAIUpstreamJSONDiskBacked(t *testing.T) {
+	value := map[string]any{
+		"model": "gpt-5.5",
+		"input": []any{map[string]any{
+			"type":    "message",
+			"content": strings.Repeat("界", openAIJSONStringChunkSize) + "<>&\u2028\u2029\n\"\\" + string([]byte{0xff}),
+		}},
+		"temperature": 0.7,
+		"store":       false,
+		"metadata":    nil,
+	}
+	want, err := marshalOpenAIUpstreamJSON(value)
+	require.NoError(t, err)
+
+	mapped, body, err := marshalOpenAIUpstreamJSONDiskBacked(value)
+	require.NoError(t, err)
+	require.NotNil(t, mapped)
+	defer func() { require.NoError(t, mapped.Close()) }()
+
+	require.Equal(t, want, body)
 }
 
 func TestOpenAIRequestView_ApplyPatches(t *testing.T) {
@@ -173,13 +196,17 @@ func TestOpenAIGatewayService_Forward_DecodedMutationKeepsLaterFieldDeletes(t *t
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 
-	body := []byte(`{"model":"gpt-5.4","stream":false,"max_completion_tokens":12,"tools":[{"type":"image_generation","format":"png"}],"input":[{"type":"message","content":"draw"}]}`)
+	body := []byte(fmt.Sprintf(
+		`{"model":"gpt-5.4","stream":false,"max_completion_tokens":12,"padding":%q,"tools":[{"type":"image_generation","format":"png"}],"input":[{"type":"message","content":"draw"}]}`,
+		strings.Repeat("x", int(pkghttputil.DefaultDiskSpillThreshold)),
+	))
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "max_completion_tokens").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "tools.0.format").Exists())
 	require.Equal(t, "png", gjson.GetBytes(upstream.lastBody, "tools.0.output_format").String())
+	require.Len(t, gjson.GetBytes(upstream.lastBody, "padding").String(), int(pkghttputil.DefaultDiskSpillThreshold))
 }
 
 // #4417：/v1/responses 原生转发路径需将 Chat-Completions 风格的 max_tokens 归一化为

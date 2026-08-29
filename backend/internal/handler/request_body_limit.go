@@ -33,6 +33,14 @@ func readLenientJSONRequestBodyWithPrealloc(req *http.Request, cfg *config.Confi
 	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, gatewayMaxBodySize(cfg))
 }
 
+func readLenientJSONRequestBodyWithDiskSpill(req *http.Request, cfg *config.Config) ([]byte, func(), error) {
+	return pkghttputil.ReadLenientJSONRequestBodyWithDiskSpill(
+		req,
+		pkghttputil.DefaultDiskSpillThreshold,
+		gatewayMaxBodySize(cfg),
+	)
+}
+
 func gatewayMaxBodySize(cfg *config.Config) int64 {
 	if cfg == nil {
 		return 0

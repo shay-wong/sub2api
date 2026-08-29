@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 	"testing"
@@ -198,6 +199,57 @@ func BenchmarkOpenAIResponses_LargeInputFunctionCallValidation(b *testing.B) {
 				benchmarkIntSink++
 			}
 		})
+	}
+}
+
+func BenchmarkOpenAIResponses_IncidentOAuthTransform(b *testing.B) {
+	body := buildLargeOpenAIResponsesBody(38_707_514)
+	body = bytes.Replace(body, []byte("session-benchmark"), []byte("anthropic-metadata-benchmark"), 1)
+
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reqBody, err := getOpenAIRequestBodyMap(nil, body)
+		if err != nil {
+			b.Fatal(err)
+		}
+		result := applyCodexOAuthTransform(reqBody, true, false)
+		if !result.Modified {
+			b.Fatal("expected OAuth transform to modify request")
+		}
+		encoded, err := marshalOpenAIUpstreamJSON(reqBody)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkIntSink = len(encoded)
+	}
+}
+
+func BenchmarkOpenAIResponses_IncidentOAuthTransformDiskBacked(b *testing.B) {
+	body := buildLargeOpenAIResponsesBody(38_707_514)
+	body = bytes.Replace(body, []byte("session-benchmark"), []byte("anthropic-metadata-benchmark"), 1)
+
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reqBody, err := getOpenAIRequestBodyMap(nil, body)
+		if err != nil {
+			b.Fatal(err)
+		}
+		result := applyCodexOAuthTransform(reqBody, true, false)
+		if !result.Modified {
+			b.Fatal("expected OAuth transform to modify request")
+		}
+		mapped, encoded, err := marshalOpenAIUpstreamJSONDiskBacked(reqBody)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkIntSink = len(encoded)
+		if err := mapped.Close(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

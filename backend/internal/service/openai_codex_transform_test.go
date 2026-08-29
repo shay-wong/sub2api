@@ -77,6 +77,22 @@ func TestApplyCodexOAuthTransform_MessagesBridgePromptCacheKeyIsHeaderOnly(t *te
 	require.NotContains(t, reqBody, "prompt_cache_key")
 }
 
+func TestAppendOpenAICompatClaudeCodeTodoGuard_DetectsNestedMarker(t *testing.T) {
+	reqBody := map[string]any{
+		"input": []any{
+			map[string]any{
+				"type": "message",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": openAICompatClaudeCodeTodoGuardText},
+				},
+			},
+		},
+	}
+
+	require.False(t, appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody))
+	require.Len(t, reqBody["input"], 1)
+}
+
 func TestApplyCodexOAuthTransform_ToolContinuationPreservesNativeMessageAndReasoningIDs(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.2",

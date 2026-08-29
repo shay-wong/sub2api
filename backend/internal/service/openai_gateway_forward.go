@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -277,18 +278,36 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		)
 	}
 
+	var mappedUpstreamBody *pkghttputil.MappedBody
+	defer func() {
+		if mappedUpstreamBody != nil {
+			_ = mappedUpstreamBody.Close()
+		}
+	}()
+
 	bodyModified := false
 	clientPromptCacheKey := promptCacheKey
 	var reqBody map[string]any
+	replaceRawBody := func(nextBody []byte) error {
+		previousMapped := mappedUpstreamBody
+		body = nextBody
+		mappedUpstreamBody = nil
+		requestView = newOpenAIRequestView(body)
+		reqBody = nil
+		if previousMapped != nil {
+			return previousMapped.Close()
+		}
+		return nil
+	}
 	ensureReqBody := func() (map[string]any, error) {
 		if requestView.HasPatches() {
 			patchedBody, patchErr := requestView.ApplyPatches()
 			if patchErr != nil {
 				return nil, patchErr
 			}
-			body = patchedBody
-			requestView = newOpenAIRequestView(body)
-			reqBody = nil
+			if replaceErr := replaceRawBody(patchedBody); replaceErr != nil {
+				return nil, replaceErr
+			}
 			bodyModified = false
 		}
 		if reqBody != nil {
@@ -327,6 +346,35 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	markDecodedModified := func() {
 		bodyModified = true
 		disablePatch()
+	}
+	replaceBodyFromDecoded := func(decoded map[string]any) error {
+		var (
+			nextBody   []byte
+			nextMapped *pkghttputil.MappedBody
+			err        error
+		)
+		if len(body) >= int(pkghttputil.DefaultDiskSpillThreshold) &&
+			wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 &&
+			account.Platform != PlatformDeepseek {
+			nextMapped, nextBody, err = marshalOpenAIUpstreamJSONDiskBacked(decoded)
+		} else {
+			nextBody, err = marshalOpenAIUpstreamJSON(decoded)
+		}
+		if err != nil {
+			return err
+		}
+
+		previousMapped := mappedUpstreamBody
+		body = nextBody
+		mappedUpstreamBody = nextMapped
+		requestView = newOpenAIRequestView(body)
+		if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
+			reqBody = nil
+		}
+		if previousMapped != nil {
+			return previousMapped.Close()
+		}
+		return nil
 	}
 
 	apiKey := getAPIKeyFromContext(c)
@@ -679,9 +727,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if bodyModified {
 		if requestView.HasPatches() {
 			if patchedBody, patchErr := requestView.ApplyPatches(); patchErr == nil {
-				body = patchedBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
+				if replaceErr := replaceRawBody(patchedBody); replaceErr != nil {
+					return nil, replaceErr
+				}
 				bodyModified = false
 			}
 		}
@@ -690,12 +738,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if decodeErr != nil {
 				return nil, decodeErr
 			}
-			var marshalErr error
-			body, marshalErr = marshalOpenAIUpstreamJSON(decoded)
-			if marshalErr != nil {
+			if marshalErr := replaceBodyFromDecoded(decoded); marshalErr != nil {
 				return nil, fmt.Errorf("serialize request body: %w", marshalErr)
 			}
-			requestView = newOpenAIRequestView(body)
 		}
 	}
 	// Run after orphan-output filtering and all request-map rebuilds so a
@@ -703,9 +748,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if normalizedBody, changed, normalizeErr := NormalizeCompactionTriggerInputOrder(body); normalizeErr != nil {
 		return nil, fmt.Errorf("normalize compaction trigger order: %w", normalizeErr)
 	} else if changed {
-		body = normalizedBody
-		requestView = newOpenAIRequestView(body)
-		reqBody = nil
+		if replaceErr := replaceRawBody(normalizedBody); replaceErr != nil {
+			return nil, fmt.Errorf("replace normalized compaction request body: %w", replaceErr)
+		}
 	}
 	imageBillingModel := ""
 	imageSizeTier := ""
@@ -993,6 +1038,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+		if mappedUpstreamBody != nil {
+			currentMapped := mappedUpstreamBody
+			upstreamReq.Body = currentMapped.NewReader()
+			upstreamReq.GetBody = func() (io.ReadCloser, error) {
+				return currentMapped.NewReader(), nil
+			}
+		}
 
 		// Get proxy URL
 		proxyURL := ""
@@ -1055,8 +1107,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					return nil, decodeErr
 				}
 				if trimOpenAIEncryptedReasoningItems(decoded) {
-					body, err = marshalOpenAIUpstreamJSON(decoded)
-					if err != nil {
+					if err = replaceBodyFromDecoded(decoded); err != nil {
 						return nil, fmt.Errorf("serialize invalid_encrypted_content retry body: %w", err)
 					}
 					httpInvalidEncryptedContentRetryTried = true
@@ -1069,9 +1120,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
-				body = retryBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
+				if replaceErr := replaceRawBody(retryBody); replaceErr != nil {
+					return nil, replaceErr
+				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
 				continue
 			}
@@ -1080,9 +1131,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			); retry {
 				s.appendOpenAICompactFallbackRetryOps(c, account, resp, respBody, upstreamMsg, false)
 				fromModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-				body = retryBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
+				if replaceErr := replaceRawBody(retryBody); replaceErr != nil {
+					return nil, replaceErr
+				}
 				upstreamModel = fallbackModel
 				compactModelFallbackRetried = true
 				SetOpsUpstreamModel(c, fallbackModel)
@@ -1155,8 +1206,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
 					); retry {
 						s.appendOpenAICompactFallbackRetryOps(c, account, resp, signal.payload, signal.message, false)
-						body = retryBody
-						requestView = newOpenAIRequestView(body)
+						if replaceErr := replaceRawBody(retryBody); replaceErr != nil {
+							return nil, replaceErr
+						}
 						upstreamModel = fallbackModel
 						compactModelFallbackRetried = true
 						SetOpsUpstreamModel(c, fallbackModel)
@@ -1199,8 +1251,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
 					); retry {
-						body = retryBody
-						requestView = newOpenAIRequestView(body)
+						if replaceErr := replaceRawBody(retryBody); replaceErr != nil {
+							return nil, replaceErr
+						}
 						upstreamModel = fallbackModel
 						compactModelFallbackRetried = true
 						SetOpsUpstreamModel(c, fallbackModel)

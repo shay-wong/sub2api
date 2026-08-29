@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -112,10 +113,33 @@ func inputContainsText(input []any, needle string) bool {
 		return false
 	}
 	for _, item := range input {
-		b, err := json.Marshal(item)
-		if err == nil && strings.Contains(string(b), needle) {
+		if valueContainsText(item, needle) {
 			return true
 		}
+	}
+	return false
+}
+
+func valueContainsText(value any, needle string) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.Contains(v, needle)
+	case []any:
+		for _, item := range v {
+			if valueContainsText(item, needle) {
+				return true
+			}
+		}
+	case map[string]any:
+		for key, item := range v {
+			if strings.Contains(key, needle) || valueContainsText(item, needle) {
+				return true
+			}
+		}
+	case json.RawMessage:
+		return bytes.Contains(v, []byte(needle))
+	case []byte:
+		return bytes.Contains(v, []byte(needle))
 	}
 	return false
 }
