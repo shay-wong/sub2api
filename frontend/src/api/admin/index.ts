@@ -34,7 +34,6 @@ import adminPaymentAPI from './payment'
 import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
-import projectsAPI from './projects'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
 
@@ -73,7 +72,6 @@ export const adminAPI = {
   affiliates: affiliatesAPI,
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
-  projects: projectsAPI,
   audit: auditAPI,
   plugins: pluginsAPI
 }
@@ -110,7 +108,6 @@ export {
   affiliatesAPI,
   riskControlAPI,
   adminComplianceAPI,
-  projectsAPI,
   auditAPI,
   pluginsAPI
 }
@@ -124,7 +121,6 @@ export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from 
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'
 export type { ContentModerationConfig, ContentModerationLog, ModerationMode } from './riskControl'
-export type { AdminProject, ProjectMember } from './projects'
 export type {
   PluginInstallation,
   PluginCompatibility,

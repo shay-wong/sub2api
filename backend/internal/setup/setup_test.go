@@ -254,7 +254,7 @@ func TestBuildDatabaseConnectionDSNsUsesPostgresForBootstrap(t *testing.T) {
 	}
 }
 
-func TestCreateInitialAdminRollsBackAndRetriesWhenDefaultProjectMembershipIsMissing(t *testing.T) {
+func TestCreateInitialAdminCommitsWithoutProjectMembership(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
@@ -264,22 +264,6 @@ func TestCreateInitialAdminRollsBackAndRetriesWhenDefaultProjectMembershipIsMiss
 	mock.ExpectQuery("INSERT INTO users").
 		WithArgs(cfg.Admin.Email, sqlmock.AnyArg(), service.RoleSuperAdmin, float64(0), defaultUserConcurrency, service.StatusActive, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
-	mock.ExpectExec("INSERT INTO project_members").
-		WithArgs(int64(42), service.ProjectRoleAdmin, service.DefaultProjectSlug).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectRollback()
-
-	created, _, err := createInitialAdmin(context.Background(), db, cfg, adminBootstrapReasonEmptyDatabase)
-
-	require.False(t, created)
-	require.ErrorContains(t, err, "affected 0 rows, want 1")
-	mock.ExpectBegin()
-	mock.ExpectQuery("INSERT INTO users").
-		WithArgs(cfg.Admin.Email, sqlmock.AnyArg(), service.RoleSuperAdmin, float64(0), defaultUserConcurrency, service.StatusActive, sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
-	mock.ExpectExec("INSERT INTO project_members").
-		WithArgs(int64(42), service.ProjectRoleAdmin, service.DefaultProjectSlug).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	mock.ExpectClose()
 

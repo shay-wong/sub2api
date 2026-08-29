@@ -189,18 +189,10 @@ export async function create(accountData: CreateAccountRequest): Promise<Account
  * @param id - Source account ID
  * @returns Newly created account
  */
-const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
 const duplicateOperationKeys = new Map<string, string>()
 
 function duplicateOperationScope(id: number): string {
-  let projectID = 'unscoped'
-  try {
-    const selectedProjectID = globalThis.localStorage?.getItem(SELECTED_PROJECT_ID_KEY)?.trim()
-    if (selectedProjectID) projectID = encodeURIComponent(selectedProjectID)
-  } catch {
-    // Use the unscoped bucket when browser storage is unavailable.
-  }
-  return `${projectID}:${id}`
+  return String(id)
 }
 
 function duplicateOperationStorageKey(scope: string): string {

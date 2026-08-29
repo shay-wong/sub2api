@@ -110,37 +110,18 @@ func setupDuplicateAccountRouter(t *testing.T, svc service.AdminService) *gin.En
 	return router
 }
 
-func setupProjectScopedDuplicateAccountRouter(t *testing.T, svc service.AdminService, projectID int64) *gin.Engine {
-	t.Helper()
-	previousCoordinator := service.DefaultIdempotencyCoordinator()
-	service.SetDefaultIdempotencyCoordinator(nil)
-	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(previousCoordinator) })
-
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 77})
-		c.Set(string(middleware2.ContextKeyUserRole), service.RoleAdmin)
-		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
-		c.Next()
-	})
-	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	router.POST("/api/v1/admin/accounts/:id/duplicate", handler.Duplicate)
-	return router
-}
-
-func TestDuplicateAccountHandlerScopesOperationIdentityByProject(t *testing.T) {
+func TestDuplicateAccountHandlerScopesOperationIdentityByAdmin(t *testing.T) {
 	svc := &duplicateAccountAdminServiceStub{
 		account: &service.Account{ID: 43, Name: "primary (Copy)", Status: service.StatusActive},
 	}
-	router := setupProjectScopedDuplicateAccountRouter(t, svc, 169)
+	router := setupDuplicateAccountRouter(t, svc)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/42/duplicate", nil)
 
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, "admin:77:project:169", svc.actorScope)
+	require.Equal(t, "admin:77", svc.actorScope)
 }
 
 func TestDuplicateAccountHandlerRedactsCredentials(t *testing.T) {

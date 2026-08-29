@@ -667,13 +667,11 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
 
 	keyRaw, _ := json.Marshal(struct {
-		ProjectID       int64  `json:"project_id,omitempty"`
 		Start           string `json:"start"`
 		End             string `json:"end"`
 		ResponseEndDate string `json:"response_end_date"`
 		Limit           int    `json:"limit"`
 	}{
-		ProjectID:       dashboardCacheProjectID(c.Request.Context()),
 		Start:           startTime.UTC().Format(time.RFC3339),
 		End:             endTime.UTC().Format(time.RFC3339),
 		ResponseEndDate: responseEndDate,
@@ -722,15 +720,13 @@ func (h *DashboardHandler) GetBatchUsersUsage(c *gin.Context) {
 
 	// cacheKey 必须包含当日日期，否则跨午夜后 30s 内会复用昨天的 "today_*" 结果。
 	keyRaw, _ := json.Marshal(struct {
-		ProjectID int64   `json:"project_id,omitempty"`
-		V         int     `json:"v"`
-		Day       string  `json:"day"`
-		UserIDs   []int64 `json:"user_ids"`
+		V       int     `json:"v"`
+		Day     string  `json:"day"`
+		UserIDs []int64 `json:"user_ids"`
 	}{
-		ProjectID: dashboardCacheProjectID(c.Request.Context()),
-		V:         2, // bump 当响应结构变化（如加入 by_platform 时）
-		Day:       timezone.Today().Format("2006-01-02"),
-		UserIDs:   userIDs,
+		V:       2, // bump 当响应结构变化（如加入 by_platform 时）
+		Day:     timezone.Today().Format("2006-01-02"),
+		UserIDs: userIDs,
 	})
 	cacheKey := string(keyRaw)
 	if cached, ok := dashboardBatchUsersUsageCache.Get(cacheKey); ok {
@@ -772,10 +768,8 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 	}
 
 	keyRaw, _ := json.Marshal(struct {
-		ProjectID int64   `json:"project_id,omitempty"`
 		APIKeyIDs []int64 `json:"api_key_ids"`
 	}{
-		ProjectID: dashboardCacheProjectID(c.Request.Context()),
 		APIKeyIDs: apiKeyIDs,
 	})
 	cacheKey := string(keyRaw)

@@ -768,7 +768,7 @@ describe('EditAccountModal', () => {
 
   it.each([
     ['super admin', true, true],
-    ['project admin', false, false]
+    ['limited admin', false, false]
   ])('%s Grok OAuth custom upstream visibility matches backend permission', (_name, isAdmin, visible) => {
     authIsAdmin.value = isAdmin
     const wrapper = mountModal(buildGrokOAuthAccount())
@@ -778,7 +778,7 @@ describe('EditAccountModal', () => {
 
   it.each([
     ['super admin', true, true],
-    ['project admin', false, false]
+    ['limited admin', false, false]
   ])('%s Ollama Cloud controls visibility matches backend permission', (_name, isAdmin, visible) => {
     authIsAdmin.value = isAdmin
     const account = buildAccount()
@@ -1009,7 +1009,7 @@ describe('EditAccountModal', () => {
     expect(payload?.rate_multiplier).toBe(1)
   })
 
-	 it('hides and strips managed upstream billing probe state for project admins', async () => {
+	 it('hides and strips managed upstream billing probe state for limited admins', async () => {
 	   authIsAdmin.value = false
 	   const account = buildAccount()
 	   account.extra = {

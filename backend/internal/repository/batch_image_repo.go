@@ -68,7 +68,6 @@ func (r *batchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.Cont
 	query := batchImageJobSelectSQL + `
 	 WHERE user_id = $1 AND api_key_id = $2 AND idempotency_key = $3`
 	args := []any{userID, apiKeyID, key}
-	query, args = appendBatchImageProjectScope(ctx, query, args)
 	job, err := scanBatchImageJobQuery(ctx, r.sql, query+`
 	 ORDER BY id DESC LIMIT 1`, args...)
 	if err != nil {
@@ -81,7 +80,6 @@ func (r *batchImageRepository) GetBatchImageJobByBatchIDForOwner(ctx context.Con
 	query := batchImageJobSelectSQL + `
 	 WHERE batch_id = $1 AND user_id = $2 AND api_key_id = $3 AND user_deleted_at IS NULL`
 	args := []any{batchID, userID, apiKeyID}
-	query, args = appendBatchImageProjectScope(ctx, query, args)
 	job, err := scanBatchImageJobQuery(ctx, r.sql, query, args...)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
@@ -118,7 +116,6 @@ func (r *batchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, u
 		}
 		query += ")"
 	}
-	query, args = appendBatchImageProjectScope(ctx, query, args)
 	if filter.TaskNameLike != "" {
 		query += " AND task_name ILIKE $" + strconv.Itoa(len(args)+1)
 		args = append(args, "%"+filter.TaskNameLike+"%")
@@ -178,7 +175,6 @@ func (r *batchImageRepository) ListBatchImageJobsForUser(ctx context.Context, us
 		}
 		query += ")"
 	}
-	query, args = appendBatchImageProjectScope(ctx, query, args)
 	if filter.TaskNameLike != "" {
 		query += " AND task_name ILIKE $" + strconv.Itoa(len(args)+1)
 		args = append(args, "%"+filter.TaskNameLike+"%")
@@ -942,14 +938,6 @@ func appendBatchImageEventWithSQL(ctx context.Context, sqlq batchImageSQLExecuto
 INSERT INTO batch_image_events (job_id, event_type, payload)
 VALUES ($1, $2, $3)`, batchID, eventType, payloadArg)
 	return err
-}
-
-func appendBatchImageProjectScope(ctx context.Context, query string, args []any) (string, []any) {
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		query += " AND project_id = $" + strconv.Itoa(len(args)+1)
-		args = append(args, projectID)
-	}
-	return query, args
 }
 
 type rowScanner interface {

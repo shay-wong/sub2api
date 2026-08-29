@@ -223,7 +223,7 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 	s.Require().Equal(1, outboxCount)
 }
 
-func (s *GroupRepoSuite) TestCreateFromSourceCopiesOnlyAccountsVisibleToActiveProjectProfile() {
+func (s *GroupRepoSuite) TestCreateFromSourceIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Duplicate Source Home", "duplicate-source-home")
 	workspaceProjectID := s.createProject("Duplicate Source Workspace", "duplicate-source-workspace")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -256,7 +256,7 @@ func (s *GroupRepoSuite) TestCreateFromSourceCopiesOnlyAccountsVisibleToActivePr
 		Status:           "inactive",
 		SubscriptionType: service.SubscriptionTypeStandard,
 	}
-	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
+	projectCtx := s.ctx
 	s.Require().NoError(s.repo.CreateFromSource(projectCtx, duplicate, source.ID))
 
 	rows, err := s.tx.QueryContext(
@@ -266,11 +266,13 @@ func (s *GroupRepoSuite) TestCreateFromSourceCopiesOnlyAccountsVisibleToActivePr
 	)
 	s.Require().NoError(err)
 	defer func() { _ = rows.Close() }()
-	s.Require().True(rows.Next())
-	var copiedAccountID int64
-	s.Require().NoError(rows.Scan(&copiedAccountID))
-	s.Require().Equal(visibleAccountID, copiedAccountID)
-	s.Require().False(rows.Next(), "accounts outside the active project profile must not be copied")
+	copiedAccountIDs := make([]int64, 0, 2)
+	for rows.Next() {
+		var copiedAccountID int64
+		s.Require().NoError(rows.Scan(&copiedAccountID))
+		copiedAccountIDs = append(copiedAccountIDs, copiedAccountID)
+	}
+	s.Require().ElementsMatch([]int64{visibleAccountID, hiddenAccountID}, copiedAccountIDs)
 }
 
 func (s *GroupRepoSuite) TestGetByID_NotFound() {
@@ -431,7 +433,7 @@ func (s *GroupRepoSuite) TestListWithFilters_Platform() {
 	}
 }
 
-func (s *GroupRepoSuite) TestListWithFiltersUsesActiveProjectProfileScope() {
+func (s *GroupRepoSuite) TestListWithFiltersIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Home Project", "group-home-project")
 	workspaceProjectID := s.createProject("Group Workspace Project", "group-workspace-project")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -450,13 +452,12 @@ func (s *GroupRepoSuite) TestListWithFiltersUsesActiveProjectProfileScope() {
 	})
 	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, boundGroup.ID)
 
-	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
+	projectCtx := s.ctx
 	groups, page, err := s.repo.ListWithFilters(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "cross-project-group", nil)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Len(groups, 1)
-	s.Require().Equal(boundGroup.ID, groups[0].ID)
-	s.Require().NotEqual(unboundGroup.ID, groups[0].ID)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().True(containsID(groups, boundGroup.ID))
+	s.Require().True(containsID(groups, unboundGroup.ID))
 
 	_, err = s.tx.Client().ProjectProfile.UpdateOneID(profileID).
 		SetMode(service.ProjectProfileModeUnrestricted).
@@ -699,7 +700,7 @@ func (s *GroupRepoSuite) TestUpdateSortOrders_MissingGroupNoPartialUpdate() {
 	s.Require().Equal(beforeSort, after.SortOrder)
 }
 
-func (s *GroupRepoSuite) TestUpdateSortOrdersUsesActiveProjectProfileScope() {
+func (s *GroupRepoSuite) TestUpdateSortOrdersIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Sort Home", "group-sort-home")
 	workspaceProjectID := s.createProject("Group Sort Workspace", "group-sort-workspace")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -718,7 +719,7 @@ func (s *GroupRepoSuite) TestUpdateSortOrdersUsesActiveProjectProfileScope() {
 	})
 	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, boundGroup.ID)
 
-	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
+	projectCtx := s.ctx
 	err := s.repo.UpdateSortOrders(projectCtx, []service.GroupSortOrderUpdate{{ID: boundGroup.ID, SortOrder: 42}})
 	s.Require().NoError(err)
 
@@ -727,7 +728,10 @@ func (s *GroupRepoSuite) TestUpdateSortOrdersUsesActiveProjectProfileScope() {
 	s.Require().Equal(42, got.SortOrder)
 
 	err = s.repo.UpdateSortOrders(projectCtx, []service.GroupSortOrderUpdate{{ID: unboundGroup.ID, SortOrder: 24}})
-	s.Require().ErrorIs(err, service.ErrGroupNotFound)
+	s.Require().NoError(err)
+	got, err = s.repo.GetByID(projectCtx, unboundGroup.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(24, got.SortOrder)
 }
 
 func (s *GroupRepoSuite) TestListWithFilters_AccountCount() {
@@ -906,7 +910,7 @@ func (s *GroupRepoSuite) TestGetAccountCount_Empty() {
 	s.Require().Zero(count)
 }
 
-func (s *GroupRepoSuite) TestGetAccountCountUsesActiveProjectProfileScope() {
+func (s *GroupRepoSuite) TestGetAccountCountIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Count Home", "group-count-home")
 	workspaceProjectID := s.createProject("Group Count Workspace", "group-count-workspace")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -932,15 +936,15 @@ func (s *GroupRepoSuite) TestGetAccountCountUsesActiveProjectProfileScope() {
 	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, group.ID)
 	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, boundAccountID)
 
-	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
+	projectCtx := s.ctx
 	total, active, err := s.repo.GetAccountCount(projectCtx, group.ID)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), total)
-	s.Require().Equal(int64(1), active)
+	s.Require().Equal(int64(2), total)
+	s.Require().Equal(int64(2), active)
 
 	accountIDs, err := s.repo.GetAccountIDsByGroupIDs(projectCtx, []int64{group.ID})
 	s.Require().NoError(err)
-	s.Require().Equal([]int64{boundAccountID}, accountIDs)
+	s.Require().ElementsMatch([]int64{boundAccountID, unboundAccountID}, accountIDs)
 
 	_, err = s.tx.Client().ProjectProfile.UpdateOneID(profileID).
 		SetMode(service.ProjectProfileModeUnrestricted).
@@ -1137,7 +1141,7 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_MultipleAccounts() {
 	s.Require().Zero(count)
 }
 
-func (s *GroupRepoSuite) TestBindAccountsToGroupUsesActiveProjectProfileScope() {
+func (s *GroupRepoSuite) TestBindAccountsToGroupIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Bind Home", "group-bind-home")
 	workspaceProjectID := s.createProject("Group Bind Workspace", "group-bind-workspace")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -1153,13 +1157,13 @@ func (s *GroupRepoSuite) TestBindAccountsToGroupUsesActiveProjectProfileScope() 
 	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, group.ID)
 	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, boundAccountID)
 
-	projectCtx := service.WithProjectID(s.ctx, workspaceProjectID)
+	projectCtx := s.ctx
 	err := s.repo.BindAccountsToGroup(projectCtx, group.ID, []int64{boundAccountID, unboundAccountID})
 	s.Require().NoError(err)
 
 	accountIDs, err := s.repo.GetAccountIDsByGroupIDs(projectCtx, []int64{group.ID})
 	s.Require().NoError(err)
-	s.Require().Equal([]int64{boundAccountID}, accountIDs)
+	s.Require().ElementsMatch([]int64{boundAccountID, unboundAccountID}, accountIDs)
 
 	var rawCount int
 	err = scanSingleRow(
@@ -1170,10 +1174,10 @@ func (s *GroupRepoSuite) TestBindAccountsToGroupUsesActiveProjectProfileScope() 
 		&rawCount,
 	)
 	s.Require().NoError(err)
-	s.Require().Zero(rawCount, "unbound account must not be attached through a scoped project")
+	s.Require().Equal(1, rawCount)
 }
 
-func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDUsesActiveProjectProfileScope() {
+func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Clear Home", "group-clear-home")
 	workspaceProjectID := s.createProject("Group Clear Workspace", "group-clear-workspace")
 	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
@@ -1193,13 +1197,13 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDUsesActiveProjectProfil
 	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", unboundAccountID, group.ID, 2)
 	s.Require().NoError(err)
 
-	affected, err := s.repo.DeleteAccountGroupsByGroupID(service.WithProjectID(s.ctx, workspaceProjectID), group.ID)
+	affected, err := s.repo.DeleteAccountGroupsByGroupID(s.ctx, group.ID)
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), affected)
+	s.Require().Equal(int64(2), affected)
 
 	accountIDs, err := s.repo.GetAccountIDsByGroupIDs(s.ctx, []int64{group.ID})
 	s.Require().NoError(err)
-	s.Require().Equal([]int64{unboundAccountID}, accountIDs)
+	s.Require().Empty(accountIDs)
 }
 
 // --- 软删除过滤测试 ---

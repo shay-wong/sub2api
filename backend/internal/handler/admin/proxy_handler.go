@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -28,14 +29,16 @@ func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 }
 
 func proxyResponseForCurrentAdmin(c *gin.Context, proxy *service.Proxy) any {
-	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if service.RoleIsSuperAdmin(role) {
 		return dto.ProxyFromServiceAdmin(proxy)
 	}
 	return dto.ProxyFromService(proxy)
 }
 
 func proxyListResponseForCurrentAdmin(c *gin.Context, proxies []service.Proxy) any {
-	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if service.RoleIsSuperAdmin(role) {
 		out := make([]dto.AdminProxy, 0, len(proxies))
 		for i := range proxies {
 			out = append(out, *dto.ProxyFromServiceAdmin(&proxies[i]))
@@ -50,7 +53,8 @@ func proxyListResponseForCurrentAdmin(c *gin.Context, proxies []service.Proxy) a
 }
 
 func proxyWithCountListResponseForCurrentAdmin(c *gin.Context, proxies []service.ProxyWithAccountCount) any {
-	if service.RoleIsSuperAdmin(currentAdminRole(c)) {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	if service.RoleIsSuperAdmin(role) {
 		out := make([]dto.AdminProxyWithAccountCount, 0, len(proxies))
 		for i := range proxies {
 			out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))

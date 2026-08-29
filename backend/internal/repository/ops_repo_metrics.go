@@ -193,7 +193,6 @@ func (r *opsRepository) GetLatestSystemMetrics(ctx context.Context, windowMinute
 	  AND group_id IS NULL
 `
 	args := []any{windowMinutes}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	q += `
 	ORDER BY created_at DESC
 	LIMIT 1`

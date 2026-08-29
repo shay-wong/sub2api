@@ -615,7 +615,7 @@ func TestLogOpsStreamError_RecordsInBandConcurrencyLimit(t *testing.T) {
 		User:      &service.User{ID: userID},
 		Group:     &service.Group{ID: groupID, Platform: service.PlatformAnthropic},
 	}
-	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 169))
+	c.Request = c.Request.WithContext(c.Request.Context())
 	c.Set(string(middleware2.ContextKeyOpsFallbackAPIKey), apiKey)
 	c.Set(opsModelKey, "test-model")
 
@@ -666,7 +666,7 @@ func TestOpsErrorLoggerMiddleware_RecordsOpenAICompatibleInBandStreamError(t *te
 	r := gin.New()
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	r.POST("/v1/responses", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
-		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 169))
+		c.Request = c.Request.WithContext(c.Request.Context())
 		c.Set(string(middleware2.ContextKeyOpsFallbackAPIKey), apiKey)
 		c.Set(opsModelKey, "test-model")
 
@@ -2010,14 +2010,14 @@ func TestGetOpsAPIKeyPrefersPrimaryContextKey(t *testing.T) {
 	require.Equal(t, int64(1), got.ID, "已鉴权请求应优先使用正式 api key")
 }
 
-func TestResolveOpsProjectIDPrefersRequestProjectContext(t *testing.T) {
+func TestResolveOpsProjectIDUsesAPIKeyStorageCompatibilityValue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/messages", nil)
-	c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 2))
+	c.Request = c.Request.WithContext(c.Request.Context())
 
 	apiKey := &service.APIKey{ID: 100, ProjectID: 1}
 
-	require.Equal(t, int64(2), resolveOpsProjectID(c, apiKey))
+	require.Equal(t, int64(1), resolveOpsProjectID(c, apiKey))
 }

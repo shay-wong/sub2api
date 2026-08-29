@@ -9,7 +9,6 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 
 	"entgo.io/ent/dialect"
@@ -44,7 +43,7 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 			AddRow(int64(11), 3, nil).
 			AddRow(int64(12), 2, 7))
 
-	loads, err := repo.ListSchedulableAccountLoads(service.WithProjectID(context.Background(), 7))
+	loads, err := repo.ListSchedulableAccountLoads(context.Background())
 	require.NoError(t, err)
 	require.Len(t, loads, 2)
 	require.Equal(t, int64(11), loads[0].ID)
@@ -65,8 +64,8 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 	require.NotContains(t, selectClause, "proxy_id")
 	require.NotContains(t, normalized, "account_groups")
 	require.NotContains(t, normalized, "proxies")
-	require.Contains(t, normalized, "project_profiles")
-	require.Contains(t, normalized, "project_profile_bindings")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 	for _, predicateColumn := range []string{
 		"status",
 		"schedulable",

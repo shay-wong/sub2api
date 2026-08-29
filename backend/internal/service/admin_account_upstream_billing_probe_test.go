@@ -559,7 +559,7 @@ func TestUpdateAccountExplicitProbeDisableUsesDedicatedExtraUpdate(t *testing.T)
 }
 
 func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) {
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 	repo := &upstreamBillingProbeAccountRepo{}
 	svc := &adminServiceImpl{accountRepo: repo}
 
@@ -567,7 +567,7 @@ func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) 
 		t.Run(key, func(t *testing.T) {
 			_, err := svc.UpdateAccount(ctx, 113, &UpdateAccountInput{Extra: map[string]any{key: true}})
 
-			require.ErrorIs(t, err, ErrProjectAdminUpstreamBillingProbeForbidden)
+			require.ErrorIs(t, err, ErrAdminUpstreamBillingProbeForbidden)
 		})
 	}
 
@@ -575,7 +575,7 @@ func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) 
 		t.Run("extra merge "+key, func(t *testing.T) {
 			err := svc.UpdateAccountExtra(ctx, 113, map[string]any{key: true})
 
-			require.ErrorIs(t, err, ErrProjectAdminUpstreamBillingProbeForbidden)
+			require.ErrorIs(t, err, ErrAdminUpstreamBillingProbeForbidden)
 			require.Empty(t, repo.updates)
 		})
 	}
@@ -603,7 +603,7 @@ func TestProjectAdminCannotUpdateManagedUpstreamBillingProbeState(t *testing.T) 
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.ErrorIs(t, tc.call(), ErrProjectAdminUpstreamBillingProbeForbidden)
+			require.ErrorIs(t, tc.call(), ErrAdminUpstreamBillingProbeForbidden)
 			require.Empty(t, repo.updates)
 		})
 	}

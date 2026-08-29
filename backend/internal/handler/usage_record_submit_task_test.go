@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -107,15 +108,15 @@ func TestOpenAIGatewayHandlerSubmitUsageRecordTask_WithoutPoolSyncFallback(t *te
 	require.True(t, called.Load())
 }
 
-func TestOpenAIGatewayHandlerSubmitUsageRecordTask_PreservesProjectContext(t *testing.T) {
+func TestOpenAIGatewayHandlerSubmitUsageRecordTask_PreservesRequestIDs(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
-	parent := service.WithProjectID(context.Background(), 169)
+	parent := context.WithValue(context.Background(), ctxkey.RequestID, "request-id")
+	parent = context.WithValue(parent, ctxkey.ClientRequestID, "client-request-id")
 	var called atomic.Bool
 
 	h.submitUsageRecordTask(parent, func(ctx context.Context) {
-		projectID, ok := service.ProjectIDFromContext(ctx)
-		require.True(t, ok)
-		require.Equal(t, int64(169), projectID)
+		require.Equal(t, "request-id", ctx.Value(ctxkey.RequestID))
+		require.Equal(t, "client-request-id", ctx.Value(ctxkey.ClientRequestID))
 		called.Store(true)
 	})
 

@@ -637,11 +637,6 @@ export function subscribeQPS(onMessage: (data: any) => void, options: SubscribeQ
     const wsURL = wsBaseUrl
       ? new URL(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${wsBaseUrl}/api/v1/admin/ops/ws/qps`)
       : new URL(buildGatewayUrl('/api/v1/admin/ops/ws/qps').replace(/^http/, 'ws'))
-    const selectedProjectID = localStorage.getItem('sub2api_selected_project_id')
-    if (selectedProjectID) {
-      wsURL.searchParams.set('project_id', selectedProjectID)
-    }
-
     // Do NOT put admin JWT in the URL query string (it can leak via access logs, proxies, etc).
     // Browsers cannot set Authorization headers for WebSockets, so we pass the token via
     // Sec-WebSocket-Protocol (subprotocol list): ["sub2api-admin", "jwt.<token>"].

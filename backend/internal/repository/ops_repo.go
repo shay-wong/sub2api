@@ -143,10 +143,6 @@ func (r *opsRepository) ensureErrorLogProject(ctx context.Context, input *servic
 	if input == nil || input.ProjectID > 0 {
 		return nil
 	}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		input.ProjectID = projectID
-		return nil
-	}
 	projectID, err := ensureDefaultProject(ctx, r.db)
 	if err != nil {
 		return err
@@ -513,7 +509,6 @@ LEFT JOIN users du ON e.deleted_key_owner_user_id = du.id
 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
 WHERE e.id = $1`
 	args := []any{id}
-	q, args = appendProjectProfileScopedQuery(ctx, q, args, "e.project_id", opsErrorSQLScopeResources("e"))
 	q += `
 LIMIT 1`
 
@@ -715,7 +710,6 @@ SET
   resolved_by_user_id = $4
 WHERE id = $1`
 	args := []any{errorID, resolved, at, nullInt64(resolvedByUserID)}
-	q, args = appendProjectProfileScopedQuery(ctx, q, args, "project_id", opsErrorSQLScopeResources(""))
 
 	_, err := r.db.ExecContext(
 		ctx,
@@ -759,7 +753,6 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 		return 0, err
 	}
 
-	contextProjectID, _ := service.ProjectIDFromContext(ctx)
 	var inserted int64
 	for _, input := range inputs {
 		if input == nil {
@@ -783,9 +776,6 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 			extra = "{}"
 		}
 		projectID := input.ProjectID
-		if projectID <= 0 {
-			projectID = contextProjectID
-		}
 		if projectID <= 0 {
 			resolvedProjectID, resolveErr := ensureDefaultProject(ctx, r.db)
 			if resolveErr != nil {
@@ -1164,7 +1154,6 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 func buildOpsErrorLogsWhereForContext(ctx context.Context, filter *service.OpsErrorLogFilter) (string, []any) {
 	where, args := buildOpsErrorLogsWhere(filter)
 	clauses := []string{strings.TrimPrefix(where, "WHERE ")}
-	clauses, args = appendProjectProfileScopedWhere(ctx, clauses, args, "e.project_id", opsErrorSQLScopeResources("e"))
 	where = "WHERE " + strings.Join(clauses, " AND ")
 	return where, args
 }
@@ -1271,13 +1260,7 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 }
 
 func buildOpsSystemLogsWhereForContext(ctx context.Context, filter *service.OpsSystemLogFilter) (string, []any, bool) {
-	where, args, hasConstraint := buildOpsSystemLogsWhere(filter)
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		where += " AND l.project_id = $" + itoa(len(args))
-		hasConstraint = true
-	}
-	return where, args, hasConstraint
+	return buildOpsSystemLogsWhere(filter)
 }
 
 func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (string, []any, bool) {

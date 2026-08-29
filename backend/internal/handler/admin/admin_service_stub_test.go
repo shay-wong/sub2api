@@ -197,6 +197,11 @@ func (s *stubAdminService) UpdateUser(ctx context.Context, id int64, input *serv
 	return &user, nil
 }
 
+func (s *stubAdminService) UpdateUserAdminAccess(ctx context.Context, id int64, input *service.UpdateUserAdminAccessInput) (*service.User, error) {
+	user := service.User{ID: id, Email: "updated@example.com", Role: input.Role, AdminPermissions: input.AdminPermissions, Status: service.StatusActive}
+	return &user, nil
+}
+
 func (s *stubAdminService) DeleteUser(ctx context.Context, id int64) error {
 	return nil
 }
@@ -855,17 +860,6 @@ func (s *stubAdminService) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 				}
 			}
 			return &service.AdminUpdateAPIKeyGroupIDResult{APIKey: &k}, nil
-		}
-	}
-	return nil, service.ErrAPIKeyNotFound
-}
-
-func (s *stubAdminService) AdminTransferAPIKeyProject(ctx context.Context, keyID int64, projectID int64) (*service.APIKey, error) {
-	for i := range s.apiKeys {
-		if s.apiKeys[i].ID == keyID {
-			s.apiKeys[i].ProjectID = projectID
-			k := s.apiKeys[i]
-			return &k, nil
 		}
 	}
 	return nil, service.ErrAPIKeyNotFound

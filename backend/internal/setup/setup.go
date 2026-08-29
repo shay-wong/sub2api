@@ -467,26 +467,6 @@ func createInitialAdmin(ctx context.Context, db *sql.DB, cfg *SetupConfig, reaso
 	if err != nil {
 		return false, "", err
 	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO project_members (project_id, user_id, role, scopes, is_owner, created_at, updated_at)
-		SELECT id, $1, $2, '[]'::jsonb, true, NOW(), NOW()
-		FROM projects
-		WHERE slug = $3
-		ON CONFLICT (project_id, user_id) DO UPDATE
-		SET role = EXCLUDED.role,
-			is_owner = EXCLUDED.is_owner,
-			updated_at = NOW()
-	`, adminID, service.ProjectRoleAdmin, service.DefaultProjectSlug)
-	if err != nil {
-		return false, "", err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, "", err
-	}
-	if affected != 1 {
-		return false, "", fmt.Errorf("default project owner membership affected %d rows, want 1", affected)
-	}
 	if err := tx.Commit(); err != nil {
 		return false, "", err
 	}

@@ -345,7 +345,6 @@ type liveTestUsageRepo struct {
 	UsageLogRepository
 	mu             sync.Mutex
 	logs           []*UsageLog
-	projectIDs     []int64
 	createFailures int
 	createCalls    int
 }
@@ -362,7 +361,7 @@ func (r *liveBlockingUsageRepo) Create(ctx context.Context, _ *UsageLog) (bool, 
 	return false, ctx.Err()
 }
 
-func (r *liveTestUsageRepo) Create(ctx context.Context, log *UsageLog) (bool, error) {
+func (r *liveTestUsageRepo) Create(_ context.Context, log *UsageLog) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.createCalls++
@@ -377,8 +376,6 @@ func (r *liveTestUsageRepo) Create(ctx context.Context, log *UsageLog) (bool, er
 	}
 	copy := *log
 	r.logs = append(r.logs, &copy)
-	projectID, _ := ProjectIDFromContext(ctx)
-	r.projectIDs = append(r.projectIDs, projectID)
 	return true, nil
 }
 
@@ -435,7 +432,6 @@ func TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage(t *testing.T) {
 	usageRepo.mu.Lock()
 	require.Len(t, usageRepo.logs, 1)
 	log := usageRepo.logs[0]
-	require.Equal(t, []int64{record.ProjectID}, usageRepo.projectIDs)
 	usageRepo.mu.Unlock()
 	require.Equal(t, record.ProjectID, log.ProjectID)
 	require.NotNil(t, log.SessionID)

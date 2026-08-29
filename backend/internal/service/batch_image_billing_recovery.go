@@ -45,8 +45,7 @@ func (s *BatchImageBillingRecoveryService) ReleaseStaleUnsubmittedOnce(ctx conte
 		if job == nil {
 			continue
 		}
-		jobCtx := batchImageContextForJob(ctx, job)
-		if err := jobCtx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return released, err
 		}
 		retryRelease := isBatchImageBillingReleaseRetryJob(job)
@@ -57,7 +56,7 @@ func (s *BatchImageBillingRecoveryService) ReleaseStaleUnsubmittedOnce(ctx conte
 		applied := retryRelease
 		if !retryRelease {
 			var err error
-			applied, err = s.Repo.FailStaleUnsubmittedBatchImageJob(jobCtx, job.BatchID, cutoff, BatchImageErrorSubmitStaleBeforeProvider, msg)
+			applied, err = s.Repo.FailStaleUnsubmittedBatchImageJob(ctx, job.BatchID, cutoff, BatchImageErrorSubmitStaleBeforeProvider, msg)
 			if err != nil {
 				// applied=true 时 UPDATE 已提交（仅审计事件写入失败）：必须继续释放，
 				// 否则 job 已转 failed、不再出现在 stale 列表，冻结余额会永久泄漏。
@@ -79,7 +78,7 @@ func (s *BatchImageBillingRecoveryService) ReleaseStaleUnsubmittedOnce(ctx conte
 			job.LastErrorCode = batchImageStringPtr(BatchImageErrorSubmitStaleBeforeProvider)
 			job.LastErrorMessage = batchImageStringPtr(msg)
 		}
-		if err := releaseBatchImageHoldWithRecovery(jobCtx, s.Repo, s.Billing, s.Queue, s.AuthCache, job, batchImageDerefString(job.RequestHash)); err != nil {
+		if err := releaseBatchImageHoldWithRecovery(ctx, s.Repo, s.Billing, s.Queue, s.AuthCache, job, batchImageDerefString(job.RequestHash)); err != nil {
 			// 释放失败必须持久化为可扫描状态；如果 Redis 入队也失败，
 			// 下一轮 recovery 仍能从 DB 重新捡起这个 failed job。
 			logger.L().Warn("batch_image.recovery_release_failed",

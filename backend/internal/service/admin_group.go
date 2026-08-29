@@ -1097,13 +1097,6 @@ func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, gro
 			return fmt.Errorf("rate_multiplier must be > 0 (user_id=%d)", e.UserID)
 		}
 	}
-	userIDs := make([]int64, 0, len(entries))
-	for _, e := range entries {
-		userIDs = append(userIDs, e.UserID)
-	}
-	if err := s.ensureAdminScopedGroupRateEntries(ctx, groupID, userIDs); err != nil {
-		return err
-	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
 }
 
@@ -1129,13 +1122,6 @@ func (s *adminServiceImpl) BatchSetGroupRPMOverrides(ctx context.Context, groupI
 		if e.RPMOverride != nil && *e.RPMOverride < 0 {
 			return infraerrors.BadRequest("INVALID_RPM_OVERRIDE", fmt.Sprintf("rpm_override must be >= 0 (user_id=%d)", e.UserID))
 		}
-	}
-	userIDs := make([]int64, 0, len(entries))
-	for _, e := range entries {
-		userIDs = append(userIDs, e.UserID)
-	}
-	if err := s.ensureAdminScopedGroupRateEntries(ctx, groupID, userIDs); err != nil {
-		return err
 	}
 	if err := s.userGroupRateRepo.SyncGroupRPMOverrides(ctx, groupID, entries); err != nil {
 		return err
@@ -1167,10 +1153,6 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	if *groupID < 0 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")
 	}
-	if err := s.ensureAdminScopedUsers(ctx, []int64{apiKey.UserID}); err != nil {
-		return nil, err
-	}
-
 	result := &AdminUpdateAPIKeyGroupIDResult{}
 
 	if *groupID == 0 {
@@ -1259,50 +1241,10 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	return result, nil
 }
 
-func (s *adminServiceImpl) AdminTransferAPIKeyProject(ctx context.Context, keyID int64, projectID int64) (*APIKey, error) {
-	if projectID <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_PROJECT_ID", "project_id must be positive")
-	}
-	if adminRole, ok := AdminRoleFromContext(ctx); !ok || !RoleIsSuperAdmin(adminRole) {
-		return nil, infraerrors.Forbidden("PROJECT_TRANSFER_REQUIRES_SUPER_ADMIN", "api key project transfer requires super admin")
-	}
-	lookupCtx := WithoutProjectID(ctx)
-	apiKey, err := s.apiKeyRepo.GetByID(lookupCtx, keyID)
-	if err != nil {
-		return nil, err
-	}
-	if apiKey.ProjectID == projectID {
-		return apiKey, nil
-	}
-	if apiKey.GroupID != nil {
-		if s.groupRepo == nil {
-			return nil, fmt.Errorf("group repository is required")
-		}
-		if _, err := s.groupRepo.GetByID(WithProjectID(lookupCtx, projectID), *apiKey.GroupID); err != nil {
-			if errors.Is(err, ErrGroupNotFound) {
-				return nil, ErrProjectAPIKeyGroupUnavailable
-			}
-			return nil, fmt.Errorf("validate api key group target project: %w", err)
-		}
-	}
-	if err := s.apiKeyRepo.UpdateProjectID(lookupCtx, apiKey.ID, projectID); err != nil {
-		return nil, fmt.Errorf("transfer api key project: %w", err)
-	}
-	apiKey.ProjectID = projectID
-	if s.authCacheInvalidator != nil {
-		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-		s.authCacheInvalidator.InvalidateAuthCacheByAPIKeyID(ctx, apiKey.ID)
-	}
-	return apiKey, nil
-}
-
 // AdminResetAPIKeyRateLimitUsage resets all API key rate-limit usage windows.
 func (s *adminServiceImpl) AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error) {
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.ensureAdminScopedUsers(ctx, []int64{apiKey.UserID}); err != nil {
 		return nil, err
 	}
 	apiKey.Usage5h = 0

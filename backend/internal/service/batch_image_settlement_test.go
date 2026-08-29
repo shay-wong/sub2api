@@ -389,7 +389,7 @@ func TestBatchImageSettlementBillingRequestIDs(t *testing.T) {
 	require.Len(t, billing.seen, 2)
 }
 
-func TestBatchImageSettlementService_SettleRestoresJobProjectScope(t *testing.T) {
+func TestBatchImageSettlementService_SettlePreservesLegacyProjectIDOnUsageLog(t *testing.T) {
 	repo := newFakeBatchImageRepository()
 	job := testSettlingBatchImageJob("imgbatch_project_scope")
 	job.ProjectID = 77
@@ -405,10 +405,10 @@ func TestBatchImageSettlementService_SettleRestoresJobProjectScope(t *testing.T)
 
 	_, err := svc.Settle(context.Background(), job.BatchID)
 	require.NoError(t, err)
-	require.Equal(t, []int64{77}, billing.captureProjects)
+	require.Equal(t, []int64{0}, billing.captureProjects)
 	require.Len(t, usageLogs.logs, 1)
 	require.Equal(t, int64(77), usageLogs.logs[0].ProjectID)
-	require.Equal(t, []int64{77}, usageLogs.projectIDs)
+	require.Equal(t, []int64{0}, usageLogs.projectIDs)
 }
 
 func testSettlingBatchImageJob(batchID string) *BatchImageJob {
@@ -536,9 +536,8 @@ func (r *fakeBatchImageBillingRepo) applyHold(cmd *BatchImageBalanceHoldCommand,
 	return &BatchImageBalanceHoldResult{Applied: true}, nil
 }
 
-func batchImageTestProjectIDFromContext(ctx context.Context) int64 {
-	projectID, _ := ProjectIDFromContext(ctx)
-	return projectID
+func batchImageTestProjectIDFromContext(context.Context) int64 {
+	return 0
 }
 
 type batchImageUsageLogRepo struct {

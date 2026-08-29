@@ -147,6 +147,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetPasswordHash(userIn.PasswordHash).
 		SetPasswordAuthDisabled(userIn.PasswordAuthDisabled).
 		SetRole(userIn.Role).
+		SetAdminPermissions(userIn.AdminPermissions).
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
@@ -166,17 +167,6 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	if err := ensureEmailAuthIdentityWithClient(txCtx, txClient, created.ID, created.Email, "user_repo_create"); err != nil {
 		return err
 	}
-	sqlExec := txAwareSQLExecutor(txCtx, r.sql, r.client)
-	if projectID, ok := service.ProjectIDFromContext(txCtx); ok {
-		if err := ensureProjectMember(txCtx, sqlExec, projectID, created.ID, userIn.Role, false); err != nil {
-			return err
-		}
-	} else {
-		if err := ensureDefaultProjectMember(txCtx, sqlExec, created.ID, userIn.Role); err != nil {
-			return err
-		}
-	}
-
 	if ownedTx != nil {
 		if err := ownedTx.Commit(); err != nil {
 			return err
@@ -321,6 +311,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	if fields.Role {
 		updateOp = updateOp.SetRole(userIn.Role)
+	}
+	if fields.AdminPermissions {
+		updateOp = updateOp.SetAdminPermissions(userIn.AdminPermissions)
 	}
 	if fields.Concurrency {
 		updateOp = updateOp.SetConcurrency(userIn.Concurrency)
@@ -559,8 +552,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		userCtx = mixins.SkipSoftDelete(ctx)
 	}
 
-	q := r.client.User.Query().
-		Where(projectScopedUserPredicate(ctx)...)
+	q := r.client.User.Query()
 
 	if filters.ID > 0 {
 		q = q.Where(dbuser.IDEQ(filters.ID))
@@ -649,10 +641,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if shouldLoadSubscriptions {
 		// Batch load active subscriptions with groups to avoid N+1.
 		subs, err := r.client.UserSubscription.Query().
-			Where(append([]predicate.UserSubscription{
+			Where([]predicate.UserSubscription{
 				usersubscription.UserIDIn(userIDs...),
 				usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+			}...).
 			WithGroup().
 			All(ctx)
 		if err != nil {
@@ -674,10 +666,6 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		if groups, ok := allowedGroupsByUser[id]; ok {
 			u.AllowedGroups = groups
 		}
-	}
-
-	if err := r.loadProjectRoles(ctx, userIDs, userMap); err != nil {
-		return nil, nil, err
 	}
 
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
@@ -1150,7 +1138,6 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	}
 	query := "UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL"
 	args := []any{value, pq.Array(userIDs)}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "users.project_id", projectSQLScopeResources{UserID: "users.id"})
 	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch set concurrency: %w", err)
@@ -1165,7 +1152,6 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 	}
 	query := "UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL"
 	args := []any{delta, pq.Array(userIDs)}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "users.project_id", projectSQLScopeResources{UserID: "users.id"})
 	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch add concurrency: %w", err)
@@ -1552,40 +1538,6 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 	return out, nil
 }
 
-func (r *userRepository) loadProjectRoles(ctx context.Context, userIDs []int64, users map[int64]*service.User) error {
-	projectID, ok := service.ProjectIDFromContext(ctx)
-	if !ok || r.sql == nil || len(userIDs) == 0 || len(users) == 0 {
-		return nil
-	}
-
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT user_id, role, status, COALESCE(scopes, '[]'::jsonb)
-		FROM project_members
-		WHERE project_id = $1
-		  AND user_id = ANY($2)
-	`, projectID, pq.Array(userIDs))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var userID int64
-		var role string
-		var status string
-		var scopes any
-		if err := rows.Scan(&userID, &role, &status, &scopes); err != nil {
-			return err
-		}
-		if user, ok := users[userID]; ok {
-			user.ProjectRole = role
-			user.ProjectMemberStatus = status
-			user.ProjectPermissions = service.ProjectAdminPermissionsForDisplay(role, decodeProjectMemberScopes(scopes))
-		}
-	}
-	return rows.Err()
-}
-
 // syncUserAllowedGroupsWithClient 在 ent client/事务内同步用户允许分组：
 // 仅操作 user_allowed_groups 联接表，legacy users.allowed_groups 列已弃用。
 func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, client *dbent.Client, userID int64, groupIDs []int64) error {
@@ -1651,6 +1603,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.AdminPermissions = append([]string(nil), src.AdminPermissions...)
 	if src.PasswordAuthDisabled != nil {
 		dst.PasswordAuthDisabled = *src.PasswordAuthDisabled
 		dst.PasswordAuthResolved = true

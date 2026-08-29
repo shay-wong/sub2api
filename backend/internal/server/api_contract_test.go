@@ -52,8 +52,9 @@ func TestAPIContracts(t *testing.T) {
 					"email": "alice@example.com",
 					"email_bound": true,
 					"username": "alice",
-						"role": "user",
-						"balance": 12.5,
+					"role": "user",
+					"admin_permissions": null,
+					"balance": 12.5,
 						"frozen_balance": 0,
 						"concurrency": 5,
 					"rpm_limit": 0,
@@ -1474,7 +1475,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingService := service.NewSettingService(settingRepo, cfg)
 
 	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, nil, redeemService, nil, nil)
+	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
@@ -2533,18 +2534,6 @@ func (r *stubApiKeyRepo) UpdateGroupIDByUserAndGroup(ctx context.Context, userID
 		updated++
 	}
 	return updated, nil
-}
-
-func (r *stubApiKeyRepo) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
-	key, ok := r.byID[id]
-	if !ok {
-		return service.ErrAPIKeyNotFound
-	}
-	clone := *key
-	clone.ProjectID = projectID
-	r.byID[id] = &clone
-	r.byKey[clone.Key] = &clone
-	return nil
 }
 
 func (r *stubApiKeyRepo) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {

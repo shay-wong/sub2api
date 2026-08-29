@@ -233,13 +233,6 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 			AND g.deleted_at IS NULL
 	`
 	args := []any{costUSD, subscriptionID}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		updateSQL += " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{
-			SubscriptionID: "us.id",
-			UserID:         "us.user_id",
-			GroupID:        "us.group_id",
-		})
-	}
 	res, err := tx.ExecContext(ctx, updateSQL, args...)
 	if err != nil {
 		return err
@@ -430,10 +423,6 @@ func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, 
 func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
 	var exhausted bool
 	args := []any{amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND " + projectProfileScopeSQL(projectID, apiKeySQLScopeResources("api_keys"))
-	}
 	err := tx.QueryRowContext(ctx, `
 		UPDATE api_keys
 		SET quota_used = quota_used + $1,
@@ -446,7 +435,7 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 				ELSE status
 			END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`+projectClause+`
+		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING quota > 0 AND quota_used >= quota AND quota_used - $1 < quota
 	`, args...).Scan(&exhausted)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -460,10 +449,6 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 
 func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost float64) error {
 	args := []any{cost, apiKeyID}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND " + projectProfileScopeSQL(projectID, apiKeySQLScopeResources("api_keys"))
-	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
@@ -473,7 +458,7 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
 			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`+projectClause, args...)
+		WHERE id = $2 AND deleted_at IS NULL`, args...)
 	if err != nil {
 		return err
 	}
@@ -489,10 +474,6 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 
 func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, userID, groupID int64, cost float64) error {
 	args := []any{userID, groupID, cost}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND " + projectUserGroupScopeSQL(projectID, "u.id", "g.id")
-	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO user_group_rate_limit_windows (
 			user_id,
@@ -505,7 +486,7 @@ func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, us
 		SELECT u.id, g.id, $3, NOW(), NOW(), NOW()
 		FROM users u
 		JOIN groups g ON g.id = $2 AND g.deleted_at IS NULL
-		WHERE u.id = $1 AND u.deleted_at IS NULL`+projectClause+`
+		WHERE u.id = $1 AND u.deleted_at IS NULL
 		ON CONFLICT (user_id, group_id) WHERE deleted_at IS NULL
 		DO UPDATE SET
 			usage_5h_usd = CASE
@@ -537,10 +518,6 @@ func incrementUsageBillingUserGroupRateLimit(ctx context.Context, tx *sql.Tx, us
 
 func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) (*service.AccountQuotaState, error) {
 	args := []any{amount, accountID}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		projectClause = " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{AccountID: "accounts.id"})
-	}
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
@@ -576,7 +553,7 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`+projectClause+`
+		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING
 			COALESCE((extra->>'quota_used')::numeric, 0),
 			COALESCE((extra->>'quota_limit')::numeric, 0),

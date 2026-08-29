@@ -84,7 +84,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 
 func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
 	m, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.IDEQ(id)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.IDEQ(id)}...).
 		WithUser().
 		WithGroup().
 		Only(ctx)
@@ -104,7 +104,7 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 //   - 适用于删除等只需 key 与用户 ID 的场景
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
 	m, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.IDEQ(id)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.IDEQ(id)}...).
 		Select(apikey.FieldKey, apikey.FieldUserID).
 		Only(ctx)
 	if err != nil {
@@ -261,7 +261,7 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 	// 同时显式设置 updated_at，避免二次查询带来的并发可见性问题。
 	client := clientFromContext(ctx, r.client)
 	now := time.Now()
-	preds := append([]predicate.APIKey{apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)
+	preds := []predicate.APIKey{apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()}
 	builder := client.APIKey.Update().
 		Where(preds...).
 		SetUpdatedAt(now)
@@ -356,94 +356,11 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 	return nil
 }
 
-func (r *apiKeyRepository) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
-	if projectID <= 0 {
-		return service.ErrProjectInvalidInput
-	}
-	if r == nil || r.sql == nil {
-		return fmt.Errorf("nil api key repository")
-	}
-	groupScopeSQL := projectProfileScopeSQL(projectID, projectSQLScopeResources{GroupID: "g.id"})
-	res, err := r.sql.ExecContext(service.WithoutProjectID(ctx), fmt.Sprintf(`
-		WITH target_api_key AS (
-			SELECT ak.id
-			FROM api_keys ak
-			WHERE ak.id = $1
-			  AND ak.deleted_at IS NULL
-			  AND EXISTS (
-				SELECT 1
-				FROM projects p
-				WHERE p.id = $2
-				  AND p.deleted_at IS NULL
-				  AND p.status = $3
-			  )
-			  AND EXISTS (
-				SELECT 1
-				FROM project_members pm
-				WHERE pm.project_id = $2
-				  AND pm.user_id = ak.user_id
-			  )
-			  AND (
-				ak.group_id IS NULL
-				OR EXISTS (
-					SELECT 1
-					FROM groups g
-					WHERE g.id = ak.group_id
-					  AND g.deleted_at IS NULL
-					  AND %s
-				)
-			  )
-			FOR UPDATE
-		),
-		updated_usage_logs AS (
-			UPDATE usage_logs ul
-			SET project_id = $2
-			FROM target_api_key tak
-			WHERE ul.api_key_id = tak.id
-			  AND ul.project_id IS DISTINCT FROM $2
-			RETURNING ul.id
-		),
-		updated_ops_error_logs AS (
-			UPDATE ops_error_logs oel
-			SET project_id = $2
-			FROM target_api_key tak
-			WHERE oel.api_key_id = tak.id
-			  AND oel.project_id IS DISTINCT FROM $2
-			RETURNING oel.id
-		),
-		updated_batch_image_jobs AS (
-			-- API key scoped history follows the key's active project, matching usage and ops error logs.
-			UPDATE batch_image_jobs bij
-			SET project_id = $2
-			FROM target_api_key tak
-			WHERE bij.api_key_id = tak.id
-			  AND bij.project_id IS DISTINCT FROM $2
-			RETURNING bij.id
-		)
-		UPDATE api_keys ak
-		SET project_id = $2,
-			updated_at = NOW()
-		FROM target_api_key tak
-		WHERE ak.id = tak.id
-	`, groupScopeSQL), id, projectID, service.StatusActive)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return service.ErrProjectAccessForbidden
-	}
-	return nil
-}
-
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
-	preds := append([]predicate.APIKey{apikey.IDEQ(id), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)
+	preds := []predicate.APIKey{apikey.IDEQ(id), apikey.DeletedAtIsNil()}
 	affected, err := r.client.APIKey.Update().
 		Where(preds...).
 		SetKey(tombstoneKey).
@@ -507,7 +424,6 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 		SELECT encode(sha256(convert_to(key, 'UTF8')), 'hex'), id, user_id, name, NOW()
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`
-	auditQuery, auditArgs = appendProjectProfileScopedQuery(ctx, auditQuery, auditArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if _, err := exec.ExecContext(ctx, auditQuery, auditArgs...); err != nil {
 		return err
 	}
@@ -517,7 +433,6 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 		UPDATE api_keys
 		SET key = $1, deleted_at = NOW(), updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL`
-	updateQuery, updateArgs = appendProjectProfileScopedQuery(ctx, updateQuery, updateArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	res, err := exec.ExecContext(ctx, updateQuery, updateArgs...)
 	if err != nil {
 		return err
@@ -527,7 +442,7 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 		return err
 	}
 	if affected == 0 {
-		// 并发/重复删除:只有记录已软删才幂等成功；未软删但不在当前项目范围内仍返回 NotFound。
+		// 并发/重复删除:只有记录已软删才幂等成功；其他情况仍返回 NotFound。
 		deleted, deletedErr := r.client.APIKey.Query().
 			Where(apikey.IDEQ(id), apikey.DeletedAtNotNil()).
 			Exist(mixins.SkipSoftDelete(ctx))
@@ -544,9 +459,6 @@ func (r *apiKeyRepository) deleteWithTombstone(ctx context.Context, exec *dbent.
 
 func (r *apiKeyRepository) apiKeyListByUserIDQuery(ctx context.Context, userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
 	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
-	if preds := projectScopedAPIKeyPredicate(ctx); len(preds) > 0 {
-		q = q.Where(preds...)
-	}
 
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
@@ -717,7 +629,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 	}
 
 	ids, err := r.client.APIKey.Query().
-		Where(append([]predicate.APIKey{apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()}...).
 		IDs(ctx)
 	if err != nil {
 		return nil, err
@@ -727,7 +639,7 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
 	count, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.UserIDEQ(userID)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.UserIDEQ(userID)}...).
 		Count(ctx)
 	return int64(count), err
 }
@@ -739,9 +651,6 @@ func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, e
 
 func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.APIKey, *pagination.PaginationResult, error) {
 	q := r.activeQuery().Where(apikey.GroupIDEQ(groupID))
-	if preds := projectScopedAPIKeyPredicate(ctx); len(preds) > 0 {
-		q = q.Where(preds...)
-	}
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -808,9 +717,6 @@ func apiKeyListOrder(params pagination.PaginationParams) []func(*entsql.Selector
 // SearchAPIKeys searches API keys by user ID and/or keyword (name)
 func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyword string, limit int) ([]service.APIKey, error) {
 	q := r.activeQuery()
-	if preds := projectScopedAPIKeyPredicate(ctx); len(preds) > 0 {
-		q = q.Where(preds...)
-	}
 	if userID > 0 {
 		q = q.Where(apikey.UserIDEQ(userID))
 	}
@@ -834,7 +740,7 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 // ClearGroupIDByGroupID 将指定分组的所有 API Key 的 group_id 设为 nil
 func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	n, err := r.client.APIKey.Update().
-		Where(append([]predicate.APIKey{apikey.GroupIDEQ(groupID), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.GroupIDEQ(groupID), apikey.DeletedAtIsNil()}...).
 		ClearGroupID().
 		Save(ctx)
 	return int64(n), err
@@ -844,7 +750,7 @@ func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID in
 func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.APIKey.Update().
-		Where(append([]predicate.APIKey{apikey.UserIDEQ(userID), apikey.GroupIDEQ(oldGroupID), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.UserIDEQ(userID), apikey.GroupIDEQ(oldGroupID), apikey.DeletedAtIsNil()}...).
 		SetGroupID(newGroupID).
 		Save(ctx)
 	return int64(n), err
@@ -853,14 +759,14 @@ func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, user
 // CountByGroupID 获取分组的 API Key 数量
 func (r *apiKeyRepository) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	count, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.GroupIDEQ(groupID)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.GroupIDEQ(groupID)}...).
 		Count(ctx)
 	return int64(count), err
 }
 
 func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
 	keys, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.UserIDEQ(userID)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.UserIDEQ(userID)}...).
 		Select(apikey.FieldKey).
 		Strings(ctx)
 	if err != nil {
@@ -871,7 +777,7 @@ func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) (
 
 func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error) {
 	keys, err := r.activeQuery().
-		Where(append([]predicate.APIKey{apikey.GroupIDEQ(groupID)}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.GroupIDEQ(groupID)}...).
 		Select(apikey.FieldKey).
 		Strings(ctx)
 	if err != nil {
@@ -883,7 +789,7 @@ func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64)
 // IncrementQuotaUsed 使用 Ent 原子递增 quota_used 字段并返回新值
 func (r *apiKeyRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error) {
 	updated, err := r.client.APIKey.UpdateOneID(id).
-		Where(append([]predicate.APIKey{apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.DeletedAtIsNil()}...).
 		AddQuotaUsed(amount).
 		Save(ctx)
 	if err != nil {
@@ -910,7 +816,6 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 			WHERE id = $3 AND deleted_at IS NULL
 	`
 	args := []any{amount, service.StatusAPIKeyQuotaExhausted, id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	query += " RETURNING quota_used, quota, key, status"
 
 	state := &service.APIKeyQuotaUsageState{}
@@ -925,7 +830,7 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 
 func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt time.Time) error {
 	affected, err := r.client.APIKey.Update().
-		Where(append([]predicate.APIKey{apikey.IDEQ(id), apikey.DeletedAtIsNil()}, projectScopedAPIKeyPredicate(ctx)...)...).
+		Where([]predicate.APIKey{apikey.IDEQ(id), apikey.DeletedAtIsNil()}...).
 		SetLastUsedAt(usedAt).
 		SetUpdatedAt(usedAt).
 		Save(ctx)
@@ -952,7 +857,6 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL`
 	args := []any{cost, id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
@@ -970,7 +874,6 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
@@ -982,7 +885,6 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -1062,6 +964,7 @@ func userEntityToService(u *dbent.User) *service.User {
 		PasswordAuthDisabled:       u.PasswordAuthDisabled != nil && *u.PasswordAuthDisabled,
 		PasswordAuthResolved:       u.PasswordAuthDisabled != nil,
 		Role:                       u.Role,
+		AdminPermissions:           append([]string(nil), u.AdminPermissions...),
 		Balance:                    u.Balance,
 		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,

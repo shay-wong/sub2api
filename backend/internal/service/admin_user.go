@@ -23,89 +23,10 @@ func (s *adminServiceImpl) getAdminScopedUser(ctx context.Context, id int64, inc
 	if id <= 0 {
 		return nil, ErrUserNotFound
 	}
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		if includeDeleted {
-			return s.userRepo.GetByIDIncludeDeleted(ctx, id)
-		}
-		return s.userRepo.GetByID(ctx, id)
+	if includeDeleted {
+		return s.userRepo.GetByIDIncludeDeleted(ctx, id)
 	}
-
-	includeSubscriptions := false
-	users, _, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, UserListFilters{
-		ID:                   id,
-		IncludeDeleted:       includeDeleted,
-		IncludeSubscriptions: &includeSubscriptions,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(users) == 0 {
-		return nil, ErrUserNotFound
-	}
-	return &users[0], nil
-}
-
-func ensureProjectAdminCanManageUser(ctx context.Context, user *User) error {
-	if user == nil {
-		return ErrUserNotFound
-	}
-	if !isProjectAdminContext(ctx) {
-		return nil
-	}
-	if RoleIsAdmin(user.Role) || user.ProjectRole == ProjectRoleAdmin {
-		return ErrProjectAdminCannotManageAdminUser
-	}
-	return nil
-}
-
-func isProjectAdminContext(ctx context.Context) bool {
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		return false
-	}
-	adminRole, ok := AdminRoleFromContext(ctx)
-	return ok && adminRole == RoleAdmin
-}
-
-func (s *adminServiceImpl) ensureAdminScopedUsers(ctx context.Context, userIDs []int64) error {
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		return nil
-	}
-	for _, userID := range userIDs {
-		user, err := s.getAdminScopedUser(ctx, userID, false)
-		if err != nil {
-			return err
-		}
-		if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *adminServiceImpl) ensureAdminScopedGroups(ctx context.Context, groupIDs []int64) error {
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		return nil
-	}
-	cleaned := normalizePositiveInt64IDsForService(groupIDs)
-	if len(cleaned) == 0 {
-		return nil
-	}
-	if s.groupRepo == nil {
-		return infraerrors.ServiceUnavailable("GROUP_REPOSITORY_UNAVAILABLE", "group repository is not configured")
-	}
-	for _, groupID := range cleaned {
-		if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *adminServiceImpl) ensureAdminScopedGroupRateEntries(ctx context.Context, groupID int64, userIDs []int64) error {
-	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
-		return err
-	}
-	return s.ensureAdminScopedUsers(ctx, normalizePositiveInt64IDsForService(userIDs))
+	return s.userRepo.GetByID(ctx, id)
 }
 
 func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, filters UserListFilters, sortBy, sortOrder string) ([]User, int64, error) {
@@ -194,23 +115,7 @@ func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) 
 	return s.getAdminScopedUser(ctx, id, true)
 }
 
-// normalizeUserRole 校验并归一化角色输入。
-// 空字符串返回 fallback(未提供时的默认角色);非法值返回错误。
-func normalizeUserRole(role, fallback string) (string, error) {
-	if role == "" {
-		return fallback, nil
-	}
-	if role != RoleAdmin && role != RoleUser {
-		return "", fmt.Errorf("invalid role: %q (must be %s or %s)", role, RoleAdmin, RoleUser)
-	}
-	return role, nil
-}
-
 func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInput) (*User, error) {
-	if err := s.ensureAdminScopedGroups(ctx, input.AllowedGroups); err != nil {
-		return nil, err
-	}
-
 	balance := 0.0
 	if input.Balance != nil {
 		balance = *input.Balance
@@ -218,17 +123,11 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		balance = s.settingService.GetDefaultBalance(ctx)
 	}
 
-	// 角色可由管理员在创建时指定(admin/user);未提供时默认 user。
-	role, err := normalizeUserRole(input.Role, RoleUser)
-	if err != nil {
-		return nil, err
-	}
-
 	user := &User{
 		Email:         input.Email,
 		Username:      input.Username,
 		Notes:         input.Notes,
-		Role:          role,
+		Role:          RoleUser,
 		Balance:       balance,
 		Concurrency:   input.Concurrency,
 		RPMLimit:      input.RPMLimit,
@@ -243,31 +142,8 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
-	// 创建管理员属权限敏感操作，落审计日志（含操作者），便于事后追溯。
-	if user.Role == RoleAdmin {
-		logger.LegacyPrintf("service.admin", "audit: admin user created actor_admin_id=%d target_user_id=%d",
-			input.ActorAdminID, user.ID)
-	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
 	return user, nil
-}
-
-// ensureNotLastAdmin 降级管理员前确认系统中仍存在其他管理员，防止零 admin 锁死。
-// 注：读取与写入之间存在竞态窗口，极端并发下仍可能双双降级；作为后台低频操作
-// 的兜底保护足够，彻底防护需依赖数据库层约束。
-func (s *adminServiceImpl) ensureNotLastAdmin(ctx context.Context) error {
-	noSubs := false
-	_, result, err := s.userRepo.ListWithFilters(ctx,
-		pagination.PaginationParams{Page: 1, PageSize: 1},
-		UserListFilters{Role: RoleAdmin, IncludeSubscriptions: &noSubs},
-	)
-	if err != nil {
-		return fmt.Errorf("count admin users: %w", err)
-	}
-	if result == nil || result.Total <= 1 {
-		return errors.New("cannot demote the last admin user")
-	}
-	return nil
 }
 
 func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userID int64) {
@@ -292,24 +168,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
-		return nil, err
-	}
-	if input.AllowedGroups != nil {
-		if err := s.ensureAdminScopedGroups(ctx, *input.AllowedGroups); err != nil {
-			return nil, err
-		}
-	}
-	if input.GroupRates != nil {
-		groupIDs := make([]int64, 0, len(input.GroupRates))
-		for groupID := range input.GroupRates {
-			groupIDs = append(groupIDs, groupID)
-		}
-		if err := s.ensureAdminScopedGroups(ctx, groupIDs); err != nil {
-			return nil, err
-		}
-	}
-
 	// 校验用户专属分组倍率：必须 > 0（nil 合法，表示清除专属倍率）
 	if input.GroupRates != nil {
 		for groupID, rate := range input.GroupRates {
@@ -320,13 +178,12 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	// Protect admin users: cannot disable admin accounts
-	if user.Role == "admin" && input.Status == "disabled" {
+	if RoleIsAdmin(user.Role) && input.Status == StatusDisabled {
 		return nil, errors.New("cannot disable admin user")
 	}
 
 	oldConcurrency := user.Concurrency
 	oldStatus := user.Status
-	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 
@@ -360,23 +217,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		fields.Status = true
 	}
 
-	// 角色变更(admin/user);空字符串表示不修改。
-	if input.Role != "" {
-		role, err := normalizeUserRole(input.Role, user.Role)
-		if err != nil {
-			return nil, err
-		}
-		// 防锁死保护：不允许降级系统中最后一个管理员（自我降级已在 handler 层拦截，
-		// 此处兜底覆盖跨管理员互降导致零 admin 的场景）。
-		if user.Role == RoleAdmin && role == RoleUser {
-			if err := s.ensureNotLastAdmin(ctx); err != nil {
-				return nil, err
-			}
-		}
-		user.Role = role
-		fields.Role = true
-	}
-
 	if input.Concurrency != nil {
 		user.Concurrency = *input.Concurrency
 		fields.Concurrency = true
@@ -402,12 +242,6 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		return nil, err
 	}
 
-	// 角色变更属权限敏感操作，落审计日志（含操作者），便于事后追溯。
-	if user.Role != oldRole {
-		logger.LegacyPrintf("service.admin", "audit: user role changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s",
-			input.ActorAdminID, user.ID, oldRole, user.Role)
-	}
-
 	// 同步用户专属分组倍率
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
 		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
@@ -418,7 +252,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.RPMLimit != oldRPMLimit || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -444,6 +278,39 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	return user, nil
+}
+
+func (s *adminServiceImpl) UpdateUserAdminAccess(ctx context.Context, id int64, input *UpdateUserAdminAccessInput) (*User, error) {
+	if input == nil {
+		return nil, infraerrors.BadRequest("INVALID_ADMIN_ACCESS", "admin access input is required")
+	}
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if RoleIsSuperAdmin(user.Role) {
+		return nil, infraerrors.Forbidden("SUPER_ADMIN_IMMUTABLE", "super admin access cannot be changed")
+	}
+	if input.Role != RoleAdmin && input.Role != RoleUser {
+		return nil, infraerrors.BadRequest("INVALID_ADMIN_ROLE", "role must be admin or user")
+	}
+	permissions, err := NormalizeAdminPermissions(input.Role, input.AdminPermissions)
+	if err != nil {
+		return nil, err
+	}
+	oldRole := user.Role
+	oldPermissions := append([]string(nil), user.AdminPermissions...)
+	user.Role = input.Role
+	user.AdminPermissions = permissions
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{Role: true, AdminPermissions: true}); err != nil {
+		return nil, err
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
+	}
+	logger.LegacyPrintf("service.admin", "audit: user admin access changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s old_permissions=%v new_permissions=%v",
+		input.ActorAdminID, user.ID, oldRole, user.Role, oldPermissions, user.AdminPermissions)
 	return user, nil
 }
 
@@ -473,7 +340,7 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if user.Role == "admin" {
+	if RoleIsAdmin(user.Role) {
 		return errors.New("cannot delete admin user")
 	}
 
@@ -568,10 +435,6 @@ func (s *adminServiceImpl) BatchUpdateConcurrency(ctx context.Context, userIDs [
 	if len(cleaned) == 0 {
 		return 0, nil
 	}
-	if err := s.ensureAdminScopedUsers(ctx, cleaned); err != nil {
-		return 0, err
-	}
-
 	var affected int
 	var err error
 	switch mode {
@@ -630,9 +493,6 @@ func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int6
 func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
 	user, err := s.getAdminScopedUser(ctx, userID, false)
 	if err != nil {
-		return nil, err
-	}
-	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
 		return nil, err
 	}
 
@@ -702,7 +562,7 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 }
 
 func (s *adminServiceImpl) tryAccrueAffiliateRebateForAdminRecharge(ctx context.Context, userID int64, operation string, amount float64) {
-	if _, projectScoped := ProjectIDFromContext(ctx); projectScoped || operation != "add" || amount <= 0 || s.settingService == nil || s.affiliateService == nil {
+	if operation != "add" || amount <= 0 || s.settingService == nil || s.affiliateService == nil {
 		return
 	}
 	if !s.settingService.IsAffiliateAdminRechargeEnabled(ctx) {
@@ -823,14 +683,7 @@ func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, us
 	if groupID <= 0 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
 	}
-	user, err := s.getAdminScopedUser(ctx, userID, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := ensureProjectAdminCanManageUser(ctx, user); err != nil {
-		return nil, err
-	}
-	if err := s.ensureAdminScopedGroups(ctx, []int64{groupID}); err != nil {
+	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
 		return nil, err
 	}
 	if s.userGroupRateLimitRepo == nil {

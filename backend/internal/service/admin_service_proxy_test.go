@@ -108,7 +108,7 @@ func TestAdminService_UpdateProxy_ProjectAdminCanUpdateVisibleSharedProxy(t *tes
 		},
 	}
 	svc := &adminServiceImpl{proxyRepo: repo}
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 
 	proxy, err := svc.UpdateProxy(ctx, 1, &UpdateProxyInput{Status: StatusDisabled})
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestAdminService_UpdateProxy_UsesProjectVisibleProxyLookup(t *testing.T) {
 		},
 	}
 	svc := &adminServiceImpl{proxyRepo: repo}
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 
 	proxy, err := svc.UpdateProxy(ctx, 1, &UpdateProxyInput{Status: StatusDisabled})
 	require.NoError(t, err)

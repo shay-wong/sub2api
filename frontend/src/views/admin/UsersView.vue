@@ -579,12 +579,6 @@
               <span class="text-sm text-gray-700 dark:text-gray-300">
                 {{ visibleUserStatus(row) === 'active' ? t('common.active') : t('admin.users.disabled') }}
               </span>
-              <span
-                v-if="row.project_member_status && row.status !== row.project_member_status"
-                class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-dark-300"
-              >
-                {{ row.status === 'active' ? t('common.active') : t('admin.users.disabled') }}
-              </span>
             </div>
           </template>
 
@@ -697,6 +691,16 @@
                 {{ t('admin.users.groups') }}
               </button>
 
+              <button
+                v-if="authStore.isAdmin && user.role !== 'super_admin'"
+                data-test="admin-access-action"
+                @click="openAdminAccess(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="shield" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.adminAccess.action') }}
+              </button>
+
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
 
               <!-- Deposit -->
@@ -775,6 +779,63 @@
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
+    <BaseDialog
+      :show="showAdminAccessModal"
+      :title="t('admin.users.adminAccess.title')"
+      width="normal"
+      @close="closeAdminAccess"
+    >
+      <div v-if="adminAccessUser" class="space-y-5">
+        <p class="text-sm text-gray-600 dark:text-dark-300">
+          {{ t('admin.users.adminAccess.description', { email: adminAccessUser.email }) }}
+        </p>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <input
+            v-model="adminAccessEnabled"
+            data-test="admin-access-enabled"
+            type="checkbox"
+            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+          <span class="text-sm font-medium text-gray-800 dark:text-dark-100">
+            {{ t('admin.users.adminAccess.enableAdmin') }}
+          </span>
+        </label>
+        <fieldset :disabled="!adminAccessEnabled" class="space-y-2 disabled:opacity-50">
+          <legend class="mb-2 text-sm font-medium text-gray-800 dark:text-dark-100">
+            {{ t('admin.users.adminAccess.permissions') }}
+          </legend>
+          <label
+            v-for="option in adminPermissionOptions"
+            :key="option.value"
+            class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-gray-50 dark:hover:bg-dark-700"
+          >
+            <input
+              v-model="adminAccessPermissions"
+              :value="option.value"
+              type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-dark-200">{{ option.label }}</span>
+          </label>
+        </fieldset>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button type="button" class="btn btn-secondary" @click="closeAdminAccess">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            data-test="save-admin-access"
+            class="btn btn-primary"
+            :disabled="savingAdminAccess"
+            @click="saveAdminAccess"
+          >
+            {{ savingAdminAccess ? t('admin.users.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
   </AppLayout>
 </template>
 
@@ -800,6 +861,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import Select from '@/components/common/Select.vue'
@@ -819,13 +881,14 @@ import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 import type { GlobalUserRole, UserRole } from '@/types'
+import { AdminPermissions, allAdminPermissions, type AdminPermission } from '@/constants/adminPermissions'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
 type UserRoleFilter = '' | GlobalUserRole
 
-const assignableGlobalRoles: readonly GlobalUserRole[] = ['super_admin', 'user']
+const assignableGlobalRoles: readonly GlobalUserRole[] = ['super_admin', 'admin', 'user']
 const displayableUserRoles: readonly UserRole[] = ['super_admin', 'admin', 'user']
 const roleFilterOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('admin.users.allRoles') },
@@ -850,13 +913,8 @@ const roleLabel = (role?: string) => {
   if (!role) return '-'
   return displayableUserRoles.includes(role as UserRole) ? t(`admin.users.roles.${role}`) : role
 }
-const effectiveUserRole = (user: AdminUser): UserRole => {
-  if (user.role === 'super_admin') return 'super_admin'
-  return (user.project_role || user.role) as UserRole
-}
-const visibleUserStatus = (user: AdminUser): 'active' | 'disabled' => {
-  return user.project_member_status || user.status
-}
+const effectiveUserRole = (user: AdminUser): UserRole => user.role
+const visibleUserStatus = (user: AdminUser): 'active' | 'disabled' => user.status
 const isAdminRole = (role?: string) => role === 'super_admin' || role === 'admin'
 const canOperateUser = (user: AdminUser) => {
   return authStore.isAdmin || !isAdminRole(effectiveUserRole(user))
@@ -1379,6 +1437,56 @@ const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
+const showAdminAccessModal = ref(false)
+const adminAccessUser = ref<AdminUser | null>(null)
+const adminAccessEnabled = ref(false)
+const adminAccessPermissions = ref<AdminPermission[]>([])
+const savingAdminAccess = ref(false)
+const adminPermissionOptions = computed(() => [
+  { value: AdminPermissions.dashboard, label: t('admin.users.adminAccess.permissionLabels.dashboard') },
+  { value: AdminPermissions.ops, label: t('admin.users.adminAccess.permissionLabels.ops') },
+  { value: AdminPermissions.users, label: t('admin.users.adminAccess.permissionLabels.users') },
+  { value: AdminPermissions.groups, label: t('admin.users.adminAccess.permissionLabels.groups') },
+  { value: AdminPermissions.proxies, label: t('admin.users.adminAccess.permissionLabels.proxies') },
+  { value: AdminPermissions.subscriptions, label: t('admin.users.adminAccess.permissionLabels.subscriptions') },
+  { value: AdminPermissions.accounts, label: t('admin.users.adminAccess.permissionLabels.accounts') },
+  { value: AdminPermissions.usage, label: t('admin.users.adminAccess.permissionLabels.usage') }
+])
+
+const openAdminAccess = (user: AdminUser) => {
+  if (!authStore.isAdmin || user.role === 'super_admin') return
+  adminAccessUser.value = user
+  adminAccessEnabled.value = user.role === 'admin'
+  adminAccessPermissions.value = allAdminPermissions.filter(permission =>
+    (user.admin_permissions ?? []).includes(permission)
+  )
+  showAdminAccessModal.value = true
+}
+
+const closeAdminAccess = () => {
+  if (savingAdminAccess.value) return
+  showAdminAccessModal.value = false
+  adminAccessUser.value = null
+}
+
+const saveAdminAccess = async () => {
+  if (!adminAccessUser.value || savingAdminAccess.value) return
+  savingAdminAccess.value = true
+  try {
+    await adminAPI.users.updateAdminAccess(adminAccessUser.value.id, {
+      role: adminAccessEnabled.value ? 'admin' : 'user',
+      admin_permissions: adminAccessEnabled.value ? adminAccessPermissions.value : []
+    })
+    appStore.showSuccess(t('admin.users.adminAccess.updated'))
+    showAdminAccessModal.value = false
+    adminAccessUser.value = null
+    await loadUsers()
+  } catch (error: any) {
+    appStore.showError(error.response?.data?.detail || t('admin.users.adminAccess.failed'))
+  } finally {
+    savingAdminAccess.value = false
+  }
+}
 
 const handlePlatformQuota = (user: AdminUser) => {
   if (!canOperateUser(user)) return
@@ -1776,15 +1884,7 @@ const handleToggleStatus = async (user: AdminUser) => {
   if (!canOperateUser(user)) return
   const newStatus = visibleUserStatus(user) === 'active' ? 'disabled' : 'active'
   try {
-    if (user.project_member_status && authStore.selectedProject?.id) {
-      await adminAPI.projects.setMember(authStore.selectedProject.id, user.id, {
-        role: (user.project_role === 'admin' ? 'admin' : 'user'),
-        status: newStatus,
-        permissions: user.project_role === 'admin' ? user.project_permissions : []
-      })
-    } else {
-      await adminAPI.users.toggleStatus(user.id, newStatus)
-    }
+    await adminAPI.users.toggleStatus(user.id, newStatus)
     appStore.showSuccess(
       newStatus === 'active' ? t('admin.users.userEnabled') : t('admin.users.userDisabled')
     )

@@ -4,26 +4,25 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAdminService_CreateUser_WithAdminRole(t *testing.T) {
-	repo := &userRepoStub{nextID: 30}
-	svc := &adminServiceImpl{userRepo: repo}
-
-	user, err := svc.CreateUser(context.Background(), &CreateUserInput{
-		Email:    "admin@test.com",
-		Password: "strong-pass",
-		Role:     RoleAdmin,
-	})
-	require.NoError(t, err)
-	require.Equal(t, RoleAdmin, user.Role)
+func TestAdminServiceRegularInputsDoNotExposeAdminAccess(t *testing.T) {
+	for _, inputType := range []reflect.Type{
+		reflect.TypeOf(CreateUserInput{}),
+		reflect.TypeOf(UpdateUserInput{}),
+	} {
+		_, hasRole := inputType.FieldByName("Role")
+		require.False(t, hasRole, "%s must not change roles", inputType.Name())
+		_, hasPermissions := inputType.FieldByName("AdminPermissions")
+		require.False(t, hasPermissions, "%s must not change admin permissions", inputType.Name())
+	}
 }
 
-func TestAdminService_CreateUser_DefaultsToUserRole(t *testing.T) {
+func TestAdminServiceCreateUserDefaultsToUserRole(t *testing.T) {
 	repo := &userRepoStub{nextID: 31}
 	svc := &adminServiceImpl{userRepo: repo}
 
@@ -31,113 +30,112 @@ func TestAdminService_CreateUser_DefaultsToUserRole(t *testing.T) {
 		Email:    "plain@test.com",
 		Password: "strong-pass",
 	})
+
 	require.NoError(t, err)
 	require.Equal(t, RoleUser, user.Role)
+	require.Empty(t, user.AdminPermissions)
 }
 
-func TestAdminService_CreateUser_InvalidRoleRejected(t *testing.T) {
-	repo := &userRepoStub{nextID: 32}
-	svc := &adminServiceImpl{userRepo: repo}
-
-	_, err := svc.CreateUser(context.Background(), &CreateUserInput{
-		Email:    "bad@test.com",
-		Password: "strong-pass",
-		Role:     "superuser",
-	})
-	require.Error(t, err)
-	require.Empty(t, repo.created, "非法角色不应写入用户")
-}
-
-func TestAdminService_UpdateUser_PromoteToAdmin(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", Role: RoleUser}}
-	repo := &rpmUserRepoStub{userRepoStub: base}
-	invalidator := &authCacheInvalidatorStub{}
-	svc := &adminServiceImpl{
-		userRepo:             repo,
-		redeemCodeRepo:       &redeemRepoStub{},
-		authCacheInvalidator: invalidator,
-	}
-
-	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: RoleAdmin})
-	require.NoError(t, err)
-	require.Equal(t, RoleAdmin, updated.Role)
-	require.Equal(t, []int64{42}, invalidator.userIDs, "角色变更应失效认证缓存")
-}
-
-func TestAdminService_UpdateUser_RoleOmittedKeepsExisting(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", Role: RoleAdmin}}
+func TestAdminServiceUpdateUserPreservesAdminAccess(t *testing.T) {
+	base := &userRepoStub{user: &User{
+		ID:               42,
+		Email:            "admin@example.com",
+		Role:             RoleAdmin,
+		AdminPermissions: []string{AdminPermissionUsageRead},
+	}}
 	repo := &rpmUserRepoStub{userRepoStub: base}
 	svc := &adminServiceImpl{userRepo: repo, redeemCodeRepo: &redeemRepoStub{}}
 
 	newName := "renamed"
 	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Username: &newName})
+
 	require.NoError(t, err)
-	require.Equal(t, RoleAdmin, updated.Role, "未提供 role 时不应改变现有角色")
+	require.Equal(t, RoleAdmin, updated.Role)
+	require.Equal(t, []string{AdminPermissionUsageRead}, updated.AdminPermissions)
+	require.NotNil(t, repo.lastUpdated)
 }
 
-func TestAdminService_UpdateUser_InvalidRoleRejected(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", Role: RoleUser}}
+func TestAdminServiceUpdateAdminAccessNormalizesAndInvalidates(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "user@example.com", Role: RoleUser}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{userRepo: repo, authCacheInvalidator: invalidator}
+
+	updated, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
+		Role: RoleAdmin,
+		AdminPermissions: []string{
+			AdminPermissionUsageRead,
+			AdminPermissionDashboardRead,
+			AdminPermissionUsageRead,
+		},
+		ActorAdminID: 7,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, RoleAdmin, updated.Role)
+	require.Equal(t, []string{AdminPermissionDashboardRead, AdminPermissionUsageRead}, updated.AdminPermissions)
+	require.Equal(t, []int64{42}, invalidator.userIDs)
+}
+
+func TestAdminServiceUpdateAdminAccessDemotionClearsPermissions(t *testing.T) {
+	base := &userRepoStub{user: &User{
+		ID:               42,
+		Email:            "admin@example.com",
+		Role:             RoleAdmin,
+		AdminPermissions: []string{AdminPermissionUsageRead},
+	}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	svc := &adminServiceImpl{userRepo: repo}
+
+	updated, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
+		Role:             RoleUser,
+		AdminPermissions: []string{AdminPermissionAccountsWrite},
+		ActorAdminID:     7,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, RoleUser, updated.Role)
+	require.Empty(t, updated.AdminPermissions)
+}
+
+func TestAdminServiceUpdateAdminAccessRejectsSuperAdmin(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "root@example.com", Role: RoleSuperAdmin}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	svc := &adminServiceImpl{userRepo: repo}
+
+	_, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
+		Role:         RoleAdmin,
+		ActorAdminID: 7,
+	})
+
+	require.Error(t, err)
+	require.Nil(t, repo.lastUpdated)
+}
+
+func TestAdminServiceUpdateAdminAccessRejectsUnknownPermission(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "user@example.com", Role: RoleUser}}
+	repo := &rpmUserRepoStub{userRepoStub: base}
+	svc := &adminServiceImpl{userRepo: repo}
+
+	_, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
+		Role:             RoleAdmin,
+		AdminPermissions: []string{"admin.unknown"},
+		ActorAdminID:     7,
+	})
+
+	require.Error(t, err)
+	require.Nil(t, repo.lastUpdated)
+}
+
+func TestAdminServiceUpdateAndDeleteProtectSuperAdmin(t *testing.T) {
+	base := &userRepoStub{user: &User{ID: 42, Email: "root@example.com", Role: RoleSuperAdmin}}
 	repo := &rpmUserRepoStub{userRepoStub: base}
 	svc := &adminServiceImpl{userRepo: repo, redeemCodeRepo: &redeemRepoStub{}}
 
-	_, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: "root"})
-	require.Error(t, err)
-	require.Nil(t, repo.lastUpdated, "非法角色不应触发持久化")
-}
+	_, updateErr := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Status: StatusDisabled})
+	require.Error(t, updateErr)
 
-// roleGuardUserRepoStub 在 rpmUserRepoStub 之上提供可控的管理员计数，
-// 用于测试"最后一个管理员不可降级"守卫。
-type roleGuardUserRepoStub struct {
-	*rpmUserRepoStub
-	adminTotal int64
-	listCalls  int
-}
-
-func (s *roleGuardUserRepoStub) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _ UserListFilters) ([]User, *pagination.PaginationResult, error) {
-	s.listCalls++
-	return nil, &pagination.PaginationResult{Total: s.adminTotal}, nil
-}
-
-func TestAdminService_UpdateUser_DemoteLastAdminRejected(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "a@example.com", Role: RoleAdmin}}
-	repo := &roleGuardUserRepoStub{rpmUserRepoStub: &rpmUserRepoStub{userRepoStub: base}, adminTotal: 1}
-	svc := &adminServiceImpl{userRepo: repo, redeemCodeRepo: &redeemRepoStub{}}
-
-	_, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: RoleUser})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "last admin")
-	require.Nil(t, repo.lastUpdated, "最后一个管理员不应被降级持久化")
-	require.Equal(t, 1, repo.listCalls, "降级路径应触发管理员计数")
-}
-
-func TestAdminService_UpdateUser_DemoteAdminAllowedWhenOthersExist(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "a@example.com", Role: RoleAdmin}}
-	repo := &roleGuardUserRepoStub{rpmUserRepoStub: &rpmUserRepoStub{userRepoStub: base}, adminTotal: 2}
-	invalidator := &authCacheInvalidatorStub{}
-	svc := &adminServiceImpl{
-		userRepo:             repo,
-		redeemCodeRepo:       &redeemRepoStub{},
-		authCacheInvalidator: invalidator,
-	}
-
-	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: RoleUser})
-	require.NoError(t, err)
-	require.Equal(t, RoleUser, updated.Role)
-	require.NotNil(t, repo.lastUpdated)
-	require.Equal(t, RoleUser, repo.lastUpdated.Role, "存在其他管理员时允许降级")
-}
-
-func TestAdminService_UpdateUser_PromoteDoesNotCountAdmins(t *testing.T) {
-	base := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", Role: RoleUser}}
-	repo := &roleGuardUserRepoStub{rpmUserRepoStub: &rpmUserRepoStub{userRepoStub: base}, adminTotal: 1}
-	svc := &adminServiceImpl{
-		userRepo:             repo,
-		redeemCodeRepo:       &redeemRepoStub{},
-		authCacheInvalidator: &authCacheInvalidatorStub{},
-	}
-
-	updated, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Role: RoleAdmin})
-	require.NoError(t, err)
-	require.Equal(t, RoleAdmin, updated.Role)
-	require.Equal(t, 0, repo.listCalls, "升级路径不应触发管理员计数")
+	deleteErr := svc.DeleteUser(context.Background(), 42)
+	require.Error(t, deleteErr)
+	require.Empty(t, base.deletedIDs)
 }

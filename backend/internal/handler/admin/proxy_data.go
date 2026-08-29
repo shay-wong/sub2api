@@ -252,9 +252,6 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 
 func proxyBackgroundContext(ctx context.Context) context.Context {
 	bg := context.Background()
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		bg = service.WithProjectID(bg, projectID)
-	}
 	if role, ok := service.AdminRoleFromContext(ctx); ok {
 		bg = service.WithAdminRole(bg, role)
 	}

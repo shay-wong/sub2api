@@ -10,11 +10,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
@@ -116,15 +114,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 
-		projectID, ok := resolveAPIKeyRequestProject(c, apiKeyService, apiKey)
-		if !ok {
-			return
-		}
-
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
 		// IP 限制等早退中断，也让 Ops 错误日志能回退取到 user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
-		setProjectContext(c, projectID)
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
@@ -397,67 +389,6 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
 	c.Request = c.Request.WithContext(ctx)
-}
-
-func setProjectContext(c *gin.Context, projectID int64) {
-	if c == nil || c.Request == nil || projectID <= 0 {
-		return
-	}
-	ctx := c.Request.Context()
-	if existing, ok := service.ProjectIDFromContext(ctx); ok && existing == projectID {
-		c.Set("project_id", projectID)
-		c.Request = c.Request.WithContext(withProjectLogger(ctx, projectID))
-		return
-	}
-	ctx = service.WithProjectID(ctx, projectID)
-	ctx = withProjectLogger(ctx, projectID)
-	c.Request = c.Request.WithContext(ctx)
-	c.Set("project_id", projectID)
-}
-
-func withProjectLogger(ctx context.Context, projectID int64) context.Context {
-	if projectID <= 0 {
-		return ctx
-	}
-	return logger.IntoContext(ctx, logger.FromContext(ctx).With(zap.Int64("project_id", projectID)))
-}
-
-func resolveAPIKeyRequestProject(c *gin.Context, apiKeyService *service.APIKeyService, apiKey *service.APIKey) (int64, bool) {
-	if apiKey == nil {
-		return 0, true
-	}
-	// API Key 只能归属一个项目空间；外部调用不能通过请求头切换到其他项目。
-	effectiveProjectID := apiKey.ProjectID
-	if effectiveProjectID <= 0 {
-		return apiKey.ProjectID, true
-	}
-	if apiKeyService == nil {
-		AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
-		return 0, false
-	}
-	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
-	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
-	if err != nil {
-		if errors.Is(err, service.ErrProjectMemberDisabled) {
-			AbortWithError(c, 403, "PROJECT_MEMBER_DISABLED", "API Key 所属用户在当前项目空间已禁用")
-			return 0, false
-		}
-		if errors.Is(err, service.ErrProjectAPIKeyGroupUnavailable) {
-			AbortWithError(c, 403, "PROJECT_API_KEY_GROUP_UNAVAILABLE", "API Key 所属分组不在当前项目空间应用配置内")
-			return 0, false
-		}
-		if errors.Is(err, service.ErrAPIKeyNotFound) {
-			AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
-			return 0, false
-		}
-		AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
-		return 0, false
-	}
-	if visible == nil || visible.ID != apiKey.ID {
-		AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
-		return 0, false
-	}
-	return effectiveProjectID, true
 }
 
 // apiKeyBalanceBelowAuthThreshold 保持鉴权层的历史语义：仅在余额耗尽（<=0）时拒绝。

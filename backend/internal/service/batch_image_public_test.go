@@ -44,7 +44,7 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Len(t, billing.reserves, 1)
 		require.Equal(t, BatchImageHoldRequestID(got.ID), billing.reserves[0].RequestID)
 		require.InDelta(t, 0.3, billing.reserves[0].HoldAmount, 1e-12)
-		require.Equal(t, []int64{77}, billing.reserveProjects)
+		require.Equal(t, []int64{0}, billing.reserveProjects)
 		require.Empty(t, billing.releases)
 		authCache := svc.AuthCache.(*fakeBatchImageAuthCacheInvalidator)
 		require.Equal(t, []int64{11}, authCache.userIDs)
@@ -56,7 +56,7 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.Equal(t, "files/gemini_api/output", batchImageDerefString(job.ProviderOutputRef))
 		require.NotNil(t, job.AccountID)
 		require.Equal(t, int64(202), *job.AccountID)
-		require.Equal(t, int64(77), job.ProjectID)
+		require.Zero(t, job.ProjectID)
 		require.Equal(t, 1, job.PricingSnapshotVersion)
 		require.InDelta(t, 0.25, job.BaseUnitPrice, 1e-12)
 		require.InDelta(t, 1.0, job.GroupRateMultiplier, 1e-12)
@@ -548,7 +548,7 @@ func TestBatchImagePublicService_List(t *testing.T) {
 	require.False(t, got.HasMore)
 }
 
-func TestBatchImagePublicService_ListAllIncludesSameProjectUserKeys(t *testing.T) {
+func TestBatchImagePublicService_ListAllIncludesAllUserKeys(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, _, _, _ := newTestBatchImagePublicService(true)
 	owner := testBatchImageOwner()
@@ -559,7 +559,7 @@ func TestBatchImagePublicService_ListAllIncludesSameProjectUserKeys(t *testing.T
 	repo.jobs["selected-key"] = &BatchImageJob{
 		BatchID:   "selected-key",
 		UserID:    owner.UserID,
-		ProjectID: owner.ProjectID,
+		ProjectID: 77,
 		APIKeyID:  &owner.APIKeyID,
 		Status:    BatchImageJobStatusCompleted,
 		Provider:  BatchImageProviderVertex,
@@ -570,7 +570,7 @@ func TestBatchImagePublicService_ListAllIncludesSameProjectUserKeys(t *testing.T
 	repo.jobs["other-key"] = &BatchImageJob{
 		BatchID:   "other-key",
 		UserID:    owner.UserID,
-		ProjectID: owner.ProjectID,
+		ProjectID: 77,
 		APIKeyID:  &otherKeyID,
 		Status:    BatchImageJobStatusCompleted,
 		Provider:  BatchImageProviderVertex,
@@ -581,7 +581,7 @@ func TestBatchImagePublicService_ListAllIncludesSameProjectUserKeys(t *testing.T
 	repo.jobs["other-project"] = &BatchImageJob{
 		BatchID:   "other-project",
 		UserID:    owner.UserID,
-		ProjectID: owner.ProjectID + 1,
+		ProjectID: 78,
 		APIKeyID:  &otherProjectKeyID,
 		Status:    BatchImageJobStatusCompleted,
 		Provider:  BatchImageProviderVertex,
@@ -594,9 +594,9 @@ func TestBatchImagePublicService_ListAllIncludesSameProjectUserKeys(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, "list", got.Object)
 	require.False(t, got.HasMore)
-	require.Len(t, got.Data, 2)
-	require.Equal(t, []string{"selected-key", "other-key"}, []string{got.Data[0].ID, got.Data[1].ID})
-	require.Equal(t, []int64{owner.APIKeyID, otherKeyID}, []int64{got.Data[0].KeyID, got.Data[1].KeyID})
+	require.Len(t, got.Data, 3)
+	require.Equal(t, []string{"selected-key", "other-key", "other-project"}, []string{got.Data[0].ID, got.Data[1].ID, got.Data[2].ID})
+	require.Equal(t, []int64{owner.APIKeyID, otherKeyID, otherProjectKeyID}, []int64{got.Data[0].KeyID, got.Data[1].KeyID, got.Data[2].KeyID})
 }
 
 func TestBatchImagePublicService_ListQueuedMatchesPublicStatus(t *testing.T) {
@@ -611,7 +611,7 @@ func TestBatchImagePublicService_ListQueuedMatchesPublicStatus(t *testing.T) {
 		repo.jobs[batchID] = &BatchImageJob{
 			BatchID:   batchID,
 			UserID:    owner.UserID,
-			ProjectID: owner.ProjectID,
+			ProjectID: 77,
 			APIKeyID:  &apiKeyID,
 			Status:    status,
 			Provider:  BatchImageProviderVertex,
@@ -623,7 +623,7 @@ func TestBatchImagePublicService_ListQueuedMatchesPublicStatus(t *testing.T) {
 	repo.jobs["running"] = &BatchImageJob{
 		BatchID:   "running",
 		UserID:    owner.UserID,
-		ProjectID: owner.ProjectID,
+		ProjectID: 77,
 		APIKeyID:  &apiKeyID,
 		Status:    BatchImageJobStatusRunning,
 		Provider:  BatchImageProviderVertex,
@@ -923,7 +923,7 @@ func newTestBatchImagePublicService(enabled bool) (*BatchImagePublicService, *fa
 }
 
 func testBatchImageOwner() BatchImageOwner {
-	return BatchImageOwner{UserID: 11, ProjectID: 77, APIKeyID: 22}
+	return BatchImageOwner{UserID: 11, APIKeyID: 22}
 }
 
 type fakeBatchImageAuthCacheInvalidator struct {

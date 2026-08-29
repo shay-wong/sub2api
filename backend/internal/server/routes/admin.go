@@ -60,10 +60,7 @@ func RegisterAdminRoutes(
 		adminOnly := admin.Group("")
 		adminOnly.Use(middleware.RequireAdminOnly())
 
-		// 项目空间管理：超级管理员可配置项目空间；项目管理员仅允许当前项目内的受限成员状态操作。
-		registerProjectRoutes(admin, h)
-
-		// 用户管理：项目管理员只能看到当前项目配置范围内的用户。
+		// 用户管理：管理员权限由用户记录统一配置。
 		registerUserManagementRoutes(admin, h)
 
 		// 公告管理
@@ -90,10 +87,10 @@ func RegisterAdminRoutes(
 		// 系统管理
 		registerSystemRoutes(adminOnly, h)
 
-		// 订阅管理：项目管理员只能看到当前项目配置范围内的订阅。
+		// 订阅管理
 		registerSubscriptionRoutes(admin, h)
 
-		// 使用记录管理：项目管理员可查看当前项目范围，清理任务仍限超级管理员。
+		// 使用记录管理；清理任务仍限超级管理员。
 		registerUsageRoutes(admin, h, panelRateLimiter)
 
 		// 用户属性管理
@@ -169,29 +166,6 @@ func registerAdminComplianceRoutes(admin *gin.RouterGroup, h *handler.Handlers) 
 	}
 }
 
-func registerProjectRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	projects := admin.Group("/projects")
-	{
-		adminOnly := middleware.RequireAdminOnly()
-		projects.GET("", h.Admin.Project.List)
-		projects.POST("", adminOnly, h.Admin.Project.Create)
-		projects.GET("/resources/search", adminOnly, h.Admin.Project.SearchGlobalBindableResources)
-		projects.PUT("/:id", adminOnly, h.Admin.Project.Update)
-		projects.GET("/:id/members", adminOnly, h.Admin.Project.ListMembers)
-		projects.PUT("/:id/members/:user_id", h.Admin.Project.SetMember)
-		projects.DELETE("/:id/members/:user_id", adminOnly, h.Admin.Project.RemoveMember)
-		projects.GET("/:id/profiles", adminOnly, h.Admin.Project.ListProfiles)
-		projects.POST("/:id/profiles", adminOnly, h.Admin.Project.CreateProfile)
-		projects.PUT("/:id/profiles/:profile_id", adminOnly, h.Admin.Project.UpdateProfile)
-		projects.DELETE("/:id/profiles/:profile_id", adminOnly, h.Admin.Project.DeleteProfile)
-		projects.POST("/:id/profiles/:profile_id/activate", adminOnly, h.Admin.Project.ActivateProfile)
-		projects.POST("/:id/resource-scope/unrestricted", adminOnly, h.Admin.Project.ActivateUnrestrictedScope)
-		projects.GET("/:id/profiles/:profile_id/bindings", adminOnly, h.Admin.Project.GetProfileBindings)
-		projects.PUT("/:id/profiles/:profile_id/bindings", adminOnly, h.Admin.Project.SetProfileBindings)
-		projects.GET("/:id/resources/search", adminOnly, h.Admin.Project.SearchBindableResources)
-	}
-}
-
 func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	risk := admin.Group("/risk-control")
 	{
@@ -211,7 +185,6 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		apiKeysWrite := middleware.RequireAdminPermission(service.AdminPermissionAccountsWrite)
 		apiKeys.PUT("/:id", apiKeysWrite, h.Admin.APIKey.UpdateGroup)
-		apiKeys.PUT("/:id/project", middleware.RequireAdminOnly(), h.Admin.APIKey.UpdateGroup)
 	}
 }
 
@@ -343,6 +316,7 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.POST("/:id/auth-identities", h.Admin.User.BindAuthIdentity)
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
+		users.PUT("/:id/admin-access", middleware.RequireAdminOnly(), h.Admin.User.UpdateAdminAccess)
 		users.DELETE("/:id", h.Admin.User.Delete)
 		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)

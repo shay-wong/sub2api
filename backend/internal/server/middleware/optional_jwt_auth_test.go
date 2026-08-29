@@ -4,7 +4,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,7 +26,7 @@ func newOptionalJWTTestEnv(users map[int64]*service.User) (*gin.Engine, *service
 	userRepo := &stubJWTUserRepo{users: users}
 	authSvc := service.NewAuthService(nil, userRepo, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
-	mw := NewOptionalJWTAuthMiddleware(authSvc, userSvc, nil, nil, nil)
+	mw := NewOptionalJWTAuthMiddleware(authSvc, userSvc, nil, nil)
 
 	r := gin.New()
 	r.Use(gin.HandlerFunc(mw))
@@ -99,17 +98,16 @@ func TestOptionalJWTAuth_BlankHeaderTreatedAsAnonymous(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"authed":false`)
 }
 
-func TestOptionalJWTAuth_AnonymousUsesDefaultProjectContext(t *testing.T) {
+func TestOptionalJWTAuth_AnonymousIgnoresProjectSelectors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	projectSvc := service.NewProjectService(&stubProjectRepo{defaultID: 42})
-	mw := NewOptionalJWTAuthMiddleware(nil, nil, projectSvc, nil, nil)
+	mw := NewOptionalJWTAuthMiddleware(nil, nil, nil, nil)
 
 	router := gin.New()
 	router.Use(gin.HandlerFunc(mw))
 	router.GET("/plaza", func(c *gin.Context) {
-		projectID, ok := service.ProjectIDFromContext(c.Request.Context())
-		require.True(t, ok)
-		c.JSON(http.StatusOK, gin.H{"project_id": projectID})
+		_, hasProject := c.Get("project_id")
+		require.False(t, hasProject)
+		c.Status(http.StatusOK)
 	})
 
 	w := httptest.NewRecorder()
@@ -118,33 +116,4 @@ func TestOptionalJWTAuth_AnonymousUsesDefaultProjectContext(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), `"project_id":42`)
-}
-
-type failingDefaultProjectRepo struct{ service.ProjectRepository }
-
-func (failingDefaultProjectRepo) GetDefaultProjectID(context.Context) (int64, error) {
-	return 0, errors.New("database unavailable")
-}
-
-func TestOptionalJWTAuth_AnonymousProjectLookupFailsClosed(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	projectSvc := service.NewProjectService(failingDefaultProjectRepo{})
-	mw := NewOptionalJWTAuthMiddleware(nil, nil, projectSvc, nil, nil)
-	handlerCalled := false
-
-	router := gin.New()
-	router.Use(gin.HandlerFunc(mw))
-	router.GET("/plaza", func(c *gin.Context) {
-		handlerCalled = true
-		c.Status(http.StatusOK)
-	})
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/plaza", nil)
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusInternalServerError, w.Code)
-	require.False(t, handlerCalled)
-	require.Contains(t, w.Body.String(), "PROJECT_SERVICE_UNAVAILABLE")
 }

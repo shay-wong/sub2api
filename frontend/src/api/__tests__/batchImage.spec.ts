@@ -15,8 +15,6 @@ describe('batch image api', () => {
 
   it('uses the user JWT route for all-key history', async () => {
     localStorage.setItem('auth_token', 'jwt-token')
-    localStorage.setItem('sub2api_selected_project_id', '169')
-
     const { apiClient } = await import('@/api/client')
     const { listAllBatchImageJobs } = await import('@/api/batchImage')
     const adapter = vi.fn().mockResolvedValue({
@@ -54,6 +52,6 @@ describe('batch image api', () => {
       timezone: expect.any(String),
     }))
     expect(config.headers.get('Authorization')).toBe('Bearer jwt-token')
-    expect(config.headers.get('X-Project-ID')).toBe('169')
+    expect(config.headers.get('X-Project-ID')).toBeFalsy()
   })
 })

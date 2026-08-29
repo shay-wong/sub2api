@@ -4,10 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endTime time.Time) error {
@@ -20,12 +17,11 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
 
 	start := startTime.UTC()
 	end := endTime.UTC()
-	args := []any{start, end}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND project_id = $" + itoa(len(args))
+	projectID, err := ensureDefaultProject(ctx, r.db)
+	if err != nil {
+		return err
 	}
+	args := []any{start, end, projectID}
 
 	// NOTE:
 	// - We aggregate usage_logs + ops_error_logs into ops_metrics_hourly.
@@ -37,11 +33,14 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
 	// IMPORTANT: Postgres UNIQUE treats NULLs as distinct, so the table uses a COALESCE-based
 	// unique index; our ON CONFLICT target must match that expression set.
 	q := `
-	WITH usage_base AS (
-	  SELECT
-	    date_trunc('hour', ul.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
-	    ul.project_id AS project_id,
-	    g.platform AS platform,
+		WITH deleted AS (
+		  DELETE FROM ops_metrics_hourly
+		  WHERE bucket_start >= $1 AND bucket_start < $2
+		),
+		usage_base AS (
+		  SELECT
+		    date_trunc('hour', ul.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
+		    g.platform AS platform,
 	    ul.group_id AS group_id,
     ul.duration_ms AS duration_ms,
     ul.first_token_ms AS first_token_ms,
@@ -49,13 +48,11 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
 	  FROM usage_logs ul
 	  JOIN groups g ON g.id = ul.group_id
 	  WHERE ul.created_at >= $1 AND ul.created_at < $2
-	    ` + strings.ReplaceAll(projectClause, "project_id", "ul.project_id") + `
 	),
-	usage_agg AS (
-	  SELECT
-	    bucket_start,
-	    project_id,
-	    CASE WHEN GROUPING(platform) = 1 THEN NULL ELSE platform END AS platform,
+		usage_agg AS (
+		  SELECT
+		    bucket_start,
+		    CASE WHEN GROUPING(platform) = 1 THEN NULL ELSE platform END AS platform,
     CASE WHEN GROUPING(group_id) = 1 THEN NULL ELSE group_id END AS group_id,
     COUNT(*) AS success_count,
     COUNT(*) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_sample_count,
@@ -74,18 +71,17 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
     percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p99_ms,
     AVG(first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_avg_ms,
     MAX(first_token_ms) AS ttft_max_ms
-  FROM usage_base
-	  GROUP BY GROUPING SETS (
-	    (bucket_start, project_id),
-	    (bucket_start, project_id, platform),
-	    (bucket_start, project_id, platform, group_id)
-	  )
+		  FROM usage_base
+		  GROUP BY GROUPING SETS (
+		    (bucket_start),
+		    (bucket_start, platform),
+		    (bucket_start, platform, group_id)
+		  )
 	),
 	error_base AS (
-	  SELECT
-	    date_trunc('hour', created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
-	    project_id AS project_id,
-	    -- platform is NULL for some early-phase errors (e.g. before routing); map to a sentinel
+		  SELECT
+		    date_trunc('hour', created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
+		    -- platform is NULL for some early-phase errors (e.g. before routing); map to a sentinel
     -- value so platform-level GROUPING SETS don't collide with the overall (platform=NULL) row.
     COALESCE(platform, 'unknown') AS platform,
     group_id AS group_id,
@@ -94,16 +90,14 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
     status_code AS client_status_code,
     COALESCE(upstream_status_code, status_code, 0) AS effective_status_code
   FROM ops_error_logs
-	  -- Exclude count_tokens requests from error metrics as they are informational probes
-	  WHERE created_at >= $1 AND created_at < $2
-	    ` + projectClause + `
-	    AND is_count_tokens = FALSE
+		  -- Exclude count_tokens requests from error metrics as they are informational probes
+		  WHERE created_at >= $1 AND created_at < $2
+		    AND is_count_tokens = FALSE
 	),
 	error_agg AS (
-	  SELECT
-	    bucket_start,
-	    project_id,
-	    CASE WHEN GROUPING(platform) = 1 THEN NULL ELSE platform END AS platform,
+		  SELECT
+		    bucket_start,
+		    CASE WHEN GROUPING(platform) = 1 THEN NULL ELSE platform END AS platform,
     CASE WHEN GROUPING(group_id) = 1 THEN NULL ELSE group_id END AS group_id,
     COUNT(*) FILTER (WHERE COALESCE(client_status_code, 0) >= 400) AS error_count_total,
     COUNT(*) FILTER (WHERE COALESCE(client_status_code, 0) >= 400 AND is_business_limited) AS business_limited_count,
@@ -111,19 +105,18 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
     COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(effective_status_code, 0) NOT IN (429, 529)) AS upstream_error_count_excl_429_529,
     COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(effective_status_code, 0) = 429) AS upstream_429_count,
     COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(effective_status_code, 0) = 529) AS upstream_529_count
-  FROM error_base
-	  GROUP BY GROUPING SETS (
-	    (bucket_start, project_id),
-	    (bucket_start, project_id, platform),
-	    (bucket_start, project_id, platform, group_id)
+		  FROM error_base
+		  GROUP BY GROUPING SETS (
+		    (bucket_start),
+		    (bucket_start, platform),
+		    (bucket_start, platform, group_id)
 	  )
 	  HAVING GROUPING(group_id) = 1 OR group_id IS NOT NULL
 	),
 	combined AS (
-	  SELECT
-	    COALESCE(u.bucket_start, e.bucket_start) AS bucket_start,
-	    COALESCE(u.project_id, e.project_id) AS project_id,
-	    COALESCE(u.platform, e.platform) AS platform,
+		  SELECT
+		    COALESCE(u.bucket_start, e.bucket_start) AS bucket_start,
+		    COALESCE(u.platform, e.platform) AS platform,
     COALESCE(u.group_id, e.group_id) AS group_id,
 
     COALESCE(u.success_count, 0) AS success_count,
@@ -151,10 +144,9 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
     u.ttft_avg_ms,
     u.ttft_max_ms
   FROM usage_agg u
-	  FULL OUTER JOIN error_agg e
-	    ON u.bucket_start = e.bucket_start
-	   AND u.project_id = e.project_id
-	   AND COALESCE(u.platform, '') = COALESCE(e.platform, '')
+		  FULL OUTER JOIN error_agg e
+		    ON u.bucket_start = e.bucket_start
+		   AND COALESCE(u.platform, '') = COALESCE(e.platform, '')
    AND COALESCE(u.group_id, 0) = COALESCE(e.group_id, 0)
 )
 	INSERT INTO ops_metrics_hourly (
@@ -185,8 +177,8 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
   ttft_max_ms,
   computed_at
 )
-	SELECT
-	  project_id,
+		SELECT
+		  $3,
 	  bucket_start,
 	  NULLIF(platform, '') AS platform,
   group_id,
@@ -212,10 +204,9 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
   ttft_avg_ms,
   ttft_max_ms::int,
   NOW()
-	FROM combined
-	WHERE bucket_start IS NOT NULL
-	  AND project_id IS NOT NULL
-	  AND (platform IS NULL OR platform <> '')
+		FROM combined
+		WHERE bucket_start IS NOT NULL
+		  AND (platform IS NULL OR platform <> '')
 	ON CONFLICT (project_id, bucket_start, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDATE SET
   success_count = EXCLUDED.success_count,
   ttft_sample_count = EXCLUDED.ttft_sample_count,
@@ -244,7 +235,7 @@ func (r *opsRepository) UpsertHourlyMetrics(ctx context.Context, startTime, endT
   computed_at = NOW()
 `
 
-	_, err := r.db.ExecContext(ctx, q, args...)
+	_, err = r.db.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -258,14 +249,18 @@ func (r *opsRepository) UpsertDailyMetrics(ctx context.Context, startTime, endTi
 
 	start := startTime.UTC()
 	end := endTime.UTC()
-	args := []any{start, end}
-	projectClause := ""
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		projectClause = " AND project_id = $" + itoa(len(args))
+	projectID, err := ensureDefaultProject(ctx, r.db)
+	if err != nil {
+		return err
 	}
+	args := []any{start, end, projectID}
 
 	q := `
+	WITH deleted AS (
+	  DELETE FROM ops_metrics_daily
+	  WHERE bucket_date >= ($1 AT TIME ZONE 'UTC')::date
+	    AND bucket_date < ($2 AT TIME ZONE 'UTC')::date
+	)
 	INSERT INTO ops_metrics_daily (
 	  project_id,
 	  bucket_date,
@@ -295,7 +290,7 @@ func (r *opsRepository) UpsertDailyMetrics(ctx context.Context, startTime, endTi
   computed_at
 )
 	SELECT
-	  project_id,
+	  $3,
 	  (bucket_start AT TIME ZONE 'UTC')::date AS bucket_date,
   platform,
   group_id,
@@ -336,8 +331,7 @@ func (r *opsRepository) UpsertDailyMetrics(ctx context.Context, startTime, endTi
   NOW()
 	FROM ops_metrics_hourly
 	WHERE bucket_start >= $1 AND bucket_start < $2
-	  ` + projectClause + `
-	GROUP BY 1, 2, 3, 4
+	GROUP BY 2, 3, 4
 	ON CONFLICT (project_id, bucket_date, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDATE SET
   success_count = EXCLUDED.success_count,
   ttft_sample_count = EXCLUDED.ttft_sample_count,
@@ -366,7 +360,7 @@ func (r *opsRepository) UpsertDailyMetrics(ctx context.Context, startTime, endTi
   computed_at = NOW()
 `
 
-	_, err := r.db.ExecContext(ctx, q, args...)
+	_, err = r.db.ExecContext(ctx, q, args...)
 	return err
 }
 
@@ -378,7 +372,6 @@ func (r *opsRepository) GetLatestHourlyBucketStart(ctx context.Context) (time.Ti
 	var value sql.NullTime
 	q := `SELECT MAX(bucket_start) FROM ops_metrics_hourly WHERE 1=1`
 	args := []any{}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	if err := r.db.QueryRowContext(ctx, q, args...).Scan(&value); err != nil {
 		return time.Time{}, false, err
 	}
@@ -396,7 +389,6 @@ func (r *opsRepository) GetLatestDailyBucketDate(ctx context.Context) (time.Time
 	var value sql.NullTime
 	q := `SELECT MAX(bucket_date) FROM ops_metrics_daily WHERE 1=1`
 	args := []any{}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	if err := r.db.QueryRowContext(ctx, q, args...).Scan(&value); err != nil {
 		return time.Time{}, false, err
 	}

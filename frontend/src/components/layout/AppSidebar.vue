@@ -778,7 +778,7 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const adminUsageItem: NavItem = { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon, adminPermission: AdminPermissions.usage }
-  const projectItems: NavItem[] = [
+  const permissionItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon, adminPermission: AdminPermissions.dashboard },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring, adminPermission: AdminPermissions.ops },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.users },
@@ -790,13 +790,12 @@ const adminNavItems = computed((): NavItem[] => {
   ]
 
   if (!authStore.isAdmin) {
-    return applyAdminPermissions(applyFeatureFlags(projectItems))
+    return applyAdminPermissions(applyFeatureFlags(permissionItems))
   }
 
   const baseItems: NavItem[] = [
-    ...projectItems.slice(0, 2),
-    { path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true },
-    ...projectItems.slice(2, 4),
+    ...permissionItems.slice(0, 2),
+    ...permissionItems.slice(2, 4),
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),
@@ -808,7 +807,7 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    ...projectItems.slice(4, 7),
+    ...permissionItems.slice(4, 7),
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     {

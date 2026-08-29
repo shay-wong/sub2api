@@ -18,34 +18,9 @@ func NewUserGroupRateRepository(sqlDB *sql.DB) service.UserGroupRateRepository {
 	return &userGroupRateRepository{sql: sqlDB}
 }
 
-func userGroupRateProjectScopeCondition(ctx context.Context, groupIDColumn, userIDColumn string) string {
-	projectID, ok := service.ProjectIDFromContext(ctx)
-	if !ok {
-		return ""
-	}
-	return projectUserGroupScopeSQL(projectID, userIDColumn, groupIDColumn)
-}
-
-func userGroupRateProjectScopeClause(ctx context.Context, groupIDColumn, userIDColumn string) string {
-	condition := userGroupRateProjectScopeCondition(ctx, groupIDColumn, userIDColumn)
-	if condition == "" {
-		return ""
-	}
-	return " AND " + condition
-}
-
-func userGroupRateProjectScopeWhere(ctx context.Context, groupIDColumn, userIDColumn string) string {
-	condition := userGroupRateProjectScopeCondition(ctx, groupIDColumn, userIDColumn)
-	if condition == "" {
-		return ""
-	}
-	return " WHERE " + condition
-}
-
 // GetByUserID 获取用户所有专属分组 rate_multiplier（仅返回非 NULL 的条目）
 func (r *userGroupRateRepository) GetByUserID(ctx context.Context, userID int64) (map[int64]float64, error) {
-	query := `SELECT group_id, rate_multiplier FROM user_group_rate_multipliers WHERE user_id = $1 AND rate_multiplier IS NOT NULL` +
-		userGroupRateProjectScopeClause(ctx, "user_group_rate_multipliers.group_id", "user_group_rate_multipliers.user_id")
+	query := `SELECT group_id, rate_multiplier FROM user_group_rate_multipliers WHERE user_id = $1 AND rate_multiplier IS NOT NULL`
 	rows, err := r.sql.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
@@ -95,7 +70,7 @@ func (r *userGroupRateRepository) GetByUserIDs(ctx context.Context, userIDs []in
 		SELECT user_id, group_id, rate_multiplier
 		FROM user_group_rate_multipliers
 		WHERE user_id = ANY($1) AND rate_multiplier IS NOT NULL
-	`+userGroupRateProjectScopeClause(ctx, "user_group_rate_multipliers.group_id", "user_group_rate_multipliers.user_id"), pq.Array(uniqueIDs))
+	`, pq.Array(uniqueIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +101,7 @@ func (r *userGroupRateRepository) GetByGroupID(ctx context.Context, groupID int6
 		FROM user_group_rate_multipliers ugr
 		JOIN users u ON u.id = ugr.user_id AND u.deleted_at IS NULL
 		WHERE ugr.group_id = $1
-	` + userGroupRateProjectScopeClause(ctx, "ugr.group_id", "ugr.user_id") + `
+
 		ORDER BY ugr.user_id
 	`
 	rows, err := r.sql.QueryContext(ctx, query, groupID)
@@ -274,15 +249,13 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 	for _, e := range entries {
 		keepUserIDs = append(keepUserIDs, e.UserID)
 	}
-	rowScope := userGroupRateProjectScopeClause(ctx, "user_group_rate_multipliers.group_id", "user_group_rate_multipliers.user_id")
-
 	// 未在 entries 列表中的行：清空 rate_multiplier。
 	if len(keepUserIDs) == 0 {
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
 			SET rate_multiplier = NULL, updated_at = NOW()
 			WHERE group_id = $1
-		`+rowScope, groupID); err != nil {
+		`, groupID); err != nil {
 			return err
 		}
 	} else {
@@ -290,7 +263,7 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 			UPDATE user_group_rate_multipliers
 			SET rate_multiplier = NULL, updated_at = NOW()
 			WHERE group_id = $1 AND user_id <> ALL($2)
-		`+rowScope, groupID, pq.Array(keepUserIDs)); err != nil {
+		`, groupID, pq.Array(keepUserIDs)); err != nil {
 			return err
 		}
 	}
@@ -299,7 +272,7 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 	if _, err := r.sql.ExecContext(ctx, `
 		DELETE FROM user_group_rate_multipliers
 		WHERE group_id = $1 AND rate_multiplier IS NULL AND rpm_override IS NULL
-	`+rowScope, groupID); err != nil {
+	`, groupID); err != nil {
 		return err
 	}
 
@@ -318,7 +291,7 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 		INSERT INTO user_group_rate_multipliers (user_id, group_id, rate_multiplier, created_at, updated_at)
 		SELECT data.user_id, $1::bigint, data.rate_multiplier, $2::timestamptz, $2::timestamptz
 		FROM unnest($3::bigint[], $4::double precision[]) AS data(user_id, rate_multiplier)
-		`+userGroupRateProjectScopeWhere(ctx, "$1::bigint", "data.user_id")+`
+
 		ON CONFLICT (user_id, group_id)
 		DO UPDATE SET rate_multiplier = EXCLUDED.rate_multiplier, updated_at = EXCLUDED.updated_at
 	`, groupID, now, pq.Array(userIDs), pq.Array(rates))
@@ -343,15 +316,13 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 			upsertValues = append(upsertValues, int32(*e.RPMOverride))
 		}
 	}
-	rowScope := userGroupRateProjectScopeClause(ctx, "user_group_rate_multipliers.group_id", "user_group_rate_multipliers.user_id")
-
 	// 未在 entries 列表中的行：清空 rpm_override。
 	if len(keepUserIDs) == 0 {
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
 			SET rpm_override = NULL, updated_at = NOW()
 			WHERE group_id = $1
-		`+rowScope, groupID); err != nil {
+		`, groupID); err != nil {
 			return err
 		}
 	} else {
@@ -359,7 +330,7 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 			UPDATE user_group_rate_multipliers
 			SET rpm_override = NULL, updated_at = NOW()
 			WHERE group_id = $1 AND user_id <> ALL($2)
-		`+rowScope, groupID, pq.Array(keepUserIDs)); err != nil {
+		`, groupID, pq.Array(keepUserIDs)); err != nil {
 			return err
 		}
 	}
@@ -370,7 +341,7 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 			UPDATE user_group_rate_multipliers
 			SET rpm_override = NULL, updated_at = NOW()
 			WHERE group_id = $1 AND user_id = ANY($2)
-		`+rowScope, groupID, pq.Array(clearUserIDs)); err != nil {
+		`, groupID, pq.Array(clearUserIDs)); err != nil {
 			return err
 		}
 	}
@@ -379,7 +350,7 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 	if _, err := r.sql.ExecContext(ctx, `
 		DELETE FROM user_group_rate_multipliers
 		WHERE group_id = $1 AND rate_multiplier IS NULL AND rpm_override IS NULL
-	`+rowScope, groupID); err != nil {
+	`, groupID); err != nil {
 		return err
 	}
 
@@ -389,7 +360,7 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 			INSERT INTO user_group_rate_multipliers (user_id, group_id, rpm_override, created_at, updated_at)
 			SELECT data.user_id, $1::bigint, data.rpm_override, $2::timestamptz, $2::timestamptz
 			FROM unnest($3::bigint[], $4::integer[]) AS data(user_id, rpm_override)
-			`+userGroupRateProjectScopeWhere(ctx, "$1::bigint", "data.user_id")+`
+
 			ON CONFLICT (user_id, group_id)
 			DO UPDATE SET rpm_override = EXCLUDED.rpm_override, updated_at = EXCLUDED.updated_at
 		`, groupID, now, pq.Array(upsertUserIDs), pq.Array(upsertValues))
@@ -403,18 +374,17 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 
 // ClearGroupRPMOverrides 清空指定分组所有行的 rpm_override。
 func (r *userGroupRateRepository) ClearGroupRPMOverrides(ctx context.Context, groupID int64) error {
-	rowScope := userGroupRateProjectScopeClause(ctx, "user_group_rate_multipliers.group_id", "user_group_rate_multipliers.user_id")
 	if _, err := r.sql.ExecContext(ctx, `
 		UPDATE user_group_rate_multipliers
 		SET rpm_override = NULL, updated_at = NOW()
 		WHERE group_id = $1
-	`+rowScope, groupID); err != nil {
+	`, groupID); err != nil {
 		return err
 	}
 	_, err := r.sql.ExecContext(ctx, `
 		DELETE FROM user_group_rate_multipliers
 		WHERE group_id = $1 AND rate_multiplier IS NULL AND rpm_override IS NULL
-	`+rowScope, groupID)
+	`, groupID)
 	return err
 }
 

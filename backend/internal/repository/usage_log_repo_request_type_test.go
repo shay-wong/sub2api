@@ -207,7 +207,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUsageLogRepositoryCreatePrefersContextProject(t *testing.T) {
+func TestUsageLogRepositoryCreatePreservesStorageCompatibilityProjectID(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
@@ -225,7 +225,7 @@ func TestUsageLogRepositoryCreatePrefersContextProject(t *testing.T) {
 	mock.ExpectQuery("INSERT INTO usage_logs").
 		WithArgs(
 			log.UserID,
-			int64(7),
+			log.ProjectID,
 			log.APIKeyID,
 			log.AccountID,
 			sqlmock.AnyArg(), // request_id
@@ -288,14 +288,14 @@ func TestUsageLogRepositoryCreatePrefersContextProject(t *testing.T) {
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(101), createdAt))
 
-	inserted, err := repo.Create(service.WithProjectID(context.Background(), 7), log)
+	inserted, err := repo.Create(context.Background(), log)
 	require.NoError(t, err)
 	require.True(t, inserted)
-	require.Equal(t, int64(7), log.ProjectID)
+	require.Equal(t, int64(99), log.ProjectID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUsageLogRepositoryCreateConflictLookupUsesContextProject(t *testing.T) {
+func TestUsageLogRepositoryCreateConflictLookupIsGlobalByRequestAndAPIKey(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
@@ -318,14 +318,14 @@ func TestUsageLogRepositoryCreateConflictLookupUsesContextProject(t *testing.T) 
 
 	mock.ExpectQuery("INSERT INTO usage_logs").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2 AND \\(EXISTS \\(\\s*SELECT 1\\s+FROM project_members pm\\s+WHERE pm\\.project_id = 7\\s+AND pm\\.user_id = usage_logs\\.user_id\\s*\\) AND").
+	mock.ExpectQuery("SELECT id, created_at FROM usage_logs WHERE request_id = \\$1 AND api_key_id = \\$2$").
 		WithArgs(log.RequestID, log.APIKeyID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(202), createdAt))
 
-	inserted, err := repo.Create(service.WithProjectID(context.Background(), 7), log)
+	inserted, err := repo.Create(context.Background(), log)
 	require.NoError(t, err)
 	require.False(t, inserted)
-	require.Equal(t, int64(7), log.ProjectID)
+	require.Equal(t, int64(9), log.ProjectID)
 	require.Equal(t, int64(202), log.ID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -30,8 +30,6 @@ export interface AccountConnectionTestResult {
   error?: string
 }
 
-const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
-
 const buildRequestBody = (options: RunAccountConnectionTestOptions) => {
   const body: Record<string, string> = {}
   if (options.modelId) body.model_id = options.modelId
@@ -40,14 +38,6 @@ const buildRequestBody = (options: RunAccountConnectionTestOptions) => {
   if (options.imageDataURL) body.image_data_url = options.imageDataURL
   if (options.audioDataURL) body.audio_data_url = options.audioDataURL
   return JSON.stringify(body)
-}
-
-const selectedProjectID = (): string => {
-  try {
-    return localStorage.getItem(SELECTED_PROJECT_ID_KEY)?.trim() ?? ''
-  } catch {
-    return ''
-  }
 }
 
 export async function runAccountConnectionTest(
@@ -60,11 +50,6 @@ export async function runAccountConnectionTest(
   if (options.authToken) {
     headers.Authorization = `Bearer ${options.authToken}`
   }
-  const projectID = selectedProjectID()
-  if (projectID) {
-    headers['X-Project-ID'] = projectID
-  }
-
   const response = await fetch(buildApiUrl(`/admin/accounts/${options.accountId}/test`), {
     method: 'POST',
     headers,

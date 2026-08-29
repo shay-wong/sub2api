@@ -18,9 +18,7 @@ func UserFromServiceShallow(u *service.User) *User {
 		Email:                      u.Email,
 		Username:                   u.Username,
 		Role:                       u.Role,
-		ProjectRole:                u.ProjectRole,
-		ProjectMemberStatus:        u.ProjectMemberStatus,
-		ProjectPermissions:         u.ProjectPermissions,
+		AdminPermissions:           append([]string(nil), u.AdminPermissions...),
 		Balance:                    u.Balance,
 		FrozenBalance:              u.FrozenBalance,
 		Concurrency:                u.Concurrency,
@@ -87,7 +85,6 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	out := &APIKey{
 		ID:                 k.ID,
 		UserID:             k.UserID,
-		ProjectID:          k.ProjectID,
 		Key:                k.Key,
 		Name:               k.Name,
 		GroupID:            k.GroupID,

@@ -54,10 +54,6 @@ func (s *authRepoStub) Update(ctx context.Context, key *APIKey, _ APIKeyUpdateFi
 	panic("unexpected Update call")
 }
 
-func (s *authRepoStub) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
-	panic("unexpected UpdateProjectID call")
-}
-
 func (s *authRepoStub) Delete(ctx context.Context, id int64) error {
 	panic("unexpected Delete call")
 }
@@ -562,8 +558,6 @@ func TestAPIKeyService_InvalidateAuthCacheByAPIKeyID(t *testing.T) {
 	repo := &authRepoStub{
 		getKeyAndOwnerID: func(ctx context.Context, id int64) (string, int64, error) {
 			require.Equal(t, int64(11), id)
-			_, ok := ProjectIDFromContext(ctx)
-			require.False(t, ok)
 			return "k-direct", 7, nil
 		},
 	}
@@ -574,7 +568,7 @@ func TestAPIKeyService_InvalidateAuthCacheByAPIKeyID(t *testing.T) {
 	}
 	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
 
-	svc.InvalidateAuthCacheByAPIKeyID(WithProjectID(context.Background(), 99), 11)
+	svc.InvalidateAuthCacheByAPIKeyID(context.Background(), 11)
 
 	require.Len(t, cache.deleteAuthKeys, 1)
 }

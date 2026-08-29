@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"html"
 	"math"
@@ -96,7 +95,6 @@ type APIKeyRepository interface {
 	GetByKeyForAuth(ctx context.Context, key string) (*APIKey, error)
 	// Update 只写 fields 中显式声明的列，其余列保持库中当前值。
 	Update(ctx context.Context, key *APIKey, fields APIKeyUpdateFields) error
-	UpdateProjectID(ctx context.Context, id int64, projectID int64) error
 	Delete(ctx context.Context, id int64) error
 	// DeleteWithAudit keeps the legacy interface name for rolling-upgrade compatibility.
 	// Implementations must tombstone the key and soft-delete it atomically without
@@ -707,49 +705,6 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 		apiKey.CurrentConcurrency = s.currentConcurrencyForAPIKey(ctx, apiKey.ID)
 	}
 	return apiKey, nil
-}
-
-func (s *APIKeyService) GetByIDForProjectAuth(ctx context.Context, id int64) (*APIKey, error) {
-	apiKey, err := s.apiKeyRepo.GetByID(WithRequireActiveProjectMember(ctx), id)
-	if err != nil {
-		if _, ok := ProjectIDFromContext(ctx); ok && errors.Is(err, ErrAPIKeyNotFound) {
-			if visible, visibleErr := s.apiKeyRepo.GetByID(ctx, id); visibleErr == nil && visible != nil {
-				return nil, ErrProjectMemberDisabled
-			} else if visibleErr != nil && !errors.Is(visibleErr, ErrAPIKeyNotFound) {
-				return nil, fmt.Errorf("check project member status: %w", visibleErr)
-			}
-		}
-		return nil, fmt.Errorf("get api key: %w", err)
-	}
-	if err := s.ensureProjectScopedAPIKeyGroup(ctx, apiKey); err != nil {
-		return nil, err
-	}
-	s.compileAPIKeyIPRules(apiKey)
-	return apiKey, nil
-}
-
-func (s *APIKeyService) ensureProjectScopedAPIKeyGroup(ctx context.Context, apiKey *APIKey) error {
-	if apiKey == nil || apiKey.GroupID == nil {
-		return nil
-	}
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		return nil
-	}
-	if s.groupRepo == nil {
-		return infraerrors.ServiceUnavailable("GROUP_REPOSITORY_UNAVAILABLE", "group repository is not configured")
-	}
-	group, err := s.groupRepo.GetByID(ctx, *apiKey.GroupID)
-	if err != nil {
-		if errors.Is(err, ErrGroupNotFound) {
-			return ErrProjectAPIKeyGroupUnavailable
-		}
-		return fmt.Errorf("check api key group project scope: %w", err)
-	}
-	if group == nil {
-		return ErrProjectAPIKeyGroupUnavailable
-	}
-	apiKey.Group = group
-	return nil
 }
 
 // GetByKey 根据Key字符串获取API Key（用于认证）

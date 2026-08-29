@@ -52,7 +52,6 @@ func (s *BatchImageCleanupService) appendCleanupEvent(ctx context.Context, batch
 }
 
 func (s *BatchImageCleanupService) DeleteOutputsForOwner(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err

@@ -175,7 +175,7 @@ func (s *APIKeyRepoSuite) TestUpdate_ClearGroupID() {
 	s.Require().Nil(got.GroupID, "expected GroupID to be cleared")
 }
 
-func (s *APIKeyRepoSuite) TestUpdateRejectsProfileBoundAPIKeyFromDifferentProject() {
+func (s *APIKeyRepoSuite) TestUpdateIgnoresLegacyProjectProfileBindings() {
 	user := s.mustCreateUser("update-profile-bound-rejected@test.com")
 	homeProjectID := mustDefaultProjectID(s.T(), s.client)
 	workspace, err := s.client.Project.Create().
@@ -208,43 +208,31 @@ func (s *APIKeyRepoSuite) TestUpdateRejectsProfileBoundAPIKeyFromDifferentProjec
 	s.Require().NoError(err)
 
 	key.Name = "Edited Profile Bound Key"
-	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
-	s.Require().ErrorIs(s.repo.Update(projectCtx, key, service.APIKeyUpdateFields{Name: true}), service.ErrAPIKeyNotFound)
+	s.Require().NoError(s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{Name: true}))
 
 	got, err := s.repo.GetByID(s.ctx, key.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(homeProjectID, got.ProjectID)
-	s.Require().Equal("Profile Bound Key", got.Name)
+	s.Require().Equal("Edited Profile Bound Key", got.Name)
 }
 
-func (s *APIKeyRepoSuite) TestUpdateProjectIDMovesBatchImageJobs() {
-	user := s.mustCreateUser("update-project-batch-image@test.com")
-	homeProjectID := mustDefaultProjectID(s.T(), s.client)
-	target, err := s.client.Project.Create().
-		SetName("API Key Batch Image Transfer").
-		SetSlug("api-key-batch-transfer-" + batchImageSafeTestIDSegment(s.T().Name(), 32)).
-		SetProfiles(map[string]any{}).
-		Save(s.ctx)
-	s.Require().NoError(err)
-	_, err = s.client.ProjectMember.Create().
-		SetProjectID(target.ID).
-		SetUserID(user.ID).
-		SetRole(service.ProjectRoleAdmin).
-		Save(s.ctx)
-	s.Require().NoError(err)
+func (s *APIKeyRepoSuite) TestCreateUsesDefaultProjectCompatibilityRow() {
+	user := s.mustCreateUser("default-project-compatibility@test.com")
+	defaultProjectID := mustDefaultProjectID(s.T(), s.client)
 
 	key := &service.APIKey{
 		UserID:    user.ID,
-		ProjectID: homeProjectID,
-		Key:       "sk-update-project-batch-image",
+		ProjectID: 999999,
+		Key:       "sk-default-project-compatibility",
 		Name:      "Batch Image Key",
 		Status:    service.StatusActive,
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, key))
+	s.Require().Equal(defaultProjectID, key.ProjectID)
 
 	batchRepo := newBatchImageRepositoryWithSQL(s.sql)
 	apiKeyID := key.ID
-	job, err := batchRepo.CreateBatchImageJob(service.WithProjectID(s.ctx, homeProjectID), service.CreateBatchImageJobParams{
+	job, err := batchRepo.CreateBatchImageJob(s.ctx, service.CreateBatchImageJobParams{
 		BatchID:   batchImageTestID(s.T(), "key-transfer"),
 		UserID:    user.ID,
 		APIKeyID:  &apiKeyID,
@@ -253,16 +241,11 @@ func (s *APIKeyRepoSuite) TestUpdateProjectIDMovesBatchImageJobs() {
 		ItemCount: 1,
 	})
 	s.Require().NoError(err)
-	s.Require().Equal(homeProjectID, job.ProjectID)
+	s.Require().Equal(defaultProjectID, job.ProjectID)
 
-	s.Require().NoError(s.repo.UpdateProjectID(s.ctx, key.ID, target.ID))
-
-	_, err = batchRepo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(s.ctx, homeProjectID), user.ID, key.ID, job.BatchID)
-	s.Require().ErrorIs(err, service.ErrBatchImageJobNotFound)
-
-	moved, err := batchRepo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(s.ctx, target.ID), user.ID, key.ID, job.BatchID)
+	got, err := batchRepo.GetBatchImageJobByBatchIDForOwner(s.ctx, user.ID, key.ID, job.BatchID)
 	s.Require().NoError(err)
-	s.Require().Equal(target.ID, moved.ProjectID)
+	s.Require().Equal(defaultProjectID, got.ProjectID)
 }
 
 // --- Delete ---
@@ -690,7 +673,7 @@ func (s *APIKeyRepoSuite) TestDeleteWithAudit_TombstonesAndRetainsOnlyDigest() {
 	s.Require().NotEqual("sk-del-audit-1", keyDigest)
 }
 
-func (s *APIKeyRepoSuite) TestDeleteWithAuditRejectsProfileBoundAPIKeyFromDifferentProject() {
+func (s *APIKeyRepoSuite) TestDeleteWithAuditIgnoresLegacyProjectProfileBinding() {
 	user := s.mustCreateUser("delwithaudit-profile-bound-rejected@test.com")
 	homeProjectID := mustDefaultProjectID(s.T(), s.client)
 	workspace, err := s.client.Project.Create().
@@ -724,12 +707,10 @@ func (s *APIKeyRepoSuite) TestDeleteWithAuditRejectsProfileBoundAPIKeyFromDiffer
 		Save(s.ctx)
 	s.Require().NoError(err)
 
-	projectCtx := service.WithProjectID(s.ctx, workspace.ID)
-	s.Require().ErrorIs(s.repo.DeleteWithAudit(projectCtx, key.ID), service.ErrAPIKeyNotFound)
+	s.Require().NoError(s.repo.DeleteWithAudit(s.ctx, key.ID))
 
-	got, err := s.repo.GetByID(s.ctx, key.ID)
-	s.Require().NoError(err)
-	s.Require().Equal(homeProjectID, got.ProjectID)
+	_, err = s.repo.GetByID(s.ctx, key.ID)
+	s.Require().ErrorIs(err, service.ErrAPIKeyNotFound)
 
 	var auditCount int
 	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql,
@@ -737,7 +718,7 @@ func (s *APIKeyRepoSuite) TestDeleteWithAuditRejectsProfileBoundAPIKeyFromDiffer
 		[]any{key.ID, user.ID},
 		&auditCount,
 	))
-	s.Require().Zero(auditCount)
+	s.Require().Equal(1, auditCount)
 }
 
 func (s *APIKeyRepoSuite) TestDeleteWithAudit_RepeatIsIdempotent() {

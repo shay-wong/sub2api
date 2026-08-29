@@ -17,6 +17,7 @@ type AdminService interface {
 	GetUserIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	CreateUser(ctx context.Context, input *CreateUserInput) (*User, error)
 	UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error)
+	UpdateUserAdminAccess(ctx context.Context, id int64, input *UpdateUserAdminAccessInput) (*User, error)
 	DeleteUser(ctx context.Context, id int64) error
 	UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error)
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
@@ -65,7 +66,6 @@ type AdminService interface {
 
 	// API Key management (admin)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
-	AdminTransferAPIKeyProject(ctx context.Context, keyID int64, projectID int64) (*APIKey, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
 
 	// ReplaceUserGroup 替换用户的专属分组：授予新分组权限、迁移 Key、移除旧分组权限
@@ -147,14 +147,11 @@ type CreateUserInput struct {
 	Password             string
 	Username             string
 	Notes                string
-	Role                 string // 空字符串表示使用默认角色(user);合法值 admin/user
 	Balance              *float64
 	Concurrency          int
 	RPMLimit             int
 	AllowedGroups        []int64
 	RestrictPublicGroups bool
-	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
-	ActorAdminID int64
 }
 
 type UpdateUserInput struct {
@@ -162,7 +159,6 @@ type UpdateUserInput struct {
 	Password      string
 	Username      *string
 	Notes         *string
-	Role          string   // 空字符串表示"未提供"(不修改);合法值 admin/user
 	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
 	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
 	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
@@ -173,8 +169,12 @@ type UpdateUserInput struct {
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
-	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
-	ActorAdminID int64
+}
+
+type UpdateUserAdminAccessInput struct {
+	Role             string
+	AdminPermissions []string
+	ActorAdminID     int64
 }
 
 type AdminBindAuthIdentityInput struct {

@@ -77,10 +77,9 @@ type BatchImageReferenceInput struct {
 }
 
 type BatchImageOwner struct {
-	UserID    int64
-	ProjectID int64
-	APIKeyID  int64
-	GroupID   *int64
+	UserID   int64
+	APIKeyID int64
+	GroupID  *int64
 }
 
 type BatchImagePublicService struct {
@@ -214,7 +213,6 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if !s.enabled() {
 		return nil, ErrBatchImageDisabled
 	}
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	normalized, err := s.validateSubmitRequest(req)
 	if err != nil {
 		return nil, err
@@ -276,7 +274,6 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	job, err := s.Repo.CreateBatchImageJob(ctx, CreateBatchImageJobParams{
 		BatchID:                 batchID,
 		UserID:                  owner.UserID,
-		ProjectID:               owner.ProjectID,
 		APIKeyID:                &apiKeyID,
 		AccountID:               &accountID,
 		Provider:                provider.Name(),
@@ -527,7 +524,6 @@ func (s *BatchImagePublicService) hidePreUpstreamSubmitFailure(ctx context.Conte
 	if s == nil || s.Repo == nil || job == nil || job.ProviderJobName != nil {
 		return
 	}
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	if err := s.Repo.MarkBatchImageJobUserDeleted(ctx, owner.UserID, owner.APIKeyID, job.BatchID, time.Now()); err != nil {
 		logger.L().Warn("batch_image.hide_pre_upstream_failure_failed",
 			zap.String("batch_id", job.BatchID),
@@ -537,7 +533,6 @@ func (s *BatchImagePublicService) hidePreUpstreamSubmitFailure(ctx context.Conte
 }
 
 func (s *BatchImagePublicService) Get(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err
@@ -546,7 +541,6 @@ func (s *BatchImagePublicService) Get(ctx context.Context, owner BatchImageOwner
 }
 
 func (s *BatchImagePublicService) List(ctx context.Context, owner BatchImageOwner, query BatchImageJobsQuery) (*BatchImagePublicListResponse, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	filter, err := batchImageJobFilterFromQuery(query)
 	if err != nil {
 		return nil, err
@@ -559,7 +553,6 @@ func (s *BatchImagePublicService) List(ctx context.Context, owner BatchImageOwne
 }
 
 func (s *BatchImagePublicService) ListAll(ctx context.Context, owner BatchImageOwner, query BatchImageJobsQuery) (*BatchImagePublicListAllResponse, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	filter, err := batchImageJobFilterFromQuery(query)
 	if err != nil {
 		return nil, err
@@ -572,7 +565,6 @@ func (s *BatchImagePublicService) ListAll(ctx context.Context, owner BatchImageO
 }
 
 func (s *BatchImagePublicService) MarkDownloaded(ctx context.Context, owner BatchImageOwner, batchID string) error {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return err
@@ -581,7 +573,6 @@ func (s *BatchImagePublicService) MarkDownloaded(ctx context.Context, owner Batc
 }
 
 func (s *BatchImagePublicService) DeleteRecord(ctx context.Context, owner BatchImageOwner, batchID string) error {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return err
@@ -596,7 +587,6 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 	if !s.enabled() {
 		return nil, ErrBatchImageDisabled
 	}
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	if s.Pricing == nil {
 		return nil, ErrBatchImageSettlementPricingMissing
 	}
@@ -653,7 +643,6 @@ func (s *BatchImagePublicService) ListModels(ctx context.Context, owner BatchIma
 }
 
 func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImageOwner, batchID string, query BatchImageItemsQuery) (*BatchImagePublicItemsResponse, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	filter := BatchImageItemFilter{Limit: query.Limit, Offset: parseBatchImageCursor(query.Cursor)}
 	switch strings.TrimSpace(query.Status) {
 	case "", "all":
@@ -690,7 +679,6 @@ func (s *BatchImagePublicService) ListItems(ctx context.Context, owner BatchImag
 }
 
 func (s *BatchImagePublicService) Cancel(ctx context.Context, owner BatchImageOwner, batchID string) (*BatchImagePublicBatch, error) {
-	ctx = batchImageContextForProject(ctx, owner.ProjectID)
 	job, err := s.Repo.GetBatchImageJobByBatchIDForOwner(ctx, owner.UserID, owner.APIKeyID, batchID)
 	if err != nil {
 		return nil, err

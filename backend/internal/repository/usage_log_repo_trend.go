@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // TrendDataPoint represents a single point in trend data
@@ -31,8 +30,8 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
-	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
+	topProjectCondition := ""
+	outerProjectCondition := ""
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
@@ -91,8 +90,8 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
-	outerProjectCondition := buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u"))
+	topProjectCondition := ""
+	outerProjectCondition := ""
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
@@ -200,7 +199,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
 	`
 	args := []any{startTime, endTime, limit}
-	projectCondition := strings.TrimSpace(buildProjectProfileScopedClause(ctx, &args, "u.project_id", usageLogSQLScopeResources("u")))
+	projectCondition := strings.TrimSpace("")
 	query = fmt.Sprintf(query, projectCondition)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -256,7 +255,6 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`, dateFormat)
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY date ORDER BY date ASC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -294,7 +292,7 @@ func (r *usageLogRepository) GetUsageTrendWithUsageFilters(ctx context.Context, 
 }
 
 func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, modelSource string, requestType *int16, stream *bool, billingType *int8, billingMode string, upstreamModelMismatch *bool) (results []TrendDataPoint, err error) {
-	if _, scoped := service.ProjectIDFromContext(ctx); !scoped && shouldUsePreaggregatedTrend(granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, billingMode, upstreamModelMismatch) {
+	if shouldUsePreaggregatedTrend(granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType, billingMode, upstreamModelMismatch) {
 		aggregated, aggregatedErr := r.getUsageTrendFromAggregates(ctx, startTime, endTime, granularity)
 		if aggregatedErr == nil && len(aggregated) > 0 {
 			return aggregated, nil
@@ -345,7 +343,6 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 	if upstreamModelMismatch != nil {
 		query += " AND " + upstreamModelMismatchCondition("upstream_model_mismatch", *upstreamModelMismatch)
 	}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += " GROUP BY date ORDER BY date ASC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -515,7 +512,6 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	if upstreamModelMismatch != nil {
 		query += " AND " + upstreamModelMismatchCondition("upstream_model_mismatch", *upstreamModelMismatch)
 	}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 	query += fmt.Sprintf(" GROUP BY %s ORDER BY total_tokens DESC", modelExpr)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -593,7 +589,6 @@ func (r *usageLogRepository) getGroupStatsWithFilters(ctx context.Context, start
 	if upstreamModelMismatch != nil {
 		query += " AND " + upstreamModelMismatchCondition("ul.upstream_model_mismatch", *upstreamModelMismatch)
 	}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 	query += " GROUP BY ul.group_id, g.name ORDER BY total_tokens DESC"
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
@@ -648,7 +643,6 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		WHERE ul.created_at >= $1 AND ul.created_at < $2
 	`
 	args := []any{startTime, endTime}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "ul.project_id", usageLogSQLScopeResources("ul"))
 
 	if dim.GroupID > 0 {
 		query += fmt.Sprintf(" AND ul.group_id = $%d", len(args)+1)
@@ -738,48 +732,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 
 // GetAllGroupUsageSummary 返回所有分组在服务端配置时区内的今日、昨日与当前保留记录累计金额。
 func (r *usageLogRepository) GetAllGroupUsageSummary(ctx context.Context, todayStart time.Time) ([]usagestats.GroupUsageSummary, error) {
-	// 全局 rollup 不含 project_id，Project 视图必须回查原始日志，避免跨项目汇总泄露。
-	if _, scoped := service.ProjectIDFromContext(ctx); !scoped {
-		return r.getAllGroupUsageSummaryFromRollups(ctx, todayStart)
-	}
-
-	todayStart = service.GroupUsageTodayStart(todayStart)
-	yesterdayStart := service.GroupUsageYesterdayStart(todayStart)
-	args := []any{todayStart, yesterdayStart}
-	usageClauses, args, _ := appendProjectProfileScopedWhereAt(ctx, nil, args, len(args)+1, "ul.project_id", usageLogSQLScopeResources("ul"))
-	query := `
-		SELECT
-			g.id AS group_id,
-			COALESCE(SUM(ul.actual_cost), 0) AS total_cost,
-			COALESCE(SUM(CASE WHEN ul.created_at >= $1 THEN ul.actual_cost ELSE 0 END), 0) AS today_cost,
-			COALESCE(SUM(CASE WHEN ul.created_at >= $2 AND ul.created_at < $1 THEN ul.actual_cost ELSE 0 END), 0) AS yesterday_cost
-		FROM groups g
-		LEFT JOIN usage_logs ul ON ul.group_id = g.id`
-	if len(usageClauses) > 0 {
-		query += " AND " + usageClauses[0]
-	}
-	groupClauses := []string{"g.deleted_at IS NULL"}
-	groupClauses, args = appendProjectProfileScopedWhere(ctx, groupClauses, args, "g.project_id", projectSQLScopeResources{GroupID: "g.id"})
-	query += " WHERE " + strings.Join(groupClauses, " AND ")
-	query += " GROUP BY g.id"
-
-	rows, err := r.sql.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var results []usagestats.GroupUsageSummary
-	for rows.Next() {
-		var row usagestats.GroupUsageSummary
-		if err := rows.Scan(&row.GroupID, &row.TotalCost, &row.TodayCost, &row.YesterdayCost); err != nil {
-			return nil, err
-		}
-		results = append(results, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return r.getAllGroupUsageSummaryFromRollups(ctx, todayStart)
 }
 
 // resolveModelDimensionExpression maps model source type to a safe SQL expression.

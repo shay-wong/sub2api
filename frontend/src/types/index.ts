@@ -63,20 +63,8 @@ export interface UserProfileSourceContext {
   provider_label?: string | null
 }
 
-export interface UserProject {
-  id: number
-  name: string
-  slug: string
-  description?: string | null
-  role: ProjectRole
-  is_owner: boolean
-  permissions?: string[]
-}
-
-export type GlobalUserRole = 'super_admin' | 'user'
-export type LegacyUserRole = 'admin'
-export type UserRole = GlobalUserRole | LegacyUserRole
-export type ProjectRole = 'super_admin' | 'admin' | 'user'
+export type UserRole = 'super_admin' | 'admin' | 'user'
+export type GlobalUserRole = UserRole
 
 export interface User {
   id: number
@@ -99,8 +87,8 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  projects?: UserProject[]
   role: UserRole // User role for authorization
+  admin_permissions: string[]
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -120,10 +108,6 @@ export interface User {
 export interface AdminUser extends User {
   // 管理员备注（普通用户接口不返回）
   notes: string
-  // 当前项目空间内的成员角色；为空时仅使用全局 role
-  project_role?: ProjectRole
-  project_member_status?: 'active' | 'disabled'
-  project_permissions?: string[]
   last_used_at?: string | null
   // 用户专属分组倍率配置 (group_id -> rate_multiplier)
   group_rates?: Record<number, number>
@@ -728,7 +712,6 @@ export interface CompositeRouteDecision {
 export interface ApiKey {
   id: number
   user_id: number
-  project_id?: number
   key: string
   name: string
   group_id: number | null

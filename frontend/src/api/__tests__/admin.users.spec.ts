@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { get, post } = vi.hoisted(() => ({
+const { get, post, put } = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  put: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
   apiClient: {
     get,
     post,
+    put,
   },
 }))
 
@@ -16,6 +18,7 @@ import {
   batchUpdateLimits,
   bindUserAuthIdentity,
   getUserApiKeys,
+  updateAdminAccess,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
   type BatchUpdateUserLimitsRequest,
@@ -136,16 +139,26 @@ describe('admin users api auth identity binding', () => {
     expect(responseContractExact).toBe(true)
   })
 
-  it('passes an explicit project context when listing a user api keys from project management', async () => {
+  it('lists user api keys without a project context', async () => {
     get.mockResolvedValue({
       data: { items: [], total: 0, page: 1, page_size: 20, pages: 0 },
     })
 
-    await getUserApiKeys(42, 7)
+    await getUserApiKeys(42)
 
-    expect(get).toHaveBeenCalledWith('/admin/users/42/api-keys', {
-      headers: { 'X-Project-ID': '7' },
-    })
+    expect(get).toHaveBeenCalledWith('/admin/users/42/api-keys')
+  })
+
+  it('updates global admin access through the dedicated endpoint', async () => {
+    const input = {
+      role: 'admin' as const,
+      admin_permissions: ['admin.dashboard.read', 'admin.users.manage'],
+    }
+    put.mockResolvedValue({ data: { id: 42, ...input } })
+
+    await updateAdminAccess(42, input)
+
+    expect(put).toHaveBeenCalledWith('/admin/users/42/admin-access', input)
   })
 
   it('posts batch limit updates once with only the supplied limit fields', async () => {

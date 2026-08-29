@@ -62,6 +62,11 @@ export interface BatchUpdateUserLimitsResponse {
   affected: number
 }
 
+export interface UpdateUserAdminAccessRequest {
+  role: 'admin' | 'user'
+  admin_permissions: string[]
+}
+
 /**
  * List all users with pagination
  * @param page - Page number (default: 1)
@@ -139,7 +144,6 @@ export async function create(userData: {
   password: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
   balance?: number
   concurrency?: number
   rpm_limit?: number
@@ -226,14 +230,18 @@ export async function toggleStatus(id: number, status: 'active' | 'disabled'): P
 /**
  * Get user's API keys
  * @param id - User ID
- * @param projectId - Optional project context for project-scoped API key listing
  * @returns List of user's API keys
  */
-export async function getUserApiKeys(id: number, projectId?: number): Promise<PaginatedResponse<ApiKey>> {
-  const headers = projectId ? { 'X-Project-ID': String(projectId) } : undefined
-  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`, {
-    headers
-  })
+export async function getUserApiKeys(id: number): Promise<PaginatedResponse<ApiKey>> {
+  const { data } = await apiClient.get<PaginatedResponse<ApiKey>>(`/admin/users/${id}/api-keys`)
+  return data
+}
+
+export async function updateAdminAccess(
+  id: number,
+  input: UpdateUserAdminAccessRequest
+): Promise<AdminUser> {
+  const { data } = await apiClient.put<AdminUser>(`/admin/users/${id}/admin-access`, input)
   return data
 }
 
@@ -446,6 +454,7 @@ export const usersAPI = {
   batchUpdateLimits,
   toggleStatus,
   getUserApiKeys,
+  updateAdminAccess,
   getUserGroupRateLimits,
   resetUserGroupRateLimit,
   getUserUsageStats,

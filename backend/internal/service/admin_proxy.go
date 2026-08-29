@@ -190,9 +190,6 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
 	if _, err := s.proxyRepo.GetByIDForManagement(ctx, id); err != nil {
 		if errors.Is(err, ErrProxyNotFound) {
-			if _, scoped := ProjectIDFromContext(ctx); scoped {
-				return err
-			}
 			return nil
 		}
 		return err
@@ -216,9 +213,7 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 	for _, id := range ids {
 		if _, err := s.proxyRepo.GetByIDForManagement(ctx, id); err != nil {
 			if errors.Is(err, ErrProxyNotFound) {
-				if _, scoped := ProjectIDFromContext(ctx); !scoped {
-					continue
-				}
+				continue
 			}
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
 				ID:     id,

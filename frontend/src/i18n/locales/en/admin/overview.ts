@@ -681,6 +681,25 @@ export default {
       failedToLoadBalanceHistory: 'Failed to load balance history',
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
+      adminAccess: {
+        action: 'Admin permissions',
+        title: 'Admin permissions',
+        description: 'Configure global admin access for {email}.',
+        enableAdmin: 'Enable admin access',
+        permissions: 'Permissions',
+        updated: 'Admin permissions updated',
+        failed: 'Failed to update admin permissions',
+        permissionLabels: {
+          dashboard: 'Dashboard',
+          ops: 'Ops monitoring',
+          users: 'User management',
+          groups: 'Group management',
+          proxies: 'Proxy management',
+          subscriptions: 'Subscription management',
+          accounts: 'Account management',
+          usage: 'Usage records'
+        }
+      },
       roles: {
         super_admin: 'Super Admin',
         admin: 'Admin',

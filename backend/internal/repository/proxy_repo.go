@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -65,16 +64,13 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 	created, err := builder.Save(ctx)
 	if err == nil {
 		applyProxyEntityToService(proxyIn, created)
-		if err := bindResourceToActiveProjectProfile(ctx, r.sql, projectID, service.ProjectResourceTypeProxy, proxyIn.ID); err != nil {
-			return err
-		}
 	}
 	return err
 }
 
 func (r *proxyRepository) GetByID(ctx context.Context, id int64) (*service.Proxy, error) {
 	m, err := r.client.Proxy.Query().
-		Where(append([]dbpredicate.Proxy{proxy.IDEQ(id)}, projectScopedProxyPredicate(ctx)...)...).
+		Where([]dbpredicate.Proxy{proxy.IDEQ(id)}...).
 		Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
@@ -95,7 +91,7 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 	}
 
 	proxies, err := r.client.Proxy.Query().
-		Where(append([]dbpredicate.Proxy{proxy.IDIn(ids...)}, projectScopedProxyPredicate(ctx)...)...).
+		Where([]dbpredicate.Proxy{proxy.IDIn(ids...)}...).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -169,7 +165,6 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		return nil, err
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
-		Where(projectScopedProxyPredicate(ctx)...).
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
@@ -295,7 +290,7 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	affected, err := r.client.Proxy.Delete().Where(append([]dbpredicate.Proxy{proxy.IDEQ(id)}, projectScopedProxyPredicate(ctx)...)...).Exec(ctx)
+	affected, err := r.client.Proxy.Delete().Where([]dbpredicate.Proxy{proxy.IDEQ(id)}...).Exec(ctx)
 	if err != nil {
 		return err
 	}
@@ -311,7 +306,7 @@ func (r *proxyRepository) List(ctx context.Context, params pagination.Pagination
 
 // ListWithFilters lists proxies with optional filtering by protocol, status, and search query
 func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.Proxy, *pagination.PaginationResult, error) {
-	return r.listWithFilters(ctx, params, protocol, status, search, projectScopedProxyPredicate(ctx))
+	return r.listWithFilters(ctx, params, protocol, status, search, nil)
 }
 
 func (r *proxyRepository) ListWithFiltersForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.Proxy, *pagination.PaginationResult, error) {
@@ -357,7 +352,7 @@ func (r *proxyRepository) listWithFilters(ctx context.Context, params pagination
 
 // ListWithFiltersAndAccountCount lists proxies with filters and includes account count per proxy
 func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
-	return r.listWithFiltersAndAccountCount(ctx, params, protocol, status, search, projectScopedProxyPredicate(ctx))
+	return r.listWithFiltersAndAccountCount(ctx, params, protocol, status, search, nil)
 }
 
 func (r *proxyRepository) ListWithFiltersAndAccountCountForManagement(ctx context.Context, params pagination.PaginationParams, protocol, status, search string) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
@@ -479,7 +474,7 @@ func proxyListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 }
 
 func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, error) {
-	return r.listActive(ctx, projectScopedProxyPredicate(ctx))
+	return r.listActive(ctx, nil)
 }
 
 func (r *proxyRepository) ListActiveForManagement(ctx context.Context) ([]service.Proxy, error) {
@@ -503,7 +498,7 @@ func (r *proxyRepository) listActive(ctx context.Context, predicates []dbpredica
 // ExistsByHostPortAuth checks if a proxy with the same host, port, username, and password exists
 func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
 	q := r.client.Proxy.Query().
-		Where(append([]dbpredicate.Proxy{proxy.HostEQ(host), proxy.PortEQ(port)}, projectScopedProxyPredicate(ctx)...)...)
+		Where([]dbpredicate.Proxy{proxy.HostEQ(host), proxy.PortEQ(port)}...)
 
 	if username == "" {
 		q = q.Where(proxy.Or(proxy.UsernameIsNil(), proxy.UsernameEQ("")))
@@ -525,20 +520,17 @@ func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID in
 	var count int64
 	query := "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL"
 	args := []any{proxyID}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	if err := scanSingleRow(ctx, r.sql, query, args, &count); err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-// CountAllAccountsByProxyID returns the global account count for destructive
-// proxy guards. It intentionally ignores project profile scope so shared
-// proxies cannot be deleted while another project still uses them.
+// CountAllAccountsByProxyID returns the account count for destructive proxy guards.
 func (r *proxyRepository) CountAllAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	var count int64
 	err := scanSingleRow(
-		service.WithoutProjectID(ctx),
+		ctx,
 		r.sql,
 		"SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL",
 		[]any{proxyID},
@@ -556,7 +548,6 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 		FROM accounts
 		WHERE proxy_id = $1 AND deleted_at IS NULL`
 	args := []any{proxyID}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	query += " ORDER BY id DESC"
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -598,7 +589,6 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (counts map[int64]int64, err error) {
 	query := "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL"
 	args := []any{}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	query += " GROUP BY proxy_id"
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -627,7 +617,7 @@ func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (count
 
 // ListActiveWithAccountCount returns all active proxies with account count, sorted by creation time descending
 func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
-	return r.listActiveWithAccountCount(ctx, projectScopedProxyPredicate(ctx))
+	return r.listActiveWithAccountCount(ctx, nil)
 }
 
 func (r *proxyRepository) ListActiveWithAccountCountForManagement(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
@@ -842,17 +832,16 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 			WHERE proxy_id=$1 AND proxy_fallback_origin_id IS NULL AND deleted_at IS NULL
 			RETURNING id`, proxyID)
 	} else {
-		rows, err = exec.QueryContext(ctx, fmt.Sprintf(`
-			UPDATE accounts SET proxy_id=$2, proxy_fallback_origin_id=$1,
+		rows, err = exec.QueryContext(ctx, `
+				UPDATE accounts SET proxy_id=$2, proxy_fallback_origin_id=$1,
 				extra=CASE
 					WHEN type='apikey' AND extra ? 'upstream_billing_probe'
 					THEN extra - 'upstream_billing_probe'
 					ELSE extra
 				END,
 				updated_at=NOW()
-			WHERE proxy_id=$1 AND proxy_fallback_origin_id IS NULL AND deleted_at IS NULL
-			  AND %s
-			RETURNING id`, proxyVisibleToAccountProjectSQL("accounts", "$2")), proxyID, *target)
+				WHERE proxy_id=$1 AND proxy_fallback_origin_id IS NULL AND deleted_at IS NULL
+				RETURNING id`, proxyID, *target)
 	}
 	if err != nil {
 		return nil, err
@@ -876,39 +865,6 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		return nil, err
 	}
 	return accountIDs, nil
-}
-
-func proxyVisibleToAccountProjectSQL(accountTable string, proxyIDExpr string) string {
-	accountTable = strings.TrimSpace(accountTable)
-	if accountTable == "" {
-		accountTable = "accounts"
-	}
-	projectIDExpr := accountTable + ".project_id"
-	proxyIDExpr = strings.TrimSpace(proxyIDExpr)
-	if proxyIDExpr == "" {
-		return "FALSE"
-	}
-	return fmt.Sprintf(`(
-		EXISTS (
-			SELECT 1
-			FROM project_profiles pp
-			WHERE pp.project_id = %s
-			  AND pp.is_active = TRUE
-			  AND pp.deleted_at IS NULL
-			  AND pp.mode = '%s'
-		)
-		OR EXISTS (
-			SELECT 1
-			FROM project_profiles pp
-			JOIN project_profile_bindings ppb ON ppb.project_profile_id = pp.id
-			WHERE pp.project_id = %s
-			  AND pp.is_active = TRUE
-			  AND pp.deleted_at IS NULL
-			  AND pp.mode = '%s'
-			  AND ppb.resource_type = '%s'
-			  AND ppb.resource_id = %s
-		)
-	)`, projectIDExpr, service.ProjectProfileModeUnrestricted, projectIDExpr, service.ProjectProfileModeRestricted, service.ProjectResourceTypeProxy, proxyIDExpr)
 }
 
 // CountExpired 返回已过期（status=expired）的代理数量。

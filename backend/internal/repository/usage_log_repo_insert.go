@@ -307,7 +307,6 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 		if errors.Is(err, sql.ErrNoRows) && prepared.requestID != "" {
 			selectQuery := "SELECT id, created_at FROM usage_logs WHERE request_id = $1 AND api_key_id = $2"
 			selectArgs := []any{prepared.requestID, log.APIKeyID}
-			selectQuery, selectArgs = appendProjectProfileScopedQuery(ctx, selectQuery, selectArgs, "project_id", usageLogSQLScopeResources(""))
 			if err := scanSingleRow(ctx, sqlq, selectQuery, selectArgs, &log.ID, &log.CreatedAt); err != nil {
 				return false, err
 			}

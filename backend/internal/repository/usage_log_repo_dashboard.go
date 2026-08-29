@@ -25,7 +25,6 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 		query += " AND user_id = $2"
 		args = append(args, userID)
 	}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var requestCount int64
 	var tokenCount int64
@@ -58,7 +57,6 @@ func (r *usageLogRepository) GetUserStats(ctx context.Context, userID int64, sta
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
 	`
 	args := []any{userID, startTime, endTime}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	stats := &UserStats{}
 	if err := scanSingleRow(
@@ -89,14 +87,8 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
 		return nil, err
 	}
-	if _, ok := service.ProjectIDFromContext(ctx); ok {
-		if err := r.fillDashboardUsageStatsFromUsageLogs(ctx, stats, time.Unix(0, 0).UTC(), now.UTC(), todayStart, now); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
-			return nil, err
-		}
+	if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
+		return nil, err
 	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
@@ -146,9 +138,6 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		WHERE deleted_at IS NULL
 	`
 	userStatsArgs := []any{todayUTC}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		userStatsQuery += " AND " + projectUserScopeSQL(projectID, "users.id")
-	}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -171,7 +160,6 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		  AND users.status = $1
 	`
 	apiKeyStatsArgs := []any{service.StatusActive}
-	apiKeyStatsQuery, apiKeyStatsArgs = appendProjectProfileScopedQuery(ctx, apiKeyStatsQuery, apiKeyStatsArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -194,9 +182,6 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		WHERE deleted_at IS NULL
 	`
 	accountStatsArgs := []any{service.StatusActive, service.StatusError, now, now}
-	accountStatsQuery, accountStatsArgs = appendProjectProfileScopedQuery(ctx, accountStatsQuery, accountStatsArgs, "accounts.project_id", projectSQLScopeResources{
-		AccountID: "accounts.id",
-	})
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -312,7 +297,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		scanEnd = todayEnd
 	}
 	args := []any{startUTC, endUTC, todayUTC, todayEnd, scanStart, scanEnd}
-	projectCondition := buildProjectProfileScopedClause(ctx, &args, "project_id", usageLogSQLScopeResources(""))
+	projectCondition := ""
 	combinedStatsQuery := `
 		WITH scoped AS (
 			SELECT
@@ -394,7 +379,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		activeScanEnd = hourEnd
 	}
 	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd, activeScanStart, activeScanEnd}
-	activeProjectCondition := buildProjectProfileScopedClause(ctx, &activeArgs, "project_id", usageLogSQLScopeResources(""))
+	activeProjectCondition := ""
 	activeUsersQuery := `
 		WITH scoped AS (
 			SELECT user_id, created_at
@@ -429,7 +414,6 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	// API Key 统计
 	apiKeyCountQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL"
 	apiKeyCountArgs := []any{userID}
-	apiKeyCountQuery, apiKeyCountArgs = appendProjectProfileScopedQuery(ctx, apiKeyCountQuery, apiKeyCountArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -441,7 +425,6 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	}
 	activeAPIKeyCountQuery := "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL"
 	activeAPIKeyCountArgs := []any{userID, service.StatusActive}
-	activeAPIKeyCountQuery, activeAPIKeyCountArgs = appendProjectProfileScopedQuery(ctx, activeAPIKeyCountQuery, activeAPIKeyCountArgs, "api_keys.project_id", apiKeySQLScopeResources("api_keys"))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -467,7 +450,6 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		WHERE user_id = $1
 	`
 	totalStatsArgs := []any{userID}
-	totalStatsQuery, totalStatsArgs = appendProjectProfileScopedQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -500,7 +482,6 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		WHERE user_id = $1 AND created_at >= $2
 	`
 	todayStatsArgs := []any{userID, today}
-	todayStatsQuery, todayStatsArgs = appendProjectProfileScopedQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -548,7 +529,6 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		  AND ` + usageLogSuccessFilterUL + `
 	`
 	platformArgs := []any{userID, today}
-	platformQuery, platformArgs = appendProjectProfileScopedQuery(ctx, platformQuery, platformArgs, "ul.project_id", usageLogSQLScopeResources("ul"))
 	platformQuery += `
 		GROUP BY ` + usageLogEffectivePlatformExpr + `
 		HAVING ` + usageLogEffectivePlatformExpr + ` IS NOT NULL AND ` + usageLogEffectivePlatformExpr + ` <> ''
@@ -594,7 +574,6 @@ func (r *usageLogRepository) getPerformanceStatsByAPIKey(ctx context.Context, ap
 		FROM usage_logs
 		WHERE created_at >= $1 AND api_key_id = $2`
 	args := []any{fiveMinutesAgo, apiKeyID}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "project_id", usageLogSQLScopeResources(""))
 
 	var requestCount int64
 	var tokenCount int64
@@ -628,7 +607,6 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		WHERE api_key_id = $1
 	`
 	totalStatsArgs := []any{apiKeyID}
-	totalStatsQuery, totalStatsArgs = appendProjectProfileScopedQuery(ctx, totalStatsQuery, totalStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -661,7 +639,6 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		WHERE api_key_id = $1 AND created_at >= $2
 	`
 	todayStatsArgs := []any{apiKeyID, today}
-	todayStatsQuery, todayStatsArgs = appendProjectProfileScopedQuery(ctx, todayStatsQuery, todayStatsArgs, "project_id", usageLogSQLScopeResources(""))
 	if err := scanSingleRow(
 		ctx,
 		r.sql,

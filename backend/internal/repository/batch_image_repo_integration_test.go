@@ -50,18 +50,17 @@ func TestBatchImageRepository_CreateJobAndDuplicates(t *testing.T) {
 	require.True(t, errors.Is(err, service.ErrBatchImageJobExists))
 }
 
-func TestBatchImageRepository_ProjectScopeUsesJobProjectID(t *testing.T) {
+func TestBatchImageRepositoryQueriesIgnoreLegacyProjectID(t *testing.T) {
 	ctx := context.Background()
 	tx := testTx(t)
 	repo := newBatchImageRepositoryWithSQL(tx)
-	projectA := createBatchImageTestProject(t, tx, "batch-image-a-"+batchImageSafeTestIDSegment(t.Name(), 28))
-	projectB := createBatchImageTestProject(t, tx, "batch-image-b-"+batchImageSafeTestIDSegment(t.Name(), 28))
+	defaultProjectID := mustDefaultProjectID(t, tx.Client())
 	apiKeyID := int64(4242)
 	otherAPIKeyID := int64(4243)
 	userID := int64(1001)
 	idempotencyKey := batchImageTestStringPtr("idem-" + batchImageSafeTestIDSegment(t.Name(), 48))
 
-	jobA, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectA), service.CreateBatchImageJobParams{
+	jobA, err := repo.CreateBatchImageJob(ctx, service.CreateBatchImageJobParams{
 		BatchID:        batchImageTestID(t, "scope-a"),
 		UserID:         userID,
 		APIKeyID:       &apiKeyID,
@@ -71,9 +70,9 @@ func TestBatchImageRepository_ProjectScopeUsesJobProjectID(t *testing.T) {
 		IdempotencyKey: idempotencyKey,
 	})
 	require.NoError(t, err)
-	require.Equal(t, projectA, jobA.ProjectID)
+	require.Equal(t, defaultProjectID, jobA.ProjectID)
 
-	jobB, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectB), service.CreateBatchImageJobParams{
+	jobB, err := repo.CreateBatchImageJob(ctx, service.CreateBatchImageJobParams{
 		BatchID:        batchImageTestID(t, "scope-b"),
 		UserID:         userID,
 		APIKeyID:       &apiKeyID,
@@ -83,9 +82,9 @@ func TestBatchImageRepository_ProjectScopeUsesJobProjectID(t *testing.T) {
 		IdempotencyKey: idempotencyKey,
 	})
 	require.NoError(t, err)
-	require.Equal(t, projectB, jobB.ProjectID)
+	require.Equal(t, defaultProjectID, jobB.ProjectID)
 
-	jobAOtherKey, err := repo.CreateBatchImageJob(service.WithProjectID(ctx, projectA), service.CreateBatchImageJobParams{
+	jobAOtherKey, err := repo.CreateBatchImageJob(ctx, service.CreateBatchImageJobParams{
 		BatchID:   batchImageTestID(t, "scope-a-other-key"),
 		UserID:    userID,
 		APIKeyID:  &otherAPIKeyID,
@@ -94,36 +93,23 @@ func TestBatchImageRepository_ProjectScopeUsesJobProjectID(t *testing.T) {
 		ItemCount: 1,
 	})
 	require.NoError(t, err)
-	require.Equal(t, projectA, jobAOtherKey.ProjectID)
+	require.Equal(t, defaultProjectID, jobAOtherKey.ProjectID)
 
-	gotA, err := repo.GetBatchImageJobByIdempotencyKey(service.WithProjectID(ctx, projectA), userID, apiKeyID, *idempotencyKey)
+	gotLatest, err := repo.GetBatchImageJobByIdempotencyKey(ctx, userID, apiKeyID, *idempotencyKey)
 	require.NoError(t, err)
-	require.Equal(t, jobA.BatchID, gotA.BatchID)
+	require.Equal(t, jobB.BatchID, gotLatest.BatchID)
 
-	gotB, err := repo.GetBatchImageJobByIdempotencyKey(service.WithProjectID(ctx, projectB), userID, apiKeyID, *idempotencyKey)
+	gotByBatchID, err := repo.GetBatchImageJobByBatchIDForOwner(ctx, userID, apiKeyID, jobB.BatchID)
 	require.NoError(t, err)
-	require.Equal(t, jobB.BatchID, gotB.BatchID)
+	require.Equal(t, jobB.BatchID, gotByBatchID.BatchID)
 
-	_, err = repo.GetBatchImageJobByBatchIDForOwner(service.WithProjectID(ctx, projectA), userID, apiKeyID, jobB.BatchID)
-	require.ErrorIs(t, err, service.ErrBatchImageJobNotFound)
-
-	jobsA, err := repo.ListBatchImageJobsForOwner(service.WithProjectID(ctx, projectA), userID, apiKeyID, service.BatchImageJobFilter{Limit: 20})
+	jobs, err := repo.ListBatchImageJobsForOwner(ctx, userID, apiKeyID, service.BatchImageJobFilter{Limit: 20})
 	require.NoError(t, err)
-	require.Len(t, jobsA, 1)
-	require.Equal(t, jobA.BatchID, jobsA[0].BatchID)
+	require.ElementsMatch(t, []string{jobA.BatchID, jobB.BatchID}, batchImageTestJobIDs(jobs))
 
-	jobsB, err := repo.ListBatchImageJobsForOwner(service.WithProjectID(ctx, projectB), userID, apiKeyID, service.BatchImageJobFilter{Limit: 20})
+	allJobs, err := repo.ListBatchImageJobsForUser(ctx, userID, service.BatchImageJobFilter{Limit: 20})
 	require.NoError(t, err)
-	require.Len(t, jobsB, 1)
-	require.Equal(t, jobB.BatchID, jobsB[0].BatchID)
-
-	allProjectA, err := repo.ListBatchImageJobsForUser(service.WithProjectID(ctx, projectA), userID, service.BatchImageJobFilter{Limit: 20})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{jobA.BatchID, jobAOtherKey.BatchID}, batchImageTestJobIDs(allProjectA))
-
-	allProjectB, err := repo.ListBatchImageJobsForUser(service.WithProjectID(ctx, projectB), userID, service.BatchImageJobFilter{Limit: 20})
-	require.NoError(t, err)
-	require.Equal(t, []string{jobB.BatchID}, batchImageTestJobIDs(allProjectB))
+	require.ElementsMatch(t, []string{jobA.BatchID, jobB.BatchID, jobAOtherKey.BatchID}, batchImageTestJobIDs(allJobs))
 }
 
 func TestBatchImageRepository_InvalidProvider(t *testing.T) {

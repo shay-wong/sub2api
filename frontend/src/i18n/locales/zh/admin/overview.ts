@@ -567,6 +567,25 @@ export default {
       failedToToggle: '更新用户状态失败',
       failedToLoadApiKeys: '加载用户 API 密钥失败',
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
+      adminAccess: {
+        action: '管理员权限',
+        title: '管理员权限',
+        description: '配置 {email} 的全局管理员权限。',
+        enableAdmin: '启用管理员身份',
+        permissions: '权限',
+        updated: '管理员权限更新成功',
+        failed: '管理员权限更新失败',
+        permissionLabels: {
+          dashboard: '仪表盘',
+          ops: '运维监控',
+          users: '用户管理',
+          groups: '分组管理',
+          proxies: '代理管理',
+          subscriptions: '订阅管理',
+          accounts: '账号管理',
+          usage: '使用记录'
+        }
+      },
       roles: {
         super_admin: '超级管理员',
         admin: '管理员',

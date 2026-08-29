@@ -699,7 +699,7 @@ describe('admin UsageView cleanup visibility', () => {
     vi.useRealTimers()
   })
 
-  it('hides cleanup action for project admins', async () => {
+  it('hides cleanup action for limited admins', async () => {
     authState.isAdmin = false
 
     const wrapper = mount(UsageView, {

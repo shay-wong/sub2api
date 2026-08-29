@@ -42,7 +42,6 @@ type AdminHandlers struct {
 	Payment                *admin.PaymentHandler
 	Affiliate              *admin.AffiliateHandler
 	Compliance             *admin.ComplianceHandler
-	Project                *admin.ProjectHandler
 	AuditLog               *admin.AuditLogHandler
 }
 

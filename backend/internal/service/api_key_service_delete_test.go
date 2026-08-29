@@ -90,10 +90,6 @@ func (s *apiKeyRepoStub) Update(ctx context.Context, key *APIKey, _ APIKeyUpdate
 	return s.updateErr
 }
 
-func (s *apiKeyRepoStub) UpdateProjectID(ctx context.Context, id int64, projectID int64) error {
-	panic("unexpected UpdateProjectID call")
-}
-
 // Delete 记录被删除的 API Key ID 并返回预设的错误。
 // 通过 deletedIDs 可以验证删除操作是否被正确调用。
 func (s *apiKeyRepoStub) Delete(ctx context.Context, id int64) error {

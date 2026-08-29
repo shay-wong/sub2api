@@ -371,23 +371,6 @@ func IsSupportedBatchImageProvider(provider string) bool {
 	}
 }
 
-func batchImageContextForProject(ctx context.Context, projectID int64) context.Context {
-	if projectID <= 0 {
-		return ctx
-	}
-	if existing, ok := ProjectIDFromContext(ctx); ok && existing == projectID {
-		return ctx
-	}
-	return WithProjectID(ctx, projectID)
-}
-
-func batchImageContextForJob(ctx context.Context, job *BatchImageJob) context.Context {
-	if job == nil {
-		return ctx
-	}
-	return batchImageContextForProject(ctx, job.ProjectID)
-}
-
 func IsTerminalBatchImageJobStatus(status string) bool {
 	switch status {
 	case BatchImageJobStatusCompleted, BatchImageJobStatusFailed, BatchImageJobStatusCancelled, BatchImageJobStatusOutputDeleted:

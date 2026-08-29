@@ -45,7 +45,6 @@ const mountModal = (concurrency: number) => mount(UserEditModal, {
         props: ['show', 'title'],
         template: '<div v-if="show"><slot /><slot name="footer" /></div>'
       },
-      Select: true,
       Icon: true,
       UserAttributeForm: true,
       TotpStepUpDialog: true

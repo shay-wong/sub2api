@@ -123,9 +123,7 @@ describe('API Client', () => {
       expect(config.withCredentials).toBe(true)
     })
 
-    it('项目上下文只附加到业务请求，不污染认证和公共配置请求', async () => {
-      localStorage.setItem('sub2api_selected_project_id', '10')
-
+    it('不再从旧项目选择状态注入请求头', async () => {
       const adapter = vi.fn().mockResolvedValue({
         status: 200,
         data: { code: 0, data: {} },
@@ -139,13 +137,13 @@ describe('API Client', () => {
       await apiClient.post('/auth/logout', { refresh_token: 'rt' })
       await apiClient.get('/settings/public')
       await apiClient.get('/admin/users')
-      await apiClient.get('/admin/users/42/api-keys', { headers: { 'X-Project-ID': '20' } })
+      await apiClient.get('/admin/users/42/api-keys')
 
       expect(adapter.mock.calls[0][0].headers.get('X-Project-ID')).toBeFalsy()
       expect(adapter.mock.calls[1][0].headers.get('X-Project-ID')).toBeFalsy()
       expect(adapter.mock.calls[2][0].headers.get('X-Project-ID')).toBeFalsy()
-      expect(adapter.mock.calls[3][0].headers.get('X-Project-ID')).toBe('10')
-      expect(adapter.mock.calls[4][0].headers.get('X-Project-ID')).toBe('20')
+      expect(adapter.mock.calls[3][0].headers.get('X-Project-ID')).toBeFalsy()
+      expect(adapter.mock.calls[4][0].headers.get('X-Project-ID')).toBeFalsy()
     })
 
     it('Admin API 在进入管理页面前也带 Admin UI 标记', async () => {

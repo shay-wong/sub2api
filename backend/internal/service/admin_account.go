@@ -21,30 +21,35 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
-var ErrProjectAdminGrokOAuthCustomBaseURL = infraerrors.Forbidden(
-	"PROJECT_ADMIN_GROK_OAUTH_CUSTOM_BASE_URL_FORBIDDEN",
-	"project admins cannot route Grok OAuth credentials to a custom base URL",
+var ErrAdminGrokOAuthCustomBaseURL = infraerrors.Forbidden(
+	"ADMIN_GROK_OAUTH_CUSTOM_BASE_URL_FORBIDDEN",
+	"admins cannot route Grok OAuth credentials to a custom base URL",
 )
 
-var ErrProjectAdminUpstreamBillingProbeForbidden = infraerrors.Forbidden(
+var ErrAdminUpstreamBillingProbeForbidden = infraerrors.Forbidden(
 	"UPSTREAM_BILLING_PROBE_FORBIDDEN",
 	"upstream billing probe settings require super admin access",
 )
 
-func ensureProjectAdminGrokOAuthBaseURL(ctx context.Context, platform, accountType, baseURL string) error {
-	if !isProjectAdminContext(ctx) || platform != PlatformGrok || accountType != AccountTypeOAuth || xai.IsOfficialBaseURL(baseURL) {
-		return nil
-	}
-	return ErrProjectAdminGrokOAuthCustomBaseURL
+func isRestrictedAdminContext(ctx context.Context) bool {
+	role, ok := AdminRoleFromContext(ctx)
+	return ok && role == RoleAdmin
 }
 
-func ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx context.Context, extra map[string]any, settings ...*bool) error {
-	if !isProjectAdminContext(ctx) {
+func ensureAdminGrokOAuthBaseURL(ctx context.Context, platform, accountType, baseURL string) error {
+	if !isRestrictedAdminContext(ctx) || platform != PlatformGrok || accountType != AccountTypeOAuth || xai.IsOfficialBaseURL(baseURL) {
+		return nil
+	}
+	return ErrAdminGrokOAuthCustomBaseURL
+}
+
+func ensureAdminCannotMutateUpstreamBillingProbe(ctx context.Context, extra map[string]any, settings ...*bool) error {
+	if !isRestrictedAdminContext(ctx) {
 		return nil
 	}
 	for _, setting := range settings {
 		if setting != nil {
-			return ErrProjectAdminUpstreamBillingProbeForbidden
+			return ErrAdminUpstreamBillingProbeForbidden
 		}
 	}
 	for _, key := range []string{
@@ -53,7 +58,7 @@ func ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx context.Context, ext
 		UpstreamBillingProbeExtraKey,
 	} {
 		if _, ok := extra[key]; ok {
-			return ErrProjectAdminUpstreamBillingProbeForbidden
+			return ErrAdminUpstreamBillingProbeForbidden
 		}
 	}
 	return nil
@@ -539,7 +544,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
+	if err := ensureAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
 		return nil, err
 	}
 	if err := s.ensureProxyAvailable(ctx, input.ProxyID); err != nil {
@@ -597,7 +602,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
+	if err := ensureAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
 		return nil, err
 	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
@@ -640,7 +645,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled, input.RateSyncEnabled); err != nil {
+	if err := ensureAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled, input.RateSyncEnabled); err != nil {
 		return nil, err
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
@@ -729,7 +734,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Credentials = SanitizeStoredCredentials(account.Platform, account.Credentials)
 	}
 	if account.Type != previousAccountType || strings.TrimSpace(account.GetCredential("base_url")) != previousGrokBaseURL {
-		if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
+		if err := ensureAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, account.GetCredential("base_url")); err != nil {
 			return nil, err
 		}
 	}
@@ -985,7 +990,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, updates); err != nil {
+	if err := ensureAdminCannotMutateUpstreamBillingProbe(ctx, updates); err != nil {
 		return err
 	}
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
@@ -1014,7 +1019,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-	if err := ensureProjectAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
+	if err := ensureAdminCannotMutateUpstreamBillingProbe(ctx, input.Extra, input.ProbeEnabled); err != nil {
 		return nil, err
 	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
@@ -1061,10 +1066,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	platformByID := map[int64]string{}
 	accountByID := map[int64]*Account{}
-	_, projectScopedBulkUpdate := ProjectIDFromContext(ctx)
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || projectScopedBulkUpdate || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1119,14 +1123,14 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// 预加载账号平台信息（混合渠道检查需要）。
-	if needMixedChannelCheck || projectScopedBulkUpdate || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
+	if needMixedChannelCheck || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
 		for _, account := range cachedTargets {
 			if account != nil {
 				accountByID[account.ID] = account
 				platformByID[account.ID] = account.Platform
 			}
 		}
-		if projectScopedBulkUpdate || (input.GroupIDs != nil && len(input.GroupScopeIDs) > 0) {
+		if input.GroupIDs != nil && len(input.GroupScopeIDs) > 0 {
 			for _, accountID := range input.AccountIDs {
 				if accountByID[accountID] == nil {
 					return nil, ErrAccountNotFound
@@ -1179,7 +1183,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if account == nil || strings.TrimSpace(account.GetCredential("base_url")) == strings.TrimSpace(fmt.Sprint(rawBaseURL)) {
 				continue
 			}
-			if err := ensureProjectAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, fmt.Sprint(rawBaseURL)); err != nil {
+			if err := ensureAdminGrokOAuthBaseURL(ctx, account.Platform, account.Type, fmt.Sprint(rawBaseURL)); err != nil {
 				return nil, err
 			}
 		}

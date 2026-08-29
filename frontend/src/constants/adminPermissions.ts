@@ -11,7 +11,7 @@ export const AdminPermissions = {
 
 export type AdminPermission = typeof AdminPermissions[keyof typeof AdminPermissions]
 
-export const defaultProjectAdminPermissions: AdminPermission[] = [
+export const allAdminPermissions: AdminPermission[] = [
   AdminPermissions.dashboard,
   AdminPermissions.ops,
   AdminPermissions.users,

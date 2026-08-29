@@ -4,10 +4,8 @@ package middleware
 import (
 	"crypto/subtle"
 	"errors"
-	"strconv"
 	"strings"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -18,21 +16,19 @@ func NewAdminAuthMiddleware(
 	authService *service.AuthService,
 	userService *service.UserService,
 	settingService *service.SettingService,
-	projectService *service.ProjectService,
 	auditService *service.AuditLogService,
 ) AdminAuthMiddleware {
-	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, projectService, auditService))
+	return AdminAuthMiddleware(adminAuth(authService, userService, settingService, auditService))
 }
 
 // adminAuth 管理员认证中间件实现
 // 支持两种认证方式（通过不同的 header 区分）：
 // 1. Admin API Key: x-api-key: <admin-api-key>
-// 2. JWT Token: Authorization: Bearer <jwt-token> (需要超级管理员或项目管理员)
+// 2. JWT Token: Authorization: Bearer <jwt-token> (需要管理员角色)
 func adminAuth(
 	authService *service.AuthService,
 	userService *service.UserService,
 	settingService *service.SettingService,
-	projectService *service.ProjectService,
 	auditService *service.AuditLogService,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -42,7 +38,7 @@ func adminAuth(
 		//   Sec-WebSocket-Protocol: sub2api-admin, jwt.<token>
 		if isWebSocketUpgradeRequest(c) {
 			if token := extractJWTFromWebSocketSubprotocol(c); token != "" {
-				if !validateJWTForAdmin(c, token, authService, userService, projectService, settingService, auditService) {
+				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
 				c.Next()
@@ -53,7 +49,7 @@ func adminAuth(
 		// 检查 x-api-key header（Admin API Key 认证）
 		apiKey := c.GetHeader("x-api-key")
 		if apiKey != "" {
-			if !validateAdminAPIKey(c, apiKey, settingService, userService, projectService) {
+			if !validateAdminAPIKey(c, apiKey, settingService, userService) {
 				return
 			}
 			c.Next()
@@ -70,7 +66,7 @@ func adminAuth(
 					AbortWithError(c, 401, "UNAUTHORIZED", "Authorization required")
 					return
 				}
-				if !validateJWTForAdmin(c, token, authService, userService, projectService, settingService, auditService) {
+				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
 				c.Next()
@@ -127,7 +123,6 @@ func validateAdminAPIKey(
 	key string,
 	settingService *service.SettingService,
 	userService *service.UserService,
-	projectService *service.ProjectService,
 ) bool {
 	storedKey, err := settingService.GetAdminAPIKey(c.Request.Context())
 	if err != nil {
@@ -148,47 +143,18 @@ func validateAdminAPIKey(
 		return false
 	}
 
-	return applyAdminProjectContext(c, admin, projectService, "admin_api_key")
+	return applyAdminContext(c, admin, "admin_api_key")
 }
 
-func applyAdminProjectContext(c *gin.Context, user *service.User, projectService *service.ProjectService, authMethod string) bool {
-	projectID, ok := parseRequestedProjectID(c)
-	if !ok {
-		return false
-	}
-
-	effectiveRole := user.Role
-	if projectService != nil {
-		resolvedProjectID, role, permissions, err := projectService.ResolveAdminProject(c.Request.Context(), user, projectID)
-		if err != nil {
-			if service.IsProjectNotFound(err) {
-				AbortWithError(c, 404, "PROJECT_NOT_FOUND", "project not found")
-			} else if appErr := infraerrors.FromError(err); appErr != nil && appErr.Reason != "" && appErr.Code >= 400 && appErr.Code < 500 {
-				AbortWithError(c, int(appErr.Code), appErr.Reason, appErr.Message)
-			} else {
-				AbortWithError(c, 403, "PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
-			}
-			return false
-		}
-		if resolvedProjectID > 0 {
-			setProjectContext(c, resolvedProjectID)
-		}
-		if role != "" {
-			effectiveRole = role
-		}
-		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), permissions))
-	} else if projectID > 0 {
-		AbortWithError(c, 500, "PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
-		return false
-	}
-
+func applyAdminContext(c *gin.Context, user *service.User, authMethod string) bool {
 	c.Set(string(ContextKeyUser), AuthSubject{
 		UserID:      user.ID,
 		Concurrency: user.Concurrency,
 	})
-	c.Set(string(ContextKeyUserRole), effectiveRole)
+	c.Set(string(ContextKeyUserRole), user.Role)
 	c.Set(ContextKeyAuthEmail, user.Email)
-	c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), effectiveRole))
+	c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), user.Role))
+	c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), user.AdminPermissions))
 	c.Set("auth_method", authMethod)
 	return true
 }
@@ -199,7 +165,6 @@ func validateJWTForAdmin(
 	token string,
 	authService *service.AuthService,
 	userService *service.UserService,
-	projectService *service.ProjectService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 ) bool {
@@ -240,31 +205,13 @@ func validateJWTForAdmin(
 
 	// 检查管理控制台访问权限；具体页面/API 权限由后续 route middleware 控制。
 	if !user.CanAccessAdminConsole() {
-		if projectService == nil {
-			AbortWithError(c, 403, "FORBIDDEN", "Admin console access required")
-			return false
-		}
+		AbortWithError(c, 403, "FORBIDDEN", "Admin console access required")
+		return false
 	}
 
-	if !applyAdminProjectContext(c, user, projectService, "jwt") {
+	if !applyAdminContext(c, user, "jwt") {
 		return false
 	}
 	c.Set(ContextKeySessionID, claims.SessionID)
 	return true
-}
-
-func parseRequestedProjectID(c *gin.Context) (int64, bool) {
-	raw := strings.TrimSpace(c.GetHeader("X-Project-ID"))
-	if raw == "" {
-		raw = strings.TrimSpace(c.Query("project_id"))
-	}
-	if raw == "" {
-		return 0, true
-	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		AbortWithError(c, 400, "INVALID_PROJECT_ID", "Invalid project ID")
-		return 0, false
-	}
-	return id, true
 }

@@ -20,9 +20,7 @@ type User struct {
 	PasswordAuthDisabled bool
 	PasswordAuthResolved bool
 	Role                 string
-	ProjectRole          string
-	ProjectMemberStatus  string
-	ProjectPermissions   []string
+	AdminPermissions     []string
 	Balance              float64
 	FrozenBalance        float64
 	Concurrency          int

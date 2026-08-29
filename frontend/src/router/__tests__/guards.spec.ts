@@ -281,9 +281,9 @@ describe('路由守卫逻辑', () => {
     })
   })
 
-  // --- 已认证项目管理员 ---
+  // --- 已认证受限管理员 ---
 
-  describe('已认证项目管理员', () => {
+  describe('已认证受限管理员', () => {
     const authState: MockAuthState = {
       isAuthenticated: true,
       isAdmin: false,
@@ -293,7 +293,7 @@ describe('路由守卫逻辑', () => {
       hasPendingAuthSession: false,
     }
 
-    it('访问项目级后台页面允许通过', () => {
+    it('访问有权限的后台页面允许通过', () => {
       expect(simulateGuard('/admin/dashboard', { requiresAdmin: true, adminPermission: 'admin.dashboard.read' }, authState)).toBeNull()
       expect(simulateGuard('/admin/accounts', { requiresAdmin: true, adminPermission: 'admin.accounts.write' }, authState)).toBeNull()
       expect(simulateGuard('/admin/ops', { requiresAdmin: true, adminPermission: 'admin.ops.read' }, authState)).toBeNull()
@@ -304,7 +304,7 @@ describe('路由守卫逻辑', () => {
       expect(simulateGuard('/admin/usage', { requiresAdmin: true, adminPermission: 'admin.usage.read' }, authState)).toBeNull()
     })
 
-    it('没有对应项目权限时阻止访问项目级后台页面', () => {
+    it('没有对应权限时阻止访问后台页面', () => {
       const limitedAuthState = {
         ...authState,
         adminPermissions: ['admin.dashboard.read', 'admin.users.manage'],
@@ -315,12 +315,11 @@ describe('路由守卫逻辑', () => {
     })
 
     it('访问超级管理员页面重定向到后台仪表盘', () => {
-      expect(simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
       expect(simulateGuard('/admin/settings', { requiresAdmin: true, requiresAdminOnly: true }, authState)).toBe('/admin/dashboard')
     })
 
-    it('Backend mode 下项目管理员可以继续访问后台', () => {
+    it('Backend mode 下受限管理员可以继续访问后台', () => {
       const redirect = simulateGuard('/admin/dashboard', { requiresAdmin: true }, {
         ...authState,
         backendModeEnabled: true,
@@ -347,7 +346,7 @@ describe('路由守卫逻辑', () => {
     })
 
     it('访问完整管理员页面重定向到用户仪表盘', () => {
-      const redirect = simulateGuard('/admin/projects', { requiresAdmin: true, requiresAdminOnly: true }, authState)
+      const redirect = simulateGuard('/admin/orders', { requiresAdmin: true, requiresAdminOnly: true }, authState)
       expect(redirect).toBe('/dashboard')
     })
 

@@ -158,7 +158,7 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(componentSource).toContain('const canAccessAdminConsole = computed(() => authStore.canAccessAdminConsole)')
   })
 
-  it('routes project-admin brand links to the admin dashboard at runtime', async () => {
+  it('routes limited-admin brand links to the admin dashboard at runtime', async () => {
     const { default: AppSidebar } = await import('../AppSidebar.vue')
 
     const wrapper = mount(AppSidebar, {
@@ -190,24 +190,24 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(componentSource).not.toContain('operatorItems')
   })
 
-  it('keeps project admins on scoped management pages only', () => {
-    const projectItemsMatch = componentSource.match(/const projectItems: NavItem\[\] = \[[\s\S]*?\n {2}\]/)
-    const projectItemsSource = projectItemsMatch?.[0] ?? ''
+  it('keeps limited admins on permission-controlled management pages only', () => {
+    const permissionItemsMatch = componentSource.match(/const permissionItems: NavItem\[\] = \[[\s\S]*?\n {2}\]/)
+    const permissionItemsSource = permissionItemsMatch?.[0] ?? ''
 
-    expect(projectItemsSource).toContain("path: '/admin/dashboard'")
-    expect(projectItemsSource).toContain("path: '/admin/ops'")
-    expect(projectItemsSource).not.toContain("path: '/admin/projects'")
-    expect(projectItemsSource).toContain("path: '/admin/users'")
-    expect(projectItemsSource).toContain("path: '/admin/groups'")
-    expect(projectItemsSource).toContain("path: '/admin/subscriptions'")
-    expect(projectItemsSource).toContain("path: '/admin/accounts'")
-    expect(projectItemsSource).toContain("path: '/admin/proxies'")
-    expect(projectItemsSource).toContain('adminUsageItem')
+    expect(permissionItemsSource).toContain("path: '/admin/dashboard'")
+    expect(permissionItemsSource).toContain("path: '/admin/ops'")
+    expect(permissionItemsSource).not.toContain("path: '/admin/projects'")
+    expect(permissionItemsSource).toContain("path: '/admin/users'")
+    expect(permissionItemsSource).toContain("path: '/admin/groups'")
+    expect(permissionItemsSource).toContain("path: '/admin/subscriptions'")
+    expect(permissionItemsSource).toContain("path: '/admin/accounts'")
+    expect(permissionItemsSource).toContain("path: '/admin/proxies'")
+    expect(permissionItemsSource).toContain('adminUsageItem')
     expect(componentSource).toContain("const adminUsageItem: NavItem = { path: '/admin/usage'")
 
     const projectAdminBranchMatch = componentSource.match(/if \(!authStore\.isAdmin\) \{[\s\S]*?\n {2}\}/)
     const projectAdminBranchSource = projectAdminBranchMatch?.[0] ?? ''
-    expect(projectAdminBranchSource).toContain('return applyAdminPermissions(applyFeatureFlags(projectItems))')
+    expect(projectAdminBranchSource).toContain('return applyAdminPermissions(applyFeatureFlags(permissionItems))')
     expect(componentSource).toContain('function applyAdminPermissions')
     expect(componentSource).toContain('authStore.hasAdminPermission(item.adminPermission)')
     expect(componentSource).toContain('AdminPermissions.proxies')
@@ -217,7 +217,7 @@ describe('AppSidebar admin/user hierarchy', () => {
     expect(projectAdminBranchSource).not.toContain('/admin/redeem')
   })
 
-  it('keeps project-space management on the super-admin navigation only', () => {
-    expect(componentSource).toContain("{ path: '/admin/projects', label: t('nav.projects'), icon: FolderIcon, hideInSimpleMode: true }")
+  it('removes project-space management navigation', () => {
+    expect(componentSource).not.toContain("path: '/admin/projects'")
   })
 })

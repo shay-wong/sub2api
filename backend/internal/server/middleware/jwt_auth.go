@@ -14,11 +14,10 @@ import (
 func NewJWTAuthMiddleware(
 	authService *service.AuthService,
 	userService *service.UserService,
-	projectService *service.ProjectService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 ) JWTAuthMiddleware {
-	return JWTAuthMiddleware(jwtAuth(authService, userService, userService, projectService, settingService, auditService))
+	return JWTAuthMiddleware(jwtAuth(authService, userService, userService, settingService, auditService))
 }
 
 type jwtUserReader interface {
@@ -34,7 +33,6 @@ func jwtAuth(
 	authService *service.AuthService,
 	userService jwtUserReader,
 	activityToucher userActivityToucher,
-	projectService *service.ProjectService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 ) gin.HandlerFunc {
@@ -104,25 +102,6 @@ func jwtAuth(
 		if activityToucher != nil {
 			activityToucher.TouchLastActiveForUser(c.Request.Context(), user)
 		}
-		if projectService != nil {
-			requestedProjectID, ok := parseRequestedProjectID(c)
-			if !ok {
-				return
-			}
-			projectID, err := projectService.ResolveUserProject(c.Request.Context(), user, requestedProjectID)
-			if err != nil {
-				if service.IsProjectNotFound(err) {
-					AbortWithError(c, 404, "PROJECT_NOT_FOUND", "project not found")
-				} else {
-					AbortWithError(c, 403, "PROJECT_ACCESS_FORBIDDEN", "project access forbidden")
-				}
-				return
-			}
-			if projectID > 0 {
-				setProjectContext(c, projectID)
-			}
-		}
-
 		c.Next()
 	}
 }

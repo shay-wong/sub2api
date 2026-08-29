@@ -24,7 +24,7 @@ describe('admin account duplicate API', () => {
 
     expect(post).toHaveBeenCalledWith('/admin/accounts/42/duplicate', undefined, {
       headers: {
-        'Idempotency-Key': 'account-duplicate-unscoped:42-11111111-1111-4111-8111-111111111111'
+        'Idempotency-Key': 'account-duplicate-42-11111111-1111-4111-8111-111111111111'
       }
     })
     expect(account).toEqual({ id: 43, name: 'primary (Copy)' })
@@ -58,23 +58,4 @@ describe('admin account duplicate API', () => {
     expect(sessionStorage.length).toBe(0)
   })
 
-  it('isolates retry keys by project and preserves the original project retry', async () => {
-    localStorage.setItem('sub2api_selected_project_id', '7')
-    post.mockRejectedValueOnce(new Error('network timeout'))
-    await expect(duplicate(42)).rejects.toThrow('network timeout')
-    const project7Headers = post.mock.calls[0][2].headers
-
-    localStorage.setItem('sub2api_selected_project_id', '8')
-    post.mockResolvedValueOnce({ data: { id: 84, name: 'project 8 copy' } })
-    await duplicate(42)
-    const project8Headers = post.mock.calls[1][2].headers
-    expect(project8Headers).not.toEqual(project7Headers)
-
-    localStorage.setItem('sub2api_selected_project_id', '7')
-    post.mockResolvedValueOnce({ data: { id: 43, name: 'project 7 retry copy' } })
-    await duplicate(42)
-
-    expect(post.mock.calls[2][2].headers).toEqual(project7Headers)
-    expect(sessionStorage.length).toBe(0)
-  })
 })

@@ -169,10 +169,6 @@ func (r *usageLogRepository) ensureUsageLogProjectID(ctx context.Context, log *s
 	if log == nil {
 		return nil
 	}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		log.ProjectID = projectID
-		return nil
-	}
 	if log.ProjectID > 0 {
 		return nil
 	}

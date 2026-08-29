@@ -264,7 +264,7 @@ func TestOllamaCloudUsageSharedStateMatchesListDetailAndSpecialEndpointWithoutLi
 	}
 }
 
-func TestProjectScopedAccountResponsesDoNotResolveSharedOllamaCloudUsage(t *testing.T) {
+func TestAdminAccountResponsesResolveGlobalOllamaCloudUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	shared := &service.Account{
 		ID: 7, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
@@ -293,21 +293,20 @@ func TestProjectScopedAccountResponsesDoNotResolveSharedOllamaCloudUsage(t *test
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(servermiddleware.ContextKeyUserRole), service.RoleAdmin)
-		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 42))
 		c.Next()
 	})
 	router.GET("/accounts", handler.List)
 	router.GET("/accounts/:id", handler.GetByID)
 
-	// Project-scoped reads may expose the visible account's state, but must not aggregate siblings from other projects.
+	// Project space has been removed, so equivalent Ollama accounts aggregate globally.
 	for _, target := range []string{"/accounts?page=1&page_size=20", "/accounts/8"} {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
 		require.Equal(t, http.StatusOK, recorder.Code)
-		require.NotContains(t, recorder.Body.String(), "cross-project")
-		require.NotContains(t, recorder.Body.String(), `"configured":true`)
+		require.Contains(t, recorder.Body.String(), "cross-project")
+		require.Contains(t, recorder.Body.String(), `"configured":true`)
 	}
-	require.Zero(t, repo.groupResolveCalls)
+	require.NotZero(t, repo.groupResolveCalls)
 }
 
 func TestGetOllamaCloudUsageSettingsHandlerSuccess(t *testing.T) {

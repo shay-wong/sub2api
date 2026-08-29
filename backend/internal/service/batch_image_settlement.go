@@ -81,8 +81,6 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 	if err != nil {
 		return nil, err
 	}
-	ctx = batchImageContextForJob(ctx, job)
-
 	manifestHash := BuildBatchImageSettlementManifestHash(job)
 	result := &BatchImageSettlementResult{
 		BatchID:      job.BatchID,
@@ -348,7 +346,6 @@ func (p *BatchImagePipelineProcessor) Process(ctx context.Context, batchID strin
 	if err != nil {
 		return BatchImageProcessResult{}, err
 	}
-	ctx = batchImageContextForJob(ctx, job)
 	if job.Status == BatchImageJobStatusSettling {
 		if p.SettlementService == nil {
 			return BatchImageProcessResult{Terminal: true}, nil

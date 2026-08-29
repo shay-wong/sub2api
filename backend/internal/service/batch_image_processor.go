@@ -65,7 +65,6 @@ func (p *BatchImageProviderProcessor) Process(ctx context.Context, batchID strin
 	if err != nil {
 		return BatchImageProcessResult{}, err
 	}
-	ctx = batchImageContextForJob(ctx, job)
 	if isBatchImageProcessorDoneStatus(job.Status) {
 		if err := p.releaseTerminalHold(ctx, job); err != nil {
 			return BatchImageProcessResult{}, err

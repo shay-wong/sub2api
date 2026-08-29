@@ -31,16 +31,6 @@ func computeDashboardHealthScore(now time.Time, overview *OpsDashboardOverview) 
 	return int(math.Round(clampFloat64(score, 0, 100)))
 }
 
-func computeProjectDashboardHealthScore(overview *OpsDashboardOverview) int {
-	if overview == nil {
-		return 0
-	}
-	if isDashboardOverviewIdle(overview) {
-		return 100
-	}
-	return int(math.Round(clampFloat64(computeBusinessHealth(overview), 0, 100)))
-}
-
 func isDashboardOverviewIdle(overview *OpsDashboardOverview) bool {
 	return overview != nil &&
 		overview.RequestCountSLA <= 0 &&

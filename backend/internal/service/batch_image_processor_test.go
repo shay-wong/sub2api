@@ -429,9 +429,6 @@ func newFakeBatchImageRepository() *fakeBatchImageRepository {
 }
 
 func (r *fakeBatchImageRepository) CreateBatchImageJob(ctx context.Context, params CreateBatchImageJobParams) (*BatchImageJob, error) {
-	if params.ProjectID <= 0 {
-		params.ProjectID, _ = ProjectIDFromContext(ctx)
-	}
 	job := &BatchImageJob{
 		BatchID:                 params.BatchID,
 		UserID:                  params.UserID,
@@ -473,11 +470,8 @@ func (r *fakeBatchImageRepository) GetBatchImageJobByBatchID(_ context.Context, 
 	return job, nil
 }
 
-func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.Context, userID, apiKeyID int64, key string) (*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(_ context.Context, userID, apiKeyID int64, key string) (*BatchImageJob, error) {
 	for _, job := range r.jobs {
-		if !batchImageTestJobVisibleInContext(ctx, job) {
-			continue
-		}
 		if job.UserID == userID && job.APIKeyID != nil && *job.APIKeyID == apiKeyID && batchImageDerefString(job.IdempotencyKey) == key {
 			return job, nil
 		}
@@ -485,9 +479,9 @@ func (r *fakeBatchImageRepository) GetBatchImageJobByIdempotencyKey(ctx context.
 	return nil, ErrBatchImageJobNotFound
 }
 
-func (r *fakeBatchImageRepository) GetBatchImageJobByBatchIDForOwner(ctx context.Context, userID, apiKeyID int64, batchID string) (*BatchImageJob, error) {
+func (r *fakeBatchImageRepository) GetBatchImageJobByBatchIDForOwner(_ context.Context, userID, apiKeyID int64, batchID string) (*BatchImageJob, error) {
 	job, ok := r.jobs[batchID]
-	if !ok || !batchImageTestJobVisibleInContext(ctx, job) || job.UserID != userID || job.APIKeyID == nil || *job.APIKeyID != apiKeyID {
+	if !ok || job.UserID != userID || job.APIKeyID == nil || *job.APIKeyID != apiKeyID {
 		return nil, ErrBatchImageJobNotFound
 	}
 	return job, nil
@@ -512,9 +506,6 @@ func (r *fakeBatchImageRepository) listBatchImageJobs(ctx context.Context, userI
 	}
 	var jobs []*BatchImageJob
 	for _, job := range r.jobs {
-		if !batchImageTestJobVisibleInContext(ctx, job) {
-			continue
-		}
 		if job.UserID != userID {
 			continue
 		}
@@ -819,14 +810,6 @@ func (r *fakeBatchImageRepository) ListBatchImageItems(_ context.Context, batchI
 		}
 	}
 	return result, nil
-}
-
-func batchImageTestJobVisibleInContext(ctx context.Context, job *BatchImageJob) bool {
-	if job == nil {
-		return false
-	}
-	projectID, ok := ProjectIDFromContext(ctx)
-	return !ok || job.ProjectID == 0 || job.ProjectID == projectID
 }
 
 func batchImageTestStatusIn(status string, allowed []string) bool {

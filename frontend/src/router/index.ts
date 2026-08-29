@@ -13,7 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
-import { AdminPermissions, defaultProjectAdminPermissions } from '@/constants/adminPermissions'
+import { AdminPermissions, allAdminPermissions } from '@/constants/adminPermissions'
 
 /**
  * Route definitions with lazy loading
@@ -455,19 +455,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/projects',
-    name: 'AdminProjects',
-    component: () => import('@/views/admin/ProjectsView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      requiresAdminOnly: true,
-      title: 'Project Management',
-      titleKey: 'admin.projects.title',
-      descriptionKey: 'admin.projects.description'
-    }
-  },
-  {
     path: '/admin/groups',
     name: 'AdminGroups',
     component: () => import('@/views/admin/GroupsView.vue'),
@@ -810,7 +797,7 @@ const ADMIN_PERMISSION_FALLBACK_PATHS: Record<string, string> = {
 }
 
 function resolveAllowedAdminPath(authStore: ReturnType<typeof useAuthStore>): string {
-  for (const permission of defaultProjectAdminPermissions) {
+  for (const permission of allAdminPermissions) {
     if (authStore.hasAdminPermission(permission)) {
       return ADMIN_PERMISSION_FALLBACK_PATHS[permission]
     }

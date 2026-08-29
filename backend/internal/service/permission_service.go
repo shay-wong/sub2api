@@ -12,7 +12,6 @@ import (
 const (
 	AdminPermissionDashboardRead = "admin.dashboard.read"
 	AdminPermissionOpsRead       = "admin.ops.read"
-	AdminPermissionAccountsRead  = "admin.accounts.read"
 	AdminPermissionAccountsWrite = "admin.accounts.write"
 	AdminPermissionUsersManage   = "admin.users.manage"
 	AdminPermissionGroupsManage  = "admin.groups.manage"
@@ -21,9 +20,7 @@ const (
 	AdminPermissionUsageRead     = "admin.usage.read"
 )
 
-const projectAdminPermissionNoneSentinel = "__none__"
-
-var defaultProjectAdminPermissions = []string{
+var defaultAdminPermissions = []string{
 	AdminPermissionDashboardRead,
 	AdminPermissionOpsRead,
 	AdminPermissionUsersManage,
@@ -38,7 +35,7 @@ var (
 	ErrPermissionUserNotFound       = infraerrors.NotFound("PERMISSION_USER_NOT_FOUND", "permission subject not found")
 	ErrPermissionInvalidRole        = infraerrors.BadRequest("PERMISSION_INVALID_ROLE", "role must be user")
 	ErrPermissionCannotChangeAdmin  = infraerrors.Forbidden("PERMISSION_ADMIN_IMMUTABLE", "admin role cannot be changed here")
-	ErrLegacyOperatorRoleDisabled   = infraerrors.Forbidden("LEGACY_OPERATOR_ROLE_DISABLED", "legacy operator role is disabled; use project admin membership")
+	ErrLegacyOperatorRoleDisabled   = infraerrors.Forbidden("LEGACY_OPERATOR_ROLE_DISABLED", "legacy operator role is disabled; assign the admin role and explicit admin permissions")
 	ErrPermissionInvalidGroupScope  = infraerrors.BadRequest("PERMISSION_INVALID_GROUP_SCOPE", "one or more scoped groups do not exist")
 	ErrOperatorScopeRequired        = infraerrors.Forbidden("OPERATOR_SCOPE_REQUIRED", "operator does not have any assigned groups")
 	ErrOperatorScopeForbidden       = infraerrors.Forbidden("OPERATOR_SCOPE_FORBIDDEN", "operator cannot access this group scope")
@@ -70,27 +67,27 @@ type PermissionService struct {
 	userRepo UserRepository
 }
 
-func DefaultProjectAdminPermissions() []string {
-	return append([]string(nil), defaultProjectAdminPermissions...)
+func DefaultAdminPermissions() []string {
+	return append([]string(nil), defaultAdminPermissions...)
 }
 
-func NormalizeProjectAdminPermissions(role string, permissions []string) []string {
-	if role != ProjectRoleAdmin {
-		return []string{}
+func NormalizeAdminPermissions(role string, permissions []string) ([]string, error) {
+	if role != RoleAdmin {
+		return []string{}, nil
 	}
 	allowed := map[string]struct{}{}
-	for _, permission := range defaultProjectAdminPermissions {
+	for _, permission := range defaultAdminPermissions {
 		allowed[permission] = struct{}{}
 	}
-	out := make([]string, 0, len(defaultProjectAdminPermissions))
+	out := make([]string, 0, len(defaultAdminPermissions))
 	seen := map[string]struct{}{}
 	for _, raw := range permissions {
 		permission := strings.TrimSpace(raw)
-		if permission == "" || permission == projectAdminPermissionNoneSentinel {
-			continue
+		if permission == "" {
+			return nil, infraerrors.BadRequest("INVALID_ADMIN_PERMISSION", "admin permission must not be empty")
 		}
 		if _, ok := allowed[permission]; !ok {
-			continue
+			return nil, infraerrors.BadRequest("INVALID_ADMIN_PERMISSION", "unknown admin permission: "+permission)
 		}
 		if _, ok := seen[permission]; ok {
 			continue
@@ -99,40 +96,13 @@ func NormalizeProjectAdminPermissions(role string, permissions []string) []strin
 		out = append(out, permission)
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
-func ProjectAdminPermissionsForStorage(role string, permissions []string) []string {
-	normalized := NormalizeProjectAdminPermissions(role, permissions)
-	if role != ProjectRoleAdmin {
-		return []string{}
-	}
-	if permissions != nil && len(normalized) == 0 {
-		return []string{projectAdminPermissionNoneSentinel}
-	}
-	return normalized
-}
-
-func ProjectAdminPermissionsForDisplay(role string, stored []string) []string {
-	if role != ProjectRoleAdmin {
-		return []string{}
-	}
-	for _, permission := range stored {
-		if strings.TrimSpace(permission) == projectAdminPermissionNoneSentinel {
-			return []string{}
-		}
-	}
-	if len(stored) == 0 {
-		return DefaultProjectAdminPermissions()
-	}
-	return NormalizeProjectAdminPermissions(role, stored)
-}
-
-func ProjectAdminHasPermission(role string, stored []string, permission string) bool {
+func AdminHasPermission(role string, permissions []string, permission string) bool {
 	if RoleIsSuperAdmin(role) {
 		return true
 	}
-	permissions := ProjectAdminPermissionsForDisplay(role, stored)
 	for _, item := range permissions {
 		if item == permission {
 			return true

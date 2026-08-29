@@ -19,7 +19,7 @@ func mustDefaultProjectID(t *testing.T, client *dbent.Client) int64 {
 	ctx := context.Background()
 
 	existingID, err := client.Project.Query().
-		Where(dbproject.SlugEQ(service.DefaultProjectSlug)).
+		Where(dbproject.SlugEQ(defaultProjectSlug)).
 		OnlyID(ctx)
 	if err == nil {
 		return existingID
@@ -27,8 +27,8 @@ func mustDefaultProjectID(t *testing.T, client *dbent.Client) int64 {
 	require.True(t, dbent.IsNotFound(err), "load default project: %v", err)
 
 	project, err := client.Project.Create().
-		SetName(service.DefaultProjectName).
-		SetSlug(service.DefaultProjectSlug).
+		SetName(defaultProjectName).
+		SetSlug(defaultProjectSlug).
 		SetDescription("Integration test default project.").
 		Save(ctx)
 	require.NoError(t, err, "create default project")

@@ -43,8 +43,7 @@ func newProjectOpenAIOAuthScopeRouter(adminSvc *stubAdminService) *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
-		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 169))
-		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultProjectAdminPermissions()))
+		c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), service.DefaultAdminPermissions()))
 		c.Next()
 	})
 	router.POST("/api/v1/admin/openai/create-from-codex-pat", handler.CreateAccountFromCodexPAT)

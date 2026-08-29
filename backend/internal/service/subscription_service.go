@@ -46,7 +46,6 @@ var (
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
 	groupRepo           GroupRepository
-	userRepo            UserRepository
 	userSubRepo         UserSubscriptionRepository
 	billingCacheService *BillingCacheService
 	entClient           *dbent.Client
@@ -76,11 +75,8 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 	return svc
 }
 
-// ProvideSubscriptionService wires project-scoped admin assignment checks into the production service.
-func ProvideSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config, userRepo UserRepository) *SubscriptionService {
-	svc := NewSubscriptionService(groupRepo, userSubRepo, billingCacheService, entClient, cfg)
-	svc.userRepo = userRepo
-	return svc
+func ProvideSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config) *SubscriptionService {
+	return NewSubscriptionService(groupRepo, userSubRepo, billingCacheService, entClient, cfg)
 }
 
 func (s *SubscriptionService) initMaintenanceQueue(cfg *config.Config) {
@@ -242,10 +238,6 @@ func (s *SubscriptionService) assignOrExtendSubscription(ctx context.Context, in
 	if !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
 	}
-	if err := s.ensureProjectScopedSubscriptionUser(ctx, input.UserID); err != nil {
-		return nil, false, err
-	}
-
 	// 查询是否已有订阅
 	existingSub, err := s.userSubRepo.GetByUserIDAndGroupID(ctx, input.UserID, input.GroupID)
 	if err != nil {
@@ -529,10 +521,6 @@ func (s *SubscriptionService) assignSubscriptionWithReuse(ctx context.Context, i
 	if !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
 	}
-	if err := s.ensureProjectScopedSubscriptionUser(ctx, input.UserID); err != nil {
-		return nil, false, err
-	}
-
 	// 检查是否已存在订阅；若已存在，则按幂等成功返回现有订阅
 	exists, err := s.userSubRepo.ExistsByUserIDAndGroupID(ctx, input.UserID, input.GroupID)
 	if err != nil {
@@ -579,30 +567,6 @@ func (s *SubscriptionService) assignSubscriptionWithReuse(ctx context.Context, i
 	}
 
 	return sub, false, nil
-}
-
-func (s *SubscriptionService) ensureProjectScopedSubscriptionUser(ctx context.Context, userID int64) error {
-	if _, ok := ProjectIDFromContext(ctx); !ok {
-		return nil
-	}
-	if userID <= 0 {
-		return ErrUserNotFound
-	}
-	if s.userRepo == nil {
-		return infraerrors.InternalServer("USER_REPOSITORY_UNAVAILABLE", "user repository unavailable")
-	}
-	includeSubscriptions := false
-	users, _, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, UserListFilters{
-		ID:                   userID,
-		IncludeSubscriptions: &includeSubscriptions,
-	})
-	if err != nil {
-		return err
-	}
-	if len(users) == 0 {
-		return ErrUserNotFound
-	}
-	return nil
 }
 
 func detectAssignSemanticConflict(existing *UserSubscription, input *AssignSubscriptionInput) (string, bool) {

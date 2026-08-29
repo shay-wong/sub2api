@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -17,21 +16,12 @@ import (
 func NewOptionalJWTAuthMiddleware(
 	authService *service.AuthService,
 	userService *service.UserService,
-	projectService *service.ProjectService,
 	settingService *service.SettingService,
 	auditService *service.AuditLogService,
 ) OptionalJWTAuthMiddleware {
-	strict := jwtAuth(authService, userService, userService, projectService, settingService, auditService)
+	strict := jwtAuth(authService, userService, userService, settingService, auditService)
 	return OptionalJWTAuthMiddleware(func(c *gin.Context) {
 		if strings.TrimSpace(c.GetHeader("Authorization")) == "" {
-			if projectService != nil {
-				projectID, err := projectService.GetDefaultProjectID(c.Request.Context())
-				if err != nil {
-					AbortWithError(c, http.StatusInternalServerError, "PROJECT_SERVICE_UNAVAILABLE", "project service unavailable")
-					return
-				}
-				setProjectContext(c, projectID)
-			}
 			c.Next()
 			return
 		}

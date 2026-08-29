@@ -199,8 +199,8 @@ ORDER BY bucket ASC`
 
 func (r *opsRepository) getThroughputBreakdownByPlatform(ctx context.Context, start, end time.Time) ([]*service.OpsThroughputPlatformBreakdownItem, error) {
 	args := []any{start, end}
-	usageProjectClause := buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
-	errorProjectClause := buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
+	usageProjectClause := ""
+	errorProjectClause := ""
 
 	q := `
 	WITH usage_totals AS (
@@ -276,8 +276,8 @@ func (r *opsRepository) getThroughputTopGroupsByPlatform(ctx context.Context, st
 	}
 
 	args := []any{start, end, platform}
-	usageProjectClause := buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
-	errorProjectClause := buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
+	usageProjectClause := ""
+	errorProjectClause := ""
 	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `
@@ -378,8 +378,8 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 	}
 	projectClauseUsage := ""
 	projectClauseError := ""
-	projectClauseUsage = buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
-	projectClauseError = buildProjectProfileScopedClause(ctx, &args, "project_id", opsErrorSQLScopeResources(""))
+	projectClauseUsage = ""
+	projectClauseError = ""
 	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `

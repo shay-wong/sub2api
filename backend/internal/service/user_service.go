@@ -103,6 +103,7 @@ type UserUpdateFields struct {
 	PasswordHash               bool
 	PasswordAuthDisabled       bool
 	Role                       bool
+	AdminPermissions           bool
 	Status                     bool
 	Concurrency                bool
 	RPMLimit                   bool

@@ -10,13 +10,15 @@ const {
   getBatchUsersUsage,
   listEnabledDefinitions,
   getBatchUserAttributes,
+  updateAdminAccess,
   authState
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn(),
+    getBatchUserAttributes: vi.fn(),
+    updateAdminAccess: vi.fn(),
   authState: {
     isAdmin: false
   }
@@ -26,6 +28,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     users: {
       list: listUsers,
+      updateAdminAccess,
       toggleStatus: vi.fn(),
       delete: vi.fn()
     },
@@ -68,6 +71,7 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   username: 'scoped-user',
   email: 'scoped@example.com',
   role: 'user',
+  admin_permissions: [],
   balance: 0,
   concurrency: 1,
   status: 'active',
@@ -144,6 +148,7 @@ const mountUsersView = () => mount(UsersView, {
       DataTable: DataTableStub,
       Pagination: PaginationStub,
       ConfirmDialog: true,
+      BaseDialog: { template: '<div v-if="$attrs.show"><slot /><slot name="footer" /></div>' },
       EmptyState: true,
       GroupBadge: true,
       Select: true,
@@ -174,6 +179,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    updateAdminAccess.mockReset()
     authState.isAdmin = false
 
     listUsers.mockResolvedValue({
@@ -187,6 +193,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockResolvedValue({ stats: {} })
     listEnabledDefinitions.mockResolvedValue([])
     getBatchUserAttributes.mockResolvedValue({ values: {} })
+    updateAdminAccess.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -217,9 +224,9 @@ describe('admin UsersView', () => {
     )
   })
 
-  it('shows project admins as admins and hides operation buttons from project admin viewers', async () => {
+  it('shows admins as admins and hides operation buttons from limited admin viewers', async () => {
     listUsers.mockResolvedValue({
-      items: [{ ...createAdminUser(), project_role: 'admin' }],
+      items: [createAdminUser({ role: 'admin' })],
       total: 1,
       page: 1,
       page_size: 20,
@@ -408,7 +415,7 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
   })
 
-  it('does not expose batch limit selection to project admins', async () => {
+  it('does not expose batch limit selection to limited admins', async () => {
     const wrapper = mountUsersView()
 
     await flushPromises()
@@ -416,5 +423,30 @@ describe('admin UsersView', () => {
     expect(wrapper.find('[data-test="select-42"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="bulk-modal"]').exists()).toBe(false)
+  })
+
+  it('lets super admins update global admin permissions from the user list', async () => {
+    authState.isAdmin = true
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ role: 'admin', admin_permissions: ['admin.dashboard.read'] })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    await wrapper.get('[data-test="actions-42"] button:last-child').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="admin-access-action"]').trigger('click')
+    await wrapper.get('[data-test="save-admin-access"]').trigger('click')
+    await flushPromises()
+
+    expect(updateAdminAccess).toHaveBeenCalledWith(42, {
+      role: 'admin',
+      admin_permissions: ['admin.dashboard.read']
+    })
   })
 })

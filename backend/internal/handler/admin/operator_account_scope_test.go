@@ -186,14 +186,13 @@ func newOperatorAccountScopeRouter(adminSvc *stubAdminService, groupIDs []int64)
 	return router
 }
 
-func newProjectAdminAccountScopeRouter(adminSvc *stubAdminService, projectID int64) *gin.Engine {
+func newAdminAccountScopeRouter(adminSvc *stubAdminService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
-		c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), projectID))
 		c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), service.RoleAdmin))
 		c.Next()
 	})
@@ -241,7 +240,7 @@ func TestOperatorAccountRoutesRejectLegacyRole(t *testing.T) {
 	require.Nil(t, adminSvc.lastBulkUpdateInput)
 }
 
-func TestProjectAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *testing.T) {
+func TestAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *testing.T) {
 	adminSvc := newStubAdminService()
 	adminSvc.accounts = []service.Account{{
 		ID:       1,
@@ -256,7 +255,7 @@ func TestProjectAdminAccountRoutesProtectManagedUpstreamBillingProbeState(t *tes
 			service.UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
 		},
 	}}
-	router := newProjectAdminAccountScopeRouter(adminSvc, 7)
+	router := newAdminAccountScopeRouter(adminSvc)
 
 	for _, path := range []string{
 		"/api/v1/admin/accounts?page=1&page_size=20",

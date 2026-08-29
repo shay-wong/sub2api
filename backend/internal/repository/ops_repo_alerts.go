@@ -440,7 +440,6 @@ SELECT
 	FROM ops_alert_events
 	WHERE id = $1`
 	args := []any{eventID}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 
 	row := r.db.QueryRowContext(ctx, q, args...)
 	ev, err := scanOpsAlertEvent(row)
@@ -480,7 +479,6 @@ SELECT
 	WHERE rule_id = $1 AND status = $2
 `
 	args := []any{ruleID, service.OpsAlertStatusFiring}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	q += `
 	ORDER BY fired_at DESC
 	LIMIT 1`
@@ -523,7 +521,6 @@ SELECT
 	WHERE rule_id = $1
 `
 	args := []any{ruleID}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	q += `
 	ORDER BY fired_at DESC
 	LIMIT 1`
@@ -625,7 +622,6 @@ SET status = $2,
     resolved_at = $3
 	WHERE id = $1`
 	args := []any{eventID, strings.TrimSpace(status), opsNullTime(resolvedAt)}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 
 	_, err := r.db.ExecContext(ctx, q, args...)
 	return err
@@ -641,7 +637,6 @@ func (r *opsRepository) UpdateAlertEventEmailSent(ctx context.Context, eventID i
 
 	q := "UPDATE ops_alert_events SET email_sent = $2 WHERE id = $1"
 	args := []any{eventID, emailSent}
-	q, args = appendProjectScopeQuery(ctx, q, args, "project_id")
 	_, err := r.db.ExecContext(ctx, q, args...)
 	return err
 }
@@ -870,12 +865,7 @@ func buildOpsAlertEventsWhere(filter *service.OpsAlertEventFilter) (string, []an
 }
 
 func buildOpsAlertEventsWhereForContext(ctx context.Context, filter *service.OpsAlertEventFilter) (string, []any) {
-	where, args := buildOpsAlertEventsWhere(filter)
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		where += " AND project_id = $" + itoa(len(args))
-	}
-	return where, args
+	return buildOpsAlertEventsWhere(filter)
 }
 
 func opsNullJSONMap(v map[string]any) (any, error) {

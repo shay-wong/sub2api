@@ -663,10 +663,6 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
-func ProvideProjectService(repo ProjectRepository, authCacheInvalidator APIKeyAuthCacheInvalidator) *ProjectService {
-	return NewProjectService(repo, authCacheInvalidator)
-}
-
 // ProvideImageStorageSettingService 构造异步生图对象存储的后台设置服务。
 //
 // config.yaml 里的 image_storage 作为回落：后台从未保存过设置时沿用它，
@@ -839,7 +835,6 @@ var ProviderSet = wire.NewSet(
 	NewUserService,
 	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
-	ProvideProjectService,
 	ProvideAuthCacheInvalidationWorker,
 	NewGroupService,
 	NewCompositeRouteResolver,

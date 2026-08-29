@@ -2993,7 +2993,7 @@ func (h *AccountHandler) GetBatchTodayStats(c *gin.Context) {
 		return
 	}
 
-	cacheKey := buildAccountTodayStatsBatchCacheKey(dashboardCacheProjectID(c.Request.Context()), accountIDs)
+	cacheKey := buildAccountTodayStatsBatchCacheKey(accountIDs)
 	if cached, ok := accountTodayStatsBatchCache.Get(cacheKey); ok {
 		if cached.ETag != "" {
 			c.Header("ETag", cached.ETag)

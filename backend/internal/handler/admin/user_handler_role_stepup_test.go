@@ -13,9 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 角色提升为管理员的 step-up 门控条件测试。
-// 测试环境不注入认证上下文，因此门控一旦触发会以 401 中止；
-// 借此区分「触发了 step-up 校验」与「直接放行到业务层（200）」。
+// 管理员权限只允许通过独立端点修改，该端点始终要求 step-up。
 func setupRoleStepUpRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -32,6 +30,7 @@ func setupRoleStepUpRouter(t *testing.T) (*gin.Engine, *stubAdminService) {
 	h := NewUserHandler(adminSvc, nil, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/users", h.Create)
 	router.PUT("/api/v1/admin/users/:id", h.Update)
+	router.PUT("/api/v1/admin/users/:id/admin-access", h.UpdateAdminAccess)
 	return router, adminSvc
 }
 
@@ -46,11 +45,11 @@ func doJSON(t *testing.T, router *gin.Engine, method, path string, payload map[s
 	return rec
 }
 
-func TestUpdateUserPromoteToAdminRequiresStepUp(t *testing.T) {
+func TestUpdateUserRoleFieldDoesNotTriggerStepUp(t *testing.T) {
 	router, _ := setupRoleStepUpRouter(t)
 
 	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1", map[string]any{"role": "admin"})
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestUpdateUserKeepAdminRoleSkipsStepUp(t *testing.T) {
@@ -67,11 +66,20 @@ func TestUpdateUserRegularRoleSkipsStepUp(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestCreateAdminUserRequiresStepUp(t *testing.T) {
+func TestCreateUserRoleFieldDoesNotTriggerStepUp(t *testing.T) {
 	router, _ := setupRoleStepUpRouter(t)
 
 	rec := doJSON(t, router, http.MethodPost, "/api/v1/admin/users", map[string]any{
 		"email": "new-admin@example.com", "password": "pass123", "role": "admin",
+	})
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestUpdateAdminAccessRequiresStepUp(t *testing.T) {
+	router, _ := setupRoleStepUpRouter(t)
+
+	rec := doJSON(t, router, http.MethodPut, "/api/v1/admin/users/1/admin-access", map[string]any{
+		"role": "admin", "admin_permissions": []string{"accounts:read"},
 	})
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }

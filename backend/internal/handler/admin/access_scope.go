@@ -10,11 +10,10 @@ import (
 )
 
 type adminAccessScope struct {
-	Unrestricted  bool
-	ProjectScoped bool
-	ProjectID     int64
-	GroupIDs      []int64
-	groupSet      map[int64]struct{}
+	Unrestricted               bool
+	ProtectManagedAccountState bool
+	GroupIDs                   []int64
+	groupSet                   map[int64]struct{}
 }
 
 type accountScopedProxyLookup interface {
@@ -31,10 +30,7 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
 	if role == service.RoleAdmin {
-		if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
-			return &adminAccessScope{ProjectScoped: true, ProjectID: projectID}, nil
-		}
-		return &adminAccessScope{Unrestricted: true}, nil
+		return &adminAccessScope{Unrestricted: true, ProtectManagedAccountState: true}, nil
 	}
 	if service.RoleIsOperator(role) {
 		return nil, service.ErrLegacyOperatorRoleDisabled
@@ -43,11 +39,11 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 }
 
 func (s *adminAccessScope) isScoped() bool {
-	return s != nil && !s.Unrestricted && !s.ProjectScoped
+	return s != nil && !s.Unrestricted
 }
 
 func (s *adminAccessScope) containsGroup(id int64) bool {
-	if s == nil || s.Unrestricted || s.ProjectScoped {
+	if s == nil || s.Unrestricted {
 		return true
 	}
 	_, ok := s.groupSet[id]
@@ -55,7 +51,7 @@ func (s *adminAccessScope) containsGroup(id int64) bool {
 }
 
 func (s *adminAccessScope) ensureGroup(id int64) error {
-	if s == nil || s.Unrestricted || s.ProjectScoped {
+	if s == nil || s.Unrestricted {
 		return nil
 	}
 	if id <= 0 {
@@ -68,7 +64,7 @@ func (s *adminAccessScope) ensureGroup(id int64) error {
 }
 
 func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) error {
-	if s == nil || s.Unrestricted || s.ProjectScoped {
+	if s == nil || s.Unrestricted {
 		return nil
 	}
 	if len(groupIDs) == 0 {
@@ -86,7 +82,7 @@ func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) 
 }
 
 func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
-	if s == nil || s.Unrestricted || s.ProjectScoped || proxyID == nil {
+	if s == nil || s.Unrestricted || proxyID == nil {
 		return nil
 	}
 	return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
@@ -95,13 +91,6 @@ func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
 func (s *adminAccessScope) ensureOAuthProxyUse(c *gin.Context, adminService accountScopedProxyLookup, accountID *int64, proxyID *int64) error {
 	if s == nil || s.Unrestricted || proxyID == nil || *proxyID == 0 {
 		return nil
-	}
-	if s.ProjectScoped {
-		if adminService == nil {
-			return errors.Forbidden("PROXY_NOT_FOUND", "proxy not found")
-		}
-		_, err := adminService.GetProxy(c.Request.Context(), *proxyID)
-		return err
 	}
 	if accountID == nil || *accountID <= 0 || adminService == nil {
 		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
@@ -126,9 +115,6 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 	if account == nil {
 		return false
 	}
-	if s.ProjectScoped {
-		return true
-	}
 	for _, id := range account.GroupIDs {
 		if s.containsGroup(id) {
 			return true
@@ -148,14 +134,11 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 }
 
 func (s *adminAccessScope) accountForResponse(account *service.Account) *service.Account {
-	if account == nil || s == nil || s.Unrestricted {
+	if account == nil || s == nil || !s.ProtectManagedAccountState {
 		return account
 	}
 	out := *account
 	out.Extra = copyAccountExtraWithoutUpstreamBillingProbe(account.Extra)
-	if s.ProjectScoped {
-		return &out
-	}
 
 	if len(account.GroupIDs) > 0 {
 		out.GroupIDs = make([]int64, 0, len(account.GroupIDs))
@@ -204,7 +187,7 @@ func copyAccountExtraWithoutUpstreamBillingProbe(extra map[string]any) map[strin
 }
 
 func (s *adminAccessScope) ensureUpstreamBillingProbeMutation(extra map[string]any, settings ...*bool) error {
-	if s == nil || s.Unrestricted {
+	if s == nil || !s.ProtectManagedAccountState {
 		return nil
 	}
 	for _, setting := range settings {

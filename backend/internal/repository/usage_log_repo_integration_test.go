@@ -1635,8 +1635,8 @@ func (s *UsageLogRepoSuite) TestGetAccountUsageStats_EmptyRange() {
 
 // --- GetUserUsageTrend ---
 
-// This matrix locks project filters into both ranking CTEs and their result scans.
-func (s *UsageLogRepoSuite) TestProjectScopedAggregateTrendsAndGroupSummary() {
+// Legacy project rows and profile bindings must not scope global usage aggregates.
+func (s *UsageLogRepoSuite) TestAggregateTrendsAndGroupSummaryIgnoreLegacyProjectBindings() {
 	projectA, err := s.client.Project.Create().
 		SetName("Usage Aggregate Project A").
 		SetSlug("usage-aggregate-project-a-" + uuid.NewString()).
@@ -1722,49 +1722,54 @@ func (s *UsageLogRepoSuite) TestProjectScopedAggregateTrendsAndGroupSummary() {
 		s.Require().NoError(err)
 	}
 
-	projectCtx := service.WithProjectID(s.ctx, projectA.ID)
+	projectCtx := s.ctx
 	startTime := createdAt.Add(-time.Hour)
 	endTime := createdAt.Add(time.Hour)
 
 	keyTrend, err := s.repo.GetAPIKeyUsageTrend(projectCtx, startTime, endTime, "day", 10)
 	s.Require().NoError(err)
-	s.Require().Len(keyTrend, 1)
-	s.Equal(keyA.ID, keyTrend[0].APIKeyID)
+	s.Require().Len(keyTrend, 3)
+	keyIDs := make([]int64, 0, len(keyTrend))
+	for _, item := range keyTrend {
+		keyIDs = append(keyIDs, item.APIKeyID)
+	}
+	s.ElementsMatch([]int64{keyA.ID, keyB.ID, foreignKey.ID}, keyIDs)
 
 	userTrend, err := s.repo.GetUserUsageTrend(projectCtx, startTime, endTime, "day", 10)
 	s.Require().NoError(err)
-	s.Require().Len(userTrend, 1)
+	s.Require().Len(userTrend, 2)
 	s.Equal(userA.ID, userTrend[0].UserID)
-	s.InDelta(1.25, userTrend[0].ActualCost, 1e-9)
+	s.InDelta(11.0, userTrend[0].ActualCost, 1e-9)
 
 	userTrendByID, err := s.repo.GetUserUsageTrendByUserID(projectCtx, userA.ID, startTime, endTime, "day")
 	s.Require().NoError(err)
 	s.Require().Len(userTrendByID, 1)
-	s.Equal(int64(1), userTrendByID[0].Requests)
-	s.InDelta(1.25, userTrendByID[0].ActualCost, 1e-9)
+	s.Equal(int64(2), userTrendByID[0].Requests)
+	s.InDelta(11.0, userTrendByID[0].ActualCost, 1e-9)
 
 	userBreakdown, err := s.repo.GetUserBreakdownStats(projectCtx, startTime, endTime, usagestats.UserBreakdownDimension{}, 10)
 	s.Require().NoError(err)
-	s.Require().Len(userBreakdown, 1)
+	s.Require().Len(userBreakdown, 2)
 	s.Equal(userA.ID, userBreakdown[0].UserID)
-	s.Equal(int64(1), userBreakdown[0].Requests)
-	s.InDelta(1.25, userBreakdown[0].ActualCost, 1e-9)
+	s.Equal(int64(2), userBreakdown[0].Requests)
+	s.InDelta(11.0, userBreakdown[0].ActualCost, 1e-9)
 
 	ranking, err := s.repo.GetUserSpendingRanking(projectCtx, startTime, endTime, 10)
 	s.Require().NoError(err)
-	s.Require().Len(ranking.Ranking, 1)
+	s.Require().Len(ranking.Ranking, 2)
 	s.Equal(userA.ID, ranking.Ranking[0].UserID)
-	s.InDelta(1.25, ranking.TotalActualCost, 1e-9)
+	s.InDelta(15.5, ranking.TotalActualCost, 1e-9)
 
 	groupSummary, err := s.repo.GetAllGroupUsageSummary(projectCtx, startTime.Add(-time.Hour))
 	s.Require().NoError(err)
-	s.Require().Len(groupSummary, 2)
+	s.Require().Len(groupSummary, 3)
 	summaryByGroupID := make(map[int64]usagestats.GroupUsageSummary, len(groupSummary))
 	for _, summary := range groupSummary {
 		summaryByGroupID[summary.GroupID] = summary
 	}
 	s.InDelta(1.25, summaryByGroupID[groupA.ID].TotalCost, 1e-9)
-	s.InDelta(0, summaryByGroupID[groupOnlyForeignUsage.ID].TotalCost, 1e-9)
+	s.InDelta(4.5, summaryByGroupID[groupOnlyForeignUsage.ID].TotalCost, 1e-9)
+	s.InDelta(9.75, summaryByGroupID[groupB.ID].TotalCost, 1e-9)
 }
 
 func (s *UsageLogRepoSuite) TestGetUserUsageTrend() {

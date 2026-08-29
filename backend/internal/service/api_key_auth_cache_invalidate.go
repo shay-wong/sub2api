@@ -40,7 +40,7 @@ func (s *APIKeyService) InvalidateAuthCacheByAPIKeyID(ctx context.Context, apiKe
 	if apiKeyID <= 0 {
 		return
 	}
-	key, _, err := s.apiKeyRepo.GetKeyAndOwnerID(WithoutProjectID(ctx), apiKeyID)
+	key, _, err := s.apiKeyRepo.GetKeyAndOwnerID(ctx, apiKeyID)
 	if err != nil {
 		return
 	}

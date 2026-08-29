@@ -220,7 +220,7 @@ describe('feature route guard', () => {
   it.each([
     '/admin/risk-control',
     '/admin/prompt-audit',
-  ])('keeps %s unavailable to project admins', async (path) => {
+  ])('keeps %s unavailable to limited admins', async (path) => {
     authStore.canAccessAdminConsole = true
     authStore.hasAdminPermission.mockReturnValue(true)
 

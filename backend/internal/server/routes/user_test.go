@@ -40,7 +40,7 @@ func TestUserRoutesRegisterBatchImageAllKeyHistory(t *testing.T) {
 	require.Equal(t, http.StatusTeapot, rec.Code)
 }
 
-func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
+func TestUserRoutesBatchImageAllKeyHistoryUsesAuthenticatedUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	v1 := router.Group("/api/v1")
@@ -70,7 +70,6 @@ func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
 		},
 		middleware.JWTAuthMiddleware(func(c *gin.Context) {
 			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 11})
-			c.Request = c.Request.WithContext(service.WithProjectID(c.Request.Context(), 169))
 			c.Next()
 		}),
 		middleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
@@ -89,7 +88,6 @@ func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(11), repo.userID)
-	require.Equal(t, int64(169), repo.projectID)
 	require.Equal(t, service.BatchImageJobStatusCompleted, repo.filter.Status)
 	require.Equal(t, "demo", repo.filter.TaskNameLike)
 	require.NotNil(t, repo.filter.Downloaded)
@@ -121,56 +119,27 @@ func TestUserRoutesBatchImageAllKeyHistoryUsesJWTProjectScope(t *testing.T) {
 	require.Equal(t, 0.2, body.Data[0].Cost)
 }
 
-func TestBatchImageAllKeyHistoryRequiresAuthAndProject(t *testing.T) {
+func TestBatchImageAllKeyHistoryRequiresAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/user/batch-image/jobs", nil)
 
-	for _, tc := range []struct {
-		name      string
-		configure func(*gin.Context)
-		wantCode  int
-		wantError string
-	}{
-		{
-			name:      "missing auth subject",
-			wantCode:  http.StatusUnauthorized,
-			wantError: "AUTH_REQUIRED",
-		},
-		{
-			name: "missing project context",
-			configure: func(c *gin.Context) {
-				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 11})
-			},
-			wantCode:  http.StatusBadRequest,
-			wantError: "PROJECT_REQUIRED",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			c, _ := gin.CreateTestContext(rec)
-			c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/user/batch-image/jobs", nil)
-			if tc.configure != nil {
-				tc.configure(c)
-			}
+	(&handler.BatchImageHandler{}).ListAll(c)
 
-			(&handler.BatchImageHandler{}).ListAll(c)
-
-			require.Equal(t, tc.wantCode, rec.Code)
-			require.Contains(t, rec.Body.String(), tc.wantError)
-		})
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "AUTH_REQUIRED")
 }
 
 type batchImageAllKeyHistoryRepo struct {
 	service.BatchImageRepository
-	jobs      []*service.BatchImageJob
-	userID    int64
-	projectID int64
-	filter    service.BatchImageJobFilter
+	jobs   []*service.BatchImageJob
+	userID int64
+	filter service.BatchImageJobFilter
 }
 
 func (r *batchImageAllKeyHistoryRepo) ListBatchImageJobsForUser(ctx context.Context, userID int64, filter service.BatchImageJobFilter) ([]*service.BatchImageJob, error) {
 	r.userID = userID
-	r.projectID, _ = service.ProjectIDFromContext(ctx)
 	r.filter = filter
 	return r.jobs, nil
 }

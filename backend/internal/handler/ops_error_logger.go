@@ -1334,14 +1334,6 @@ func resolveOpsProjectID(c *gin.Context, apiKey *service.APIKey) int64 {
 		}
 		return 0
 	}
-	if projectID, ok := service.ProjectIDFromContext(c.Request.Context()); ok {
-		return projectID
-	}
-	if v, ok := c.Get("project_id"); ok {
-		if id, ok := v.(int64); ok && id > 0 {
-			return id
-		}
-	}
 	if apiKey != nil && apiKey.ProjectID > 0 {
 		return apiKey.ProjectID
 	}

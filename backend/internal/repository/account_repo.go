@@ -212,9 +212,6 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, sqlq sqlExec
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
-	if err := bindResourceToActiveProjectProfile(ctx, sqlq, projectID, service.ProjectResourceTypeAccount, account.ID); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -273,7 +270,6 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 
 func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Account, error) {
 	preds := []dbpredicate.Account{dbaccount.IDEQ(id)}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	m, err := r.client.Account.Query().Where(preds...).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
@@ -313,7 +309,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 
 	entAccounts, err := r.client.Account.
 		Query().
-		Where(append([]dbpredicate.Account{dbaccount.IDIn(uniqueIDs...)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDIn(uniqueIDs...)}...).
 		WithProxy().
 		All(ctx)
 	if err != nil {
@@ -380,7 +376,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 //   - 适用于删除前的存在性检查等只需判断有无的场景
 func (r *accountRepository) ExistsByID(ctx context.Context, id int64) (bool, error) {
 	exists, err := r.client.Account.Query().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		Exist(ctx)
 	if err != nil {
 		return false, err
@@ -403,7 +399,6 @@ func (r *accountRepository) GetByCRSAccountID(ctx context.Context, crsAccountID 
 			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, crsAccountID, sqljson.Path("crs_account_id")))
 		},
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	m, err := r.client.Account.Query().
 		Where(preds...).
 		Only(ctx)
@@ -551,7 +546,6 @@ func (r *accountRepository) updateLockedAccount(
 	}
 
 	builder := client.Account.UpdateOneID(account.ID).
-		Where(projectScopedAccountPredicate(ctx)...).
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
 		SetPlatform(account.Platform).
@@ -864,7 +858,6 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		WHERE id = $2 AND deleted_at IS NULL
 	`
 	args := []any{string(payload), id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -951,7 +944,6 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 
 func (r *accountRepository) accountListFilteredQuery(ctx context.Context, platform, accountType, status, search string, groupIDs []int64, privacyMode string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
-	q = q.Where(projectScopedAccountPredicate(ctx)...)
 
 	if platform != "" {
 		q = q.Where(dbaccount.PlatformEQ(platform))
@@ -1124,7 +1116,6 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 	}
 
 	preds := []dbpredicate.Account{dbaccount.DeletedAtIsNil()}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	q := r.client.Account.Query().Where(preds...)
 	if platformFilter = strings.TrimSpace(platformFilter); platformFilter != "" {
 		q = q.Where(dbaccount.PlatformEQ(platformFilter))
@@ -1314,7 +1305,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			) IS NOT TRUE`
 	}
 	args := []any{pq.Array(options.Platforms), options.AfterID, options.Limit}
-	query += buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	query += ""
 	query += `
 		ORDER BY a.id ASC
 		LIMIT $3`
@@ -1437,7 +1428,7 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 
 func (r *accountRepository) SetError(ctx context.Context, id int64, errorMsg string) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetStatus(service.StatusError).
 		SetErrorMessage(errorMsg).
 		SetSchedulable(false).
@@ -1463,7 +1454,7 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 		snapshot.CredentialsJSON, snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1534,7 +1525,7 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 		string(expectedJSON),
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1602,7 +1593,7 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1664,7 +1655,7 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1729,7 +1720,7 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1845,7 +1836,7 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetStatus(service.StatusActive).
 		SetErrorMessage("").
 		Save(ctx)
@@ -1864,7 +1855,7 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 		return err
 	}
 	if _, err := r.client.Group.Query().
-		Where(append([]dbpredicate.Group{dbgroup.IDEQ(groupID)}, projectScopedGroupPredicate(ctx)...)...).
+		Where([]dbpredicate.Group{dbgroup.IDEQ(groupID)}...).
 		Only(ctx); err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
@@ -1888,7 +1879,7 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 		return err
 	}
 	if _, err := r.client.Group.Query().
-		Where(append([]dbpredicate.Group{dbgroup.IDEQ(groupID)}, projectScopedGroupPredicate(ctx)...)...).
+		Where([]dbpredicate.Group{dbgroup.IDEQ(groupID)}...).
 		Only(ctx); err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
@@ -1910,7 +1901,7 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 
 func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
-		Where(append([]dbpredicate.Group{dbgroup.HasAccountsWith(dbaccount.IDEQ(accountID))}, projectScopedGroupPredicate(ctx)...)...).
+		Where([]dbpredicate.Group{dbgroup.HasAccountsWith(dbaccount.IDEQ(accountID))}...).
 		All(ctx)
 	if err != nil {
 		return nil, err
@@ -1929,7 +1920,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	}
 	if len(groupIDs) > 0 {
 		count, err := r.client.Group.Query().
-			Where(append([]dbpredicate.Group{dbgroup.IDIn(groupIDs...)}, projectScopedGroupPredicate(ctx)...)...).
+			Where([]dbpredicate.Group{dbgroup.IDIn(groupIDs...)}...).
 			Count(ctx)
 		if err != nil {
 			return err
@@ -2037,7 +2028,6 @@ func (r *accountRepository) schedulableAccountsQuery(ctx context.Context, now ti
 		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	return r.client.Account.Query().
 		Where(preds...).
 		Order(dbent.Asc(dbaccount.FieldPriority))
@@ -2098,7 +2088,6 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 				AND (a.overload_until IS NULL OR a.overload_until <= $3)
 				AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= $3)
 	`
-	query += groupAccountRelationshipScopeClause(ctx, "ag.group_id", "a.id")
 	query += `
 			ORDER BY ag.group_id ASC, ag.priority ASC, a.priority ASC, a.id ASC
 		`
@@ -2150,7 +2139,6 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	accounts, err := r.client.Account.Query().
 		Where(preds...).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
@@ -2186,7 +2174,6 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	accounts, err := r.client.Account.Query().
 		Where(preds...).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
@@ -2209,7 +2196,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	accounts, err := r.client.Account.Query().
 		Where(preds...).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
@@ -2235,7 +2221,6 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 		dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 		dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	accounts, err := r.client.Account.Query().
 		Where(preds...).
 		Order(dbent.Asc(dbaccount.FieldPriority)).
@@ -2301,7 +2286,7 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	now := time.Now()
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetRateLimitedAt(now).
 		SetRateLimitResetAt(resetAt).
 		Save(ctx)
@@ -2327,7 +2312,6 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 			dbaccount.RateLimitResetAtLT(resetAt),
 		),
 	}
-	predicates = append(predicates, projectScopedAccountPredicate(ctx)...)
 	updated, err := r.client.Account.Update().
 		Where(predicates...).
 		SetRateLimitedAt(now).
@@ -2354,13 +2338,13 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 // from erasing a later clear/re-arm generation with an equal or shorter reset.
 func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
 	updated, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{
+		Where([]dbpredicate.Account{
 			dbaccount.IDEQ(id),
 			dbaccount.PlatformEQ(service.PlatformGrok),
 			dbaccount.TypeEQ(service.AccountTypeOAuth),
 			dbaccount.RateLimitedAtEQ(observedLimitedAt),
 			dbaccount.RateLimitResetAtEQ(observedResetAt),
-		}, projectScopedAccountPredicate(ctx)...)...).
+		}...).
 		ClearRateLimitedAt().
 		ClearRateLimitResetAt().
 		Save(ctx)
@@ -2380,11 +2364,11 @@ func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int
 
 func (r *accountRepository) ClearOpenAIRateLimit(ctx context.Context, id int64) error {
 	updated, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{
+		Where([]dbpredicate.Account{
 			dbaccount.IDEQ(id),
 			dbaccount.PlatformEQ(service.PlatformOpenAI),
 			dbaccount.TypeEQ(service.AccountTypeOAuth),
-		}, projectScopedAccountPredicate(ctx)...)...).
+		}...).
 		ClearRateLimitedAt().
 		ClearRateLimitResetAt().
 		Save(ctx)
@@ -2439,7 +2423,6 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 			updated_at = NOW()
 		WHERE id = $3 AND deleted_at IS NULL`
 	args := []any{scope, raw, id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2461,7 +2444,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 
 func (r *accountRepository) SetOverloaded(ctx context.Context, id int64, until time.Time) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetOverloadUntil(until).
 		Save(ctx)
 	if err != nil {
@@ -2485,7 +2468,6 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 			AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until < $1)
 	`
 	args := []any{until, reason, id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2515,7 +2497,7 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 		until, reason, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
 		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := buildProjectProfileScopedClause(ctx, &args, "a.project_id", projectSQLScopeResources{AccountID: "a.id"})
+	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -2565,7 +2547,6 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 			AND deleted_at IS NULL
 	`
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	_, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2579,7 +2560,7 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		ClearRateLimitedAt().
 		ClearRateLimitResetAt().
 		ClearOverloadUntil().
@@ -2598,7 +2579,6 @@ func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id 
 	client := clientFromContext(ctx, r.client)
 	query := "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'antigravity_quota_scopes', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL"
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2621,7 +2601,6 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 	client := clientFromContext(ctx, r.client)
 	query := "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) - 'model_rate_limits', updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL"
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -2643,7 +2622,7 @@ func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) 
 
 func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	builder := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetSessionWindowStatus(status)
 	if start != nil {
 		builder.SetSessionWindowStart(*start)
@@ -2666,7 +2645,7 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 
 func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetSessionWindowEnd(end).
 		Save(ctx)
 	if err != nil {
@@ -2680,7 +2659,7 @@ func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64
 
 func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
 	_, err := r.client.Account.Update().
-		Where(append([]dbpredicate.Account{dbaccount.IDEQ(id)}, projectScopedAccountPredicate(ctx)...)...).
+		Where([]dbpredicate.Account{dbaccount.IDEQ(id)}...).
 		SetSchedulable(schedulable).
 		Save(ctx)
 	if err != nil {
@@ -2782,7 +2761,6 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 	query := "UPDATE accounts SET extra = " + extraExpression + ", updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL"
 	args := []any{string(payload), id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := client.ExecContext(ctx, query, args...)
 
 	if err != nil {
@@ -3167,7 +3145,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		args = append(args, service.AccountTypeAPIKey)
 	}
 	query := "UPDATE accounts SET " + joinClauses(setClauses, ", ") + whereClause
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
@@ -3246,14 +3223,10 @@ type accountGroupQueryOptions struct {
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {
 	q := r.client.AccountGroup.Query().
 		Where(dbaccountgroup.GroupIDEQ(groupID))
-	if groupPreds := projectScopedGroupPredicate(ctx); len(groupPreds) > 0 {
-		q = q.Where(dbaccountgroup.HasGroupWith(groupPreds...))
-	}
 
 	// 通过 account_groups 中间表查询账号，并按需叠加状态/平台/调度能力过滤。
 	preds := make([]dbpredicate.Account, 0, 8)
 	preds = append(preds, dbaccount.DeletedAtIsNil())
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	if opts.status != "" {
 		preds = append(preds, dbaccount.StatusEQ(opts.status))
 	}
@@ -3677,7 +3650,6 @@ func (r *accountRepository) FindByExtraField(ctx context.Context, key string, va
 			}
 		},
 	}
-	preds = append(preds, projectScopedAccountPredicate(ctx)...)
 	accounts, err := r.client.Account.Query().
 		Where(preds...).
 		All(ctx)
@@ -3698,9 +3670,6 @@ func (r *accountRepository) FindDuplicateByOperationID(ctx context.Context, oper
 		func(s *entsql.Selector) {
 			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, operationID, sqljson.Path("duplicate_operation_id")))
 		},
-	}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		preds = append(preds, dbaccount.ProjectIDEQ(projectID))
 	}
 	account, err := r.client.Account.Query().Where(preds...).First(ctx)
 	if dbent.IsNotFound(err) {
@@ -4001,7 +3970,6 @@ func (r *accountRepository) ResetQuotaUsed(ctx context.Context, id int64) error 
 		) - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at', updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`
 	args := []any{id}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -4028,7 +3996,6 @@ func (r *accountRepository) RevertProxyFallback(ctx context.Context, accountID i
 		UPDATE accounts SET proxy_id=proxy_fallback_origin_id, proxy_fallback_origin_id=NULL, updated_at=NOW()
 		WHERE id=$1 AND proxy_fallback_origin_id IS NOT NULL AND deleted_at IS NULL`
 	args := []any{accountID}
-	query, args = appendProjectProfileScopedQuery(ctx, query, args, "accounts.project_id", projectSQLScopeResources{AccountID: "accounts.id"})
 	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err

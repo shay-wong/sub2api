@@ -17,23 +17,20 @@ import (
 )
 
 type PasskeyHandler struct {
-	passkeys       *service.PasskeyService
-	authService    *service.AuthService
-	settingSvc     *service.SettingService
-	projectService *service.ProjectService
+	passkeys    *service.PasskeyService
+	authService *service.AuthService
+	settingSvc  *service.SettingService
 }
 
 func NewPasskeyHandler(
 	passkeys *service.PasskeyService,
 	authService *service.AuthService,
 	settingService *service.SettingService,
-	projectService *service.ProjectService,
 ) *PasskeyHandler {
 	return &PasskeyHandler{
-		passkeys:       passkeys,
-		authService:    authService,
-		settingSvc:     settingService,
-		projectService: projectService,
+		passkeys:    passkeys,
+		authService: authService,
+		settingSvc:  settingService,
 	}
 }
 
@@ -120,7 +117,7 @@ func (h *PasskeyHandler) FinishLogin(c *gin.Context) {
 	middleware2.SetAuditActor(c, user.ID, user.Email)
 	c.Set("auth_method", service.AuditAuthMethodPasskey)
 	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	respondWithTokenPair(c, h.authService, h.projectService, user)
+	respondWithTokenPair(c, h.authService, user)
 }
 
 func (h *PasskeyHandler) BeginRegistration(c *gin.Context) {
@@ -278,12 +275,7 @@ func (h *PasskeyHandler) requirePasskeysEnabled(c *gin.Context) bool {
 }
 
 func (h *PasskeyHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
-	return ensureBackendModeUserAccess(
-		ctx,
-		user,
-		h.settingSvc != nil && h.settingSvc.IsBackendModeEnabled(ctx),
-		h.projectService,
-	)
+	return ensureBackendModeUserAccess(user, h.settingSvc != nil && h.settingSvc.IsBackendModeEnabled(ctx))
 }
 
 func bindPasskeyFinishRequest(c *gin.Context) (*passkeyFinishRequest, bool) {

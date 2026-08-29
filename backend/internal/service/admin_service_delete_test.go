@@ -804,12 +804,12 @@ func TestAdminService_DeleteProxy_Error(t *testing.T) {
 	require.ErrorIs(t, err, deleteErr)
 }
 
-func TestAdminService_DeleteProxy_NotVisible(t *testing.T) {
+func TestAdminService_DeleteProxy_MissingIsIdempotent(t *testing.T) {
 	repo := &proxyRepoStub{getErr: ErrProxyNotFound}
 	svc := &adminServiceImpl{proxyRepo: repo}
 
-	err := svc.DeleteProxy(WithProjectID(context.Background(), 7), 33)
-	require.ErrorIs(t, err, ErrProxyNotFound)
+	err := svc.DeleteProxy(context.Background(), 33)
+	require.NoError(t, err)
 	require.Empty(t, repo.deletedIDs)
 }
 
@@ -820,7 +820,7 @@ func TestAdminService_DeleteProxy_ProjectAdminCanDeleteVisibleSharedProxyWhenUnu
 		},
 	}
 	svc := &adminServiceImpl{proxyRepo: repo}
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 
 	err := svc.DeleteProxy(ctx, 33)
 	require.NoError(t, err)
@@ -834,7 +834,7 @@ func TestAdminService_DeleteProxy_ProjectAdminCanDeleteOwnerProxy(t *testing.T) 
 		},
 	}
 	svc := &adminServiceImpl{proxyRepo: repo}
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 
 	err := svc.DeleteProxy(ctx, 33)
 	require.NoError(t, err)
@@ -849,7 +849,7 @@ func TestAdminService_BatchDeleteProxies_ProjectAdminDeletesVisibleSharedProxyWh
 		},
 	}
 	svc := &adminServiceImpl{proxyRepo: repo}
-	ctx := WithAdminRole(WithProjectID(context.Background(), 7), RoleAdmin)
+	ctx := WithAdminRole(context.Background(), RoleAdmin)
 
 	result, err := svc.BatchDeleteProxies(ctx, []int64{11, 22})
 	require.NoError(t, err)

@@ -18,12 +18,6 @@ export { buildApiUrl, buildGatewayUrl } from './url'
 
 // ==================== Axios Instance Configuration ====================
 
-const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
-const PROJECT_HEADER_EXCLUDED_PREFIXES = [
-  '/auth/',
-  '/settings/public',
-]
-
 export const apiClient: AxiosInstance = axios.create({
   baseURL: getAPIBaseURL(),
   withCredentials: true,
@@ -65,16 +59,6 @@ apiClient.interceptors.request.use(
       config.headers['Accept-Language'] = getLocale()
     }
 
-    const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
-    if (
-      selectedProjectID
-      && config.headers
-      && shouldAttachProjectHeader(config.url)
-      && !hasRequestHeader(config.headers, 'X-Project-ID')
-    ) {
-      config.headers['X-Project-ID'] = selectedProjectID
-    }
-
     // Attach timezone for all GET requests (backend may use it for default date ranges)
     if (config.method === 'get') {
       if (!config.params) {
@@ -99,34 +83,6 @@ apiClient.interceptors.request.use(
     return Promise.reject(error)
   }
 )
-
-function shouldAttachProjectHeader(url?: string): boolean {
-  const path = normalizeRequestPath(url)
-  if (!path) {
-    return false
-  }
-  return !PROJECT_HEADER_EXCLUDED_PREFIXES.some(prefix => path === prefix.slice(0, -1) || path.startsWith(prefix))
-}
-
-function hasRequestHeader(headers: InternalAxiosRequestConfig['headers'], name: string): boolean {
-  const getter = headers as { get?: (headerName: string) => unknown }
-  if (typeof getter.get === 'function') {
-    return getter.get(name) != null
-  }
-  const lowerName = name.toLowerCase()
-  return Object.keys(headers as Record<string, unknown>).some(key => key.toLowerCase() === lowerName)
-}
-
-function normalizeRequestPath(url?: string): string {
-  if (!url) {
-    return ''
-  }
-  try {
-    return new URL(url, window.location.origin).pathname
-  } catch {
-    return url.split('?')[0] ?? ''
-  }
-}
 
 // ==================== Response Interceptor ====================
 

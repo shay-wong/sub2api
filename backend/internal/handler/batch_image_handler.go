@@ -134,12 +134,7 @@ func (h *BatchImageHandler) ListAll(c *gin.Context) {
 		batchImageError(c, infraerrors.New(http.StatusUnauthorized, "AUTH_REQUIRED", "authentication is required"))
 		return
 	}
-	projectID, ok := service.ProjectIDFromContext(c.Request.Context())
-	if !ok || projectID <= 0 {
-		batchImageError(c, infraerrors.New(http.StatusBadRequest, "PROJECT_REQUIRED", "project is required"))
-		return
-	}
-	owner := service.BatchImageOwner{UserID: subject.UserID, ProjectID: projectID}
+	owner := service.BatchImageOwner{UserID: subject.UserID}
 	limit, _ := strconv.Atoi(c.Query("limit"))
 	got, err := h.service.ListAll(c.Request.Context(), owner, service.BatchImageJobsQuery{
 		Status:     c.Query("status"),
@@ -309,15 +304,10 @@ func batchImageOwnerFromContext(c *gin.Context) (service.BatchImageOwner, bool) 
 	if !ok || apiKey == nil || apiKey.ID <= 0 || apiKey.UserID <= 0 {
 		return service.BatchImageOwner{}, false
 	}
-	projectID := apiKey.ProjectID
-	if projectID <= 0 {
-		projectID, _ = service.ProjectIDFromContext(c.Request.Context())
-	}
 	return service.BatchImageOwner{
-		UserID:    apiKey.UserID,
-		ProjectID: projectID,
-		APIKeyID:  apiKey.ID,
-		GroupID:   apiKey.GroupID,
+		UserID:   apiKey.UserID,
+		APIKeyID: apiKey.ID,
+		GroupID:  apiKey.GroupID,
 	}, true
 }
 

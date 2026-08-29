@@ -27,6 +27,7 @@ const fakeUser = {
   username: 'testuser',
   email: 'test@example.com',
   role: 'user' as const,
+  admin_permissions: [],
   balance: 100,
   concurrency: 5,
   status: 'active' as const,
@@ -41,7 +42,7 @@ const fakeAdminUser = {
   username: 'admin',
   email: 'admin@example.com',
   role: 'admin' as const,
-  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true, permissions: ['admin.dashboard.read', 'admin.users.manage'] }],
+  admin_permissions: ['admin.dashboard.read', 'admin.users.manage'],
 }
 
 const fakeSuperAdminUser = {
@@ -50,7 +51,6 @@ const fakeSuperAdminUser = {
   username: 'superadmin',
   email: 'superadmin@example.com',
   role: 'super_admin' as const,
-  projects: [{ id: 10, name: 'Default', slug: 'default', role: 'super_admin' as const, is_owner: true }],
 }
 
 const fakeOperatorUser = {
@@ -346,7 +346,7 @@ describe('useAuthStore', () => {
       expect(store.canAccessAdminConsole).toBe(true)
     })
 
-    it('项目管理员不是超级管理员但可以进入管理后台', async () => {
+    it('管理员不是超级管理员但可以按权限进入管理后台', async () => {
       const adminResponse = { ...fakeAuthResponse, user: { ...fakeAdminUser } }
       mockLogin.mockResolvedValue(adminResponse)
       const store = useAuthStore()
@@ -357,15 +357,14 @@ describe('useAuthStore', () => {
       expect(store.canAccessAdminConsole).toBe(true)
       expect(store.hasAdminPermission('admin.dashboard.read')).toBe(true)
       expect(store.hasAdminPermission('admin.accounts.write')).toBe(false)
-      expect(localStorage.getItem('sub2api_selected_project_id')).toBe('10')
     })
 
-    it('旧项目管理员没有 permissions 字段时使用默认后台权限', async () => {
+    it('管理员没有对应权限时拒绝后台功能', async () => {
       const adminResponse = {
         ...fakeAuthResponse,
         user: {
           ...fakeAdminUser,
-          projects: [{ id: 10, name: 'Default', slug: 'default', role: 'admin' as const, is_owner: true }],
+          admin_permissions: [],
         },
       }
       mockLogin.mockResolvedValue(adminResponse)
@@ -373,9 +372,9 @@ describe('useAuthStore', () => {
 
       await store.login({ email: 'admin@example.com', password: '123456' })
 
-      expect(store.hasAdminPermission('admin.accounts.write')).toBe(true)
-      expect(store.hasAdminPermission('admin.proxies.manage')).toBe(true)
-      expect(store.hasAdminPermission('admin.usage.read')).toBe(true)
+      expect(store.hasAdminPermission('admin.accounts.write')).toBe(false)
+      expect(store.hasAdminPermission('admin.proxies.manage')).toBe(false)
+      expect(store.hasAdminPermission('admin.usage.read')).toBe(false)
     })
 
     it('普通用户返回 false', async () => {

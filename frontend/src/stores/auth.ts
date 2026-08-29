@@ -13,14 +13,13 @@ import type {
   AuthResponse,
   ActionCaptchaRequestProof
 } from '@/types'
-import { defaultProjectAdminPermissions, type AdminPermission } from '@/constants/adminPermissions'
+import type { AdminPermission } from '@/constants/adminPermissions'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
 const REFRESH_TOKEN_KEY = 'refresh_token'
 const TOKEN_EXPIRES_AT_KEY = 'token_expires_at' // 存储过期时间戳而非有效期
 const PENDING_AUTH_SESSION_KEY = 'pending_auth_session'
-const SELECTED_PROJECT_ID_KEY = 'sub2api_selected_project_id'
 const AUTO_REFRESH_INTERVAL = 60 * 1000 // 60 seconds for user data refresh
 const TOKEN_REFRESH_BUFFER = 120 * 1000 // 120 seconds before expiry to refresh token
 
@@ -103,26 +102,17 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const canAccessAdminConsole = computed(() => {
-    return user.value?.role === 'super_admin' || user.value?.projects?.some(project => project.role === 'admin') === true
-  })
-
-  const selectedProject = computed(() => {
-    const projects = user.value?.projects ?? []
-    if (projects.length === 0) return null
-    const selectedProjectID = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
-    return projects.find(project => String(project.id) === selectedProjectID) ?? projects.find(project => project.role === 'admin') ?? projects[0]
+    return user.value?.role === 'super_admin' || user.value?.role === 'admin'
   })
 
   function hasAdminPermission(permission: AdminPermission | string): boolean {
     if (user.value?.role === 'super_admin') {
       return true
     }
-    const project = selectedProject.value
-    if (!project || project.role !== 'admin') {
+    if (user.value?.role !== 'admin') {
       return false
     }
-    const permissions = project.permissions ?? defaultProjectAdminPermissions
-    return permissions.includes(permission)
+    return (user.value.admin_permissions ?? []).includes(permission)
   }
 
   const isSimpleMode = computed(() => runMode.value === 'simple')
@@ -146,7 +136,6 @@ export const useAuthStore = defineStore('auth', () => {
       try {
         token.value = savedToken
         user.value = JSON.parse(savedUser)
-        ensureSelectedProject(user.value)
         refreshTokenValue.value = savedRefreshToken
         tokenExpiresAt.value = savedExpiresAt ? parseInt(savedExpiresAt, 10) : null
 
@@ -342,7 +331,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
     const { run_mode: _run_mode, ...userData } = response.user
     user.value = userData
-    ensureSelectedProject(userData)
 
     // Persist to localStorage
     localStorage.setItem(AUTH_TOKEN_KEY, response.access_token)
@@ -475,7 +463,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
       const { run_mode: _run_mode, ...userData } = response.data
       user.value = userData
-      ensureSelectedProject(userData)
 
       // Update localStorage
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userData))
@@ -508,7 +495,6 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(AUTH_USER_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
     localStorage.removeItem(TOKEN_EXPIRES_AT_KEY)
-    localStorage.removeItem(SELECTED_PROJECT_ID_KEY)
 
     if (options?.preservePendingAuthSession) {
       pendingAuthSession.value = getPersistedPendingAuthSession()
@@ -517,27 +503,6 @@ export const useAuthStore = defineStore('auth', () => {
 
     pendingAuthSession.value = null
     clearPendingAuthSessionStorage()
-  }
-
-  function ensureSelectedProject(currentUser: User | null): void {
-    if (!currentUser) {
-      localStorage.removeItem(SELECTED_PROJECT_ID_KEY)
-      return
-    }
-
-    const projects = currentUser.projects ?? []
-    if (projects.length === 0) {
-      localStorage.removeItem(SELECTED_PROJECT_ID_KEY)
-      return
-    }
-
-    const persisted = localStorage.getItem(SELECTED_PROJECT_ID_KEY)
-    if (persisted && projects.some(project => String(project.id) === persisted)) {
-      return
-    }
-
-    const preferred = projects.find(project => project.role === 'admin') ?? projects[0]
-    localStorage.setItem(SELECTED_PROJECT_ID_KEY, String(preferred.id))
   }
 
   // ==================== Return Store API ====================
@@ -554,7 +519,6 @@ export const useAuthStore = defineStore('auth', () => {
     isAdmin,
     hasUserAccess,
     canAccessAdminConsole,
-    selectedProject,
     isSimpleMode,
     hasPendingAuthSession,
     hasAdminPermission,

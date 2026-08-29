@@ -56,17 +56,17 @@ func TestBuildOpsSystemLogsWhere_WithClientRequestIDAndUserID(t *testing.T) {
 	}
 }
 
-func TestBuildOpsSystemLogsWhereForContext_IncludesProjectScope(t *testing.T) {
-	ctx := service.WithProjectID(context.Background(), 169)
+func TestBuildOpsSystemLogsWhereForContextDoesNotAddProjectScope(t *testing.T) {
+	ctx := context.Background()
 	where, args, hasConstraint := buildOpsSystemLogsWhereForContext(ctx, &service.OpsSystemLogFilter{})
-	if !hasConstraint {
-		t.Fatalf("expected project context to count as a constraint")
+	if hasConstraint {
+		t.Fatalf("empty global filter should not count as a constraint")
 	}
-	if !contains(where, "l.project_id = $1") {
-		t.Fatalf("where should include project scope: %s", where)
+	if contains(where, "project_id") {
+		t.Fatalf("where should not include project scope: %s", where)
 	}
-	if len(args) != 1 || args[0] != int64(169) {
-		t.Fatalf("args = %#v, want [169]", args)
+	if len(args) != 0 {
+		t.Fatalf("args = %#v, want none", args)
 	}
 }
 

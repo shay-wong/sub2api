@@ -7,15 +7,11 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
-	"github.com/Wei-Shaw/sub2api/ent/projectprofile"
-	"github.com/Wei-Shaw/sub2api/ent/projectprofilebinding"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-
-	entsql "entgo.io/ent/dialect/sql"
 )
 
 type userSubscriptionRepository struct {
@@ -63,45 +59,7 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		return translatePersistenceError(err, nil, service.ErrSubscriptionAlreadyExists)
 	}
 	applyUserSubscriptionEntityToService(sub, created)
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		if err := bindSubscriptionToActiveProjectProfile(ctx, client, projectID, created.ID); err != nil {
-			return err
-		}
-	}
 	return nil
-}
-
-func bindSubscriptionToActiveProjectProfile(ctx context.Context, client *dbent.Client, projectID int64, subscriptionID int64) error {
-	if client == nil || projectID <= 0 || subscriptionID <= 0 {
-		return nil
-	}
-	profile, err := client.ProjectProfile.Query().
-		Where(
-			projectprofile.ProjectIDEQ(projectID),
-			projectprofile.IsActiveEQ(true),
-			projectprofile.DeletedAtIsNil(),
-			projectprofile.ModeEQ(service.ProjectProfileModeRestricted),
-		).
-		Only(ctx)
-	if dbent.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return client.ProjectProfileBinding.Create().
-		SetProjectProfileID(profile.ID).
-		SetResourceType(service.ProjectResourceTypeSubscription).
-		SetResourceID(subscriptionID).
-		OnConflict(
-			entsql.ConflictColumns(
-				projectprofilebinding.FieldProjectProfileID,
-				projectprofilebinding.FieldResourceType,
-				projectprofilebinding.FieldResourceID,
-			),
-		).
-		Ignore().
-		Exec(ctx)
 }
 
 func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*service.UserSubscription, error) {
@@ -115,7 +73,7 @@ func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id in
 func (r *userSubscriptionRepository) getByID(ctx context.Context, id int64, forUpdate bool) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	query := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(id)}...).
 		WithUser().
 		WithGroup().
 		WithAssignedByUser()
@@ -147,7 +105,7 @@ func (r *userSubscriptionRepository) GetByIDIncludeDeleted(ctx context.Context, 
 func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	m, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)}...).
 		WithGroup().
 		Only(ctx)
 	if err != nil {
@@ -159,12 +117,12 @@ func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, 
 func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	m, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{
+		Where([]predicate.UserSubscription{
 			usersubscription.UserIDEQ(userID),
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
 			usersubscription.ExpiresAtGT(time.Now()),
-		}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		}...).
 		WithGroup().
 		Only(ctx)
 	if err != nil {
@@ -180,7 +138,7 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 
 	client := clientFromContext(ctx, r.client)
 	builder := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(sub.ID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(sub.ID)}...).
 		SetUserID(sub.UserID).
 		SetGroupID(sub.GroupID).
 		SetStartsAt(sub.StartsAt).
@@ -215,7 +173,7 @@ func (r *userSubscriptionRepository) Delete(ctx context.Context, id int64) error
 	// Match GORM semantics: deleting a missing row is not an error.
 	client := clientFromContext(ctx, r.client)
 	_, err := client.UserSubscription.Delete().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(id)}...).
 		Exec(ctx)
 	return err
 }
@@ -237,7 +195,7 @@ func (r *userSubscriptionRepository) Restore(ctx context.Context, subscriptionID
 func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	subs, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.UserIDEQ(userID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.UserIDEQ(userID)}...).
 		WithGroup().
 		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
 		All(ctx)
@@ -250,11 +208,11 @@ func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID in
 func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	subs, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{
+		Where([]predicate.UserSubscription{
 			usersubscription.UserIDEQ(userID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
 			usersubscription.ExpiresAtGT(time.Now()),
-		}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		}...).
 		WithGroup().
 		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
 		All(ctx)
@@ -266,7 +224,7 @@ func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, use
 
 func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.UserSubscription, *pagination.PaginationResult, error) {
 	client := clientFromContext(ctx, r.client)
-	q := client.UserSubscription.Query().Where(append([]predicate.UserSubscription{usersubscription.GroupIDEQ(groupID)}, projectScopedUserSubscriptionPredicate(ctx)...)...)
+	q := client.UserSubscription.Query().Where([]predicate.UserSubscription{usersubscription.GroupIDEQ(groupID)}...)
 
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
@@ -289,7 +247,7 @@ func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID 
 
 func (r *userSubscriptionRepository) List(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string) ([]service.UserSubscription, *pagination.PaginationResult, error) {
 	client := clientFromContext(ctx, r.client)
-	q := client.UserSubscription.Query().Where(projectScopedUserSubscriptionPredicate(ctx)...)
+	q := client.UserSubscription.Query()
 	includeSoftDeleted := status == "" || status == service.SubscriptionStatusRevoked
 	if userID != nil {
 		q = q.Where(usersubscription.UserIDEQ(*userID))
@@ -388,7 +346,7 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 func (r *userSubscriptionRepository) ExistsByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (bool, error) {
 	client := clientFromContext(ctx, r.client)
 	return client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)}...).
 		Exist(ctx)
 }
 
@@ -399,7 +357,7 @@ func (r *userSubscriptionRepository) ExistsActiveByUserIDAndGroupID(ctx context.
 func (r *userSubscriptionRepository) ExtendExpiry(ctx context.Context, subscriptionID int64, newExpiresAt time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}...).
 		SetExpiresAt(newExpiresAt).
 		Save(ctx)
 	if err == nil && affected == 0 {
@@ -411,7 +369,7 @@ func (r *userSubscriptionRepository) ExtendExpiry(ctx context.Context, subscript
 func (r *userSubscriptionRepository) UpdateStatus(ctx context.Context, subscriptionID int64, status string) error {
 	client := clientFromContext(ctx, r.client)
 	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}...).
 		SetStatus(status).
 		Save(ctx)
 	if err == nil && affected == 0 {
@@ -423,7 +381,7 @@ func (r *userSubscriptionRepository) UpdateStatus(ctx context.Context, subscript
 func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	client := clientFromContext(ctx, r.client)
 	affected, err := client.UserSubscription.Update().
-		Where(append([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.IDEQ(subscriptionID)}...).
 		SetNotes(notes).
 		Save(ctx)
 	if err == nil && affected == 0 {
@@ -434,12 +392,12 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 
 func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, dailyStart, periodicStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	predicates := append([]predicate.UserSubscription{
+	predicates := []predicate.UserSubscription{
 		usersubscription.IDEQ(id),
 		usersubscription.DailyWindowStartIsNil(),
 		usersubscription.WeeklyWindowStartIsNil(),
 		usersubscription.MonthlyWindowStartIsNil(),
-	}, projectScopedUserSubscriptionPredicate(ctx)...)
+	}
 	n, err := client.UserSubscription.Update().
 		Where(predicates...).
 		SetDailyWindowStart(dailyStart).
@@ -451,7 +409,7 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 
 func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	predicates := []predicate.UserSubscription{usersubscription.IDEQ(id)}
 	update := client.UserSubscription.Update().Where(predicates...)
 	if resetDaily {
 		update.SetDailyUsageUsd(0).SetDailyWindowStart(dailyStart)
@@ -471,7 +429,7 @@ func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id i
 
 func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	predicates := []predicate.UserSubscription{usersubscription.IDEQ(id)}
 	if expectedWindowStart == nil {
 		predicates = append(predicates, usersubscription.DailyWindowStartIsNil())
 	} else {
@@ -487,7 +445,7 @@ func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int
 
 func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	predicates := []predicate.UserSubscription{usersubscription.IDEQ(id)}
 	if expectedWindowStart == nil {
 		predicates = append(predicates, usersubscription.WeeklyWindowStartIsNil())
 	} else {
@@ -503,7 +461,7 @@ func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id in
 
 func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	predicates := []predicate.UserSubscription{usersubscription.IDEQ(id)}
 	if expectedWindowStart == nil {
 		predicates = append(predicates, usersubscription.MonthlyWindowStartIsNil())
 	} else {
@@ -527,7 +485,7 @@ func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context
 
 	// A stale reset is an expected no-op: another request already advanced the
 	// window. Preserve not-found semantics for callers that target a missing row.
-	predicates := append([]predicate.UserSubscription{usersubscription.IDEQ(id)}, projectScopedUserSubscriptionPredicate(ctx)...)
+	predicates := []predicate.UserSubscription{usersubscription.IDEQ(id)}
 	exists, err := client.UserSubscription.Query().Where(predicates...).Exist(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
@@ -556,13 +514,6 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 			AND g.deleted_at IS NULL
 	`
 	args := []any{costUSD, id}
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		updateSQL += " AND " + projectProfileScopeSQL(projectID, projectSQLScopeResources{
-			SubscriptionID: "us.id",
-			UserID:         "us.user_id",
-			GroupID:        "us.group_id",
-		})
-	}
 
 	client := clientFromContext(ctx, r.client)
 	result, err := client.ExecContext(ctx, updateSQL, args...)
@@ -614,7 +565,7 @@ func (r *userSubscriptionRepository) ListExpired(ctx context.Context) ([]service
 func (r *userSubscriptionRepository) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	count, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{usersubscription.GroupIDEQ(groupID)}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		Where([]predicate.UserSubscription{usersubscription.GroupIDEQ(groupID)}...).
 		Count(ctx)
 	return int64(count), err
 }
@@ -622,11 +573,11 @@ func (r *userSubscriptionRepository) CountByGroupID(ctx context.Context, groupID
 func (r *userSubscriptionRepository) CountActiveByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	count, err := client.UserSubscription.Query().
-		Where(append([]predicate.UserSubscription{
+		Where([]predicate.UserSubscription{
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
 			usersubscription.ExpiresAtGT(time.Now()),
-		}, projectScopedUserSubscriptionPredicate(ctx)...)...).
+		}...).
 		Count(ctx)
 	return int64(count), err
 }
@@ -655,7 +606,7 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 
 	client := clientFromContext(ctx, r.client)
 	relationCtx := mixins.SkipSoftDelete(ctx)
-	userPredicates := append([]predicate.User{user.IDIn(uniqueInt64s(userIDs)...)}, projectScopedUserPredicate(relationCtx)...)
+	userPredicates := []predicate.User{user.IDIn(uniqueInt64s(userIDs)...)}
 	users, err := client.User.Query().Where(userPredicates...).All(relationCtx)
 	if err != nil {
 		return err
@@ -665,7 +616,7 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 		userByID[u.ID] = userEntityToService(u)
 	}
 
-	groupPredicates := append([]predicate.Group{group.IDIn(uniqueInt64s(groupIDs)...)}, projectScopedGroupPredicate(relationCtx)...)
+	groupPredicates := []predicate.Group{group.IDIn(uniqueInt64s(groupIDs)...)}
 	groups, err := client.Group.Query().Where(groupPredicates...).All(relationCtx)
 	if err != nil {
 		return err
@@ -677,7 +628,7 @@ func (r *userSubscriptionRepository) attachUserSubscriptionRelations(ctx context
 
 	assignedByID := map[int64]*service.User{}
 	if len(assignedByIDs) > 0 {
-		assignedByPredicates := append([]predicate.User{user.IDIn(uniqueInt64s(assignedByIDs)...)}, projectScopedUserPredicate(relationCtx)...)
+		assignedByPredicates := []predicate.User{user.IDIn(uniqueInt64s(assignedByIDs)...)}
 		assignedUsers, err := client.User.Query().Where(assignedByPredicates...).All(relationCtx)
 		if err != nil {
 			return err

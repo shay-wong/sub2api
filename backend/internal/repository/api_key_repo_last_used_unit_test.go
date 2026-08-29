@@ -34,8 +34,8 @@ func newAPIKeyRepoSQLite(t *testing.T) (*apiKeyRepository, *dbent.Client) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	_, err = client.Project.Create().
-		SetName(service.DefaultProjectName).
-		SetSlug(service.DefaultProjectSlug).
+		SetName(defaultProjectName).
+		SetSlug(defaultProjectSlug).
 		SetProfiles(map[string]any{}).
 		Save(context.Background())
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func newAPIKeyRepoSQLite(t *testing.T) (*apiKeyRepository, *dbent.Client) {
 func mustGetAPIKeyRepoDefaultProjectID(t *testing.T, ctx context.Context, client *dbent.Client) int64 {
 	t.Helper()
 	projectID, err := client.Project.Query().
-		Where(dbproject.SlugEQ(service.DefaultProjectSlug)).
+		Where(dbproject.SlugEQ(defaultProjectSlug)).
 		OnlyID(ctx)
 	require.NoError(t, err)
 	return projectID
@@ -230,7 +230,7 @@ func TestAPIKeyRepository_UpdateLastUsedDeletedKey(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
 }
 
-func TestAPIKeyRepository_UpdateLastUsedRequiresContextProject(t *testing.T) {
+func TestAPIKeyRepository_UpdateLastUsedUsesGlobalKeyVisibility(t *testing.T) {
 	repo, client := newAPIKeyRepoSQLite(t)
 	ctx := context.Background()
 	user := mustCreateAPIKeyRepoUser(t, ctx, client, "update-last-used-project@test.com")
@@ -251,13 +251,13 @@ func TestAPIKeyRepository_UpdateLastUsedRequiresContextProject(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(ctx, key))
 
-	err = repo.UpdateLastUsed(service.WithProjectID(ctx, defaultProjectID), key.ID, time.Now().UTC())
-	require.ErrorIs(t, err, service.ErrAPIKeyNotFound)
+	err = repo.UpdateLastUsed(ctx, key.ID, time.Now().UTC())
+	require.NoError(t, err)
 
 	after, err := repo.GetByID(ctx, key.ID)
 	require.NoError(t, err)
-	require.Nil(t, after.LastUsedAt)
-	require.Equal(t, otherProject.ID, after.ProjectID)
+	require.NotNil(t, after.LastUsedAt)
+	require.Equal(t, defaultProjectID, after.ProjectID)
 }
 
 func TestAPIKeyRepository_UpdateLastUsedDBError(t *testing.T) {

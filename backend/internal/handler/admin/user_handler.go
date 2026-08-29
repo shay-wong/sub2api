@@ -63,7 +63,6 @@ type CreateUserRequest struct {
 	Password             string   `json:"password" binding:"required,min=6"`
 	Username             string   `json:"username"`
 	Notes                string   `json:"notes"`
-	Role                 string   `json:"role" binding:"omitempty,oneof=admin user"`
 	Balance              *float64 `json:"balance"`
 	Concurrency          int      `json:"concurrency"`
 	RPMLimit             int      `json:"rpm_limit"`
@@ -78,7 +77,6 @@ type UpdateUserRequest struct {
 	Password             string   `json:"password" binding:"omitempty,min=6"`
 	Username             *string  `json:"username"`
 	Notes                *string  `json:"notes"`
-	Role                 string   `json:"role" binding:"omitempty,oneof=admin user"`
 	Balance              *float64 `json:"balance"`
 	Concurrency          *int     `json:"concurrency"`
 	RPMLimit             *int     `json:"rpm_limit"`
@@ -88,6 +86,11 @@ type UpdateUserRequest struct {
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64 `json:"group_rates"`
+}
+
+type UpdateUserAdminAccessRequest struct {
+	Role             string   `json:"role" binding:"required,oneof=admin user"`
+	AdminPermissions []string `json:"admin_permissions"`
 }
 
 // UpdateBalanceRequest represents balance update request
@@ -278,25 +281,16 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
-	if req.Role == service.RoleAdmin {
-		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
-			return
-		}
-	}
-
 	user, err := h.adminService.CreateUser(c.Request.Context(), &service.CreateUserInput{
 		Email:                req.Email,
 		Password:             req.Password,
 		Username:             req.Username,
 		Notes:                req.Notes,
-		Role:                 req.Role,
 		Balance:              req.Balance,
 		Concurrency:          req.Concurrency,
 		RPMLimit:             req.RPMLimit,
 		AllowedGroups:        req.AllowedGroups,
 		RestrictPublicGroups: req.RestrictPublicGroups,
-		ActorAdminID:         getAdminIDFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -321,35 +315,12 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 防锁死保护：管理员不能把自己降级为普通用户(单管理员场景下会失去后台访问权)。
-	// 与既有"不能禁用/删除 admin"保护一致。降级其他管理员仍然允许。
-	if req.Role == service.RoleUser && userID == getAdminIDFromContext(c) {
-		response.BadRequest(c, "cannot demote yourself from admin")
-		return
-	}
-
-	// 把普通用户提升为管理员属权限敏感操作：需最近完成 step-up 2FA 验证。
-	// 目标已是管理员时（前端编辑表单总是携带 role）不触发，避免日常编辑被打断。
-	if req.Role == service.RoleAdmin {
-		target, err := h.adminService.GetUser(c.Request.Context(), userID)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-		if target.Role != service.RoleAdmin {
-			if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
-				return
-			}
-		}
-	}
-
 	// 使用指针类型直接传递，nil 表示未提供该字段
 	user, err := h.adminService.UpdateUser(c.Request.Context(), userID, &service.UpdateUserInput{
 		Email:                req.Email,
 		Password:             req.Password,
 		Username:             req.Username,
 		Notes:                req.Notes,
-		Role:                 req.Role,
 		Balance:              req.Balance,
 		Concurrency:          req.Concurrency,
 		RPMLimit:             req.RPMLimit,
@@ -357,13 +328,44 @@ func (h *UserHandler) Update(c *gin.Context) {
 		AllowedGroups:        req.AllowedGroups,
 		RestrictPublicGroups: req.RestrictPublicGroups,
 		GroupRates:           req.GroupRates,
-		ActorAdminID:         getAdminIDFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
+	response.Success(c, dto.UserFromServiceAdmin(user))
+}
+
+// UpdateAdminAccess changes a user's global role and administrator permissions.
+// PUT /api/v1/admin/users/:id/admin-access
+func (h *UserHandler) UpdateAdminAccess(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	if userID == getAdminIDFromContext(c) {
+		response.BadRequest(c, "cannot change your own admin access")
+		return
+	}
+	var req UpdateUserAdminAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
+		return
+	}
+	user, err := h.adminService.UpdateUserAdminAccess(c.Request.Context(), userID, &service.UpdateUserAdminAccessInput{
+		Role:             req.Role,
+		AdminPermissions: req.AdminPermissions,
+		ActorAdminID:     getAdminIDFromContext(c),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	response.Success(c, dto.UserFromServiceAdmin(user))
 }
 

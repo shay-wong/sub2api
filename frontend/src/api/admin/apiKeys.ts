@@ -26,16 +26,8 @@ export async function updateApiKeyGroup(id: number, groupId: number | null): Pro
   return data
 }
 
-export async function transferApiKeyProject(id: number, projectId: number): Promise<UpdateApiKeyGroupResult> {
-  const { data } = await apiClient.put<UpdateApiKeyGroupResult>(`/admin/api-keys/${id}/project`, {
-    project_id: projectId
-  })
-  return data
-}
-
 export const apiKeysAPI = {
-  updateApiKeyGroup,
-  transferApiKeyProject
+  updateApiKeyGroup
 }
 
 export default apiKeysAPI

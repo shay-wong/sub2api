@@ -1012,9 +1012,6 @@ func (s *OpenAIGatewayService) persistLiveCallUsage(ctx context.Context, record 
 	if logCtx == nil {
 		logCtx = context.Background()
 	}
-	if record.ProjectID > 0 {
-		logCtx = WithProjectID(logCtx, record.ProjectID)
-	}
 	// TODO(billing): Live 会话目前不计费：TotalCost/ActualCost 恒为 0，完全绕过
 	// recordUsageCore/applyUsageBilling，余额模式下极低余额也能反复开启最长
 	// liveMaxSessionDuration 的会话。若确认按时长计费，应在此接入计费管道；

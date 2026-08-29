@@ -116,7 +116,7 @@ func (s *duplicateAccountRepoStub) FindDuplicateByOperationID(ctx context.Contex
 }
 
 func TestDuplicateAccountRecoversConcurrentCommitAfterUniqueFenceRejectsStaleWorker(t *testing.T) {
-	ctx := WithProjectID(context.Background(), 7)
+	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
 	svc := newDuplicateAccountService(repo)
 	source := &Account{

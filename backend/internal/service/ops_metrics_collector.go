@@ -274,149 +274,102 @@ func (c *OpsMetricsCollector) collectAndPersist(ctx context.Context) error {
 	active, idle := c.dbPoolStats()
 	redisTotal, redisIdle, redisStatsOK := c.redisPoolStats()
 
-	projectIDs, err := c.listActiveProjectIDs(ctx)
-	if err != nil {
-		return fmt.Errorf("list active projects: %w", err)
-	}
-	if len(projectIDs) == 0 {
-		projectIDs = []int64{0}
-	}
-
 	goroutines := runtime.NumGoroutine()
 
-	for _, projectID := range projectIDs {
-		projectCtx := ctx
-		if projectID > 0 {
-			projectCtx = WithProjectID(ctx, projectID)
-		}
+	successCount, tokenConsumed, err := c.queryUsageCounts(ctx, windowStart, windowEnd)
+	if err != nil {
+		return fmt.Errorf("query usage counts: %w", err)
+	}
 
-		successCount, tokenConsumed, err := c.queryUsageCounts(projectCtx, windowStart, windowEnd)
-		if err != nil {
-			return fmt.Errorf("query usage counts: %w", err)
-		}
+	duration, ttft, err := c.queryUsageLatency(ctx, windowStart, windowEnd)
+	if err != nil {
+		return fmt.Errorf("query usage latency: %w", err)
+	}
 
-		duration, ttft, err := c.queryUsageLatency(projectCtx, windowStart, windowEnd)
-		if err != nil {
-			return fmt.Errorf("query usage latency: %w", err)
-		}
+	errorTotal, businessLimited, errorSLA, upstreamExcl, upstream429, upstream529, err := c.queryErrorCounts(ctx, windowStart, windowEnd)
+	if err != nil {
+		return fmt.Errorf("query error counts: %w", err)
+	}
 
-		errorTotal, businessLimited, errorSLA, upstreamExcl, upstream429, upstream529, err := c.queryErrorCounts(projectCtx, windowStart, windowEnd)
-		if err != nil {
-			return fmt.Errorf("query error counts: %w", err)
-		}
+	accountSwitchCount, err := c.queryAccountSwitchCount(ctx, windowStart, windowEnd)
+	if err != nil {
+		return fmt.Errorf("query account switch counts: %w", err)
+	}
 
-		accountSwitchCount, err := c.queryAccountSwitchCount(projectCtx, windowStart, windowEnd)
-		if err != nil {
-			return fmt.Errorf("query account switch counts: %w", err)
-		}
+	windowSeconds := windowEnd.Sub(windowStart).Seconds()
+	if windowSeconds <= 0 {
+		windowSeconds = 60
+	}
+	requestTotal := successCount + errorTotal
+	qps := float64(requestTotal) / windowSeconds
+	tps := float64(tokenConsumed) / windowSeconds
 
-		windowSeconds := windowEnd.Sub(windowStart).Seconds()
-		if windowSeconds <= 0 {
-			windowSeconds = 60
-		}
-		requestTotal := successCount + errorTotal
-		qps := float64(requestTotal) / windowSeconds
-		tps := float64(tokenConsumed) / windowSeconds
+	concurrencyQueueDepth := c.collectConcurrencyQueueDepth(ctx)
 
-		concurrencyQueueDepth := c.collectConcurrencyQueueDepth(projectCtx)
+	input := &OpsInsertSystemMetricsInput{
+		CreatedAt:     windowEnd,
+		WindowMinutes: 1,
 
-		input := &OpsInsertSystemMetricsInput{
-			CreatedAt:     windowEnd,
-			WindowMinutes: 1,
+		SuccessCount:         successCount,
+		ErrorCountTotal:      errorTotal,
+		BusinessLimitedCount: businessLimited,
+		ErrorCountSLA:        errorSLA,
 
-			SuccessCount:         successCount,
-			ErrorCountTotal:      errorTotal,
-			BusinessLimitedCount: businessLimited,
-			ErrorCountSLA:        errorSLA,
+		UpstreamErrorCountExcl429529: upstreamExcl,
+		Upstream429Count:             upstream429,
+		Upstream529Count:             upstream529,
 
-			UpstreamErrorCountExcl429529: upstreamExcl,
-			Upstream429Count:             upstream429,
-			Upstream529Count:             upstream529,
+		TokenConsumed:      tokenConsumed,
+		AccountSwitchCount: accountSwitchCount,
+		QPS:                float64Ptr(roundTo1DP(qps)),
+		TPS:                float64Ptr(roundTo1DP(tps)),
 
-			TokenConsumed:      tokenConsumed,
-			AccountSwitchCount: accountSwitchCount,
-			QPS:                float64Ptr(roundTo1DP(qps)),
-			TPS:                float64Ptr(roundTo1DP(tps)),
+		DurationP50Ms: duration.p50,
+		DurationP90Ms: duration.p90,
+		DurationP95Ms: duration.p95,
+		DurationP99Ms: duration.p99,
+		DurationAvgMs: duration.avg,
+		DurationMaxMs: duration.max,
 
-			DurationP50Ms: duration.p50,
-			DurationP90Ms: duration.p90,
-			DurationP95Ms: duration.p95,
-			DurationP99Ms: duration.p99,
-			DurationAvgMs: duration.avg,
-			DurationMaxMs: duration.max,
+		TTFTP50Ms: ttft.p50,
+		TTFTP90Ms: ttft.p90,
+		TTFTP95Ms: ttft.p95,
+		TTFTP99Ms: ttft.p99,
+		TTFTAvgMs: ttft.avg,
+		TTFTMaxMs: ttft.max,
 
-			TTFTP50Ms: ttft.p50,
-			TTFTP90Ms: ttft.p90,
-			TTFTP95Ms: ttft.p95,
-			TTFTP99Ms: ttft.p99,
-			TTFTAvgMs: ttft.avg,
-			TTFTMaxMs: ttft.max,
+		CPUUsagePercent:    sys.cpuUsagePercent,
+		MemoryUsedMB:       sys.memoryUsedMB,
+		MemoryTotalMB:      sys.memoryTotalMB,
+		MemoryUsagePercent: sys.memoryUsagePercent,
 
-			CPUUsagePercent:    sys.cpuUsagePercent,
-			MemoryUsedMB:       sys.memoryUsedMB,
-			MemoryTotalMB:      sys.memoryTotalMB,
-			MemoryUsagePercent: sys.memoryUsagePercent,
+		DBOK:    boolPtr(dbOK),
+		RedisOK: boolPtr(redisOK),
 
-			DBOK:    boolPtr(dbOK),
-			RedisOK: boolPtr(redisOK),
+		RedisConnTotal: func() *int {
+			if !redisStatsOK {
+				return nil
+			}
+			return intPtr(redisTotal)
+		}(),
+		RedisConnIdle: func() *int {
+			if !redisStatsOK {
+				return nil
+			}
+			return intPtr(redisIdle)
+		}(),
 
-			RedisConnTotal: func() *int {
-				if !redisStatsOK {
-					return nil
-				}
-				return intPtr(redisTotal)
-			}(),
-			RedisConnIdle: func() *int {
-				if !redisStatsOK {
-					return nil
-				}
-				return intPtr(redisIdle)
-			}(),
+		DBConnActive:          intPtr(active),
+		DBConnIdle:            intPtr(idle),
+		GoroutineCount:        intPtr(goroutines),
+		ConcurrencyQueueDepth: concurrencyQueueDepth,
+	}
 
-			DBConnActive:          intPtr(active),
-			DBConnIdle:            intPtr(idle),
-			GoroutineCount:        intPtr(goroutines),
-			ConcurrencyQueueDepth: concurrencyQueueDepth,
-		}
-
-		if err := c.opsRepo.InsertSystemMetrics(projectCtx, input); err != nil {
-			return err
-		}
+	if err := c.opsRepo.InsertSystemMetrics(ctx, input); err != nil {
+		return err
 	}
 
 	return nil
-}
-
-func (c *OpsMetricsCollector) listActiveProjectIDs(ctx context.Context) ([]int64, error) {
-	if c == nil || c.db == nil {
-		return nil, nil
-	}
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT id
-		FROM projects
-		WHERE deleted_at IS NULL
-		  AND status = 'active'
-		ORDER BY id ASC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := make([]int64, 0, 4)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		if id > 0 {
-			out = append(out, id)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *OpsMetricsCollector) collectConcurrencyQueueDepth(parentCtx context.Context) *int {
@@ -496,13 +449,13 @@ type opsCollectedPercentiles struct {
 }
 
 func (c *OpsMetricsCollector) queryUsageCounts(ctx context.Context, start, end time.Time) (successCount int64, tokenConsumed int64, err error) {
-	projectClause, args := opsCollectorProjectClause(ctx, []any{start, end}, "project_id")
+	args := []any{start, end}
 	q := `
 	SELECT
 	  COALESCE(COUNT(*), 0) AS success_count,
 	  COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_consumed
 	FROM usage_logs
-	WHERE created_at >= $1 AND created_at < $2` + projectClause
+	WHERE created_at >= $1 AND created_at < $2`
 
 	var tokens sql.NullInt64
 	if err := c.db.QueryRowContext(ctx, q, args...).Scan(&successCount, &tokens); err != nil {
@@ -515,7 +468,7 @@ func (c *OpsMetricsCollector) queryUsageCounts(ctx context.Context, start, end t
 }
 
 func (c *OpsMetricsCollector) queryUsageLatency(ctx context.Context, start, end time.Time) (duration opsCollectedPercentiles, ttft opsCollectedPercentiles, err error) {
-	projectClause, args := opsCollectorProjectClause(ctx, []any{start, end}, "project_id")
+	args := []any{start, end}
 	{
 		q := `
 	SELECT
@@ -527,7 +480,6 @@ func (c *OpsMetricsCollector) queryUsageLatency(ctx context.Context, start, end 
   MAX(duration_ms) AS max_ms
 	FROM usage_logs
 	WHERE created_at >= $1 AND created_at < $2
-	  ` + projectClause + `
 	  AND duration_ms IS NOT NULL`
 
 		var p50, p90, p95, p99 sql.NullFloat64
@@ -561,7 +513,6 @@ SELECT
   MAX(first_token_ms) AS max_ms
 	FROM usage_logs
 	WHERE created_at >= $1 AND created_at < $2
-	  ` + projectClause + `
 	  AND first_token_ms IS NOT NULL`
 
 		var p50, p90, p95, p99 sql.NullFloat64
@@ -596,7 +547,7 @@ func (c *OpsMetricsCollector) queryErrorCounts(ctx context.Context, start, end t
 	upstream529 int64,
 	err error,
 ) {
-	projectClause, args := opsCollectorProjectClause(ctx, []any{start, end}, "project_id")
+	args := []any{start, end}
 	q := `
 	SELECT
   COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400), 0) AS error_total,
@@ -607,7 +558,6 @@ func (c *OpsMetricsCollector) queryErrorCounts(ctx context.Context, start, end t
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT is_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
 	FROM ops_error_logs
 	WHERE created_at >= $1 AND created_at < $2
-	  ` + projectClause + `
 	  AND is_count_tokens = FALSE`
 
 	if err := c.db.QueryRowContext(ctx, q, args...).Scan(
@@ -624,7 +574,7 @@ func (c *OpsMetricsCollector) queryErrorCounts(ctx context.Context, start, end t
 }
 
 func (c *OpsMetricsCollector) queryAccountSwitchCount(ctx context.Context, start, end time.Time) (int64, error) {
-	projectClause, args := opsCollectorProjectClause(ctx, []any{start, end}, "o.project_id")
+	args := []any{start, end}
 	q := `
 	SELECT
   COALESCE(SUM(CASE
@@ -635,23 +585,14 @@ FROM ops_error_logs o
 CROSS JOIN LATERAL jsonb_array_elements(
   COALESCE(NULLIF(o.upstream_errors, 'null'::jsonb), '[]'::jsonb)
 	) AS ev
-	WHERE o.created_at >= $1 AND o.created_at < $2
-	  ` + projectClause + `
-	  AND o.is_count_tokens = FALSE`
+		WHERE o.created_at >= $1 AND o.created_at < $2
+		  AND o.is_count_tokens = FALSE`
 
 	var count int64
 	if err := c.db.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
-}
-
-func opsCollectorProjectClause(ctx context.Context, args []any, column string) (string, []any) {
-	if projectID, ok := ProjectIDFromContext(ctx); ok {
-		args = append(args, projectID)
-		return " AND " + column + " = $" + strconv.Itoa(len(args)), args
-	}
-	return "", args
 }
 
 type opsCollectedSystemStats struct {

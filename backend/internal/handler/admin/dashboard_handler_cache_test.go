@@ -24,17 +24,12 @@ type dashboardUsageRepoCacheProbe struct {
 	groupCalls      atomic.Int32
 	groupFilters    []usagestats.UsageLogFilters
 	statsCalls      atomic.Int32
-	statsProjectIDs []int64
 	ranking         []usagestats.UserSpendingRankingItem
 	rankingTotal    float64
 }
 
-func (r *dashboardUsageRepoCacheProbe) GetDashboardStats(ctx context.Context) (*usagestats.DashboardStats, error) {
+func (r *dashboardUsageRepoCacheProbe) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
 	r.statsCalls.Add(1)
-	if projectID, ok := service.ProjectIDFromContext(ctx); ok {
-		r.statsProjectIDs = append(r.statsProjectIDs, projectID)
-		return &usagestats.DashboardStats{TotalAccounts: 4, TotalRequests: 12}, nil
-	}
 	return &usagestats.DashboardStats{TotalAccounts: 99, TotalRequests: 123}, nil
 }
 
@@ -169,61 +164,6 @@ func TestDashboardHandler_GetUserUsageTrend_UsesCache(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2.Code)
 	require.Equal(t, "hit", rec2.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, int32(1), repo.usersTrendCalls.Load())
-}
-
-func TestDashboardHandler_GetStats_ProjectScopedDoesNotReuseGlobalStats(t *testing.T) {
-	t.Cleanup(resetDashboardReadCachesForTest)
-	resetDashboardReadCachesForTest()
-
-	gin.SetMode(gin.TestMode)
-	repo := &dashboardUsageRepoCacheProbe{}
-	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
-	handler := NewDashboardHandler(dashboardSvc, nil)
-	router := gin.New()
-	router.GET("/admin/dashboard/stats", handler.GetStats)
-
-	globalReq := httptest.NewRequest(http.MethodGet, "/admin/dashboard/stats", nil)
-	globalRec := httptest.NewRecorder()
-	router.ServeHTTP(globalRec, globalReq)
-	require.Equal(t, http.StatusOK, globalRec.Code)
-	require.Contains(t, globalRec.Body.String(), "\"total_accounts\":99")
-
-	projectReq := httptest.NewRequest(http.MethodGet, "/admin/dashboard/stats", nil)
-	projectReq = projectReq.WithContext(service.WithProjectID(projectReq.Context(), 42))
-	projectRec := httptest.NewRecorder()
-	router.ServeHTTP(projectRec, projectReq)
-	require.Equal(t, http.StatusOK, projectRec.Code)
-	require.Contains(t, projectRec.Body.String(), "\"total_accounts\":4")
-	require.Equal(t, []int64{42}, repo.statsProjectIDs)
-}
-
-func TestDashboardSnapshotV2_ProjectScopedStatsDoesNotReuseGlobalCache(t *testing.T) {
-	t.Cleanup(resetDashboardReadCachesForTest)
-	resetDashboardReadCachesForTest()
-
-	gin.SetMode(gin.TestMode)
-	repo := &dashboardUsageRepoCacheProbe{}
-	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
-	handler := NewDashboardHandler(dashboardSvc, nil)
-	router := gin.New()
-	router.GET("/admin/dashboard/snapshot-v2", handler.GetSnapshotV2)
-
-	path := "/admin/dashboard/snapshot-v2?start_date=2026-03-01&end_date=2026-03-07&include_trend=false&include_model_stats=false&include_group_stats=false"
-	globalReq := httptest.NewRequest(http.MethodGet, path, nil)
-	globalRec := httptest.NewRecorder()
-	router.ServeHTTP(globalRec, globalReq)
-	require.Equal(t, http.StatusOK, globalRec.Code)
-	require.Equal(t, "miss", globalRec.Header().Get("X-Snapshot-Cache"))
-	require.Contains(t, globalRec.Body.String(), "\"total_accounts\":99")
-
-	projectReq := httptest.NewRequest(http.MethodGet, path, nil)
-	projectReq = projectReq.WithContext(service.WithProjectID(projectReq.Context(), 42))
-	projectRec := httptest.NewRecorder()
-	router.ServeHTTP(projectRec, projectReq)
-	require.Equal(t, http.StatusOK, projectRec.Code)
-	require.Equal(t, "miss", projectRec.Header().Get("X-Snapshot-Cache"))
-	require.Contains(t, projectRec.Body.String(), "\"total_accounts\":4")
-	require.Equal(t, []int64{42}, repo.statsProjectIDs)
 }
 
 func TestDashboardSnapshotV2RejectsLegacyOperatorRole(t *testing.T) {

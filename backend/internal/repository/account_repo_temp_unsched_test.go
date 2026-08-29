@@ -26,39 +26,35 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
 }
 
-func TestAccountRepository_ResetQuotaUsedScopesByContextProject(t *testing.T) {
+func TestAccountRepository_ResetQuotaUsedUsesGlobalAccountID(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
-	err := repo.ResetQuotaUsed(service.WithProjectID(context.Background(), 7), 42)
+	err := repo.ResetQuotaUsed(context.Background(), 42)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.NotContains(t, normalized, "accounts.project_id = $2")
-	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "ppb.resource_type = 'account'")
-	require.Contains(t, normalized, "ppb.resource_id = accounts.id")
+	require.Contains(t, normalized, "WHERE id = $1")
+	require.NotContains(t, normalized, "project_id")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 	require.Equal(t, []any{int64(42)}, exec.execArgs[0])
 }
 
-func TestAccountRepository_RevertProxyFallbackScopesByContextProject(t *testing.T) {
+func TestAccountRepository_RevertProxyFallbackUsesGlobalAccountID(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
-	err := repo.RevertProxyFallback(service.WithProjectID(context.Background(), 7), 42)
+	err := repo.RevertProxyFallback(context.Background(), 42)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.NotContains(t, normalized, "accounts.project_id = $2")
-	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "ppb.resource_type = 'account'")
-	require.Contains(t, normalized, "ppb.resource_id = accounts.id")
+	require.Contains(t, normalized, "WHERE id=$1")
+	require.NotContains(t, normalized, "project_id")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 	require.Equal(t, []any{int64(42)}, exec.execArgs[0])
 }
 
@@ -122,8 +118,8 @@ func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomi
 	})
 }
 
-func TestAccountRepository_GrokCredentialConditionalMutationsRespectProjectScope(t *testing.T) {
-	ctx := service.WithProjectID(context.Background(), 7)
+func TestAccountRepository_GrokCredentialConditionalMutationsUseGlobalAccountID(t *testing.T) {
+	ctx := context.Background()
 	snapshot := service.GrokCredentialMutationSnapshot{CredentialsJSON: `{"access_token":"access"}`}
 	tests := []struct {
 		name   string
@@ -153,10 +149,9 @@ func TestAccountRepository_GrokCredentialConditionalMutationsRespectProjectScope
 			require.NoError(t, tt.mutate(repo))
 			require.Len(t, exec.execQueries, 1)
 			normalized := normalizeSQLWhitespace(exec.execQueries[0])
-			require.Contains(t, normalized, "FROM project_profiles pp")
-			require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-			require.Contains(t, normalized, "ppb.resource_type = 'account'")
-			require.Contains(t, normalized, "ppb.resource_id = a.id")
+			require.Contains(t, normalized, "a.id = $3")
+			require.NotContains(t, normalized, "project_profiles")
+			require.NotContains(t, normalized, "project_profile_bindings")
 		})
 	}
 }
@@ -246,12 +241,12 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_AppliedWrites
 	require.Contains(t, normalized, "SELECT $8, updated.id, NULL, NULL FROM updated")
 }
 
-func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RespectsProjectProfileScope(t *testing.T) {
+func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchangedUsesGlobalAccountID(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
 	applied, err := repo.SetGrokOAuthErrorIfCredentialsUnchanged(
-		service.WithProjectID(context.Background(), 7),
+		context.Background(),
 		42,
 		map[string]any{"access_token": "observed"},
 		"missing refresh token",
@@ -261,11 +256,9 @@ func TestAccountRepository_SetGrokOAuthErrorIfCredentialsUnchanged_RespectsProje
 	require.False(t, applied)
 	require.Len(t, exec.execQueries, 1)
 	normalized := normalizeSQLWhitespace(exec.execQueries[0])
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "ppb.resource_type = 'account'")
-	require.Contains(t, normalized, "ppb.resource_id = a.id")
-	require.Contains(t, normalized, "pp.project_id = 7")
+	require.Contains(t, normalized, "a.id = $3")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 }
 
 func TestAccountRepository_SetGrokOAuthRefreshErrorIfCredentialsUnchanged_UsesAttemptCredentialsAndProxy(t *testing.T) {
@@ -346,8 +339,8 @@ func TestAccountRepository_UpdateGrokOAuthCredentialsIfUnchanged_UsesExactAttemp
 	require.Equal(t, &proxyID, exec.execArgs[0][5])
 }
 
-func TestAccountRepository_GrokOAuthRefreshConditionalMutationsRespectProjectProfileScope(t *testing.T) {
-	ctx := service.WithProjectID(context.Background(), 7)
+func TestAccountRepository_GrokOAuthRefreshConditionalMutationsUseGlobalAccountID(t *testing.T) {
+	ctx := context.Background()
 	proxyID := int64(29)
 	expected := map[string]any{"refresh_token": "attempted", "_token_version": int64(9)}
 	tests := []struct {
@@ -389,11 +382,9 @@ func TestAccountRepository_GrokOAuthRefreshConditionalMutationsRespectProjectPro
 			require.NoError(t, tt.mutate(repo))
 			require.Len(t, exec.execQueries, 1)
 			normalized := normalizeSQLWhitespace(exec.execQueries[0])
-			require.Contains(t, normalized, "FROM project_profiles pp")
-			require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-			require.Contains(t, normalized, "ppb.resource_type = 'account'")
-			require.Contains(t, normalized, "ppb.resource_id = a.id")
-			require.Contains(t, normalized, "pp.project_id = 7")
+			require.Contains(t, normalized, "a.id = $")
+			require.NotContains(t, normalized, "project_profiles")
+			require.NotContains(t, normalized, "project_profile_bindings")
 		})
 	}
 }
@@ -483,7 +474,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesA
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAccountRepository_ListOAuthRefreshCandidatePage_RespectsProjectProfileScopeBeforeLimit(t *testing.T) {
+func TestAccountRepository_ListOAuthRefreshCandidatePageUsesGlobalCandidateSet(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -493,7 +484,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_RespectsProjectProfileS
 	repo := newAccountRepositoryWithSQL(nil, captureQuerySQL{db: db, captured: &capturedSQL}, nil)
 
 	page, err := repo.ListOAuthRefreshCandidatePage(
-		service.WithProjectID(context.Background(), 7),
+		context.Background(),
 		service.OAuthRefreshPageOptions{
 			Platforms: []string{service.PlatformGrok},
 			AfterID:   100,
@@ -504,17 +495,14 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_RespectsProjectProfileS
 	require.NoError(t, err)
 	require.Empty(t, page.Accounts)
 	normalized := normalizeSQLWhitespace(capturedSQL)
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "ppb.resource_type = 'account'")
-	require.Contains(t, normalized, "ppb.resource_id = a.id")
-	require.Contains(t, normalized, "pp.project_id = 7")
-	require.Less(t, strings.Index(normalized, "FROM project_profiles pp"), strings.Index(normalized, "ORDER BY a.id ASC"))
-	require.Less(t, strings.Index(normalized, "FROM project_profiles pp"), strings.Index(normalized, "LIMIT $3"))
+	require.Contains(t, normalized, "ORDER BY a.id ASC")
+	require.Contains(t, normalized, "LIMIT $3")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestAccountRepositoryListSchedulableCapacityByGroupIDsSQLUsesActiveProjectProfileScope(t *testing.T) {
+func TestAccountRepositoryListSchedulableCapacityByGroupIDsSQLUsesGlobalResources(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -533,18 +521,14 @@ func TestAccountRepositoryListSchedulableCapacityByGroupIDsSQLUsesActiveProjectP
 
 	repo := newAccountRepositoryWithSQL(nil, captureQuerySQL{db: db, captured: &capturedSQL}, nil)
 
-	rows, err := repo.ListSchedulableCapacityByGroupIDs(service.WithProjectID(context.Background(), 7), []int64{11})
+	rows, err := repo.ListSchedulableCapacityByGroupIDs(context.Background(), []int64{11})
 	require.NoError(t, err)
 	require.Empty(t, rows)
 
 	normalized := normalizeSQLWhitespace(capturedSQL)
-	require.Contains(t, normalized, "FROM project_profiles pp")
-	require.Contains(t, normalized, "JOIN project_profile_bindings ppb")
-	require.Contains(t, normalized, "pp.mode = 'unrestricted'")
-	require.Contains(t, normalized, "ppb.resource_type = 'group'")
-	require.Contains(t, normalized, "ppb.resource_id = ag.group_id")
-	require.Contains(t, normalized, "ppb.resource_type = 'account'")
-	require.Contains(t, normalized, "ppb.resource_id = a.id")
+	require.Contains(t, normalized, "FROM account_groups ag JOIN accounts a")
+	require.NotContains(t, normalized, "project_profiles")
+	require.NotContains(t, normalized, "project_profile_bindings")
 	require.NotContains(t, normalized, "a.project_id =")
 	require.NoError(t, mock.ExpectationsWereMet())
 }

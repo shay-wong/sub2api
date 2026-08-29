@@ -71,8 +71,7 @@ describe('runAccountConnectionTest', () => {
     expect(result).toEqual({ success: false, error: 'token expired' })
   })
 
-  it('preserves the selected project context for raw fetch streaming requests', async () => {
-    localStorage.setItem('sub2api_selected_project_id', '169')
+  it('does not attach the removed project context to raw fetch streaming requests', async () => {
     global.fetch = vi.fn().mockResolvedValue(
       createStreamResponse([
         'data: {"type":"test_complete","success":true}\n'
@@ -84,15 +83,11 @@ describe('runAccountConnectionTest', () => {
       authToken: 'admin-token'
     })
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/v1/admin/accounts/5837/test', expect.objectContaining({
-      headers: expect.objectContaining({
-        'X-Project-ID': '169'
-      })
-    }))
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(request.headers).not.toHaveProperty('X-Project-ID')
   })
 
   it('forwards optional Grok media inputs and media output events', async () => {
-    localStorage.setItem('sub2api_selected_project_id', '169')
     global.fetch = vi.fn().mockResolvedValue(
       createStreamResponse([
         'data: {"type":"audio","audio_url":"data:audio/wav;base64,T0s=","mime_type":"audio/wav"}\n',
@@ -117,7 +112,7 @@ describe('runAccountConnectionTest', () => {
       image_data_url: 'data:image/png;base64,SU1H',
       audio_data_url: 'data:audio/wav;base64,QVVESU8='
     })
-    expect(request.headers).toMatchObject({ 'X-Project-ID': '169' })
+    expect(request.headers).not.toHaveProperty('X-Project-ID')
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'audio', audio_url: 'data:audio/wav;base64,T0s=' }),
       expect.objectContaining({ type: 'video', video_url: 'https://example.test/video.mp4' })

@@ -4,7 +4,6 @@ import enAdminAccounts from '../locales/en/admin/accounts'
 import enAdminChannels from '../locales/en/admin/channels'
 import enAdminOps from '../locales/en/admin/ops'
 import enAdminOverview from '../locales/en/admin/overview'
-import enAdminProjects from '../locales/en/admin/projects'
 import enAdminResources from '../locales/en/admin/resources'
 import enAdminSettings from '../locales/en/admin/settings'
 import enCommon from '../locales/en/common'
@@ -15,7 +14,6 @@ import zhAdminAccounts from '../locales/zh/admin/accounts'
 import zhAdminChannels from '../locales/zh/admin/channels'
 import zhAdminOps from '../locales/zh/admin/ops'
 import zhAdminOverview from '../locales/zh/admin/overview'
-import zhAdminProjects from '../locales/zh/admin/projects'
 import zhAdminResources from '../locales/zh/admin/resources'
 import zhAdminSettings from '../locales/zh/admin/settings'
 import zhCommon from '../locales/zh/common'
@@ -55,8 +53,7 @@ const admins: Record<string, Modules> = {
     accounts: zhAdminAccounts,
     resources: zhAdminResources,
     ops: zhAdminOps,
-    settings: zhAdminSettings,
-    projects: zhAdminProjects
+    settings: zhAdminSettings
   },
   en: {
     overview: enAdminOverview,
@@ -64,8 +61,7 @@ const admins: Record<string, Modules> = {
     accounts: enAdminAccounts,
     resources: enAdminResources,
     ops: enAdminOps,
-    settings: enAdminSettings,
-    projects: enAdminProjects
+    settings: enAdminSettings
   }
 }
 

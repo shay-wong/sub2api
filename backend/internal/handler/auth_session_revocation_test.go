@@ -67,7 +67,6 @@ func TestAuthHandlerRevokeAllSessionsInvalidatesAccessTokens(t *testing.T) {
 		service.NewUserService(repo, nil, nil, nil),
 		nil,
 		nil,
-		nil,
 	)))
 	protected.GET("/protected", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	afterRevoke := httptest.NewRecorder()

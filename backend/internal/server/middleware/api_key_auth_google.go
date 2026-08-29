@@ -75,15 +75,9 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			return
 		}
 
-		projectID, ok := resolveAPIKeyRequestProjectGoogle(c, apiKeyService, apiKey)
-		if !ok {
-			return
-		}
-
 		// 同 api_key_auth.go：早退中断前也写入 Ops 回退 key，便于错误日志展示
 		// user/group/platform。
 		SetOpsFallbackAPIKey(c, apiKey)
-		setProjectContext(c, projectID)
 
 		// disabled / 未知状态 → 无条件拦截（expired 和 quota_exhausted 留给计费阶段，
 		// 与主中间件 api_key_auth.go 保持一致）。
@@ -261,44 +255,6 @@ func extractAPIKeyForGoogle(c *gin.Context) string {
 
 func allowGoogleQueryKey(path string) bool {
 	return strings.HasPrefix(path, "/v1beta") || strings.HasPrefix(path, "/antigravity/v1beta")
-}
-
-func resolveAPIKeyRequestProjectGoogle(c *gin.Context, apiKeyService *service.APIKeyService, apiKey *service.APIKey) (int64, bool) {
-	if apiKey == nil {
-		return 0, true
-	}
-	// API Key 只能归属一个项目空间；外部调用不能通过请求头切换到其他项目。
-	effectiveProjectID := apiKey.ProjectID
-	if effectiveProjectID <= 0 {
-		return apiKey.ProjectID, true
-	}
-	if apiKeyService == nil {
-		abortWithGoogleError(c, 500, "Failed to validate API key")
-		return 0, false
-	}
-	projectCtx := service.WithProjectID(c.Request.Context(), effectiveProjectID)
-	visible, err := apiKeyService.GetByIDForProjectAuth(projectCtx, apiKey.ID)
-	if err != nil {
-		if errors.Is(err, service.ErrProjectMemberDisabled) {
-			abortWithGoogleError(c, 403, "API Key owner is disabled in this project")
-			return 0, false
-		}
-		if errors.Is(err, service.ErrProjectAPIKeyGroupUnavailable) {
-			abortWithGoogleError(c, 403, "API Key group is not available in this project")
-			return 0, false
-		}
-		if errors.Is(err, service.ErrAPIKeyNotFound) {
-			abortWithGoogleError(c, 401, "Invalid API key")
-			return 0, false
-		}
-		abortWithGoogleError(c, 500, "Failed to validate API key")
-		return 0, false
-	}
-	if visible == nil || visible.ID != apiKey.ID {
-		abortWithGoogleError(c, 401, "Invalid API key")
-		return 0, false
-	}
-	return effectiveProjectID, true
 }
 
 func abortWithGoogleError(c *gin.Context, status int, message string) {

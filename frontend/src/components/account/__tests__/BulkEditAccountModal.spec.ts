@@ -361,8 +361,8 @@ describe('BulkEditAccountModal', () => {
 
   it.each([
     ['super admin editing Grok OAuth', true, ['grok'], ['oauth'], true],
-    ['project admin editing Grok OAuth', false, ['grok'], ['oauth'], false],
-    ['project admin editing Grok API key', false, ['grok'], ['apikey'], true]
+    ['limited admin editing Grok OAuth', false, ['grok'], ['oauth'], false],
+    ['limited admin editing Grok API key', false, ['grok'], ['apikey'], true]
   ])('%s base URL visibility matches backend permission', (_name, isAdmin, platforms, types, visible) => {
     authIsAdmin.value = isAdmin
     const wrapper = mountModal({

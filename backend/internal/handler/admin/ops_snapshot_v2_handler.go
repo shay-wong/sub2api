@@ -24,7 +24,6 @@ type opsDashboardSnapshotV2Response struct {
 }
 
 type opsDashboardSnapshotV2CacheKey struct {
-	ProjectID    int64                `json:"project_id,omitempty"`
 	StartTime    string               `json:"start_time"`
 	EndTime      string               `json:"end_time"`
 	Platform     string               `json:"platform"`
@@ -79,7 +78,6 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
 
 	keyRaw, _ := json.Marshal(opsDashboardSnapshotV2CacheKey{
-		ProjectID:    dashboardCacheProjectID(c.Request.Context()),
 		StartTime:    startTime.UTC().Format(time.RFC3339),
 		EndTime:      endTime.UTC().Format(time.RFC3339),
 		Platform:     filter.Platform,

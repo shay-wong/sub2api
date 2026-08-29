@@ -407,7 +407,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('initialInputMethod')).toBe('manual')
   })
 
-  it('hides super-admin-only Codex imports from project admins', async () => {
+  it('hides super-admin-only Codex imports from limited admins', async () => {
     authStoreMock.isAdmin = false
     const wrapper = await openCodexImportStep()
 
@@ -419,7 +419,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   it.each([
     ['super admin', true, true],
-    ['project admin', false, false],
+    ['limited admin', false, false],
   ])('%s Grok OAuth custom upstream visibility matches backend permission', async (_name, isAdmin, visible) => {
     authStoreMock.isAdmin = isAdmin
     const wrapper = mountModal()

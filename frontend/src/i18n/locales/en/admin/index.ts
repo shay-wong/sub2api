@@ -4,7 +4,6 @@ import accounts from './accounts'
 import resources from './resources'
 import ops from './ops'
 import settings from './settings'
-import projects from './projects'
 import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
@@ -16,7 +15,6 @@ export default {
   ...resources,
   ...ops,
   ...settings,
-  ...projects,
   ...audit,
   ...promptAudit,
   ...plugins,

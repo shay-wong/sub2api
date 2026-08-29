@@ -24,8 +24,8 @@ func (r *opsRepository) ListRequestDetails(ctx context.Context, filter *service.
 
 	// Placeholders $1/$2 reserved for time window inside the CTE.
 	args = append(args, startTime.UTC(), endTime.UTC())
-	usageProjectClause := buildProjectProfileScopedClause(ctx, &args, "ul.project_id", usageLogSQLScopeResources("ul"))
-	errorProjectClause := buildProjectProfileScopedClause(ctx, &args, "o.project_id", opsErrorSQLScopeResources("o"))
+	usageProjectClause := ""
+	errorProjectClause := ""
 
 	addCondition := func(condition string, values ...any) {
 		conditions = append(conditions, condition)

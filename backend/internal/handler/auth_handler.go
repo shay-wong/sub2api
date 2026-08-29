@@ -23,7 +23,6 @@ type AuthHandler struct {
 	authService          *service.AuthService
 	userService          *service.UserService
 	settingSvc           *service.SettingService
-	projectService       *service.ProjectService
 	promoService         *service.PromoService
 	redeemService        *service.RedeemService
 	totpService          *service.TotpService
@@ -34,13 +33,12 @@ type AuthHandler struct {
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, projectService *service.ProjectService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
 	return &AuthHandler{
 		cfg:                  cfg,
 		authService:          authService,
 		userService:          userService,
 		settingSvc:           settingService,
-		projectService:       projectService,
 		promoService:         promoService,
 		redeemService:        redeemService,
 		totpService:          totpService,
@@ -103,17 +101,6 @@ type AuthResponse struct {
 
 type authUser struct {
 	dto.User
-	Projects []authProject `json:"projects,omitempty"`
-}
-
-type authProject struct {
-	ID          int64    `json:"id"`
-	Name        string   `json:"name"`
-	Slug        string   `json:"slug"`
-	Description *string  `json:"description,omitempty"`
-	Role        string   `json:"role"`
-	IsOwner     bool     `json:"is_owner"`
-	Permissions []string `json:"permissions,omitempty"`
 }
 
 func ensureLoginUserActive(user *service.User) error {
@@ -129,20 +116,16 @@ func ensureLoginUserActive(user *service.User) error {
 // respondWithTokenPair 生成 Token 对并返回认证响应
 // 如果 Token 对生成失败，回退到只返回 Access Token（向后兼容）
 func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
-	respondWithTokenPair(c, h.authService, h.projectService, user)
+	respondWithTokenPair(c, h.authService, user)
 }
 
-func respondWithTokenPair(c *gin.Context, authService *service.AuthService, projectService *service.ProjectService, user *service.User) {
+func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user *service.User) {
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	authUser, err := authUserFromService(c.Request.Context(), projectService, user)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
+	authUser := authUserFromService(user)
 
 	tokenPair, err := authService.GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
@@ -169,75 +152,27 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, proj
 	})
 }
 
-func authUserFromService(ctx context.Context, projectService *service.ProjectService, user *service.User) (*authUser, error) {
+func authUserFromService(user *service.User) *authUser {
 	base := dto.UserFromService(user)
 	if base == nil {
-		return nil, nil
+		return nil
 	}
-	projects, err := authProjectsForUser(ctx, projectService, user)
-	if err != nil {
-		return nil, err
-	}
-	return &authUser{
-		User:     *base,
-		Projects: projects,
-	}, nil
-}
-
-func (h *AuthHandler) authProjectsForUser(ctx context.Context, user *service.User) ([]authProject, error) {
-	if h == nil {
-		return nil, nil
-	}
-	return authProjectsForUser(ctx, h.projectService, user)
-}
-
-func authProjectsForUser(ctx context.Context, projectService *service.ProjectService, user *service.User) ([]authProject, error) {
-	if projectService == nil || user == nil {
-		return nil, nil
-	}
-	projects, err := projectService.ListUserProjects(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]authProject, 0, len(projects))
-	for _, project := range projects {
-		out = append(out, authProject{
-			ID:          project.ID,
-			Name:        project.Name,
-			Slug:        project.Slug,
-			Description: project.Description,
-			Role:        project.Role,
-			IsOwner:     project.IsOwner,
-			Permissions: project.Permissions,
-		})
-	}
-	return out, nil
+	return &authUser{User: *base}
 }
 
 func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {
 	if h == nil {
-		return ensureBackendModeUserAccess(ctx, user, false, nil)
+		return ensureBackendModeUserAccess(user, false)
 	}
-	return ensureBackendModeUserAccess(ctx, user, h.isBackendModeEnabled(ctx), h.projectService)
+	return ensureBackendModeUserAccess(user, h.isBackendModeEnabled(ctx))
 }
 
-func ensureBackendModeUserAccess(ctx context.Context, user *service.User, backendModeEnabled bool, projectService *service.ProjectService) error {
+func ensureBackendModeUserAccess(user *service.User, backendModeEnabled bool) error {
 	if user == nil {
 		return infraerrors.Unauthorized("INVALID_USER", "user not found")
 	}
 	if !backendModeEnabled || user.CanAccessAdminConsole() {
 		return nil
-	}
-	if projectService != nil {
-		projects, err := projectService.ListUserProjects(ctx, user)
-		if err != nil {
-			return err
-		}
-		for _, project := range projects {
-			if project.Role == service.ProjectRoleAdmin {
-				return nil
-			}
-		}
 	}
 	return infraerrors.Forbidden("BACKEND_MODE_ADMIN_ONLY", "Backend mode is active. Only admin login is allowed.")
 }
@@ -528,8 +463,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 
 	type UserResponse struct {
 		userProfileResponse
-		Projects []authProject `json:"projects,omitempty"`
-		RunMode  string        `json:"run_mode"`
+		RunMode string `json:"run_mode"`
 	}
 
 	runMode := config.RunModeStandard
@@ -537,15 +471,8 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		runMode = h.cfg.RunMode
 	}
 
-	projects, err := h.authProjectsForUser(c.Request.Context(), user)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
 	response.Success(c, UserResponse{
 		userProfileResponse: userProfileResponseFromService(user, identities),
-		Projects:            projects,
 		RunMode:             runMode,
 	})
 }
@@ -789,7 +716,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Backend mode: use the same global/project admin access check as login.
+	// Backend mode: use the same global admin access check as login.
 	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), result.User); err != nil {
 		response.ErrorFrom(c, err)
 		return

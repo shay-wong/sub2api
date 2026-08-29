@@ -27,21 +27,21 @@ func TestRequireAdminPermissionRoleHierarchy(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
-			name:        "project_admin_allows_project_permission",
+			name:        "admin_allows_assigned_permission",
 			role:        service.RoleAdmin,
 			permission:  service.AdminPermissionAccountsWrite,
 			permissions: []string{service.AdminPermissionAccountsWrite},
 			wantStatus:  http.StatusOK,
 		},
 		{
-			name:        "project_admin_rejects_missing_permission",
+			name:        "admin_rejects_missing_permission",
 			role:        service.RoleAdmin,
 			permission:  service.AdminPermissionAccountsWrite,
 			permissions: []string{service.AdminPermissionDashboardRead},
 			wantStatus:  http.StatusForbidden,
 		},
 		{
-			name:       "project_admin_rejects_missing_permission_context",
+			name:       "admin_rejects_missing_permission_context",
 			role:       service.RoleAdmin,
 			permission: service.AdminPermissionAccountsWrite,
 			wantStatus: http.StatusForbidden,
@@ -93,7 +93,7 @@ func TestRequireAdminOnlyOnlyAllowsSuperAdmin(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "super_admin_allowed", role: service.RoleSuperAdmin, wantStatus: http.StatusOK},
-		{name: "project_admin_rejected", role: service.RoleAdmin, wantStatus: http.StatusForbidden},
+		{name: "admin_rejected", role: service.RoleAdmin, wantStatus: http.StatusForbidden},
 		{name: "operator_rejected", role: service.RoleOperator, wantStatus: http.StatusForbidden},
 		{name: "user_rejected", role: service.RoleUser, wantStatus: http.StatusForbidden},
 	}
