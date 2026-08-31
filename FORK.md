@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `52374af94031f04df8de6fc91deb77a179e04b06` |
-| 当前比较范围 | `52374af94031f04df8de6fc91deb77a179e04b06..HEAD` |
+| 已合并上游提交 / 比较基线 | `200602b41bf97c706f8c28fdc9df97ef5ece1aa9` |
+| 当前比较范围 | `200602b41bf97c706f8c28fdc9df97ef5ece1aa9..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `52374af94031f04df8de6fc91deb77a179e04b06`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `200602b41bf97c706f8c28fdc9df97ef5ece1aa9`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
