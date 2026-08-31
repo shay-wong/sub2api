@@ -30,13 +30,13 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.184` |
-| 当前 Fork 版本 | `0.1.183-fork.3` |
-| 已发布同基线 Fork 版本 | 无 |
+| 当前 Fork 版本 | `0.1.183-fork.4` |
+| 已发布同基线 Fork 版本 | `v0.1.183-fork.4`（版本基数与当前上游基线不一致） |
 | 下次发布所需版本 | `0.1.184-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍是上一上游基线已发布的 `0.1.183-fork.3`。本次只合并上游、不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.184-fork.1`。
+发布流程已将版本源同步为 `0.1.183-fork.4`，但当前上游基线版本已是 `0.1.184`，该 release 不符合本契约的版本基数要求。下次发布前必须将版本源提升为 `0.1.184-fork.1`；本次 CI 测试修复不修改 VERSION，也不重写既有 tag。
 
 ## 能力索引
 
