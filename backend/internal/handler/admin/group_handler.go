@@ -313,7 +313,7 @@ func (h *GroupHandler) List(c *gin.Context) {
 		}); ok {
 			groups, total, err = scoped.ListGroupsByIDScope(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder, scope.GroupIDs)
 		} else {
-			groups, total, err = h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
+			groups, _, err = h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
 			filtered := groups[:0]
 			for _, group := range groups {
 				if scope.containsGroup(group.ID) {

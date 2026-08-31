@@ -10,6 +10,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type adminResourceScopeRepoStub struct {
+	role        string
+	permissions []string
+	scope       AdminResourceScope
+}
+
+func (s *adminResourceScopeRepoStub) GetAdminResourceScope(context.Context, int64) (AdminResourceScope, error) {
+	return UnrestrictedAdminResourceScope(), nil
+}
+
+func (s *adminResourceScopeRepoStub) GetAdminResourceScopesByUserIDs(context.Context, []int64) (map[int64]AdminResourceScope, error) {
+	return map[int64]AdminResourceScope{}, nil
+}
+
+func (s *adminResourceScopeRepoStub) UpdateUserAdminAccess(_ context.Context, _ int64, role string, permissions []string, scope AdminResourceScope, _ *int64) error {
+	s.role = role
+	s.permissions = append([]string(nil), permissions...)
+	s.scope = scope
+	return nil
+}
+
+func (s *adminResourceScopeRepoStub) BindAdminResource(context.Context, int64, string, int64, *int64) error {
+	return nil
+}
+
 func TestAdminServiceRegularInputsDoNotExposeAdminAccess(t *testing.T) {
 	for _, inputType := range []reflect.Type{
 		reflect.TypeOf(CreateUserInput{}),
@@ -59,7 +84,12 @@ func TestAdminServiceUpdateAdminAccessNormalizesAndInvalidates(t *testing.T) {
 	base := &userRepoStub{user: &User{ID: 42, Email: "user@example.com", Role: RoleUser}}
 	repo := &rpmUserRepoStub{userRepoStub: base}
 	invalidator := &authCacheInvalidatorStub{}
-	svc := &adminServiceImpl{userRepo: repo, authCacheInvalidator: invalidator}
+	scopeRepo := &adminResourceScopeRepoStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		authCacheInvalidator: invalidator,
+		permissionService:    &PermissionService{resourceScopeRepo: scopeRepo},
+	}
 
 	updated, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
 		Role: RoleAdmin,
@@ -75,6 +105,9 @@ func TestAdminServiceUpdateAdminAccessNormalizesAndInvalidates(t *testing.T) {
 	require.Equal(t, RoleAdmin, updated.Role)
 	require.Equal(t, []string{AdminPermissionDashboardRead, AdminPermissionUsageRead}, updated.AdminPermissions)
 	require.Equal(t, []int64{42}, invalidator.userIDs)
+	require.Equal(t, RoleAdmin, scopeRepo.role)
+	require.Equal(t, updated.AdminPermissions, scopeRepo.permissions)
+	require.Equal(t, UnrestrictedAdminResourceScope(), scopeRepo.scope)
 }
 
 func TestAdminServiceUpdateAdminAccessDemotionClearsPermissions(t *testing.T) {
@@ -85,7 +118,11 @@ func TestAdminServiceUpdateAdminAccessDemotionClearsPermissions(t *testing.T) {
 		AdminPermissions: []string{AdminPermissionUsageRead},
 	}}
 	repo := &rpmUserRepoStub{userRepoStub: base}
-	svc := &adminServiceImpl{userRepo: repo}
+	scopeRepo := &adminResourceScopeRepoStub{}
+	svc := &adminServiceImpl{
+		userRepo:          repo,
+		permissionService: &PermissionService{resourceScopeRepo: scopeRepo},
+	}
 
 	updated, err := svc.UpdateUserAdminAccess(context.Background(), 42, &UpdateUserAdminAccessInput{
 		Role:             RoleUser,
@@ -96,6 +133,9 @@ func TestAdminServiceUpdateAdminAccessDemotionClearsPermissions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, RoleUser, updated.Role)
 	require.Empty(t, updated.AdminPermissions)
+	require.Equal(t, RoleUser, scopeRepo.role)
+	require.Empty(t, scopeRepo.permissions)
+	require.Equal(t, UnrestrictedAdminResourceScope(), scopeRepo.scope)
 }
 
 func TestAdminServiceUpdateAdminAccessRejectsSuperAdmin(t *testing.T) {
