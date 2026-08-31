@@ -187,7 +187,7 @@ func (s *APIKeyRepoSuite) TestUpdateIgnoresLegacyProjectProfileBindings() {
 	profile, err := s.client.ProjectProfile.Create().
 		SetProjectID(workspace.ID).
 		SetName("Restricted").
-		SetMode(service.ProjectProfileModeRestricted).
+		SetMode(legacyProjectProfileModeRestricted).
 		SetIsActive(true).
 		Save(s.ctx)
 	s.Require().NoError(err)
@@ -202,7 +202,7 @@ func (s *APIKeyRepoSuite) TestUpdateIgnoresLegacyProjectProfileBindings() {
 	s.Require().NoError(s.repo.Create(s.ctx, key))
 	_, err = s.client.ProjectProfileBinding.Create().
 		SetProjectProfileID(profile.ID).
-		SetResourceType(service.ProjectResourceTypeAPIKey).
+		SetResourceType(legacyProjectResourceTypeAPIKey).
 		SetResourceID(key.ID).
 		Save(s.ctx)
 	s.Require().NoError(err)
@@ -685,7 +685,7 @@ func (s *APIKeyRepoSuite) TestDeleteWithAuditIgnoresLegacyProjectProfileBinding(
 	profile, err := s.client.ProjectProfile.Create().
 		SetProjectID(workspace.ID).
 		SetName("Restricted").
-		SetMode(service.ProjectProfileModeRestricted).
+		SetMode(legacyProjectProfileModeRestricted).
 		SetIsActive(true).
 		Save(s.ctx)
 	s.Require().NoError(err)
@@ -702,7 +702,7 @@ func (s *APIKeyRepoSuite) TestDeleteWithAuditIgnoresLegacyProjectProfileBinding(
 
 	_, err = s.client.ProjectProfileBinding.Create().
 		SetProjectProfileID(profile.ID).
-		SetResourceType(service.ProjectResourceTypeAPIKey).
+		SetResourceType(legacyProjectResourceTypeAPIKey).
 		SetResourceID(key.ID).
 		Save(s.ctx)
 	s.Require().NoError(err)

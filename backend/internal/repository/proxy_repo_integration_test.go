@@ -112,7 +112,7 @@ func (s *ProxyRepoSuite) TestListAndManagementIgnoreLegacyProjectProfileBindings
 	workspaceProxy := s.mustCreateProxy(&service.Proxy{Name: "workspace-proxy", ProjectID: workspace.ID, Protocol: "http", Host: "127.0.0.1", Port: 8082, Status: service.StatusActive})
 	s.mustInsertAccountInProject("default-account", defaultProjectID, &sharedProxy.ID)
 	s.mustInsertAccountInProject("workspace-account", workspace.ID, &sharedProxy.ID)
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
 
 	projectCtx := s.ctx
 	proxies, page, err := s.repo.ListWithFilters(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "shared")
@@ -246,7 +246,7 @@ func (s *ProxyRepoSuite) TestExistsByHostPortAuthIgnoresLegacyProjectProfileBind
 		Password:  "pass",
 		Status:    service.StatusActive,
 	})
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, shared.ID))
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, shared.ID))
 
 	projectCtx := s.ctx
 	exists, err := s.repo.ExistsByHostPortAuth(projectCtx, "9.9.9.9", 8080, "user", "pass")
@@ -295,7 +295,7 @@ func (s *ProxyRepoSuite) TestAccountCountsIgnoreLegacyProjectProfileBindings() {
 	sharedProxy := s.mustCreateProxy(&service.Proxy{Name: "shared-count-proxy", ProjectID: defaultProjectID, Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
 	s.mustInsertAccountInProject("default-account", defaultProjectID, &sharedProxy.ID)
 	s.mustInsertAccountInProject("workspace-account", workspace.ID, &sharedProxy.ID)
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, sharedProxy.ID), "bind shared proxy to workspace profile")
 
 	projectCtx := s.ctx
 	scopedCount, err := s.repo.CountAccountsByProxyID(projectCtx, sharedProxy.ID)
@@ -439,7 +439,7 @@ func (s *ProxyRepoSuite) mustInsertAccountInProject(name string, projectID int64
 		&accountID,
 	)
 	s.Require().NoError(err, "insert account")
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, projectID, service.ProjectResourceTypeAccount, accountID), "bind account to active profile")
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, projectID, legacyProjectResourceTypeAccount, accountID), "bind account to active profile")
 }
 
 func (s *ProxyRepoSuite) mustCreateProject(slug string) *dbent.Project {

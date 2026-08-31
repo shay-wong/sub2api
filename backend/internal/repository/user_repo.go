@@ -147,7 +147,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetPasswordHash(userIn.PasswordHash).
 		SetPasswordAuthDisabled(userIn.PasswordAuthDisabled).
 		SetRole(userIn.Role).
-		SetAdminPermissions(userIn.AdminPermissions).
+		SetAdminPermissions(append([]string{}, userIn.AdminPermissions...)).
 		SetBalance(userIn.Balance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
@@ -313,7 +313,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		updateOp = updateOp.SetRole(userIn.Role)
 	}
 	if fields.AdminPermissions {
-		updateOp = updateOp.SetAdminPermissions(userIn.AdminPermissions)
+		updateOp = updateOp.SetAdminPermissions(append([]string{}, userIn.AdminPermissions...))
 	}
 	if fields.Concurrency {
 		updateOp = updateOp.SetConcurrency(userIn.Concurrency)

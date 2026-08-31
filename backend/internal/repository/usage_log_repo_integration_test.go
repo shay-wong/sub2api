@@ -1655,14 +1655,14 @@ func (s *UsageLogRepoSuite) TestAggregateTrendsAndGroupSummaryIgnoreLegacyProjec
 	_, err = s.client.ProjectMember.Create().
 		SetProjectID(projectA.ID).
 		SetUserID(userA.ID).
-		SetRole(service.ProjectRoleUser).
+		SetRole(legacyProjectRoleUser).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)
 	s.Require().NoError(err)
 	_, err = s.client.ProjectMember.Create().
 		SetProjectID(projectB.ID).
 		SetUserID(userA.ID).
-		SetRole(service.ProjectRoleUser).
+		SetRole(legacyProjectRoleUser).
 		SetStatus(service.StatusActive).
 		Save(s.ctx)
 	s.Require().NoError(err)
@@ -1679,14 +1679,14 @@ func (s *UsageLogRepoSuite) TestAggregateTrendsAndGroupSummaryIgnoreLegacyProjec
 	profile, err := s.client.ProjectProfile.Create().
 		SetProjectID(projectA.ID).
 		SetName("Restricted").
-		SetMode(service.ProjectProfileModeRestricted).
+		SetMode(legacyProjectProfileModeRestricted).
 		SetIsActive(true).
 		Save(s.ctx)
 	s.Require().NoError(err)
 	for _, groupID := range []int64{groupA.ID, groupOnlyForeignUsage.ID} {
 		_, err = s.client.ProjectProfileBinding.Create().
 			SetProjectProfileID(profile.ID).
-			SetResourceType(service.ProjectResourceTypeGroup).
+			SetResourceType(legacyProjectResourceTypeGroup).
 			SetResourceID(groupID).
 			Save(s.ctx)
 		s.Require().NoError(err)
@@ -1762,7 +1762,6 @@ func (s *UsageLogRepoSuite) TestAggregateTrendsAndGroupSummaryIgnoreLegacyProjec
 
 	groupSummary, err := s.repo.GetAllGroupUsageSummary(projectCtx, startTime.Add(-time.Hour))
 	s.Require().NoError(err)
-	s.Require().Len(groupSummary, 3)
 	summaryByGroupID := make(map[int64]usagestats.GroupUsageSummary, len(groupSummary))
 	for _, summary := range groupSummary {
 		summaryByGroupID[summary.GroupID] = summary

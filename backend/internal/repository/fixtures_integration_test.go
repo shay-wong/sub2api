@@ -14,6 +14,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	legacyProjectProfileModeRestricted   = "restricted"
+	legacyProjectProfileModeUnrestricted = "unrestricted"
+	legacyProjectRoleUser                = "user"
+	legacyProjectResourceTypeAPIKey      = "api_key"
+	legacyProjectResourceTypeGroup       = "group"
+	legacyProjectResourceTypeAccount     = "account"
+	legacyProjectResourceTypeProxy       = "proxy"
+)
+
 func mustDefaultProjectID(t *testing.T, client *dbent.Client) int64 {
 	t.Helper()
 	ctx := context.Background()
@@ -33,6 +43,29 @@ func mustDefaultProjectID(t *testing.T, client *dbent.Client) int64 {
 		Save(ctx)
 	require.NoError(t, err, "create default project")
 	return project.ID
+}
+
+// bindLegacyResourceToActiveProjectProfile seeds removed Project binding data so repositories can prove they ignore it.
+func bindLegacyResourceToActiveProjectProfile(ctx context.Context, sqlq sqlExecutor, projectID int64, resourceType string, resourceID int64) error {
+	_, err := sqlq.ExecContext(ctx, `
+		INSERT INTO project_profiles (project_id, name, description, mode, is_active, created_at, updated_at)
+		VALUES ($1, 'Legacy integration profile', 'Legacy project binding test fixture.', $2, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT DO NOTHING
+	`, projectID, legacyProjectProfileModeRestricted)
+	if err != nil {
+		return err
+	}
+
+	_, err = sqlq.ExecContext(ctx, `
+		INSERT INTO project_profile_bindings (project_profile_id, resource_type, resource_id)
+		SELECT id, $2, $3
+		FROM project_profiles
+		WHERE project_id = $1
+		  AND is_active = TRUE
+		  AND deleted_at IS NULL
+		ON CONFLICT (project_profile_id, resource_type, resource_id) DO NOTHING
+	`, projectID, resourceType, resourceID)
+	return err
 }
 
 func mustCreateUser(t *testing.T, client *dbent.Client, u *service.User) *service.User {

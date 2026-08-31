@@ -46,7 +46,7 @@ func (s *ProxyExpirySuite) mkAccountWithProxyInProject(projectID int64, proxyID 
 		VALUES ($1,$2,'claude','api','{}','{}','active',$3,NOW(),NOW()) RETURNING id`,
 		[]any{projectID, "acc-" + time.Now().Format("150405.000000"), proxyID}, &id)
 	s.Require().NoError(err)
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, projectID, service.ProjectResourceTypeAccount, id))
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, projectID, legacyProjectResourceTypeAccount, id))
 	return id
 }
 
@@ -128,7 +128,7 @@ func (s *ProxyExpirySuite) TestSweep_ProxyMode_Healthy() {
 	s.Require().Equal(pid, *origin)
 }
 
-func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyOnlyUsesProjectVisibleBackup() {
+func (s *ProxyExpirySuite) TestSweep_ProxyMode_IgnoresLegacyProjectVisibility() {
 	future := time.Now().Add(24 * time.Hour)
 	past := time.Now().Add(-time.Hour)
 	backup := s.mkProxy("p-shared-backup", service.FallbackModeNone, &future, nil)
@@ -136,13 +136,13 @@ func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyOnlyUsesProjectVisible
 	workspace := s.mkProject("proxy-expiry-workspace")
 	aidDefault := s.mkAccountWithProxy(pid)
 	aidWorkspace := s.mkAccountWithProxyInProject(workspace.ID, pid)
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, pid))
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, pid))
 
 	changed, err := s.repo.SweepExpiredProxies(s.ctx, time.Now())
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), changed)
+	s.Require().Equal(int64(2), changed)
 	s.Require().Equal(backup, *s.accountProxyID(aidDefault))
-	s.Require().Equal(pid, *s.accountProxyID(aidWorkspace), "workspace account must not move to an unbound backup proxy")
+	s.Require().Equal(backup, *s.accountProxyID(aidWorkspace))
 }
 
 func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyUpdatesAccountsWhenBackupIsVisible() {
@@ -153,8 +153,8 @@ func (s *ProxyExpirySuite) TestSweep_ProxyMode_SharedProxyUpdatesAccountsWhenBac
 	workspace := s.mkProject("proxy-expiry-visible-backup-workspace")
 	aidDefault := s.mkAccountWithProxy(pid)
 	aidWorkspace := s.mkAccountWithProxyInProject(workspace.ID, pid)
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, pid))
-	s.Require().NoError(bindResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, service.ProjectResourceTypeProxy, backup))
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, pid))
+	s.Require().NoError(bindLegacyResourceToActiveProjectProfile(s.ctx, s.tx, workspace.ID, legacyProjectResourceTypeProxy, backup))
 
 	changed, err := s.repo.SweepExpiredProxies(s.ctx, time.Now())
 	s.Require().NoError(err)

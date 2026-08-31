@@ -61,7 +61,7 @@ func TestCreateWithAccountGroupsPersistsPausedCopyAtomically(t *testing.T) {
 		JOIN project_profiles pp ON pp.id = ppb.project_profile_id
 		WHERE pp.project_id = $1 AND ppb.resource_type = 'account' AND ppb.resource_id = $2
 	`, success.ProjectID, success.ID).Scan(&bindingCount))
-	require.Equal(t, 1, bindingCount)
+	require.Zero(t, bindingCount)
 
 	failure := &service.Account{
 		Name:        fmt.Sprintf("duplicate-failure-%d", suffix),

@@ -226,7 +226,7 @@ func (s *GroupRepoSuite) TestCreateFromSourcePreservesPriorityAndFiltersIneligib
 func (s *GroupRepoSuite) TestCreateFromSourceIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Duplicate Source Home", "duplicate-source-home")
 	workspaceProjectID := s.createProject("Duplicate Source Workspace", "duplicate-source-workspace")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	source := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -245,8 +245,8 @@ func (s *GroupRepoSuite) TestCreateFromSourceIgnoresLegacyProjectProfileBindings
 		)
 		s.Require().NoError(err)
 	}
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, source.ID)
-	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, visibleAccountID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, source.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeAccount, visibleAccountID)
 
 	duplicate := &service.Group{
 		ProjectID:        source.ProjectID,
@@ -436,7 +436,7 @@ func (s *GroupRepoSuite) TestListWithFilters_Platform() {
 func (s *GroupRepoSuite) TestListWithFiltersIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Home Project", "group-home-project")
 	workspaceProjectID := s.createProject("Group Workspace Project", "group-workspace-project")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	boundGroup := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -450,7 +450,7 @@ func (s *GroupRepoSuite) TestListWithFiltersIgnoresLegacyProjectProfileBindings(
 		Platform:  service.PlatformAnthropic,
 		Status:    service.StatusActive,
 	})
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, boundGroup.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, boundGroup.ID)
 
 	projectCtx := s.ctx
 	groups, page, err := s.repo.ListWithFilters(projectCtx, pagination.PaginationParams{Page: 1, PageSize: 20}, "", "", "cross-project-group", nil)
@@ -460,7 +460,7 @@ func (s *GroupRepoSuite) TestListWithFiltersIgnoresLegacyProjectProfileBindings(
 	s.Require().True(containsID(groups, unboundGroup.ID))
 
 	_, err = s.tx.Client().ProjectProfile.UpdateOneID(profileID).
-		SetMode(service.ProjectProfileModeUnrestricted).
+		SetMode(legacyProjectProfileModeUnrestricted).
 		Save(s.ctx)
 	s.Require().NoError(err)
 
@@ -703,7 +703,7 @@ func (s *GroupRepoSuite) TestUpdateSortOrders_MissingGroupNoPartialUpdate() {
 func (s *GroupRepoSuite) TestUpdateSortOrdersIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Sort Home", "group-sort-home")
 	workspaceProjectID := s.createProject("Group Sort Workspace", "group-sort-workspace")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	boundGroup := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -717,7 +717,7 @@ func (s *GroupRepoSuite) TestUpdateSortOrdersIgnoresLegacyProjectProfileBindings
 		Platform:  service.PlatformAnthropic,
 		Status:    service.StatusActive,
 	})
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, boundGroup.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, boundGroup.ID)
 
 	projectCtx := s.ctx
 	err := s.repo.UpdateSortOrders(projectCtx, []service.GroupSortOrderUpdate{{ID: boundGroup.ID, SortOrder: 42}})
@@ -913,7 +913,7 @@ func (s *GroupRepoSuite) TestGetAccountCount_Empty() {
 func (s *GroupRepoSuite) TestGetAccountCountIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Count Home", "group-count-home")
 	workspaceProjectID := s.createProject("Group Count Workspace", "group-count-workspace")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	group := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -933,8 +933,8 @@ func (s *GroupRepoSuite) TestGetAccountCountIgnoresLegacyProjectProfileBindings(
 		)
 		s.Require().NoError(err)
 	}
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, group.ID)
-	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, boundAccountID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, group.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeAccount, boundAccountID)
 
 	projectCtx := s.ctx
 	total, active, err := s.repo.GetAccountCount(projectCtx, group.ID)
@@ -947,7 +947,7 @@ func (s *GroupRepoSuite) TestGetAccountCountIgnoresLegacyProjectProfileBindings(
 	s.Require().ElementsMatch([]int64{boundAccountID, unboundAccountID}, accountIDs)
 
 	_, err = s.tx.Client().ProjectProfile.UpdateOneID(profileID).
-		SetMode(service.ProjectProfileModeUnrestricted).
+		SetMode(legacyProjectProfileModeUnrestricted).
 		Save(s.ctx)
 	s.Require().NoError(err)
 
@@ -1144,7 +1144,7 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupID_MultipleAccounts() {
 func (s *GroupRepoSuite) TestBindAccountsToGroupIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Bind Home", "group-bind-home")
 	workspaceProjectID := s.createProject("Group Bind Workspace", "group-bind-workspace")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	group := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -1154,8 +1154,8 @@ func (s *GroupRepoSuite) TestBindAccountsToGroupIgnoresLegacyProjectProfileBindi
 	})
 	boundAccountID := s.insertAccountInProject(homeProjectID, "bound-profile-bind-account")
 	unboundAccountID := s.insertAccountInProject(homeProjectID, "unbound-profile-bind-account")
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, group.ID)
-	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, boundAccountID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, group.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeAccount, boundAccountID)
 
 	projectCtx := s.ctx
 	err := s.repo.BindAccountsToGroup(projectCtx, group.ID, []int64{boundAccountID, unboundAccountID})
@@ -1180,7 +1180,7 @@ func (s *GroupRepoSuite) TestBindAccountsToGroupIgnoresLegacyProjectProfileBindi
 func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDIgnoresLegacyProjectProfileBindings() {
 	homeProjectID := s.createProject("Group Clear Home", "group-clear-home")
 	workspaceProjectID := s.createProject("Group Clear Workspace", "group-clear-workspace")
-	profileID := s.createProjectProfile(workspaceProjectID, service.ProjectProfileModeRestricted)
+	profileID := s.createProjectProfile(workspaceProjectID, legacyProjectProfileModeRestricted)
 
 	group := mustCreateGroup(s.T(), s.tx.Client(), &service.Group{
 		ProjectID: homeProjectID,
@@ -1190,8 +1190,8 @@ func (s *GroupRepoSuite) TestDeleteAccountGroupsByGroupIDIgnoresLegacyProjectPro
 	})
 	boundAccountID := s.insertAccountInProject(homeProjectID, "bound-profile-clear-account")
 	unboundAccountID := s.insertAccountInProject(homeProjectID, "unbound-profile-clear-account")
-	s.bindProjectResource(profileID, service.ProjectResourceTypeGroup, group.ID)
-	s.bindProjectResource(profileID, service.ProjectResourceTypeAccount, boundAccountID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeGroup, group.ID)
+	s.bindProjectResource(profileID, legacyProjectResourceTypeAccount, boundAccountID)
 	_, err := s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", boundAccountID, group.ID, 1)
 	s.Require().NoError(err)
 	_, err = s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, $3, NOW())", unboundAccountID, group.ID, 2)
