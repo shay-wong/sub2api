@@ -25,8 +25,6 @@ type AdminService interface {
 	GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error)
 	GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error)
 	GetUserRPMStatus(ctx context.Context, userID int64) (*UserRPMStatus, error)
-	ListUserGroupRateLimitWindows(ctx context.Context, userID int64) ([]UserGroupRateLimitWindowRecord, error)
-	ResetUserGroupRateLimitWindow(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error)
 	// GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
 	// codeType is optional - pass empty string to return all types.
 	// Also returns totalRecharged (sum of all positive balance top-ups).
@@ -227,7 +225,6 @@ type CreateGroupInput struct {
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	LongContextPricingEnabled bool
 	ModelPricing              []ChannelModelPricing
-	RateLimit5h               float64 // 分组级 5 小时 USD 限制，0 = 不限制
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	AllowImageGeneration         bool
 	AllowBatchImageGeneration    bool
@@ -303,7 +300,6 @@ type UpdateGroupInput struct {
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	LongContextPricingEnabled *bool
 	ModelPricing              *[]ChannelModelPricing
-	RateLimit5h               *float64 // nil 表示不修改，0 = 不限制
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	AllowImageGeneration         *bool
 	AllowBatchImageGeneration    *bool
@@ -662,31 +658,30 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
-	userRepo               UserRepository
-	groupRepo              GroupRepository
-	groupDuplicateRepo     GroupDuplicateRepository
-	accountRepo            AccountRepository
-	accountDuplicateRepo   AccountDuplicateRepository
-	accountBillingRepo     AccountBillingSettingsRepository
-	proxyRepo              ProxyRepository
-	apiKeyRepo             APIKeyRepository
-	redeemCodeRepo         RedeemCodeRepository
-	userGroupRateRepo      UserGroupRateRepository
-	userGroupRateLimitRepo UserGroupRateLimitWindowRepository
-	userRPMCache           UserRPMCache
-	billingCacheService    *BillingCacheService
-	proxyProber            ProxyExitInfoProber
-	proxyLatencyCache      ProxyLatencyCache
-	authCacheInvalidator   APIKeyAuthCacheInvalidator
-	entClient              *dbent.Client // 用于开启数据库事务
-	settingService         *SettingService
-	defaultSubAssigner     DefaultSubscriptionAssigner
-	userSubRepo            UserSubscriptionRepository
-	privacyClientFactory   PrivacyClientFactory
-	runtimeBlocker         AccountRuntimeBlocker
-	affiliateService       adminRechargeAffiliateAccruer
-	compositeRouteRepo     CompositeModelRouteRepository
-	compositeResolver      *CompositeRouteResolver
+	userRepo             UserRepository
+	groupRepo            GroupRepository
+	groupDuplicateRepo   GroupDuplicateRepository
+	accountRepo          AccountRepository
+	accountDuplicateRepo AccountDuplicateRepository
+	accountBillingRepo   AccountBillingSettingsRepository
+	proxyRepo            ProxyRepository
+	apiKeyRepo           APIKeyRepository
+	redeemCodeRepo       RedeemCodeRepository
+	userGroupRateRepo    UserGroupRateRepository
+	userRPMCache         UserRPMCache
+	billingCacheService  *BillingCacheService
+	proxyProber          ProxyExitInfoProber
+	proxyLatencyCache    ProxyLatencyCache
+	authCacheInvalidator APIKeyAuthCacheInvalidator
+	entClient            *dbent.Client // 用于开启数据库事务
+	settingService       *SettingService
+	defaultSubAssigner   DefaultSubscriptionAssigner
+	userSubRepo          UserSubscriptionRepository
+	privacyClientFactory PrivacyClientFactory
+	runtimeBlocker       AccountRuntimeBlocker
+	affiliateService     adminRechargeAffiliateAccruer
+	compositeRouteRepo   CompositeModelRouteRepository
+	compositeResolver    *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
 }
@@ -714,7 +709,6 @@ func NewAdminService(
 	apiKeyRepo APIKeyRepository,
 	redeemCodeRepo RedeemCodeRepository,
 	userGroupRateRepo UserGroupRateRepository,
-	userGroupRateLimitRepo UserGroupRateLimitWindowRepository,
 	userRPMCache UserRPMCache,
 	billingCacheService *BillingCacheService,
 	proxyProber ProxyExitInfoProber,
@@ -742,7 +736,6 @@ func NewAdminService(
 		apiKeyRepo:              apiKeyRepo,
 		redeemCodeRepo:          redeemCodeRepo,
 		userGroupRateRepo:       userGroupRateRepo,
-		userGroupRateLimitRepo:  userGroupRateLimitRepo,
 		userRPMCache:            userRPMCache,
 		billingCacheService:     billingCacheService,
 		proxyProber:             proxyProber,

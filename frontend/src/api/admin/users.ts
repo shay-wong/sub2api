@@ -9,8 +9,7 @@ import type {
   GlobalUserRole,
   UpdateUserRequest,
   PaginatedResponse,
-  ApiKey,
-  UserGroupRateLimitWindow
+  ApiKey
 } from '@/types'
 
 export interface AdminBindAuthIdentityChannelRequest {
@@ -245,31 +244,6 @@ export async function updateAdminAccess(
   return data
 }
 
-export interface UserGroupRateLimitsResponse {
-  group_rate_limits: UserGroupRateLimitWindow[]
-}
-
-export interface ResetUserGroupRateLimitResponse {
-  group_rate_limit: UserGroupRateLimitWindow
-}
-
-export async function getUserGroupRateLimits(id: number): Promise<UserGroupRateLimitsResponse> {
-  const { data } = await apiClient.get<UserGroupRateLimitsResponse>(
-    `/admin/users/${id}/group-rate-limits`
-  )
-  return data
-}
-
-export async function resetUserGroupRateLimit(
-  id: number,
-  groupId: number
-): Promise<ResetUserGroupRateLimitResponse> {
-  const { data } = await apiClient.post<ResetUserGroupRateLimitResponse>(
-    `/admin/users/${id}/group-rate-limits/${groupId}/reset`
-  )
-  return data
-}
-
 /**
  * Get user's usage statistics
  * @param id - User ID
@@ -455,8 +429,6 @@ export const usersAPI = {
   toggleStatus,
   getUserApiKeys,
   updateAdminAccess,
-  getUserGroupRateLimits,
-  resetUserGroupRateLimit,
   getUserUsageStats,
   getUserBalanceHistory,
   replaceGroup,

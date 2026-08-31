@@ -207,7 +207,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// Images 调度不装利润门，此分支实际不可达；防御性排除重选并受同一否决上限约束。
@@ -395,28 +395,28 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil {
 			upstreamModel = result.UpstreamModel
 		}
-		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+		effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		sessionID := service.ExtractClientSessionID(c)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:                result,
-				APIKey:                apiKey,
-				User:                  apiKey.User,
-				Account:               account,
-				Subscription:          subscription,
-				InboundEndpoint:       inboundEndpoint,
-				UpstreamEndpoint:      upstreamEndpoint,
-				UserAgent:             userAgent,
-				IPAddress:             clientIP,
-				SessionID:             sessionID,
-				RequestPayloadHash:    requestPayloadHash,
-				APIKeyService:         h.apiKeyService,
-				GroupRateLimitGroupID: groupRateLimitGroupID,
-				GroupRateLimitGroup:   groupRateLimitGroup,
-				QuotaPlatform:         quotaPlatform,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
+				Result:             result,
+				APIKey:             apiKey,
+				User:               apiKey.User,
+				Account:            account,
+				Subscription:       subscription,
+				InboundEndpoint:    inboundEndpoint,
+				UpstreamEndpoint:   upstreamEndpoint,
+				UserAgent:          userAgent,
+				IPAddress:          clientIP,
+				SessionID:          sessionID,
+				RequestPayloadHash: requestPayloadHash,
+				APIKeyService:      h.apiKeyService,
+				EffectiveGroupID:   effectiveGroupID,
+				EffectiveGroup:     effectiveGroup,
+				QuotaPlatform:      quotaPlatform,
+				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.images"),

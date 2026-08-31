@@ -34,7 +34,7 @@ func (c *failingSubscriptionInvalidationCache) SubscribeSubscriptionCacheInvalid
 func TestInvalidateSubscriptionCaches_PublishesAfterDistributedInvalidationFailure(t *testing.T) {
 	invalidateErr := errors.New("injected distributed invalidation failure")
 	cache := &failingSubscriptionInvalidationCache{invalidateErr: invalidateErr}
-	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 
 	svc := &SubscriptionService{billingCacheService: billingCacheSvc}
@@ -183,7 +183,7 @@ func TestExtendSubscriptionPublishesAfterDistributedInvalidationFailure(t *testi
 	cache := &failingSubscriptionInvalidationCache{
 		invalidateErr: errors.New("injected distributed invalidation failure"),
 	}
-	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	billingCacheSvc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, billingCacheSvc, nil, &config.Config{
 		SubscriptionCache: config.SubscriptionCacheConfig{

@@ -396,7 +396,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
-		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature
@@ -491,27 +491,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已抢槽
 		// 的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 		if selection.ProfitGateActive() || !selection.Acquired {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, groupRateLimitGroupID, sessionKey, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, effectiveGroupID, sessionKey, account.ID); err != nil {
 				reqLog.Warn("gemini.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
 		// 账号槽位/等待计数需要在超时或断开时安全回收
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
-		if handleEffectiveGroupRateLimit5h(
-			c.Request.Context(),
-			c,
-			h.billingCacheService,
-			selection,
-			apiKey,
-			accountReleaseFunc,
-			func(err error) { reqLog.Info("gemini.selected_group_rate_limit_check_failed", zap.Error(err)) },
-			func(status int, _ string, message string) {
-				googleError(c, status, message)
-			},
-		) {
-			return
-		}
 
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
@@ -519,7 +504,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
-		sessionGroupID := derefGroupID(groupRateLimitGroupID)
+		sessionGroupID := derefGroupID(effectiveGroupID)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
 				requestCtx,
@@ -583,7 +568,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 		forceCacheBilling := fs.ForceCacheBilling
-		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		sessionID := service.ExtractClientSessionID(c)
 		// 长上下文规则由计费服务统一持有（模型广场展示同源），入口只负责声明自己适用该规则。
@@ -611,8 +596,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				LongContextMultiplier: longContextMultiplier,
 				ForceCacheBilling:     forceCacheBilling,
 				APIKeyService:         h.apiKeyService,
-				GroupRateLimitGroupID: groupRateLimitGroupID,
-				GroupRateLimitGroup:   groupRateLimitGroup,
+				EffectiveGroupID:      effectiveGroupID,
+				EffectiveGroup:        effectiveGroup,
 				SessionID:             sessionID,
 				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 			}); err != nil {

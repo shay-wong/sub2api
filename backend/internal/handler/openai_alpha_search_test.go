@@ -165,7 +165,6 @@ func TestAlphaSearchUsesRequestIDForCyberSessionPreflight(t *testing.T) {
 		nil,
 		settingService,
 		nil,
-		nil,
 	)
 	h := newAlphaSearchPreflightHandler(gatewayService, nil)
 

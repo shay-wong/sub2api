@@ -159,7 +159,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, selectedGroupID, "", selection, false, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
@@ -266,29 +266,29 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+		effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		sessionID := service.ExtractClientSessionID(c)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:                result,
-				APIKey:                apiKey,
-				User:                  apiKey.User,
-				Account:               account,
-				Subscription:          subscription,
-				InboundEndpoint:       inboundEndpoint,
-				UpstreamEndpoint:      upstreamEndpoint,
-				UserAgent:             userAgent,
-				IPAddress:             clientIP,
-				SessionID:             sessionID,
-				APIKeyService:         h.apiKeyService,
-				GroupRateLimitGroupID: groupRateLimitGroupID,
-				GroupRateLimitGroup:   groupRateLimitGroup,
-				QuotaPlatform:         quotaPlatform,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
-				PricingAt:             pricingAt,
+				Result:             result,
+				APIKey:             apiKey,
+				User:               apiKey.User,
+				Account:            account,
+				Subscription:       subscription,
+				InboundEndpoint:    inboundEndpoint,
+				UpstreamEndpoint:   upstreamEndpoint,
+				UserAgent:          userAgent,
+				IPAddress:          clientIP,
+				SessionID:          sessionID,
+				APIKeyService:      h.apiKeyService,
+				EffectiveGroupID:   effectiveGroupID,
+				EffectiveGroup:     effectiveGroup,
+				QuotaPlatform:      quotaPlatform,
+				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+				PricingAt:          pricingAt,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.embeddings"),

@@ -450,11 +450,11 @@ func TestGetUpstreamEndpoint_FullFlow(t *testing.T) {
 	require.Equal(t, "/v1/responses/compact", got)
 }
 
-func TestEffectiveGroupRateLimitGroupID_SelectionWinsOverAPIKeyGroup(t *testing.T) {
+func TestResolveEffectiveGroupID_SelectionWinsOverAPIKeyGroup(t *testing.T) {
 	apiKeyGroupID := int64(10)
 	selectionGroupID := int64(20)
 
-	got := EffectiveGroupRateLimitGroupID(
+	got := ResolveEffectiveGroupID(
 		&service.AccountSelectionResult{GroupID: &selectionGroupID},
 		&service.APIKey{GroupID: &apiKeyGroupID},
 	)
@@ -463,25 +463,25 @@ func TestEffectiveGroupRateLimitGroupID_SelectionWinsOverAPIKeyGroup(t *testing.
 	require.Equal(t, selectionGroupID, *got)
 }
 
-func TestEffectiveGroupRateLimitGroupID_FallsBackToAPIKeyGroup(t *testing.T) {
+func TestResolveEffectiveGroupID_FallsBackToAPIKeyGroup(t *testing.T) {
 	apiKeyGroupID := int64(10)
 
-	got := EffectiveGroupRateLimitGroupID(nil, &service.APIKey{GroupID: &apiKeyGroupID})
+	got := ResolveEffectiveGroupID(nil, &service.APIKey{GroupID: &apiKeyGroupID})
 
 	require.NotNil(t, got)
 	require.Equal(t, apiKeyGroupID, *got)
 }
 
-func TestEffectiveGroupRateLimitGroupID_ReturnsNilWhenNoGroup(t *testing.T) {
-	require.Nil(t, EffectiveGroupRateLimitGroupID(nil, nil))
-	require.Nil(t, EffectiveGroupRateLimitGroupID(&service.AccountSelectionResult{}, &service.APIKey{}))
+func TestResolveEffectiveGroupID_ReturnsNilWhenNoGroup(t *testing.T) {
+	require.Nil(t, ResolveEffectiveGroupID(nil, nil))
+	require.Nil(t, ResolveEffectiveGroupID(&service.AccountSelectionResult{}, &service.APIKey{}))
 }
 
-func TestEffectiveGroupRateLimitGroup_SelectionGroupWins(t *testing.T) {
-	apiKeyGroup := &service.Group{ID: 10, RateLimit5h: 100}
-	selectionGroup := &service.Group{ID: 20, RateLimit5h: 10}
+func TestResolveEffectiveGroup_SelectionGroupWins(t *testing.T) {
+	apiKeyGroup := &service.Group{ID: 10}
+	selectionGroup := &service.Group{ID: 20}
 
-	got := EffectiveGroupRateLimitGroup(
+	got := ResolveEffectiveGroup(
 		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
 		&service.APIKey{GroupID: &apiKeyGroup.ID, Group: apiKeyGroup},
 	)
@@ -489,11 +489,11 @@ func TestEffectiveGroupRateLimitGroup_SelectionGroupWins(t *testing.T) {
 	require.Same(t, selectionGroup, got)
 }
 
-func TestEffectiveGroupRateLimitGroup_DoesNotUseAPIKeyGroupForDifferentSelectionID(t *testing.T) {
+func TestResolveEffectiveGroup_DoesNotUseAPIKeyGroupForDifferentSelectionID(t *testing.T) {
 	apiKeyGroupID := int64(10)
 	selectionGroupID := int64(20)
 
-	got := EffectiveGroupRateLimitGroup(
+	got := ResolveEffectiveGroup(
 		&service.AccountSelectionResult{GroupID: &selectionGroupID},
 		&service.APIKey{GroupID: &apiKeyGroupID, Group: &service.Group{ID: apiKeyGroupID}},
 	)
@@ -670,7 +670,7 @@ func TestHandleSelectedOpenAIPreflight_ResolvesSelectedSubscription(t *testing.T
 	selectedSub := &service.UserSubscription{ID: 200, UserID: userID, GroupID: selectedGroupID}
 	subRepo := &selectedOpenAIPreflightSubRepoStub{sub: selectedSub}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
-	billingSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	billingSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	defer billingSvc.Stop()
 	gatewaySvc := service.NewOpenAIGatewayService(
 		nil,
@@ -681,7 +681,6 @@ func TestHandleSelectedOpenAIPreflight_ResolvesSelectedSubscription(t *testing.T
 		nil,
 		nil,
 		cfg,
-		nil,
 		nil,
 		nil,
 		nil,
@@ -745,7 +744,7 @@ func TestHandleSelectedOpenAIPreflight_UsesSelectedGroupPlatformForQuota(t *test
 	quotaCache := &selectedOpenAIPreflightQuotaCache{}
 	cfg := &config.Config{}
 	cfg.Billing.UserPlatformQuotaCacheTTLSeconds = 60
-	billingSvc := service.NewBillingCacheService(quotaCache, nil, nil, nil, nil, nil, nil, cfg, &selectedOpenAIPreflightQuotaRepoStub{})
+	billingSvc := service.NewBillingCacheService(quotaCache, nil, nil, nil, nil, nil, cfg, &selectedOpenAIPreflightQuotaRepoStub{})
 	defer billingSvc.Stop()
 
 	released := false

@@ -323,11 +323,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
 	monthlyLimit := normalizeLimit(input.MonthlyLimitUSD)
-	if input.RateLimit5h < 0 {
-		return nil, errors.New("rate_limit_5h must be >= 0")
-	}
-	rateLimit5h := normalizeSubscriptionRateLimit5h(subscriptionType, input.RateLimit5h)
-
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
 	imagePrice2K := normalizePrice(input.ImagePrice2K)
@@ -469,7 +464,6 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		MonthlyLimitUSD:                 monthlyLimit,
 		LongContextPricingEnabled:       input.LongContextPricingEnabled,
 		ModelPricing:                    modelPricing,
-		RateLimit5h:                     rateLimit5h,
 		AllowImageGeneration:            allowImageGeneration,
 		AllowBatchImageGeneration:       allowBatchImageGeneration,
 		ImageRateIndependent:            input.ImageRateIndependent,
@@ -569,13 +563,6 @@ func normalizePrice(price *float64) *float64 {
 		return nil
 	}
 	return price
-}
-
-func normalizeSubscriptionRateLimit5h(subscriptionType string, limit float64) float64 {
-	if subscriptionType != SubscriptionTypeSubscription {
-		return 0
-	}
-	return limit
 }
 
 // validateFallbackGroup 校验降级分组的有效性
@@ -702,13 +689,6 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.MonthlyLimitUSD != nil {
 		group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
 	}
-	if input.RateLimit5h != nil {
-		if *input.RateLimit5h < 0 {
-			return nil, errors.New("rate_limit_5h must be >= 0")
-		}
-		group.RateLimit5h = *input.RateLimit5h
-	}
-	group.RateLimit5h = normalizeSubscriptionRateLimit5h(group.SubscriptionType, group.RateLimit5h)
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration

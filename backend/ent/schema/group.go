@@ -49,10 +49,6 @@ func (Group) Fields() []ent.Field {
 		field.Float("rate_multiplier").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(1.0),
-		field.Float("rate_limit_5h").
-			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
-			Default(0).
-			Comment("Group-level 5-hour USD rate limit per user-group window (0 = unlimited)"),
 		// 高峰时段倍率（added by migration 158）
 		field.Bool("peak_rate_enabled").
 			Default(false).
@@ -309,7 +305,6 @@ func (Group) Edges() []ent.Edge {
 		edge.To("redeem_codes", RedeemCode.Type),
 		edge.To("subscriptions", UserSubscription.Type),
 		edge.To("usage_logs", UsageLog.Type),
-		edge.To("user_rate_limit_windows", UserGroupRateLimitWindow.Type),
 		edge.From("accounts", Account.Type).
 			Ref("groups").
 			Through("account_groups", AccountGroup.Type),

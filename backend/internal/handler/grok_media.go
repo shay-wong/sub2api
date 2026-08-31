@@ -286,7 +286,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, false, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 媒体路径已显式豁免利润门（suppress 标记），此分支仅防御性兜底，
@@ -679,8 +679,8 @@ func recordGrokMediaUsage(
 		OriginalModel:      clientRequestedModel(c, requestModel),
 		ChannelMappedModel: requestModel,
 	}
-	groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-	groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+	effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+	effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 	quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 	// Async video: force durable task request id and release claim if billing fails.
 	videoTaskID := ""
@@ -696,22 +696,22 @@ func recordGrokMediaUsage(
 	}
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-			Result:                result,
-			APIKey:                apiKey,
-			User:                  apiKey.User,
-			Account:               account,
-			Subscription:          subscription,
-			InboundEndpoint:       inboundEndpoint,
-			UpstreamEndpoint:      upstreamEndpoint,
-			UserAgent:             userAgent,
-			IPAddress:             clientIP,
-			SessionID:             sessionID,
-			RequestPayloadHash:    service.HashUsageRequestPayload(payloadForHash),
-			APIKeyService:         h.apiKeyService,
-			QuotaPlatform:         quotaPlatform,
-			GroupRateLimitGroupID: groupRateLimitGroupID,
-			GroupRateLimitGroup:   groupRateLimitGroup,
-			ChannelUsageFields:    channelUsageFields,
+			Result:             result,
+			APIKey:             apiKey,
+			User:               apiKey.User,
+			Account:            account,
+			Subscription:       subscription,
+			InboundEndpoint:    inboundEndpoint,
+			UpstreamEndpoint:   upstreamEndpoint,
+			UserAgent:          userAgent,
+			IPAddress:          clientIP,
+			SessionID:          sessionID,
+			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
+			APIKeyService:      h.apiKeyService,
+			QuotaPlatform:      quotaPlatform,
+			EffectiveGroupID:   effectiveGroupID,
+			EffectiveGroup:     effectiveGroup,
+			ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			if videoTaskID != "" {
 				if releaseErr := h.gatewayService.ReleaseGrokVideoBilling(ctx, videoTaskID, subject.UserID, apiKey.ID); releaseErr != nil {

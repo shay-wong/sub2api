@@ -22,7 +22,6 @@ type Group struct {
 	Description    string
 	Platform       string
 	RateMultiplier float64
-	RateLimit5h    float64
 	// 高峰时段倍率：peak_rate_enabled 为 true 且当前时刻处于 [PeakStart, PeakEnd) 时，
 	// token 计费倍率额外乘以 PeakRateMultiplier。详见 PeakMultiplierAt。
 	PeakRateEnabled    bool
@@ -153,10 +152,6 @@ func (g *Group) HasWeeklyLimit() bool {
 
 func (g *Group) HasMonthlyLimit() bool {
 	return g.MonthlyLimitUSD != nil && *g.MonthlyLimitUSD > 0
-}
-
-func (g *Group) HasRateLimit5h() bool {
-	return g != nil && g.RateLimit5h > 0
 }
 
 // GetImagePrice 根据 image_size 返回对应的图片生成价格

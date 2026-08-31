@@ -663,35 +663,6 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 	}, nil
 }
 
-func (s *adminServiceImpl) ListUserGroupRateLimitWindows(ctx context.Context, userID int64) ([]UserGroupRateLimitWindowRecord, error) {
-	if userID <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_USER_ID", "invalid user id")
-	}
-	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
-		return nil, err
-	}
-	if s.userGroupRateLimitRepo == nil {
-		return nil, infraerrors.ServiceUnavailable("GROUP_RATE_LIMIT_REPOSITORY_UNAVAILABLE", "group rate limit repository is not configured")
-	}
-	return s.userGroupRateLimitRepo.ListByUser(ctx, userID)
-}
-
-func (s *adminServiceImpl) ResetUserGroupRateLimitWindow(ctx context.Context, userID, groupID int64) (*UserGroupRateLimitWindowRecord, error) {
-	if userID <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_USER_ID", "invalid user id")
-	}
-	if groupID <= 0 {
-		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "invalid group id")
-	}
-	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
-		return nil, err
-	}
-	if s.userGroupRateLimitRepo == nil {
-		return nil, infraerrors.ServiceUnavailable("GROUP_RATE_LIMIT_REPOSITORY_UNAVAILABLE", "group rate limit repository is not configured")
-	}
-	return s.userGroupRateLimitRepo.Reset(ctx, userID, groupID)
-}
-
 func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {
 	if _, err := s.getAdminScopedUser(ctx, userID, false); err != nil {
 		return nil, err

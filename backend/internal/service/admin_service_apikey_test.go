@@ -149,10 +149,10 @@ func (s *userRepoStubForGroupUpdate) RemoveGroupFromUserAllowedGroups(context.Co
 
 // apiKeyRepoStubForGroupUpdate implements APIKeyRepository for AdminUpdateAPIKeyGroupID tests.
 type apiKeyRepoStubForGroupUpdate struct {
-	key              *APIKey
-	getErr           error
-	updateErr        error
-	updated          *APIKey // captures what was passed to Update
+	key       *APIKey
+	getErr    error
+	updateErr error
+	updated   *APIKey // captures what was passed to Update
 }
 
 func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*APIKey, error) {
@@ -170,6 +170,7 @@ func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey, _ 
 	s.updated = &clone
 	return nil
 }
+
 // Unused methods – panic on unexpected call.
 func (s *apiKeyRepoStubForGroupUpdate) Create(context.Context, *APIKey) error { panic("unexpected") }
 func (s *apiKeyRepoStubForGroupUpdate) GetKeyAndOwnerID(context.Context, int64) (string, int64, error) {

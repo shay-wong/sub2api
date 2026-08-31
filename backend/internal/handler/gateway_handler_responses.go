@@ -249,28 +249,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		account = latest
 		selection.Account = latest
 		if selection.ProfitGateActive() {
-			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, EffectiveGroupRateLimitGroupID(selection, apiKey), sessionHash, account.ID); err != nil {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, ResolveEffectiveGroupID(selection, apiKey), sessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.responses.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
 		accountReleaseFunc = wrapAccountReleaseOnForwardDone(c.Request.Context(), reqStream, accountReleaseFunc)
-
-		if handleEffectiveGroupRateLimit5h(
-			c.Request.Context(),
-			c,
-			h.billingCacheService,
-			selection,
-			apiKey,
-			accountReleaseFunc,
-			func(err error) {
-				reqLog.Info("gateway.responses.selected_group_rate_limit_check_failed", zap.Error(err))
-			},
-			func(status int, code, message string) {
-				h.responsesErrorResponse(c, status, code, message)
-			},
-		) {
-			return
-		}
 
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
@@ -339,30 +322,30 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-		groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+		effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
-		groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		sessionID := service.ExtractClientSessionID(c)
 		stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-				Result:                result,
-				QuotaPlatform:         quotaPlatform,
-				APIKey:                apiKey,
-				User:                  apiKey.User,
-				Account:               account,
-				Subscription:          subscription,
-				InboundEndpoint:       inboundEndpoint,
-				UpstreamEndpoint:      upstreamEndpoint,
-				UserAgent:             userAgent,
-				IPAddress:             clientIP,
-				SessionID:             sessionID,
-				RequestPayloadHash:    requestPayloadHash,
-				APIKeyService:         h.apiKeyService,
-				GroupRateLimitGroupID: groupRateLimitGroupID,
-				GroupRateLimitGroup:   groupRateLimitGroup,
-				PricingAt:             pricingAt,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+				Result:             result,
+				QuotaPlatform:      quotaPlatform,
+				APIKey:             apiKey,
+				User:               apiKey.User,
+				Account:            account,
+				Subscription:       subscription,
+				InboundEndpoint:    inboundEndpoint,
+				UpstreamEndpoint:   upstreamEndpoint,
+				UserAgent:          userAgent,
+				IPAddress:          clientIP,
+				SessionID:          sessionID,
+				RequestPayloadHash: requestPayloadHash,
+				APIKeyService:      h.apiKeyService,
+				EffectiveGroupID:   effectiveGroupID,
+				EffectiveGroup:     effectiveGroup,
+				PricingAt:          pricingAt,
+				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 			}); err != nil {
 				reqLog.Error("gateway.responses.record_usage_failed",
 					zap.Int64("account_id", account.ID),

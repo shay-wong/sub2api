@@ -261,21 +261,6 @@
             >
           </template>
 
-          <template #cell-rate_limit_5h="{ value, row }">
-            <span
-              v-if="row.subscription_type === 'subscription' && Number(value || 0) > 0"
-              class="text-sm tabular-nums text-gray-700 dark:text-gray-300"
-              >${{ formatCost(Number(value)) }}/5h</span
-            >
-            <span
-              v-else-if="row.subscription_type === 'subscription'"
-              class="text-sm text-gray-400 dark:text-gray-500"
-            >{{
-              t("admin.groups.unlimited")
-            }}</span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
-          </template>
-
           <template #cell-is_exclusive="{ value }">
             <span :class="['badge', value ? 'badge-primary' : 'badge-gray']">
               {{
@@ -743,18 +728,6 @@
             v-if="createForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
-              <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
-              <input
-                v-model.number="createForm.rate_limit_5h"
-                type="number"
-                min="0"
-                step="0.01"
-                class="input"
-                :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
-              />
-              <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
-            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -2487,18 +2460,6 @@
             v-if="editForm.subscription_type === 'subscription'"
             class="space-y-4 border-l-2 border-primary-200 pl-4 dark:border-primary-800"
           >
-            <div>
-              <label class="input-label">{{ t("admin.groups.form.rateLimit5h") }}</label>
-              <input
-                v-model.number="editForm.rate_limit_5h"
-                type="number"
-                min="0"
-                step="0.01"
-                class="input"
-                :placeholder="t('admin.groups.form.rateLimit5hPlaceholder')"
-              />
-              <p class="input-hint">{{ t("admin.groups.form.rateLimit5hHint") }}</p>
-            </div>
             <div>
               <label class="input-label">{{
                 t("admin.groups.subscription.dailyLimit")
@@ -4651,11 +4612,6 @@ const allColumns = computed<Column[]>(() => [
     sortable: true,
   },
   {
-    key: "rate_limit_5h",
-    label: t("admin.groups.columns.rateLimit5h"),
-    sortable: true,
-  },
-  {
     key: "is_exclusive",
     label: t("admin.groups.columns.type"),
     sortable: true,
@@ -5148,8 +5104,6 @@ const createForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
-  // 分组级每用户 5 小时 USD 窗口限制（0 = 不限制）
-  rate_limit_5h: null as number | null,
   max_reasoning_effort: "",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
@@ -5512,8 +5466,6 @@ const editForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
-  // 分组级每用户 5 小时 USD 窗口限制（0 = 不限制）
-  rate_limit_5h: null as number | null,
   max_reasoning_effort: "",
   reasoning_effort_mappings: [] as ReasoningEffortMappingRow[],
 });
@@ -5954,7 +5906,6 @@ const closeCreateModal = () => {
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
   createForm.rpm_limit = 0;
-  createForm.rate_limit_5h = null;
   createForm.max_reasoning_effort = "";
   createForm.reasoning_effort_mappings = [];
   createReasoningEffortPolicyRef.value?.resetValidation();
@@ -5979,29 +5930,6 @@ const normalizeOptionalLimit = (
   }
 
   return Number.isFinite(value) && value > 0 ? value : null;
-};
-
-const normalizeGroupRateLimit5h = (
-  value: number | string | null | undefined,
-): number | null => {
-  if (value === null || value === undefined || value === "") {
-    return 0;
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return null;
-  }
-  return parsed > 0 ? parsed : 0;
-};
-
-const normalizeSubscriptionRateLimit5h = (
-  subscriptionType: SubscriptionType,
-  value: number | string | null | undefined,
-): number | null => {
-  if (subscriptionType !== "subscription") {
-    return 0;
-  }
-  return normalizeGroupRateLimit5h(value);
 };
 
 const normalizeRateMultiplier = (
@@ -6030,14 +5958,6 @@ const validateProfitControlForm = (form: ProfitControlFormState): boolean => {
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
-    return;
-  }
-  const rateLimit5h = normalizeSubscriptionRateLimit5h(
-    createForm.subscription_type,
-    createForm.rate_limit_5h as number | string | null,
-  );
-  if (rateLimit5h === null) {
-    appStore.showError(t("admin.groups.rateLimit5hInvalidError"));
     return;
   }
   if (
@@ -6075,7 +5995,6 @@ const handleCreateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         createForm.monthly_limit_usd as number | string | null,
       ),
-      rate_limit_5h: rateLimit5h,
       ...(Object.keys(videoModelPrices).length > 0
         ? { video_model_prices: videoModelPrices }
         : {}),
@@ -6254,7 +6173,6 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true;
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
   editForm.rpm_limit = group.rpm_limit ?? 0;
-  editForm.rate_limit_5h = group.rate_limit_5h > 0 ? group.rate_limit_5h : null;
   editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
     group.platform,
     group.max_reasoning_effort,
@@ -6315,14 +6233,6 @@ const handleUpdateGroup = async () => {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
   }
-  const rateLimit5h = normalizeSubscriptionRateLimit5h(
-    editForm.subscription_type,
-    editForm.rate_limit_5h as number | string | null,
-  );
-  if (rateLimit5h === null) {
-    appStore.showError(t("admin.groups.rateLimit5hInvalidError"));
-    return;
-  }
   if (
     supportsReasoningEffortPolicyPlatform(editForm.platform) &&
     editReasoningEffortPolicyRef.value &&
@@ -6352,7 +6262,6 @@ const handleUpdateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         editForm.monthly_limit_usd as number | string | null,
       ),
-      rate_limit_5h: rateLimit5h,
       video_model_prices: serializeVideoModelPrices(
         editForm.video_model_prices,
       ),

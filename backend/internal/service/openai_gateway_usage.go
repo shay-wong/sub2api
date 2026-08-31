@@ -20,21 +20,21 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	Result                *OpenAIForwardResult
-	APIKey                *APIKey
-	User                  *User
-	Account               *Account
-	Subscription          *UserSubscription
-	InboundEndpoint       string
-	UpstreamEndpoint      string
-	UserAgent             string // 请求的 User-Agent
-	IPAddress             string // 请求的客户端 IP 地址
-	SessionID             string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
-	RequestPayloadHash    string
-	APIKeyService         APIKeyQuotaUpdater
-	GroupRateLimitGroupID *int64
-	GroupRateLimitGroup   *Group
-	QuotaPlatform         string // user×platform quota platform resolved by the handler before async billing.
+	Result             *OpenAIForwardResult
+	APIKey             *APIKey
+	User               *User
+	Account            *Account
+	Subscription       *UserSubscription
+	InboundEndpoint    string
+	UpstreamEndpoint   string
+	UserAgent          string // 请求的 User-Agent
+	IPAddress          string // 请求的客户端 IP 地址
+	SessionID          string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
+	RequestPayloadHash string
+	APIKeyService      APIKeyQuotaUpdater
+	EffectiveGroupID   *int64
+	EffectiveGroup     *Group
+	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
 	// PricingAt 是请求级定价时刻（请求开始捕获，与利润门的 D 同源）：高峰因子
 	// 按该时刻计算，保证同一请求从准入到扣费不中途变价。零值回退记录时刻
 	//（既有行为），供未装配的路径（图片/异步/cyber 等）沿用。
@@ -62,17 +62,17 @@ type CyberPolicyUsageInput struct {
 	OutputTokens int
 	// 渠道归因与请求级 meta，使 cyber 计费行与正常 RecordUsage 行口径一致
 	// （否则 cyber 行 channel_id 等为空，渠道维度统计会遗漏 cyber 命中）。
-	InboundEndpoint       string
-	UpstreamEndpoint      string
-	UserAgent             string
-	IPAddress             string
-	SessionID             string
-	RequestPayloadHash    string
-	APIKeyService         APIKeyQuotaUpdater
-	QuotaPlatform         string
-	GroupRateLimitGroupID *int64
-	GroupRateLimitGroup   *Group
-	NativeCompactionV2    bool
+	InboundEndpoint    string
+	UpstreamEndpoint   string
+	UserAgent          string
+	IPAddress          string
+	SessionID          string
+	RequestPayloadHash string
+	APIKeyService      APIKeyQuotaUpdater
+	QuotaPlatform      string
+	EffectiveGroupID   *int64
+	EffectiveGroup     *Group
+	NativeCompactionV2 bool
 	ChannelUsageFields
 }
 
@@ -96,24 +96,24 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		},
 	}
 	if err := s.RecordUsage(ctx, &OpenAIRecordUsageInput{
-		Result:                result,
-		APIKey:                in.APIKey,
-		User:                  in.APIKey.User,
-		Account:               in.Account,
-		Subscription:          in.Subscription,
-		InboundEndpoint:       in.InboundEndpoint,
-		UpstreamEndpoint:      in.UpstreamEndpoint,
-		UserAgent:             in.UserAgent,
-		IPAddress:             in.IPAddress,
-		SessionID:             in.SessionID,
-		RequestPayloadHash:    in.RequestPayloadHash,
-		APIKeyService:         in.APIKeyService,
-		QuotaPlatform:         in.QuotaPlatform,
-		GroupRateLimitGroupID: in.GroupRateLimitGroupID,
-		GroupRateLimitGroup:   in.GroupRateLimitGroup,
-		ChannelUsageFields:    in.ChannelUsageFields,
-		CyberBlocked:          true,
-		NativeCompactionV2:    in.NativeCompactionV2,
+		Result:             result,
+		APIKey:             in.APIKey,
+		User:               in.APIKey.User,
+		Account:            in.Account,
+		Subscription:       in.Subscription,
+		InboundEndpoint:    in.InboundEndpoint,
+		UpstreamEndpoint:   in.UpstreamEndpoint,
+		UserAgent:          in.UserAgent,
+		IPAddress:          in.IPAddress,
+		SessionID:          in.SessionID,
+		RequestPayloadHash: in.RequestPayloadHash,
+		APIKeyService:      in.APIKeyService,
+		QuotaPlatform:      in.QuotaPlatform,
+		EffectiveGroupID:   in.EffectiveGroupID,
+		EffectiveGroup:     in.EffectiveGroup,
+		ChannelUsageFields: in.ChannelUsageFields,
+		CyberBlocked:       true,
+		NativeCompactionV2: in.NativeCompactionV2,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 	}
@@ -184,7 +184,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if s.cfg != nil {
 		multiplier = s.cfg.Default.RateMultiplier
 	}
-	billingGroupID, billingGroup := resolveUsageBillingGroup(apiKey, input.GroupRateLimitGroupID, input.GroupRateLimitGroup)
+	billingGroupID, billingGroup := resolveUsageBillingGroup(apiKey, input.EffectiveGroupID, input.EffectiveGroup)
 	billingAPIKey := apiKeyForUsageBillingGroup(apiKey, billingGroupID, billingGroup)
 	if billingGroupID != nil && billingGroup != nil {
 		resolver := s.userGroupRateResolver
@@ -472,7 +472,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
 			Platform:              quotaPlatform,
-			GroupRateLimitGroupID: billingGroupID,
+			EffectiveGroupID:      billingGroupID,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

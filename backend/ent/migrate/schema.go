@@ -949,7 +949,6 @@ var (
 		{Name: "name", Type: field.TypeString, Size: 100},
 		{Name: "description", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
-		{Name: "rate_limit_5h", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "peak_rate_enabled", Type: field.TypeBool, Default: false},
 		{Name: "peak_start", Type: field.TypeString, Size: 5, Default: ""},
 		{Name: "peak_end", Type: field.TypeString, Size: 5, Default: ""},
@@ -1016,7 +1015,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_projects_groups",
-				Columns:    []*schema.Column{GroupsColumns[64]},
+				Columns:    []*schema.Column{GroupsColumns[63]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1025,27 +1024,27 @@ var (
 			{
 				Name:    "group_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[13]},
+				Columns: []*schema.Column{GroupsColumns[12]},
 			},
 			{
 				Name:    "group_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[64]},
+				Columns: []*schema.Column{GroupsColumns[63]},
 			},
 			{
 				Name:    "group_platform",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[15]},
+				Columns: []*schema.Column{GroupsColumns[14]},
 			},
 			{
 				Name:    "group_subscription_type",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[16]},
+				Columns: []*schema.Column{GroupsColumns[15]},
 			},
 			{
 				Name:    "group_is_exclusive",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[12]},
+				Columns: []*schema.Column{GroupsColumns[11]},
 			},
 			{
 				Name:    "group_deleted_at",
@@ -1055,17 +1054,17 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[50]},
+				Columns: []*schema.Column{GroupsColumns[49]},
 			},
 			{
 				Name:    "group_project_id_platform_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[64], GroupsColumns[15], GroupsColumns[13]},
+				Columns: []*schema.Column{GroupsColumns[63], GroupsColumns[14], GroupsColumns[12]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",
 				Unique:  true,
-				Columns: []*schema.Column{GroupsColumns[14]},
+				Columns: []*schema.Column{GroupsColumns[13]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "duplicate_operation_id IS NOT NULL AND deleted_at IS NULL",
 				},
@@ -2251,62 +2250,6 @@ var (
 			},
 		},
 	}
-	// UserGroupRateLimitWindowsColumns holds the columns for the "user_group_rate_limit_windows" table.
-	UserGroupRateLimitWindowsColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt64, Increment: true},
-		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
-		{Name: "usage_5h_usd", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
-		{Name: "window_5h_start", Type: field.TypeTime, Nullable: true},
-		{Name: "group_id", Type: field.TypeInt64},
-		{Name: "user_id", Type: field.TypeInt64},
-	}
-	// UserGroupRateLimitWindowsTable holds the schema information for the "user_group_rate_limit_windows" table.
-	UserGroupRateLimitWindowsTable = &schema.Table{
-		Name:       "user_group_rate_limit_windows",
-		Columns:    UserGroupRateLimitWindowsColumns,
-		PrimaryKey: []*schema.Column{UserGroupRateLimitWindowsColumns[0]},
-		ForeignKeys: []*schema.ForeignKey{
-			{
-				Symbol:     "user_group_rate_limit_windows_groups_user_rate_limit_windows",
-				Columns:    []*schema.Column{UserGroupRateLimitWindowsColumns[6]},
-				RefColumns: []*schema.Column{GroupsColumns[0]},
-				OnDelete:   schema.NoAction,
-			},
-			{
-				Symbol:     "user_group_rate_limit_windows_users_group_rate_limit_windows",
-				Columns:    []*schema.Column{UserGroupRateLimitWindowsColumns[7]},
-				RefColumns: []*schema.Column{UsersColumns[0]},
-				OnDelete:   schema.NoAction,
-			},
-		},
-		Indexes: []*schema.Index{
-			{
-				Name:    "usergroupratelimitwindow_user_id_group_id",
-				Unique:  true,
-				Columns: []*schema.Column{UserGroupRateLimitWindowsColumns[7], UserGroupRateLimitWindowsColumns[6]},
-				Annotation: &entsql.IndexAnnotation{
-					Where: "deleted_at IS NULL",
-				},
-			},
-			{
-				Name:    "usergroupratelimitwindow_user_id",
-				Unique:  false,
-				Columns: []*schema.Column{UserGroupRateLimitWindowsColumns[7]},
-			},
-			{
-				Name:    "usergroupratelimitwindow_group_id",
-				Unique:  false,
-				Columns: []*schema.Column{UserGroupRateLimitWindowsColumns[6]},
-			},
-			{
-				Name:    "usergroupratelimitwindow_deleted_at",
-				Unique:  false,
-				Columns: []*schema.Column{UserGroupRateLimitWindowsColumns[3]},
-			},
-		},
-	}
 	// UserPlatformQuotasColumns holds the columns for the "user_platform_quotas" table.
 	UserPlatformQuotasColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2486,7 +2429,6 @@ var (
 		UserAllowedGroupsTable,
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
-		UserGroupRateLimitWindowsTable,
 		UserPlatformQuotasTable,
 		UserSubscriptionsTable,
 	}
@@ -2656,11 +2598,6 @@ func init() {
 	UserAttributeValuesTable.ForeignKeys[1].RefTable = UserAttributeDefinitionsTable
 	UserAttributeValuesTable.Annotation = &entsql.Annotation{
 		Table: "user_attribute_values",
-	}
-	UserGroupRateLimitWindowsTable.ForeignKeys[0].RefTable = GroupsTable
-	UserGroupRateLimitWindowsTable.ForeignKeys[1].RefTable = UsersTable
-	UserGroupRateLimitWindowsTable.Annotation = &entsql.Annotation{
-		Table: "user_group_rate_limit_windows",
 	}
 	UserPlatformQuotasTable.ForeignKeys[0].RefTable = UsersTable
 	UserPlatformQuotasTable.Annotation = &entsql.Annotation{

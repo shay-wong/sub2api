@@ -56,11 +56,6 @@ describe('groups locale key completeness', () => {
   })
 
   const requiredKeys = [
-    'admin.groups.columns.rateLimit5h',
-    'admin.groups.form.rateLimit5h',
-    'admin.groups.form.rateLimit5hPlaceholder',
-    'admin.groups.form.rateLimit5hHint',
-    'admin.groups.rateLimit5hInvalidError',
     'admin.groups.unlimited',
     'admin.groups.webSearchPricing.title',
     'admin.groups.webSearchPricing.pricePerCall',

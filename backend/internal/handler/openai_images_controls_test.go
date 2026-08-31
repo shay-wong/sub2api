@@ -98,9 +98,8 @@ func TestOpenAIGatewayHandlerImages_SelectedGroupRejectsImagePermission(t *testi
 		nil,
 		nil,
 		nil,
-		nil,
 	)
-	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, nil, cfg, nil)
+	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingService.Stop)
 	handler := NewOpenAIGatewayHandler(
 		gatewayService,

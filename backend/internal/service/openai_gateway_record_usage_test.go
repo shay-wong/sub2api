@@ -172,19 +172,19 @@ func TestRecordCyberPolicyUsageLog_PreservesExplicitQuotaPlatformAndGroup(t *tes
 	svc.userPlatformQuotaRepo = &openAIRecordUsageUserPlatformQuotaRepoStub{}
 
 	svc.RecordCyberPolicyUsageLog(context.Background(), CyberPolicyUsageInput{
-		APIKey:                &APIKey{ID: 2, User: &User{ID: 1}, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1}},
-		Account:               &Account{ID: 3},
-		RequestID:             "rid-cyber-explicit-platform-group",
-		Model:                 "gpt-5.1",
-		InputTokens:           1200,
-		OutputTokens:          300,
-		QuotaPlatform:         PlatformAntigravity,
-		GroupRateLimitGroupID: &actualGroupID,
+		APIKey:           &APIKey{ID: 2, User: &User{ID: 1}, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1}},
+		Account:          &Account{ID: 3},
+		RequestID:        "rid-cyber-explicit-platform-group",
+		Model:            "gpt-5.1",
+		InputTokens:      1200,
+		OutputTokens:     300,
+		QuotaPlatform:    PlatformAntigravity,
+		EffectiveGroupID: &actualGroupID,
 	})
 
 	require.NotNil(t, billingRepo.lastCmd)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
 	require.Equal(t, 1, quotaCache.incrCalls)
 	require.Equal(t, int64(1), quotaCache.lastIncrUserID)
 	require.Equal(t, PlatformAntigravity, quotaCache.lastIncrPlatform)
@@ -360,7 +360,6 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
-		nil, // userGroupRateLimitRepo
 	)
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		rateRepo,
@@ -620,10 +619,10 @@ func TestOpenAIGatewayServiceRecordUsage_UsesActualSelectionGroupForRateAndPeak(
 				PeakRateMultiplier: 9.0,
 			},
 		},
-		User:                  &User{ID: 2002},
-		Account:               &Account{ID: 3002},
-		GroupRateLimitGroupID: i64p(actualGroupID),
-		GroupRateLimitGroup:   actualGroup,
+		User:             &User{ID: 2002},
+		Account:          &Account{ID: 3002},
+		EffectiveGroupID: i64p(actualGroupID),
+		EffectiveGroup:   actualGroup,
 	})
 
 	require.NoError(t, err)
@@ -664,11 +663,11 @@ func TestOpenAIGatewayServiceRecordUsage_ActualSubscriptionGroupControlsBillingM
 			GroupID: i64p(apiKeyGroupID),
 			Group:   &Group{ID: apiKeyGroupID, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1.0},
 		},
-		User:                  &User{ID: userID},
-		Account:               &Account{ID: 3201},
-		Subscription:          &UserSubscription{ID: 3102, UserID: userID, GroupID: apiKeyGroupID},
-		GroupRateLimitGroupID: i64p(actualGroupID),
-		GroupRateLimitGroup:   &Group{ID: actualGroupID, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0},
+		User:             &User{ID: userID},
+		Account:          &Account{ID: 3201},
+		Subscription:     &UserSubscription{ID: 3102, UserID: userID, GroupID: apiKeyGroupID},
+		EffectiveGroupID: i64p(actualGroupID),
+		EffectiveGroup:   &Group{ID: actualGroupID, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0},
 	})
 
 	require.NoError(t, err)
@@ -687,8 +686,6 @@ func TestOpenAIGatewayServiceRecordUsage_ActualSubscriptionGroupControlsBillingM
 	require.Equal(t, actualSubscription.ID, *billingRepo.lastCmd.SubscriptionID)
 	require.Greater(t, billingRepo.lastCmd.SubscriptionCost, 0.0)
 	require.Zero(t, billingRepo.lastCmd.BalanceCost)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
 	require.Equal(t, 1, quotaCache.subUsageCalls)
 	require.Equal(t, userID, quotaCache.lastSubUsageUserID)
 	require.Equal(t, actualGroupID, quotaCache.lastSubUsageGroupID)
@@ -718,11 +715,11 @@ func TestOpenAIGatewayServiceRecordUsage_ActualStandardGroupControlsBillingMode(
 			GroupID: i64p(apiKeyGroupID),
 			Group:   &Group{ID: apiKeyGroupID, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0},
 		},
-		User:                  &User{ID: userID},
-		Account:               &Account{ID: 5201},
-		Subscription:          &UserSubscription{ID: 5102, UserID: userID, GroupID: apiKeyGroupID},
-		GroupRateLimitGroupID: i64p(actualGroupID),
-		GroupRateLimitGroup:   &Group{ID: actualGroupID, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1.0},
+		User:             &User{ID: userID},
+		Account:          &Account{ID: 5201},
+		Subscription:     &UserSubscription{ID: 5102, UserID: userID, GroupID: apiKeyGroupID},
+		EffectiveGroupID: i64p(actualGroupID),
+		EffectiveGroup:   &Group{ID: actualGroupID, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1.0},
 	})
 
 	require.NoError(t, err)
@@ -737,8 +734,6 @@ func TestOpenAIGatewayServiceRecordUsage_ActualStandardGroupControlsBillingMode(
 	require.Nil(t, billingRepo.lastCmd.SubscriptionID)
 	require.Greater(t, billingRepo.lastCmd.BalanceCost, 0.0)
 	require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
 	require.Equal(t, 0, quotaCache.subUsageCalls)
 }
 
@@ -1196,7 +1191,7 @@ func TestOpenAIGatewayServiceRecordUsage_BillingFingerprintIncludesRequestPayloa
 	require.Equal(t, payloadHash, billingRepo.lastCmd.RequestPayloadHash)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimitGroup(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitEffectiveGroup(t *testing.T) {
 	apiKeyGroupID := int64(30)
 	actualGroupID := int64(40)
 	usageRepo := &openAIRecordUsageLogRepoStub{}
@@ -1205,7 +1200,7 @@ func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimi
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
-			RequestID: "openai_group_5h_actual_group",
+			RequestID: "openai_actual_group",
 			Usage: OpenAIUsage{
 				InputTokens:  1000,
 				OutputTokens: 200,
@@ -1213,21 +1208,19 @@ func TestOpenAIGatewayServiceRecordUsage_BillingCommandUsesExplicitGroupRateLimi
 			Model:    "gpt-5.1",
 			Duration: time.Second,
 		},
-		APIKey:                &APIKey{ID: 1200, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
-		User:                  &User{ID: 2200},
-		Account:               &Account{ID: 3200},
-		GroupRateLimitGroupID: &actualGroupID,
+		APIKey:           &APIKey{ID: 1200, GroupID: &apiKeyGroupID, Group: &Group{ID: apiKeyGroupID, RateMultiplier: 1}},
+		User:             &User{ID: 2200},
+		Account:          &Account{ID: 3200},
+		EffectiveGroupID: &actualGroupID,
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
-	require.InDelta(t, billingRepo.lastCmd.BalanceCost, billingRepo.lastCmd.GroupRateLimit5hCost, 1e-12)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, actualGroupID, *usageRepo.lastLog.GroupID)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitGroupRateLimitGroup(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitEffectiveGroup(t *testing.T) {
 	apiKeyGroupID := int64(30)
 	actualGroupID := int64(40)
 	dailyLimit := 1.0
@@ -1254,10 +1247,10 @@ func TestOpenAIGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitGroupR
 			GroupID: &apiKeyGroupID,
 			Group:   &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, RateMultiplier: 1},
 		},
-		User:                  &User{ID: 2202},
-		Account:               &Account{ID: 3202},
-		GroupRateLimitGroupID: &actualGroupID,
-		GroupRateLimitGroup:   &Group{ID: actualGroupID, Platform: PlatformAntigravity, RateMultiplier: 1},
+		User:             &User{ID: 2202},
+		Account:          &Account{ID: 3202},
+		EffectiveGroupID: &actualGroupID,
+		EffectiveGroup:   &Group{ID: actualGroupID, Platform: PlatformAntigravity, RateMultiplier: 1},
 	})
 
 	require.NoError(t, err)
@@ -1268,7 +1261,7 @@ func TestOpenAIGatewayServiceRecordUsage_FallbackQuotaPlatformUsesExplicitGroupR
 	require.True(t, quotaCache.lastIncrMarkDirty)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_ImageCostUsesExplicitGroupRateLimitGroup(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ImageCostUsesExplicitEffectiveGroup(t *testing.T) {
 	apiKeyGroupID := int64(30)
 	actualGroupID := int64(40)
 	apiKeyGroupImagePrice := 0.99
@@ -1296,10 +1289,10 @@ func TestOpenAIGatewayServiceRecordUsage_ImageCostUsesExplicitGroupRateLimitGrou
 				ImagePrice2K:   &apiKeyGroupImagePrice,
 			},
 		},
-		User:                  &User{ID: 2203},
-		Account:               &Account{ID: 3203},
-		GroupRateLimitGroupID: &actualGroupID,
-		GroupRateLimitGroup: &Group{
+		User:             &User{ID: 2203},
+		Account:          &Account{ID: 3203},
+		EffectiveGroupID: &actualGroupID,
+		EffectiveGroup: &Group{
 			ID:             actualGroupID,
 			Platform:       PlatformAntigravity,
 			RateMultiplier: 1,
@@ -1317,7 +1310,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageCostUsesExplicitGroupRateLimitGrou
 	require.Equal(t, string(BillingModeImage), *usageRepo.lastLog.BillingMode)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_VideoCostUsesExplicitGroupRateLimitGroup(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_VideoCostUsesExplicitEffectiveGroup(t *testing.T) {
 	apiKeyGroupID := int64(31)
 	actualGroupID := int64(41)
 	apiKeyGroupVideoPrice := 0.44
@@ -1349,10 +1342,10 @@ func TestOpenAIGatewayServiceRecordUsage_VideoCostUsesExplicitGroupRateLimitGrou
 				VideoPrice480P:       &apiKeyGroupVideoPrice,
 			},
 		},
-		User:                  &User{ID: 2204},
-		Account:               &Account{ID: 3204, Platform: PlatformGrok},
-		GroupRateLimitGroupID: &actualGroupID,
-		GroupRateLimitGroup: &Group{
+		User:             &User{ID: 2204},
+		Account:          &Account{ID: 3204, Platform: PlatformGrok},
+		EffectiveGroupID: &actualGroupID,
+		EffectiveGroup: &Group{
 			ID:                   actualGroupID,
 			Platform:             PlatformGrok,
 			RateMultiplier:       1,
@@ -1373,11 +1366,9 @@ func TestOpenAIGatewayServiceRecordUsage_VideoCostUsesExplicitGroupRateLimitGrou
 	require.NotNil(t, usageRepo.lastLog.BillingMode)
 	require.Equal(t, string(BillingModeVideo), *usageRepo.lastLog.BillingMode)
 	require.NotNil(t, billingRepo.lastCmd)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, actualGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupForGroupRateLimit(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_UsageLogFallsBackToAPIKeyGroup(t *testing.T) {
 	apiKeyGroupID := int64(30)
 	usageRepo := &openAIRecordUsageLogRepoStub{}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
@@ -1385,7 +1376,7 @@ func TestOpenAIGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupFor
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
-			RequestID: "openai_group_5h_api_key_group",
+			RequestID: "openai_api_key_group",
 			Usage: OpenAIUsage{
 				InputTokens:  1000,
 				OutputTokens: 200,
@@ -1400,9 +1391,8 @@ func TestOpenAIGatewayServiceRecordUsage_BillingCommandFallsBackToAPIKeyGroupFor
 
 	require.NoError(t, err)
 	require.NotNil(t, billingRepo.lastCmd)
-	require.NotNil(t, billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Equal(t, apiKeyGroupID, *billingRepo.lastCmd.GroupRateLimitGroupID)
-	require.Greater(t, billingRepo.lastCmd.GroupRateLimit5hCost, 0.0)
+	require.NotNil(t, usageRepo.lastLog.GroupID)
+	require.Equal(t, apiKeyGroupID, *usageRepo.lastLog.GroupID)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UsesFallbackRequestIDForBillingAndUsageLog(t *testing.T) {

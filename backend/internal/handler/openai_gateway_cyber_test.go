@@ -97,8 +97,8 @@ func TestCyberPolicyUsageAttributionUsesRequestPlatformAndSelectionGroup(t *test
 	)
 
 	require.Equal(t, service.PlatformAntigravity, got.QuotaPlatform)
-	require.NotNil(t, got.GroupRateLimitGroupID)
-	require.Equal(t, selectionGroupID, *got.GroupRateLimitGroupID)
+	require.NotNil(t, got.EffectiveGroupID)
+	require.Equal(t, selectionGroupID, *got.EffectiveGroupID)
 }
 
 func TestCyberPolicyUsageAttributionUsesSelectionGroupPlatform(t *testing.T) {
@@ -116,9 +116,9 @@ func TestCyberPolicyUsageAttributionUsesSelectionGroupPlatform(t *testing.T) {
 	)
 
 	require.Equal(t, service.PlatformGemini, got.QuotaPlatform)
-	require.NotNil(t, got.GroupRateLimitGroupID)
-	require.Equal(t, selectionGroupID, *got.GroupRateLimitGroupID)
-	require.Same(t, selectionGroup, got.GroupRateLimitGroup)
+	require.NotNil(t, got.EffectiveGroupID)
+	require.Equal(t, selectionGroupID, *got.EffectiveGroupID)
+	require.Same(t, selectionGroup, got.EffectiveGroup)
 }
 
 func TestSelectedGroupNameFollowsActualCyberAttributionGroup(t *testing.T) {

@@ -43,7 +43,7 @@
 | # | 能力 | 生命周期 |
 | --- | --- | --- |
 | 1 | 全局管理员角色与细粒度权限 | `长期保留` |
-| 2 | 分组订阅 5 小时额度与实际调度归因 | `长期保留` |
+| 2 | 实际调度分组归因 | `长期保留` |
 | 3 | 账号数据交换与批量账号操作 | `长期保留` |
 | 4 | Fork 发布、版本与更新通道 | `长期保留` |
 | 5 | 提示词审计的数据最小化与授权 | `长期保留` |
@@ -76,25 +76,25 @@
 (cd frontend && ./node_modules/.bin/vitest run src/api/__tests__/admin.users.spec.ts src/views/admin/__tests__/UsersView.spec.ts)
 ```
 
-## 2. 分组订阅 5 小时额度与实际调度归因
+## 2. 实际调度分组归因
 
 - **生命周期**：`长期保留`
-- **原始意图**：为 subscription group 提供用户级 5 小时 USD 窗口，并确保 fallback/composite 调度后的限额、计费、并发、sticky session 和 Cyber policy 归因符合各自契约。
-- **行为不变量**：API Key 自身限流与分组 5 小时窗口保持两条独立逻辑；普通分组不得误用 subscription 窗口；真实 fallback 后的检查、利润准入和记账必须使用 `AccountSelectionResult` 的有效分组，不得回退到原 `apiKey.Group`；composite 只路由目标平台、不携带成员分组关系，因此 selection 与 usage 继续归属于 API Key 所属父分组，且 composite 本身不得凭空安装成员分组利润门；同一请求共享一个 `PricingAt`。
-- **当前代码**：`backend/ent/schema/user_group_rate_limit_window.go`、`backend/internal/repository/user_group_rate_limit_window_repo.go`、`backend/internal/service/user_group_rate_limit_window_port.go`、`backend/internal/service/gateway_request_pricing.go`、`backend/internal/service/gateway_profit_control.go`、`backend/internal/service/openai_profit_control.go`、`backend/internal/service/gateway_usage_billing.go`、`backend/internal/service/openai_gateway_usage.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/endpoint.go`、`frontend/src/views/admin/GroupsView.vue`。
-- **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql`、`backend/internal/repository/user_group_rate_limit_window_repo_test.go`、`backend/internal/service/admin_service_group_rate_limit_window_test.go`、`backend/internal/service/gateway_profit_control_v2_test.go`、`backend/internal/service/openai_profit_control_paths_test.go`、`backend/internal/service/response_model_billing_test.go`、`backend/internal/handler/admin/user_group_rate_limit_handler_test.go`、`frontend/src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts`。
-- **来源提交**：`ae870a2978fc316e51721927d3a91f9bf2f1ceb6`、`17dcffb1c887bf432688e0f25f544b629d4b9eab`、`a80e366bbe27d3212c68ae028cf54cbd714dbe69`、`a6e3a1ceede4cdc048e1f471990b82cc406dd001`、`bbe433256021676ab389439d3bb8157cb0662372`、`7b51c2bd4b53d669d5c37aedaaa9f0ce41edf7df`。
-- **当前修复定位**：提交后运行 `git log -S'composite 请求即父分组' -- backend/internal/service/openai_profit_control.go`、`git log -S'EffectiveGroupRateLimitGroupID(selection, apiKey)' -- backend/internal/handler/openai_gateway_handler.go`、`git log -S'hasIdentifiedResponseModelPricing(ctx, responseModel, billingAPIKey)' -- backend/internal/service/gateway_usage_billing.go` 与 `git log -S'hasIdentifiedOpenAIResponsePricing(ctx, responseModel, billingAPIKey)' -- backend/internal/service/openai_gateway_usage.go`。
-- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `backend/internal/handler/gateway_handler.go` 中保留 `EffectiveGroupRateLimitGroup`、`EffectiveQuotaPlatform` 和 group-rate-limit 记账字段；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将这些实际分组不变量与上游 profit gate、`PricingAt` 和倍率计费合并；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 gateway、usage 和计费冲突中继续使用实际选中分组，同时吸收上游搜索、音视频与响应模型计费扩展。
+- **原始意图**：确保 fallback/composite 调度后的计费、并发、sticky session、利润准入、推理策略、配额平台、Cyber policy 和用量日志归因符合各自契约。
+- **行为不变量**：真实 fallback 后的检查、利润准入、倍率、订阅计费、账号统计和用量日志必须使用 `AccountSelectionResult` 的有效分组，不得回退到原 `apiKey.Group`；composite 只路由目标平台、不携带成员分组关系，因此 selection 与 usage 继续归属于 API Key 所属父分组，且 composite 本身不得凭空安装成员分组利润门；同一请求共享一个 `PricingAt`。API Key 自身的 5 小时限额继续独立生效，不属于本能力。
+- **当前代码**：`backend/internal/service/gateway_request_pricing.go`、`backend/internal/service/gateway_profit_control.go`、`backend/internal/service/openai_profit_control.go`、`backend/internal/service/gateway_usage_billing.go`、`backend/internal/service/openai_gateway_usage.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/openai_gateway_handler.go`、`backend/internal/handler/endpoint.go`。
+- **迁移与测试**：`backend/migrations/145_group_5h_rate_limits.sql` 仅保留为已执行历史；`backend/migrations/235_drop_group_5h_rate_limits.sql` 删除分组 5 小时字段和窗口表，`backend/migrations/group_5h_rate_limit_removal_migration_test.go` 锁定删除顺序并确认 API Key 5 小时限额仍存在。实际分组归因由 `backend/internal/handler/endpoint_test.go`、`backend/internal/service/gateway_record_usage_test.go`、`backend/internal/service/openai_gateway_record_usage_test.go`、`backend/internal/service/gateway_profit_control_v2_test.go`、`backend/internal/service/openai_profit_control_paths_test.go` 和 `backend/internal/service/response_model_billing_test.go` 覆盖。
+- **来源提交**：`a80e366bbe27d3212c68ae028cf54cbd714dbe69`、`a6e3a1ceede4cdc048e1f471990b82cc406dd001`、`bbe433256021676ab389439d3bb8157cb0662372`、`7b51c2bd4b53d669d5c37aedaaa9f0ce41edf7df`。
+- **当前变更定位**：搜索 `ResolveEffectiveGroupID`、`ResolveEffectiveGroup`、`EffectiveGroupID` 和 `EffectiveGroup` 可定位实际分组从 handler 到 usage/billing 的传递；`git log -S'composite 请求即父分组' -- backend/internal/service/openai_profit_control.go` 可定位 composite 利润门契约。
+- **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309`、`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 和 `a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 均保留了实际选中分组对策略、倍率、订阅计费、配额平台和用量归因的决定权；原分组 5 小时预检与记账已由 migration `235` 及本次代码删除移除。
 - **合并审查**：重点检查 gateway 预检、账户切换、sticky binding、usage worker 和图像/Grok 分支；同名 `group_id` 不代表已使用实际调度分组。
-- **删除条件**：不主动删除。只有产品不再提供分组订阅窗口和 fallback 分组归因时才可移除。
+- **删除条件**：不主动删除。只有上游提供等价的实际调度分组归因，并有同等回归覆盖时才可移除。
 - **聚焦验证**：
 
 ```bash
-(cd backend && go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test.*GroupRateLimit')
+(cd backend && go test ./migrations -run '^TestGroup5hRateLimitRemovalMigration$')
+(cd backend && go test -tags=unit ./internal/handler -run '^TestResolveEffectiveGroup')
 (cd backend && go test -tags=unit ./internal/service -run 'Test(GatewayProfitControlCompositeSelectionKeepsParentGroupWithoutSyntheticGate|GatewayProfitControlFallbackUsesResolvedGroupRate|ProfitControl_CompositeSelectionKeepsParentGroupWithoutSyntheticGate)')
-(cd backend && go test ./internal/repository -run '^TestUserGroupRateLimitWindowRepository')
-(cd frontend && ./node_modules/.bin/vitest run src/views/admin/__tests__/GroupsView.subscriptionRateLimit5h.spec.ts)
+(cd backend && go test -tags=unit ./internal/service -run 'Test(GatewayServiceRecordUsage|OpenAIGatewayServiceRecordUsage)')
 ```
 
 ## 3. 账号数据交换与批量账号操作

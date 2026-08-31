@@ -740,7 +740,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
@@ -845,32 +845,32 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+			effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+			effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-					Result:                res,
-					APIKey:                apiKey,
-					User:                  apiKey.User,
-					Account:               account,
-					Subscription:          subscription,
-					InboundEndpoint:       inboundEndpoint,
-					UpstreamEndpoint:      upstreamEndpoint,
-					UserAgent:             userAgent,
-					IPAddress:             clientIP,
-					RequestPayloadHash:    requestPayloadHash,
-					APIKeyService:         h.apiKeyService,
-					GroupRateLimitGroupID: groupRateLimitGroupID,
-					GroupRateLimitGroup:   groupRateLimitGroup,
-					QuotaPlatform:         quotaPlatform,
-					SessionID:             sessionID,
-					ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
-					PricingAt:             pricingAt,
-					CyberBlocked:          cyberBlocked,
-					NativeCompactionV2:    nativeV2,
+					Result:             res,
+					APIKey:             apiKey,
+					User:               apiKey.User,
+					Account:            account,
+					Subscription:       subscription,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   upstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					RequestPayloadHash: requestPayloadHash,
+					APIKeyService:      h.apiKeyService,
+					EffectiveGroupID:   effectiveGroupID,
+					EffectiveGroup:     effectiveGroup,
+					QuotaPlatform:      quotaPlatform,
+					SessionID:          sessionID,
+					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
+					PricingAt:          pricingAt,
+					CyberBlocked:       cyberBlocked,
+					NativeCompactionV2: nativeV2,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.openai_gateway.responses"),
@@ -1360,7 +1360,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, selectedGroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
@@ -1437,31 +1437,31 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+			effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+			effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-					Result:                res,
-					APIKey:                apiKey,
-					User:                  apiKey.User,
-					Account:               account,
-					Subscription:          subscription,
-					InboundEndpoint:       inboundEndpoint,
-					UpstreamEndpoint:      upstreamEndpoint,
-					UserAgent:             userAgent,
-					IPAddress:             clientIP,
-					RequestPayloadHash:    requestPayloadHash,
-					APIKeyService:         h.apiKeyService,
-					GroupRateLimitGroupID: groupRateLimitGroupID,
-					GroupRateLimitGroup:   groupRateLimitGroup,
-					QuotaPlatform:         quotaPlatform,
-					SessionID:             sessionID,
-					ChannelUsageFields:    clientRequestedUsageFields(c, channelMappingMsg, reqModel, res.UpstreamModel),
-					PricingAt:             pricingAt,
-					CyberBlocked:          cyberBlocked,
+					Result:             res,
+					APIKey:             apiKey,
+					User:               apiKey.User,
+					Account:            account,
+					Subscription:       subscription,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   upstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					RequestPayloadHash: requestPayloadHash,
+					APIKeyService:      h.apiKeyService,
+					EffectiveGroupID:   effectiveGroupID,
+					EffectiveGroup:     effectiveGroup,
+					QuotaPlatform:      quotaPlatform,
+					SessionID:          sessionID,
+					ChannelUsageFields: clientRequestedUsageFields(c, channelMappingMsg, reqModel, res.UpstreamModel),
+					PricingAt:          pricingAt,
+					CyberBlocked:       cyberBlocked,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.openai_gateway.messages"),
@@ -2406,7 +2406,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// A new account attempt must replace any model captured for the previous account.
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		currentAccountRelease = wrapAccountReleaseOnForwardDone(ctx, true, accountReleaseFunc)
-		selectedGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+		selectedGroupID := ResolveEffectiveGroupID(selection, apiKey)
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, selectedGroupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.websocket_bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
@@ -2683,32 +2683,32 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
-				groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-				groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+				effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
+				effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 				quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 				sessionID := service.ExtractClientSessionID(c)
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
-						Result:                result,
-						APIKey:                apiKey,
-						User:                  apiKey.User,
-						Account:               account,
-						Subscription:          subscription,
-						InboundEndpoint:       inboundEndpoint,
-						UpstreamEndpoint:      upstreamEndpoint,
-						UserAgent:             userAgent,
-						IPAddress:             clientIP,
-						SessionID:             sessionID,
-						RequestPayloadHash:    requestPayloadHash,
-						APIKeyService:         h.apiKeyService,
-						GroupRateLimitGroupID: groupRateLimitGroupID,
-						GroupRateLimitGroup:   groupRateLimitGroup,
-						QuotaPlatform:         quotaPlatform,
-						ChannelUsageFields:    turnUsageFields,
-						PricingAt:             turnRecordPricingAt,
-						CyberBlocked:          cyberBlocked,
+						Result:             result,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Subscription:       subscription,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						SessionID:          sessionID,
+						RequestPayloadHash: requestPayloadHash,
+						APIKeyService:      h.apiKeyService,
+						EffectiveGroupID:   effectiveGroupID,
+						EffectiveGroup:     effectiveGroup,
+						QuotaPlatform:      quotaPlatform,
+						ChannelUsageFields: turnUsageFields,
+						PricingAt:          turnRecordPricingAt,
+						CyberBlocked:       cyberBlocked,
 					}); err != nil {
 						reqLog.Error("openai.websocket_record_usage_failed",
 							zap.Int64("account_id", account.ID),
@@ -3926,7 +3926,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		apiKeyPrefix = keyPrefix(apiKey.Key, 8)
 	}
 	usageAttribution := cyberPolicyUsageAttribution(requestCtx, apiKey, selection)
-	actualGroupID := usageAttribution.GroupRateLimitGroupID
+	actualGroupID := usageAttribution.EffectiveGroupID
 	actualGroupName := selectedGroupName(selection, apiKey, actualGroupID)
 	opsMeta := cyberPolicyOpsErrorMeta{
 		RequestID:       requestID,
@@ -3977,26 +3977,26 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if forwardErrored && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
-				APIKey:                apiKey,
-				Account:               account,
-				Subscription:          subscription,
-				RequestID:             requestID,
-				Model:                 model,
-				Stream:                stream,
-				InputTokens:           mark.UpstreamInTok,
-				OutputTokens:          mark.UpstreamOutTok,
-				InboundEndpoint:       inboundEndpoint,
-				UpstreamEndpoint:      upstreamEndpoint,
-				UserAgent:             userAgent,
-				IPAddress:             clientIPStr,
-				SessionID:             sessionID,
-				RequestPayloadHash:    requestPayloadHash,
-				APIKeyService:         apiKeySvc,
-				QuotaPlatform:         usageAttribution.QuotaPlatform,
-				GroupRateLimitGroupID: usageAttribution.GroupRateLimitGroupID,
-				GroupRateLimitGroup:   usageAttribution.GroupRateLimitGroup,
-				ChannelUsageFields:    channelFields,
-				NativeCompactionV2:    nativeCompactionV2,
+				APIKey:             apiKey,
+				Account:            account,
+				Subscription:       subscription,
+				RequestID:          requestID,
+				Model:              model,
+				Stream:             stream,
+				InputTokens:        mark.UpstreamInTok,
+				OutputTokens:       mark.UpstreamOutTok,
+				InboundEndpoint:    inboundEndpoint,
+				UpstreamEndpoint:   upstreamEndpoint,
+				UserAgent:          userAgent,
+				IPAddress:          clientIPStr,
+				SessionID:          sessionID,
+				RequestPayloadHash: requestPayloadHash,
+				APIKeyService:      apiKeySvc,
+				QuotaPlatform:      usageAttribution.QuotaPlatform,
+				EffectiveGroupID:   usageAttribution.EffectiveGroupID,
+				EffectiveGroup:     usageAttribution.EffectiveGroup,
+				ChannelUsageFields: channelFields,
+				NativeCompactionV2: nativeCompactionV2,
 			})
 		}
 		if opsSvc != nil {
@@ -4006,16 +4006,16 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 }
 
 type cyberPolicyUsageAttributionResult struct {
-	QuotaPlatform         string
-	GroupRateLimitGroupID *int64
-	GroupRateLimitGroup   *service.Group
+	QuotaPlatform    string
+	EffectiveGroupID *int64
+	EffectiveGroup   *service.Group
 }
 
 func cyberPolicyUsageAttribution(ctx context.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult) cyberPolicyUsageAttributionResult {
 	return cyberPolicyUsageAttributionResult{
-		QuotaPlatform:         EffectiveQuotaPlatform(ctx, selection, apiKey),
-		GroupRateLimitGroupID: EffectiveGroupRateLimitGroupID(selection, apiKey),
-		GroupRateLimitGroup:   EffectiveGroupRateLimitGroup(selection, apiKey),
+		QuotaPlatform:    EffectiveQuotaPlatform(ctx, selection, apiKey),
+		EffectiveGroupID: ResolveEffectiveGroupID(selection, apiKey),
+		EffectiveGroup:   ResolveEffectiveGroup(selection, apiKey),
 	}
 }
 

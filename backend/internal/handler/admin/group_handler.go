@@ -86,62 +86,6 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 	return &unlimited
 }
 
-type optionalGroupRateLimitField struct {
-	set   bool
-	value *float64
-}
-
-func (f *optionalGroupRateLimitField) UnmarshalJSON(data []byte) error {
-	f.set = true
-
-	trimmed := bytes.TrimSpace(data)
-	if bytes.Equal(trimmed, []byte("null")) {
-		f.value = nil
-		return nil
-	}
-
-	var number float64
-	if err := json.Unmarshal(trimmed, &number); err == nil {
-		f.value = &number
-		return nil
-	}
-
-	var text string
-	if err := json.Unmarshal(trimmed, &text); err == nil {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			f.value = nil
-			return nil
-		}
-		number, err = strconv.ParseFloat(text, 64)
-		if err != nil {
-			return fmt.Errorf("invalid numeric rate limit value %q: %w", text, err)
-		}
-		f.value = &number
-		return nil
-	}
-
-	return fmt.Errorf("invalid rate limit value: %s", string(trimmed))
-}
-
-func (f optionalGroupRateLimitField) ToCreateServiceInput() float64 {
-	if !f.set || f.value == nil {
-		return 0
-	}
-	return *f.value
-}
-
-func (f optionalGroupRateLimitField) ToUpdateServiceInput() *float64 {
-	if !f.set {
-		return nil
-	}
-	if f.value != nil {
-		return f.value
-	}
-	zero := 0.0
-	return &zero
-}
-
 // NewGroupHandler creates a new admin group handler
 func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, permissionService ...*service.PermissionService) *GroupHandler {
 	var perm *service.PermissionService
@@ -169,7 +113,6 @@ type CreateGroupRequest struct {
 	MonthlyLimitUSD           optionalLimitField            `json:"monthly_limit_usd"`
 	LongContextPricingEnabled bool                          `json:"long_context_pricing_enabled"`
 	ModelPricing              []service.ChannelModelPricing `json:"model_pricing"`
-	RateLimit5h               optionalGroupRateLimitField   `json:"rate_limit_5h"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	AllowImageGeneration            bool                          `json:"allow_image_generation"`
 	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation"`
@@ -239,7 +182,6 @@ type UpdateGroupRequest struct {
 	MonthlyLimitUSD           optionalLimitField             `json:"monthly_limit_usd"`
 	LongContextPricingEnabled *bool                          `json:"long_context_pricing_enabled"`
 	ModelPricing              *[]service.ChannelModelPricing `json:"model_pricing"`
-	RateLimit5h               optionalGroupRateLimitField    `json:"rate_limit_5h"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	AllowImageGeneration            *bool                         `json:"allow_image_generation"`
 	AllowBatchImageGeneration       *bool                         `json:"allow_batch_image_generation"`
@@ -590,7 +532,6 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		ModelPricing:                    req.ModelPricing,
-		RateLimit5h:                     req.RateLimit5h.ToCreateServiceInput(),
 		AllowImageGeneration:            req.AllowImageGeneration,
 		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
 		ImageRateIndependent:            req.ImageRateIndependent,
@@ -720,7 +661,6 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		ModelPricing:                    req.ModelPricing,
-		RateLimit5h:                     req.RateLimit5h.ToUpdateServiceInput(),
 		AllowImageGeneration:            req.AllowImageGeneration,
 		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
 		ImageRateIndependent:            req.ImageRateIndependent,

@@ -135,7 +135,6 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		Status:                       StatusActive,
 		Hydrated:                     true,
 		SubscriptionType:             SubscriptionTypeSubscription,
-		RateLimit5h:                  12.5,
 		DailyLimitUSD:                groupDuplicateTestPointer(11.0),
 		WeeklyLimitUSD:               groupDuplicateTestPointer(22.0),
 		MonthlyLimitUSD:              groupDuplicateTestPointer(33.0),
@@ -208,7 +207,6 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.Platform, duplicate.Platform)
 	require.Equal(t, source.RateMultiplier, duplicate.RateMultiplier)
 	require.Equal(t, source.PeakRateMultiplier, duplicate.PeakRateMultiplier)
-	require.Equal(t, source.RateLimit5h, duplicate.RateLimit5h)
 	require.Equal(t, source.DefaultValidityDays, duplicate.DefaultValidityDays)
 	require.Equal(t, source.ImagePrice4K, duplicate.ImagePrice4K)
 	require.Equal(t, source.VideoModelPrices, duplicate.VideoModelPrices)

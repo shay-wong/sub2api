@@ -338,10 +338,10 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
 }
 
-// EffectiveGroupRateLimitGroupID returns the actual group that should receive
-// post-usage group 5h limit increments. Selection wins because fallback routing
-// may execute a request through a different group than the API key's default.
-func EffectiveGroupRateLimitGroupID(selection *service.AccountSelectionResult, apiKey *service.APIKey) *int64 {
+// ResolveEffectiveGroupID returns the group that should receive request usage.
+// Selection wins because fallback routing may execute through a different group
+// than the API key's default.
+func ResolveEffectiveGroupID(selection *service.AccountSelectionResult, apiKey *service.APIKey) *int64 {
 	if selection != nil && selection.GroupID != nil && *selection.GroupID > 0 {
 		id := *selection.GroupID
 		return &id
@@ -353,11 +353,10 @@ func EffectiveGroupRateLimitGroupID(selection *service.AccountSelectionResult, a
 	return nil
 }
 
-// EffectiveGroupRateLimitGroup returns the group object to use for the
-// selected-request 5h preflight. It intentionally returns nil when selection
-// points at a different group but did not carry that group's snapshot; falling
-// back to the API key group in that case would check the wrong window.
-func EffectiveGroupRateLimitGroup(selection *service.AccountSelectionResult, apiKey *service.APIKey) *service.Group {
+// ResolveEffectiveGroup returns the group object for the selected request. It
+// intentionally returns nil when selection points at another group but did not
+// carry that group's snapshot; falling back would apply the wrong group policy.
+func ResolveEffectiveGroup(selection *service.AccountSelectionResult, apiKey *service.APIKey) *service.Group {
 	if selection != nil && selection.Group != nil && selection.Group.ID > 0 {
 		return selection.Group
 	}
@@ -377,7 +376,7 @@ func EffectiveGroupRateLimitGroup(selection *service.AccountSelectionResult, api
 // the group that actually handles the request. Selection wins so fallback
 // routing cannot apply the API key group's policy to another group's account.
 func EffectiveOpenAIReasoningEffortPolicy(selection *service.AccountSelectionResult, apiKey *service.APIKey) (string, []service.ReasoningEffortMapping) {
-	group := EffectiveGroupRateLimitGroup(selection, apiKey)
+	group := ResolveEffectiveGroup(selection, apiKey)
 	if group == nil || group.Platform != service.PlatformOpenAI {
 		return "", nil
 	}
@@ -396,53 +395,12 @@ func EffectiveQuotaPlatform(ctx context.Context, selection *service.AccountSelec
 	if forced := service.QuotaPlatform(ctx, nil); forced != "" {
 		return forced
 	}
-	if group := EffectiveGroupRateLimitGroup(selection, apiKey); group != nil {
+	if group := ResolveEffectiveGroup(selection, apiKey); group != nil {
 		if platform := strings.TrimSpace(group.Platform); platform != "" {
 			return platform
 		}
 	}
 	return service.PlatformFromAPIKey(apiKey)
-}
-
-func CheckEffectiveGroupRateLimit5h(ctx context.Context, billingCacheService *service.BillingCacheService, selection *service.AccountSelectionResult, apiKey *service.APIKey) error {
-	if billingCacheService == nil || apiKey == nil {
-		return nil
-	}
-	groupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
-	if groupID == nil || (apiKey.GroupID != nil && *apiKey.GroupID == *groupID) {
-		return nil
-	}
-	return billingCacheService.CheckGroupRateLimit5h(ctx, apiKey.User, EffectiveGroupRateLimitGroup(selection, apiKey))
-}
-
-func handleEffectiveGroupRateLimit5h(
-	ctx context.Context,
-	c *gin.Context,
-	billingCacheService *service.BillingCacheService,
-	selection *service.AccountSelectionResult,
-	apiKey *service.APIKey,
-	release func(),
-	logFailure func(error),
-	respond func(status int, code, message string),
-) bool {
-	err := CheckEffectiveGroupRateLimit5h(ctx, billingCacheService, selection, apiKey)
-	if err == nil {
-		return false
-	}
-	if logFailure != nil {
-		logFailure(err)
-	}
-	if release != nil {
-		release()
-	}
-	status, code, message, retryAfter := billingErrorDetails(err)
-	if retryAfter > 0 && c != nil {
-		c.Header("Retry-After", strconv.Itoa(retryAfter))
-	}
-	if respond != nil {
-		respond(status, code, message)
-	}
-	return true
 }
 
 func handleSelectedOpenAIPreflight(
@@ -461,7 +419,7 @@ func handleSelectedOpenAIPreflight(
 	if apiKey == nil {
 		return subscription, false
 	}
-	selectedGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+	selectedGroup := ResolveEffectiveGroup(selection, apiKey)
 	if requiresImage && !service.GroupAllowsImageGeneration(selectedGroup) {
 		if release != nil {
 			release()

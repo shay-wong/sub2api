@@ -354,7 +354,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, apiKey)
+			effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
@@ -446,27 +446,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, groupRateLimitGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, effectiveGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
-			if handleEffectiveGroupRateLimit5h(
-				c.Request.Context(),
-				c,
-				h.billingCacheService,
-				selection,
-				apiKey,
-				accountReleaseFunc,
-				func(err error) { reqLog.Info("gateway.selected_group_rate_limit_check_failed", zap.Error(err)) },
-				func(status int, code, message string) {
-					h.handleStreamingAwareError(c, status, code, message, streamStarted)
-				},
-			) {
-				return
-			}
 
 			// 转发请求 - 根据账号平台分流
 			var result *service.ForwardResult
@@ -486,7 +471,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					body,
 					hasBoundSession,
-					service.WithForwardGeminiSession(derefGroupID(groupRateLimitGroupID), sessionKey),
+					service.WithForwardGeminiSession(derefGroupID(effectiveGroupID), sessionKey),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
@@ -575,29 +560,29 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
-			groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, apiKey)
+			effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:                result,
-					QuotaPlatform:         quotaPlatform,
-					APIKey:                apiKey,
-					User:                  apiKey.User,
-					Account:               account,
-					Subscription:          subscription,
-					PricingAt:             pricingAt,
-					InboundEndpoint:       inboundEndpoint,
-					UpstreamEndpoint:      upstreamEndpoint,
-					UserAgent:             userAgent,
-					IPAddress:             clientIP,
-					SessionID:             sessionID,
-					RequestPayloadHash:    requestPayloadHash,
-					ForceCacheBilling:     forceCacheBilling,
-					APIKeyService:         h.apiKeyService,
-					GroupRateLimitGroupID: groupRateLimitGroupID,
-					GroupRateLimitGroup:   groupRateLimitGroup,
-					ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					Result:             result,
+					QuotaPlatform:      quotaPlatform,
+					APIKey:             apiKey,
+					User:               apiKey.User,
+					Account:            account,
+					Subscription:       subscription,
+					PricingAt:          pricingAt,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   upstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					SessionID:          sessionID,
+					RequestPayloadHash: requestPayloadHash,
+					ForceCacheBilling:  forceCacheBilling,
+					APIKeyService:      h.apiKeyService,
+					EffectiveGroupID:   effectiveGroupID,
+					EffectiveGroup:     effectiveGroup,
+					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -687,7 +672,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			account := selection.Account
-			groupRateLimitGroupID := EffectiveGroupRateLimitGroupID(selection, currentAPIKey)
+			effectiveGroupID := ResolveEffectiveGroupID(selection, currentAPIKey)
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// [DEBUG-STICKY] 打印账号选择结果
@@ -793,27 +778,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			if selection.ProfitGateActive() || !selection.Acquired {
-				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, groupRateLimitGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, effectiveGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
-			if handleEffectiveGroupRateLimit5h(
-				c.Request.Context(),
-				c,
-				h.billingCacheService,
-				selection,
-				currentAPIKey,
-				accountReleaseFunc,
-				func(err error) { reqLog.Info("gateway.selected_group_rate_limit_check_failed", zap.Error(err)) },
-				func(status int, code, message string) {
-					h.handleStreamingAwareError(c, status, code, message, streamStarted)
-				},
-			) {
-				return
-			}
 
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
@@ -938,29 +908,29 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 				// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 				forceCacheBilling := fs.ForceCacheBilling
-				groupRateLimitGroup := EffectiveGroupRateLimitGroup(selection, currentAPIKey)
+				effectiveGroup := ResolveEffectiveGroup(selection, currentAPIKey)
 				quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, currentAPIKey)
 				sessionID := service.ExtractClientSessionID(c)
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-						Result:                result,
-						QuotaPlatform:         quotaPlatform,
-						APIKey:                currentAPIKey,
-						User:                  currentAPIKey.User,
-						Account:               account,
-						Subscription:          currentSubscription,
-						PricingAt:             pricingAt,
-						InboundEndpoint:       inboundEndpoint,
-						UpstreamEndpoint:      upstreamEndpoint,
-						UserAgent:             userAgent,
-						IPAddress:             clientIP,
-						SessionID:             sessionID,
-						RequestPayloadHash:    requestPayloadHash,
-						ForceCacheBilling:     forceCacheBilling,
-						APIKeyService:         h.apiKeyService,
-						GroupRateLimitGroupID: groupRateLimitGroupID,
-						GroupRateLimitGroup:   groupRateLimitGroup,
-						ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+						Result:             result,
+						QuotaPlatform:      quotaPlatform,
+						APIKey:             currentAPIKey,
+						User:               currentAPIKey.User,
+						Account:            account,
+						Subscription:       currentSubscription,
+						PricingAt:          pricingAt,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						SessionID:          sessionID,
+						RequestPayloadHash: requestPayloadHash,
+						ForceCacheBilling:  forceCacheBilling,
+						APIKeyService:      h.apiKeyService,
+						EffectiveGroupID:   effectiveGroupID,
+						EffectiveGroup:     effectiveGroup,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 					}); err != nil {
 						logger.L().With(
 							zap.String("component", "handler.gateway.messages"),
@@ -1096,7 +1066,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), groupRateLimitGroupID, sessionKey, account.ID); err != nil {
+				if err := h.gatewayService.BindStickySession(c.Request.Context(), effectiveGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -2461,10 +2431,6 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 	if errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded) {
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, 0
-	}
-	if errors.Is(err, service.ErrGroupRateLimit5hExceeded) {
-		msg := pkgerrors.Message(err)
-		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
 	}
 	// 用户/分组 RPM 超限统一映射为 HTTP 429；保留与其它 rate_limit 一致的错误码便于客户端分类。
 	// 返回 Retry-After 秒数（当前分钟剩余秒数），让 SDK 自动退避。

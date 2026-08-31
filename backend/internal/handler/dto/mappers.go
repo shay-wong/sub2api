@@ -126,18 +126,6 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 	return out
 }
 
-func UserGroupRateLimitWindowFromService(r service.UserGroupRateLimitWindowRecord) UserGroupRateLimitWindow {
-	return UserGroupRateLimitWindow{
-		UserID:          r.UserID,
-		GroupID:         r.GroupID,
-		GroupName:       r.GroupName,
-		RateLimit5h:     r.RateLimit5h,
-		Usage5hUSD:      r.EffectiveUsage5hUSD(),
-		Window5hStart:   r.Window5hStart,
-		Window5hResetAt: r.Window5hResetAt(),
-	}
-}
-
 func GroupFromServiceShallow(g *service.Group) *Group {
 	if g == nil {
 		return nil
@@ -194,7 +182,6 @@ func groupFromServiceBase(g *service.Group) Group {
 		Description:                     g.Description,
 		Platform:                        g.Platform,
 		RateMultiplier:                  g.RateMultiplier,
-		RateLimit5h:                     g.RateLimit5h,
 		IsExclusive:                     g.IsExclusive,
 		Status:                          g.Status,
 		SubscriptionType:                g.SubscriptionType,
