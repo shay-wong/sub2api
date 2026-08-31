@@ -26,11 +26,11 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
 }
 
-func TestAccountRepository_ResetQuotaUsedUsesGlobalAccountID(t *testing.T) {
+func TestAccountRepository_ResetQuotaUsedAndClearRateLimitCooldownUsesGlobalAccountID(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 
-	err := repo.ResetQuotaUsed(context.Background(), 42)
+	err := repo.ResetQuotaUsedAndClearRateLimitCooldown(context.Background(), 42)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, exec.execQueries)
@@ -56,6 +56,18 @@ func TestAccountRepository_RevertProxyFallbackUsesGlobalAccountID(t *testing.T) 
 	require.NotContains(t, normalized, "project_profiles")
 	require.NotContains(t, normalized, "project_profile_bindings")
 	require.Equal(t, []any{int64(42)}, exec.execArgs[0])
+}
+
+func TestAccountRepository_ResetQuotaUsedAndClearRateLimitCooldown_NoRowsAffectedReturnsNotFoundWithoutOutbox(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+	err := repo.ResetQuotaUsedAndClearRateLimitCooldown(context.Background(), 42)
+
+	require.ErrorIs(t, err, service.ErrAccountNotFound)
+	require.Len(t, exec.execQueries, 1)
+	require.Contains(t, exec.execQueries[0], "UPDATE accounts")
+	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
 }
 
 func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomicallyPropagated(t *testing.T) {

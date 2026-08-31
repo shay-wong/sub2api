@@ -41,6 +41,10 @@ type OpenAIRecordUsageInput struct {
 	PricingAt time.Time
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
+	// NativeCompactionV2 is an orthogonal semantic flag captured by the
+	// Responses handler from stream=true + compaction_trigger. It never stores
+	// the request payload and does not replace the transport request type.
+	NativeCompactionV2 bool
 	ChannelUsageFields
 }
 
@@ -68,6 +72,7 @@ type CyberPolicyUsageInput struct {
 	QuotaPlatform         string
 	GroupRateLimitGroupID *int64
 	GroupRateLimitGroup   *Group
+	NativeCompactionV2    bool
 	ChannelUsageFields
 }
 
@@ -108,6 +113,7 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		GroupRateLimitGroup:   in.GroupRateLimitGroup,
 		ChannelUsageFields:    in.ChannelUsageFields,
 		CyberBlocked:          true,
+		NativeCompactionV2:    in.NativeCompactionV2,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 	}
@@ -367,6 +373,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageOutputSize:          optionalTrimmedStringPtr(result.ImageOutputSize),
 		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
 		ImageSizeBreakdown:       result.ImageSizeBreakdown,
+		NativeCompactionV2:       input.NativeCompactionV2,
 	}
 	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {

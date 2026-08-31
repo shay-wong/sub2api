@@ -29,6 +29,7 @@ type dashboardTrendCacheKey struct {
 	ModelFilterSource     string `json:"model_filter_source,omitempty"`
 	RequestType           *int16 `json:"request_type"`
 	Stream                *bool  `json:"stream"`
+	NativeCompactionV2    *bool  `json:"native_compaction_v2"`
 	BillingType           *int8  `json:"billing_type"`
 	BillingMode           string `json:"billing_mode,omitempty"`
 	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
@@ -46,6 +47,7 @@ type dashboardModelGroupCacheKey struct {
 	ModelSource           string `json:"model_source,omitempty"`
 	RequestType           *int16 `json:"request_type"`
 	Stream                *bool  `json:"stream"`
+	NativeCompactionV2    *bool  `json:"native_compaction_v2"`
 	BillingType           *int8  `json:"billing_type"`
 	BillingMode           string `json:"billing_mode,omitempty"`
 	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
@@ -100,6 +102,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 		ModelFilterSource:     usagestats.NormalizeModelSource(filters.ModelFilterSource),
 		RequestType:           filters.RequestType,
 		Stream:                filters.Stream,
+		NativeCompactionV2:    filters.NativeCompactionV2,
 		BillingType:           filters.BillingType,
 		BillingMode:           filters.BillingMode,
 		UpstreamModelMismatch: filters.UpstreamModelMismatch,
@@ -132,6 +135,7 @@ func (h *DashboardHandler) getModelStatsCached(
 		ModelSource:           usagestats.NormalizeModelSource(modelSource),
 		RequestType:           filters.RequestType,
 		Stream:                filters.Stream,
+		NativeCompactionV2:    filters.NativeCompactionV2,
 		BillingType:           filters.BillingType,
 		BillingMode:           filters.BillingMode,
 		UpstreamModelMismatch: filters.UpstreamModelMismatch,
@@ -162,6 +166,7 @@ func (h *DashboardHandler) getGroupStatsCached(
 		ModelFilterSource:     usagestats.NormalizeModelSource(filters.ModelFilterSource),
 		RequestType:           filters.RequestType,
 		Stream:                filters.Stream,
+		NativeCompactionV2:    filters.NativeCompactionV2,
 		BillingType:           filters.BillingType,
 		BillingMode:           filters.BillingMode,
 		UpstreamModelMismatch: filters.UpstreamModelMismatch,

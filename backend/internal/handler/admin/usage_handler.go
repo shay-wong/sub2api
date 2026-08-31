@@ -109,6 +109,14 @@ func parseAdminUsageLogFilters(c *gin.Context) (usagestats.UsageLogFilters, bool
 		}
 		filters.UpstreamModelMismatch = &value
 	}
+	if raw := strings.TrimSpace(c.Query("native_compaction_v2")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "Invalid native_compaction_v2 value, use true or false")
+			return usagestats.UsageLogFilters{}, false
+		}
+		filters.NativeCompactionV2 = &value
+	}
 
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)
@@ -177,7 +185,6 @@ func (h *UsageHandler) List(c *gin.Context) {
 		}
 		exactTotal = parsed
 	}
-
 	params := pagination.PaginationParams{
 		Page:      page,
 		PageSize:  pageSize,

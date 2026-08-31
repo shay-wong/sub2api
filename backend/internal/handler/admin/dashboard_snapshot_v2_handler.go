@@ -46,6 +46,7 @@ type dashboardSnapshotV2Filters struct {
 	ModelFilterSource     string
 	RequestType           *int16
 	Stream                *bool
+	NativeCompactionV2    *bool
 	BillingType           *int8
 	BillingMode           string
 	UpstreamModelMismatch *bool
@@ -64,6 +65,7 @@ func (f *dashboardSnapshotV2Filters) usageLogFilters() usagestats.UsageLogFilter
 		ModelFilterSource:     f.ModelFilterSource,
 		RequestType:           f.RequestType,
 		Stream:                f.Stream,
+		NativeCompactionV2:    f.NativeCompactionV2,
 		BillingType:           f.BillingType,
 		BillingMode:           f.BillingMode,
 		UpstreamModelMismatch: f.UpstreamModelMismatch,
@@ -87,6 +89,7 @@ type dashboardSnapshotV2CacheKey struct {
 	ModelSource           string  `json:"model_source,omitempty"`
 	RequestType           *int16  `json:"request_type"`
 	Stream                *bool   `json:"stream"`
+	NativeCompactionV2    *bool   `json:"native_compaction_v2"`
 	BillingType           *int8   `json:"billing_type"`
 	BillingMode           string  `json:"billing_mode,omitempty"`
 	UpstreamModelMismatch *bool   `json:"upstream_model_mismatch"`
@@ -154,6 +157,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		ModelSource:           usagestats.NormalizeModelSource(filters.ModelSource),
 		RequestType:           filters.RequestType,
 		Stream:                filters.Stream,
+		NativeCompactionV2:    filters.NativeCompactionV2,
 		BillingType:           filters.BillingType,
 		BillingMode:           filters.BillingMode,
 		UpstreamModelMismatch: filters.UpstreamModelMismatch,
@@ -333,6 +337,14 @@ func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filter
 			return nil, err
 		}
 		filters.Stream = &streamVal
+	}
+
+	if nativeCompactionV2Str := strings.TrimSpace(c.Query("native_compaction_v2")); nativeCompactionV2Str != "" {
+		value, err := strconv.ParseBool(nativeCompactionV2Str)
+		if err != nil {
+			return nil, err
+		}
+		filters.NativeCompactionV2 = &value
 	}
 
 	if billingTypeStr := strings.TrimSpace(c.Query("billing_type")); billingTypeStr != "" {
