@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `fdf9751c1223a74a7153e537c6d9d1fb14ee9cad` |
-| 当前比较范围 | `fdf9751c1223a74a7153e537c6d9d1fb14ee9cad..HEAD` |
+| 已合并上游提交 / 比较基线 | `52374af94031f04df8de6fc91deb77a179e04b06` |
+| 当前比较范围 | `52374af94031f04df8de6fc91deb77a179e04b06..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `fdf9751c1223a74a7153e537c6d9d1fb14ee9cad`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `52374af94031f04df8de6fc91deb77a179e04b06`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -29,14 +29,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.183` |
+| 当前上游版本 | `0.1.184` |
 | 当前 Fork 版本 | `0.1.183-fork.3` |
-| 已发布同基线 Fork 版本 | `0.1.183-fork.3` |
-| 下次发布所需版本 | `0.1.183-fork.4` |
+| 已发布同基线 Fork 版本 | 无 |
+| 下次发布所需版本 | `0.1.184-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源是已发布的 `0.1.183-fork.3`。本次功能提交不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.183-fork.4`。
+当前版本源仍是上一上游基线已发布的 `0.1.183-fork.3`。本次只合并上游、不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.184-fork.1`。
 
 ## 能力索引
 
