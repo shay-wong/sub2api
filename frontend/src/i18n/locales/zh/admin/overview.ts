@@ -564,6 +564,19 @@ export default {
         description: '配置 {email} 的全局管理员权限。',
         enableAdmin: '启用管理员身份',
         permissions: '权限',
+        resourceScope: '资源范围',
+        allResources: '全部资源',
+        restrictedResources: '仅限指定资源',
+        searchResources: '搜索资源',
+        noResources: '暂无资源',
+        directAccountBindingHint: '分组权限不会自动授予分组内账号权限；账号必须单独勾选。',
+        failedToLoadResources: '加载权限资源失败',
+        resourceTypes: {
+          groups: '分组',
+          accounts: '账号',
+          proxies: '代理',
+          subscriptions: '订阅'
+        },
         updated: '管理员权限更新成功',
         failed: '管理员权限更新失败',
         permissionLabels: {

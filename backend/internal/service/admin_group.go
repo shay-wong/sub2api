@@ -29,6 +29,24 @@ func (s *adminServiceImpl) ListGroups(ctx context.Context, page, pageSize int, p
 	return groups, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListGroupsByIDScope(ctx context.Context, page, pageSize int, platform, status, search string, isExclusive *bool, sortBy, sortOrder string, groupIDs []int64) ([]Group, int64, error) {
+	if len(groupIDs) == 0 {
+		return []Group{}, 0, nil
+	}
+	repo, ok := s.groupRepo.(interface {
+		ListWithIDScope(context.Context, pagination.PaginationParams, string, string, string, *bool, []int64) ([]Group, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, fmt.Errorf("group repository does not support direct ID scope listing")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	groups, result, err := repo.ListWithIDScope(ctx, params, platform, status, search, isExclusive, groupIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	return groups, result.Total, nil
+}
+
 func (s *adminServiceImpl) GetAllGroups(ctx context.Context) ([]Group, error) {
 	return s.groupRepo.ListActive(ctx)
 }
@@ -544,6 +562,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			return nil, fmt.Errorf("failed to bind accounts to new group: %w", err)
 		}
 		group.AccountCount = int64(len(accountIDsToCopy))
+	}
+	if err := s.bindCreatedAdminResource(ctx, AdminResourceGroup, group.ID); err != nil {
+		return nil, err
 	}
 
 	return group, nil

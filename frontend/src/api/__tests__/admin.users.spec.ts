@@ -153,6 +153,13 @@ describe('admin users api auth identity binding', () => {
     const input = {
       role: 'admin' as const,
       admin_permissions: ['admin.dashboard.read', 'admin.users.manage'],
+		resource_scope: {
+			mode: 'restricted' as const,
+			group_ids: [10],
+			account_ids: [20],
+			proxy_ids: [30],
+			subscription_ids: [40]
+		},
     }
     put.mockResolvedValue({ data: { id: 42, ...input } })
 

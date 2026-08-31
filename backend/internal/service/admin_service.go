@@ -172,6 +172,7 @@ type UpdateUserInput struct {
 type UpdateUserAdminAccessInput struct {
 	Role             string
 	AdminPermissions []string
+	ResourceScope    AdminResourceScope
 	ActorAdminID     int64
 }
 
@@ -421,21 +422,22 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	AccountIDs     []int64
-	Filters        *BulkUpdateAccountFilters
-	Name           string
-	ProxyID        *int64
-	Concurrency    *int
-	Priority       *int
-	RateMultiplier *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor     *int
-	Status         string
-	Schedulable    *bool
-	GroupIDs       *[]int64
-	GroupScopeIDs  []int64
-	Credentials    map[string]any
-	Extra          map[string]any
-	ProbeEnabled   *bool
+	AccountIDs      []int64
+	AccountScopeIDs []int64
+	Filters         *BulkUpdateAccountFilters
+	Name            string
+	ProxyID         *int64
+	Concurrency     *int
+	Priority        *int
+	RateMultiplier  *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor      *int
+	Status          string
+	Schedulable     *bool
+	GroupIDs        *[]int64
+	GroupScopeIDs   []int64
+	Credentials     map[string]any
+	Extra           map[string]any
+	ProbeEnabled    *bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -684,6 +686,18 @@ type adminServiceImpl struct {
 	compositeResolver    *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
+	permissionService       *PermissionService
+}
+
+func (s *adminServiceImpl) bindCreatedAdminResource(ctx context.Context, resourceType string, resourceID int64) error {
+	userID, restricted := RestrictedAdminResourceActorFromContext(ctx)
+	if !restricted {
+		return nil
+	}
+	if s.permissionService == nil {
+		return ErrAdminResourceScopeUnavailable
+	}
+	return s.permissionService.BindAdminResource(ctx, userID, resourceType, resourceID, &userID)
 }
 
 // ChannelCacheInvalidator 失效渠道缓存。
@@ -724,6 +738,7 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
+	permissionService *PermissionService,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:                userRepo,
@@ -751,5 +766,6 @@ func NewAdminService(
 		compositeRouteRepo:      compositeRouteRepo,
 		compositeResolver:       compositeResolver,
 		channelCacheInvalidator: channelCacheInvalidator,
+		permissionService:       permissionService,
 	}
 }

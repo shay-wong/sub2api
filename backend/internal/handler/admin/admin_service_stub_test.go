@@ -187,7 +187,7 @@ func (s *stubAdminService) UpdateUser(ctx context.Context, id int64, input *serv
 }
 
 func (s *stubAdminService) UpdateUserAdminAccess(ctx context.Context, id int64, input *service.UpdateUserAdminAccessInput) (*service.User, error) {
-	user := service.User{ID: id, Email: "updated@example.com", Role: input.Role, AdminPermissions: input.AdminPermissions, Status: service.StatusActive}
+	user := service.User{ID: id, Email: "updated@example.com", Role: input.Role, AdminPermissions: input.AdminPermissions, AdminResourceScope: input.ResourceScope, Status: service.StatusActive}
 	return &user, nil
 }
 

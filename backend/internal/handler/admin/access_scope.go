@@ -10,10 +10,17 @@ import (
 )
 
 type adminAccessScope struct {
+	UserID                     int64
 	Unrestricted               bool
 	ProtectManagedAccountState bool
 	GroupIDs                   []int64
+	AccountIDs                 []int64
+	ProxyIDs                   []int64
+	SubscriptionIDs            []int64
 	groupSet                   map[int64]struct{}
+	accountSet                 map[int64]struct{}
+	proxySet                   map[int64]struct{}
+	subscriptionSet            map[int64]struct{}
 }
 
 type accountScopedProxyLookup interface {
@@ -30,12 +37,45 @@ func resolveAdminAccessScope(c *gin.Context, permissionService *service.Permissi
 		return &adminAccessScope{Unrestricted: true}, nil
 	}
 	if role == service.RoleAdmin {
-		return &adminAccessScope{Unrestricted: true, ProtectManagedAccountState: true}, nil
+		subject, hasSubject := middleware.GetAuthSubjectFromContext(c)
+		if permissionService == nil || !hasSubject || subject.UserID <= 0 {
+			return &adminAccessScope{Unrestricted: true, ProtectManagedAccountState: true}, nil
+		}
+		resourceScope, err := permissionService.GetAdminResourceScope(c.Request.Context(), subject.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if resourceScope.Mode == service.AdminResourceScopeAll {
+			return &adminAccessScope{UserID: subject.UserID, Unrestricted: true, ProtectManagedAccountState: true}, nil
+		}
+		c.Request = c.Request.WithContext(service.WithRestrictedAdminResourceActor(c.Request.Context(), subject.UserID))
+		return &adminAccessScope{
+			UserID:                     subject.UserID,
+			ProtectManagedAccountState: true,
+			GroupIDs:                   resourceScope.GroupIDs,
+			AccountIDs:                 resourceScope.AccountIDs,
+			ProxyIDs:                   resourceScope.ProxyIDs,
+			SubscriptionIDs:            resourceScope.SubscriptionIDs,
+			groupSet:                   int64Set(resourceScope.GroupIDs),
+			accountSet:                 int64Set(resourceScope.AccountIDs),
+			proxySet:                   int64Set(resourceScope.ProxyIDs),
+			subscriptionSet:            int64Set(resourceScope.SubscriptionIDs),
+		}, nil
 	}
 	if service.RoleIsOperator(role) {
 		return nil, service.ErrLegacyOperatorRoleDisabled
 	}
 	return nil, errors.Forbidden("FORBIDDEN", "admin console access required")
+}
+
+func int64Set(ids []int64) map[int64]struct{} {
+	out := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			out[id] = struct{}{}
+		}
+	}
+	return out
 }
 
 func (s *adminAccessScope) isScoped() bool {
@@ -55,10 +95,10 @@ func (s *adminAccessScope) ensureGroup(id int64) error {
 		return nil
 	}
 	if id <= 0 {
-		return service.ErrOperatorScopeForbidden
+		return service.ErrAdminGroupScopeForbidden
 	}
 	if !s.containsGroup(id) {
-		return service.ErrOperatorScopeForbidden
+		return service.ErrAdminGroupScopeForbidden
 	}
 	return nil
 }
@@ -69,7 +109,7 @@ func (s *adminAccessScope) ensureGroups(groupIDs []int64, requireNonEmpty bool) 
 	}
 	if len(groupIDs) == 0 {
 		if requireNonEmpty {
-			return service.ErrOperatorAccountScopeRequired
+			return service.ErrAdminAccountScopeRequired
 		}
 		return nil
 	}
@@ -85,27 +125,17 @@ func (s *adminAccessScope) ensureProxyMutation(proxyID *int64) error {
 	if s == nil || s.Unrestricted || proxyID == nil {
 		return nil
 	}
-	return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
+	if *proxyID == 0 || s.containsProxy(*proxyID) {
+		return nil
+	}
+	return service.ErrAdminProxyScopeForbidden
 }
 
 func (s *adminAccessScope) ensureOAuthProxyUse(c *gin.Context, adminService accountScopedProxyLookup, accountID *int64, proxyID *int64) error {
 	if s == nil || s.Unrestricted || proxyID == nil || *proxyID == 0 {
 		return nil
 	}
-	if accountID == nil || *accountID <= 0 || adminService == nil {
-		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
-	}
-	account, err := adminService.GetAccount(c.Request.Context(), *accountID)
-	if err != nil {
-		return err
-	}
-	if !s.accountVisible(account) {
-		return service.ErrOperatorAccountForbidden
-	}
-	if account.ProxyID == nil || *account.ProxyID != *proxyID {
-		return errors.Forbidden("OPERATOR_PROXY_FORBIDDEN", "operator cannot assign account proxy")
-	}
-	return nil
+	return s.ensureProxyMutation(proxyID)
 }
 
 func (s *adminAccessScope) accountVisible(account *service.Account) bool {
@@ -115,22 +145,46 @@ func (s *adminAccessScope) accountVisible(account *service.Account) bool {
 	if account == nil {
 		return false
 	}
-	for _, id := range account.GroupIDs {
-		if s.containsGroup(id) {
-			return true
-		}
+	_, ok := s.accountSet[account.ID]
+	return ok
+}
+
+func (s *adminAccessScope) containsProxy(id int64) bool {
+	if s == nil || s.Unrestricted {
+		return true
 	}
-	for _, group := range account.Groups {
-		if group != nil && s.containsGroup(group.ID) {
-			return true
-		}
+	_, ok := s.proxySet[id]
+	return ok
+}
+
+func (s *adminAccessScope) ensureProxy(id int64) error {
+	if id <= 0 || !s.containsProxy(id) {
+		return service.ErrAdminProxyScopeForbidden
 	}
-	for _, accountGroup := range account.AccountGroups {
-		if s.containsGroup(accountGroup.GroupID) {
-			return true
-		}
+	return nil
+}
+
+func (s *adminAccessScope) containsSubscription(id int64) bool {
+	if s == nil || s.Unrestricted {
+		return true
 	}
-	return false
+	_, ok := s.subscriptionSet[id]
+	return ok
+}
+
+func (s *adminAccessScope) ensureSubscription(id int64) error {
+	if id <= 0 || !s.containsSubscription(id) {
+		return service.ErrAdminSubscriptionScopeForbidden
+	}
+	return nil
+}
+
+func (s *adminAccessScope) bindCreatedResource(ctx context.Context, permissionService *service.PermissionService, resourceType string, resourceID int64) error {
+	if s == nil || s.Unrestricted || permissionService == nil {
+		return nil
+	}
+	actorID := s.UserID
+	return permissionService.BindAdminResource(ctx, s.UserID, resourceType, resourceID, &actorID)
 }
 
 func (s *adminAccessScope) accountForResponse(account *service.Account) *service.Account {
@@ -338,7 +392,7 @@ func (s *adminAccessScope) ensureOpsErrorLogVisible(detail *service.OpsErrorLogD
 		return nil
 	}
 	if detail == nil || detail.GroupID == nil || *detail.GroupID <= 0 {
-		return service.ErrOperatorScopeForbidden
+		return service.ErrAdminGroupScopeForbidden
 	}
 	return s.ensureGroup(*detail.GroupID)
 }
@@ -348,11 +402,11 @@ func (s *adminAccessScope) ensureOpsAlertEventVisible(event *service.OpsAlertEve
 		return nil
 	}
 	if event == nil || event.Dimensions == nil {
-		return service.ErrOperatorScopeForbidden
+		return service.ErrAdminGroupScopeForbidden
 	}
 	groupID, ok := eventDimensionGroupID(event.Dimensions["group_id"])
 	if !ok || groupID <= 0 {
-		return service.ErrOperatorScopeForbidden
+		return service.ErrAdminGroupScopeForbidden
 	}
 	return s.ensureGroup(groupID)
 }

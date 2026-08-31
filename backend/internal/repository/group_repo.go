@@ -440,7 +440,18 @@ func (r *groupRepository) List(ctx context.Context, params pagination.Pagination
 }
 
 func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
+	return r.listWithFilters(ctx, params, platform, status, search, isExclusive, nil)
+}
+
+func (r *groupRepository) ListWithIDScope(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool, groupIDs []int64) ([]service.Group, *pagination.PaginationResult, error) {
+	return r.listWithFilters(ctx, params, platform, status, search, isExclusive, groupIDs)
+}
+
+func (r *groupRepository) listWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool, scopedGroupIDs []int64) ([]service.Group, *pagination.PaginationResult, error) {
 	q := r.client.Group.Query()
+	if scopedGroupIDs != nil {
+		q = q.Where(group.IDIn(scopedGroupIDs...))
+	}
 
 	if platform != "" {
 		q = q.Where(group.PlatformEQ(platform))

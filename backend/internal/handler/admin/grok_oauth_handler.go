@@ -646,7 +646,7 @@ func (h *GrokOAuthHandler) QueryQuota(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if h.quotaService == nil {
@@ -678,7 +678,7 @@ func (h *GrokOAuthHandler) ResetQuota(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if h.quotaService == nil {

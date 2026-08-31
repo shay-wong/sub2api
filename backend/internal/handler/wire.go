@@ -183,6 +183,14 @@ func ProvideAdminGroupHandler(adminService service.AdminService, dashboardServic
 	return admin.NewGroupHandler(adminService, dashboardService, groupCapacityService, permissionService)
 }
 
+func ProvideAdminProxyHandler(adminService service.AdminService, permissionService *service.PermissionService) *admin.ProxyHandler {
+	return admin.NewProxyHandler(adminService, permissionService)
+}
+
+func ProvideAdminSubscriptionHandler(subscriptionService *service.SubscriptionService, permissionService *service.PermissionService) *admin.SubscriptionHandler {
+	return admin.NewSubscriptionHandler(subscriptionService, permissionService)
+}
+
 func ProvideAdminAccountHandler(
 	adminService service.AdminService,
 	oauthService *service.OAuthService,
@@ -317,13 +325,13 @@ var ProviderSet = wire.NewSet(
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,
 	admin.NewCNProviderHandler,
-	admin.NewProxyHandler,
+	ProvideAdminProxyHandler,
 	admin.NewRedeemHandler,
 	admin.NewPromoHandler,
 	ProvideAdminSettingHandler,
 	ProvideAdminOpsHandler,
 	ProvideSystemHandler,
-	admin.NewSubscriptionHandler,
+	ProvideAdminSubscriptionHandler,
 	admin.NewUsageHandler,
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,

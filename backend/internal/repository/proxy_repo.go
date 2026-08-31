@@ -359,6 +359,10 @@ func (r *proxyRepository) ListWithFiltersAndAccountCountForManagement(ctx contex
 	return r.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
 }
 
+func (r *proxyRepository) ListWithFiltersAndAccountCountByIDs(ctx context.Context, params pagination.PaginationParams, protocol, status, search string, proxyIDs []int64) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
+	return r.listWithFiltersAndAccountCount(ctx, params, protocol, status, search, []dbpredicate.Proxy{proxy.IDIn(proxyIDs...)})
+}
+
 func (r *proxyRepository) listWithFiltersAndAccountCount(ctx context.Context, params pagination.PaginationParams, protocol, status, search string, predicates []dbpredicate.Proxy) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
 	q := r.client.Proxy.Query().Where(predicates...)
 	if protocol != "" {
@@ -622,6 +626,31 @@ func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]ser
 
 func (r *proxyRepository) ListActiveWithAccountCountForManagement(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
 	return r.ListActiveWithAccountCount(ctx)
+}
+
+func (r *proxyRepository) ListActiveByIDs(ctx context.Context, proxyIDs []int64) ([]service.Proxy, error) {
+	if len(proxyIDs) == 0 {
+		return []service.Proxy{}, nil
+	}
+	proxies, err := r.client.Proxy.Query().
+		Where(proxy.StatusEQ(service.StatusActive), proxy.IDIn(proxyIDs...)).
+		Order(dbent.Desc(proxy.FieldCreatedAt)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]service.Proxy, 0, len(proxies))
+	for _, entity := range proxies {
+		out = append(out, *proxyEntityToService(entity))
+	}
+	return out, nil
+}
+
+func (r *proxyRepository) ListActiveWithAccountCountByIDs(ctx context.Context, proxyIDs []int64) ([]service.ProxyWithAccountCount, error) {
+	if len(proxyIDs) == 0 {
+		return []service.ProxyWithAccountCount{}, nil
+	}
+	return r.listActiveWithAccountCount(ctx, []dbpredicate.Proxy{proxy.IDIn(proxyIDs...)})
 }
 
 func (r *proxyRepository) listActiveWithAccountCount(ctx context.Context, predicates []dbpredicate.Proxy) ([]service.ProxyWithAccountCount, error) {

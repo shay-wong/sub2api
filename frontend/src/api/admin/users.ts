@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   AdminUser,
+  AdminResourceScope,
   GlobalUserRole,
   UpdateUserRequest,
   PaginatedResponse,
@@ -64,6 +65,7 @@ export interface BatchUpdateUserLimitsResponse {
 export interface UpdateUserAdminAccessRequest {
   role: 'admin' | 'user'
   admin_permissions: string[]
+  resource_scope: AdminResourceScope
 }
 
 /**

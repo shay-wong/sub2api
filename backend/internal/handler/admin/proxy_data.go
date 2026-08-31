@@ -93,6 +93,11 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 
 // ImportData imports proxy-only data for migration.
 func (h *ProxyHandler) ImportData(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	type ProxyImportRequest struct {
 		Data DataPayload `json:"data"`
 	}
@@ -111,7 +116,13 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 	ctx := c.Request.Context()
 	result := DataImportResult{}
 
-	existingProxies, err := h.listProxiesFiltered(ctx, "", "", "", "id", "desc")
+	var existingProxies []service.Proxy
+	var err error
+	if scope.isScoped() {
+		existingProxies, err = h.adminService.GetProxiesByIDs(ctx, scope.ProxyIDs)
+	} else {
+		existingProxies, err = h.listProxiesFiltered(ctx, "", "", "", "id", "desc")
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

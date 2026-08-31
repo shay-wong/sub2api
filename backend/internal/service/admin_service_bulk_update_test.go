@@ -43,6 +43,7 @@ type accountRepoStubForBulkUpdate struct {
 	listErr              error
 	listCalled           bool
 	listGroupScopeCalled bool
+	listIDScopeCalled    bool
 	lastListParams       pagination.PaginationParams
 	lastListFilters      struct {
 		platform    string
@@ -59,6 +60,10 @@ type accountRepoStubForBulkUpdate struct {
 		search      string
 		groupIDs    []int64
 		privacyMode string
+	}
+	lastIDScopeFilters struct {
+		groupID    int64
+		accountIDs []int64
 	}
 }
 
@@ -190,6 +195,26 @@ func (s *accountRepoStubForBulkUpdate) ListWithGroupScope(_ context.Context, par
 		return s.listData, s.listResult, nil
 	}
 	return s.listData, &pagination.PaginationResult{Total: int64(len(s.listData))}, nil
+}
+
+func (s *accountRepoStubForBulkUpdate) ListWithIDScope(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs, accountIDs []int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
+	s.listIDScopeCalled = true
+	s.lastListParams = params
+	if len(groupIDs) > 0 {
+		s.lastIDScopeFilters.groupID = groupIDs[0]
+	}
+	s.lastIDScopeFilters.accountIDs = append([]int64(nil), accountIDs...)
+	allowed := make(map[int64]struct{}, len(accountIDs))
+	for _, id := range accountIDs {
+		allowed[id] = struct{}{}
+	}
+	filtered := make([]Account, 0, len(s.listData))
+	for _, account := range s.listData {
+		if _, ok := allowed[account.ID]; ok {
+			filtered = append(filtered, account)
+		}
+	}
+	return filtered, &pagination.PaginationResult{Total: int64(len(filtered))}, nil
 }
 
 // TestAdminService_BulkUpdateAccounts_AllSuccessIDs 验证批量更新成功时返回 success_ids/failed_ids。
@@ -498,6 +523,28 @@ func TestAdminServiceBulkUpdateAccounts_ResolvesIDsFromFilters(t *testing.T) {
 	require.Equal(t, 2, result.Success)
 	require.Equal(t, 0, result.Failed)
 	require.Equal(t, []int64{7, 11}, result.SuccessIDs)
+}
+
+func TestAdminServiceBulkUpdateAccounts_FilterTargetsIntersectDirectAccountScope(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{
+		listData: []Account{{ID: 7}, {ID: 11}},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := true
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountScopeIDs: []int64{11},
+		Filters:         &BulkUpdateAccountFilters{Group: "12"},
+		Schedulable:     &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.True(t, repo.listIDScopeCalled)
+	require.False(t, repo.listGroupScopeCalled)
+	require.Equal(t, int64(12), repo.lastIDScopeFilters.groupID)
+	require.Equal(t, []int64{11}, repo.lastIDScopeFilters.accountIDs)
+	require.Equal(t, []int64{11}, repo.bulkUpdateIDs)
+	require.Equal(t, []int64{11}, result.SuccessIDs)
 }
 
 func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {

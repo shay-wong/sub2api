@@ -30,13 +30,13 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.1.183` |
-| 当前 Fork 版本 | `0.1.183-fork.2` |
-| 已发布同基线 Fork 版本 | `0.1.183-fork.2` |
-| 下次发布所需版本 | `0.1.183-fork.3` |
+| 当前 Fork 版本 | `0.1.183-fork.3` |
+| 已发布同基线 Fork 版本 | `0.1.183-fork.3` |
+| 下次发布所需版本 | `0.1.183-fork.4` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍是已发布的 `0.1.183-fork.2`。本次只合并上游、不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.183-fork.3`。
+当前版本源是已发布的 `0.1.183-fork.3`。本次功能提交不发布，因此不修改 VERSION；下次发布前必须将版本源提升为 `0.1.183-fork.4`。
 
 ## 能力索引
 
@@ -59,18 +59,19 @@
 ## 1. 全局管理员角色与细粒度权限
 
 - **生命周期**：`长期保留`
-- **原始意图**：取消面向用户的 Project 空间、成员和资源隔离模型，恢复全局资源视图；保留 `super_admin`、`admin`、`user` 三种角色，并把管理员能力配置集中到用户管理列表。
-- **行为不变量**：`super_admin` 始终拥有全部后台权限，且不能通过管理员权限接口修改；`admin` 只拥有用户记录 `admin_permissions` 中显式授予的 8 项白名单权限；`user` 的管理员权限必须为空。创建用户和普通用户编辑接口不得提升或降级角色，只有超级管理员完成 step-up 验证后，才能通过 `PUT /api/v1/admin/users/:id/admin-access` 修改其他用户的 `admin/user` 角色和权限；修改后必须立即失效鉴权缓存。账号、分组、代理、API Key、用量、日志、批量图片任务、Dashboard、Ops 和调度缓存均为全局范围，不得再读取 Project context、成员关系、Profile binding、`X-Project-ID` 或前端选中项目状态。
+- **原始意图**：取消面向用户的 Project 空间、成员和资源隔离模型；保留 `super_admin`、`admin`、`user` 三种角色，并把管理员功能权限和分组、账号、代理、订阅四类资源范围统一配置在用户管理列表。
+- **行为不变量**：`super_admin` 始终拥有全部后台权限，且不能通过管理员权限接口修改；`admin` 只拥有用户记录 `admin_permissions` 中显式授予的 8 项白名单权限，并按 `all/restricted` 资源模式访问四类管理资源；`user` 的管理员权限和资源范围必须为空。受限模式的分组、账号、代理、订阅均为独立直接绑定，勾选分组不得隐式开放分组内账号，所有列表、详情、汇总和批量操作都必须与对应直接绑定取交集；受限管理员新建资源后自动绑定给自己。创建用户和普通用户编辑接口不得提升或降级角色，只有超级管理员完成 step-up 验证后，才能通过 `PUT /api/v1/admin/users/:id/admin-access` 在同一事务内修改其他用户的 `admin/user` 角色、功能权限和资源范围；无效资源 ID 必须使整次更新回滚，修改后必须立即失效鉴权缓存。该资源范围不是 Project 空间：API Key、用量、日志、批量图片任务、Dashboard、Ops 和调度缓存仍不得读取 Project context、成员关系、Profile binding、`X-Project-ID` 或前端选中项目状态。
 - **权限集合**：`admin.dashboard.read`、`admin.ops.read`、`admin.accounts.write`、`admin.users.manage`、`admin.groups.manage`、`admin.proxies.manage`、`admin.subscriptions.manage`、`admin.usage.read`。写入时必须校验白名单、去重并排序；未知项和空项必须拒绝。
-- **当前代码**：`backend/ent/schema/user.go`、`backend/internal/repository/legacy_project_id.go`、`backend/internal/service/permission_service.go`、`backend/internal/service/admin_user.go`、`backend/internal/server/middleware/admin_auth.go`、`backend/internal/server/middleware/admin_permission.go`、`backend/internal/handler/admin/user_handler.go`、`backend/internal/server/routes/admin.go`、`frontend/src/constants/adminPermissions.ts`、`frontend/src/views/admin/UsersView.vue`。
-- **迁移与测试**：`backend/migrations/233_add_user_admin_permissions.sql`、`backend/migrations/234_backfill_user_admin_permissions.sql`、`backend/migrations/user_admin_permissions_migration_test.go`、`backend/internal/repository/legacy_project_id_test.go`、`backend/internal/service/admin_service_role_test.go`、`backend/internal/server/middleware/admin_auth_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/api/__tests__/admin.users.spec.ts`、`frontend/src/views/admin/__tests__/UsersView.spec.ts`。
+- **当前代码**：`backend/ent/schema/user.go`、`backend/internal/repository/legacy_project_id.go`、`backend/internal/repository/admin_resource_scope_repo.go`、`backend/internal/service/permission_service.go`、`backend/internal/service/admin_user.go`、`backend/internal/handler/admin/access_scope.go`、`backend/internal/handler/admin/user_handler.go`、`backend/internal/server/middleware/admin_auth.go`、`backend/internal/server/middleware/admin_permission.go`、`backend/internal/server/routes/admin.go`、`frontend/src/constants/adminPermissions.ts`、`frontend/src/views/admin/UsersView.vue`。
+- **迁移与测试**：`backend/migrations/233_add_user_admin_permissions.sql`、`backend/migrations/234_backfill_user_admin_permissions.sql`、`backend/migrations/236_admin_resource_scopes.sql`、`backend/migrations/user_admin_permissions_migration_test.go`、`backend/migrations/admin_resource_scope_migration_test.go`、`backend/internal/repository/legacy_project_id_test.go`、`backend/internal/repository/admin_resource_scope_repo_test.go`、`backend/internal/service/admin_service_role_test.go`、`backend/internal/service/admin_service_bulk_update_test.go`、`backend/internal/handler/admin/operator_account_scope_test.go`、`backend/internal/handler/admin/group_summary_scope_test.go`、`backend/internal/handler/admin/subscription_scope_test.go`、`backend/internal/server/middleware/admin_auth_test.go`、`backend/internal/server/routes/admin_permission_routes_test.go`、`frontend/src/api/__tests__/admin.users.spec.ts`、`frontend/src/views/admin/__tests__/UsersView.spec.ts`。
 - **旧 Project 存储兼容**：本次不物理删除 `projects`、`project_members`、`project_profiles`、`project_profile_bindings` 及资源表中的 `project_id`，Ent schema 也暂时保留，避免旧列 `NOT NULL`、外键和混合版本部署阻断写入。兼容代码只能为新资源补默认 `project_id`，不得创建成员、绑定或恢复范围查询。确认所有部署已升级并完成数据审计后，必须另做独立 contract migration 删除旧表、列、索引、外键、Ent schema 和兼容写入。
-- **合并审查**：搜索新增 admin route、repository query、cache key、scheduler snapshot、WebSocket 和后台原始 `fetch`；任何重新引入 Project context、成员检查、Profile scope、项目请求头或项目切换 UI 的改动，都应视为与本能力冲突。上游若新增权限点，必须明确映射到现有 8 项权限或经维护者批准扩展白名单。
+- **合并审查**：搜索新增 admin route、repository query、批量/汇总入口、cache key、scheduler snapshot、WebSocket 和后台原始 `fetch`；管理资源入口必须执行对应直接绑定范围，且账号范围不得从分组成员关系推导。任何重新引入 Project context、成员检查、Profile scope、项目请求头或项目切换 UI 的改动，都应视为与本能力冲突。上游若新增权限点，必须明确映射到现有 8 项权限或经维护者批准扩展白名单。
 - **删除条件**：只有上游提供等价的全局角色、权限白名单、独立管理员权限入口、step-up 和缓存失效契约，并有同等回归覆盖时才可删除。
 - **聚焦验证**：
 
 ```bash
 (cd backend && go test -tags=unit ./internal/service -run 'Test.*AdminAccess|TestNormalizeAdminPermissions')
+(cd backend && go test ./internal/repository ./internal/handler/admin ./migrations -run 'Test.*(AdminResource|RestrictedAdmin|GroupSummaries)')
 (cd backend && go test -tags=unit ./internal/server/middleware ./internal/server/routes -run 'Test.*AdminPermission|Test.*AdminAccess')
 (cd backend && go test ./migrations -run '^TestUserAdminPermissionsMigrations$')
 (cd frontend && ./node_modules/.bin/vitest run src/api/__tests__/admin.users.spec.ts src/views/admin/__tests__/UsersView.spec.ts)
@@ -101,7 +102,7 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：支持 native/CPA 账号数据导入导出、文件级错误定位、批量连接测试、按账号选择模型、最近测试跳过和按失败类型清理账号。
-- **行为不变量**：导入不得留下半成功账号或破坏既有代理；CPA schema 自动识别且敏感字段不泄漏；批量测试必须限制并发；只有已加载的完整账号集合可进入测试或删除，失败删除结果必须逐项对账。所有批量操作都使用全局资源视图，不得注入项目请求头。
+- **行为不变量**：导入不得留下半成功账号或破坏既有代理；CPA schema 自动识别且敏感字段不泄漏；批量测试必须限制并发；只有已加载的完整账号集合可进入测试或删除，失败删除结果必须逐项对账。批量操作不得注入项目请求头；受限管理员的账号批量操作还必须与直接账号绑定取交集，分组绑定不能扩大账号范围。
 - **当前代码**：`backend/internal/handler/admin/account_data.go`、`backend/internal/handler/admin/account_data_cpa.go`、`frontend/src/components/admin/account/ImportDataModal.vue`、`frontend/src/components/admin/account/AccountBatchTestModal.vue`、`frontend/src/components/admin/account/AccountBulkActionsBar.vue`、`frontend/src/utils/accountTestRunner.ts`、`frontend/src/views/admin/AccountsView.vue`。
 - **测试**：`backend/internal/handler/admin/account_data_handler_test.go`、`frontend/src/__tests__/integration/data-import.spec.ts`、`frontend/src/components/admin/account/__tests__/AccountBatchTestModal.spec.ts`、`frontend/src/components/admin/account/__tests__/AccountBulkActionsBar.spec.ts`、`frontend/src/views/admin/__tests__/AccountsView.batchTest.spec.ts`。
 - **来源提交**：`3a295166d17636c9f3b44e53c47a7804ab83819e`、`454639e07532e35a0823048ad18948b508554615`、`3543db03bbcf1750852642115f48b61f7b61bac9`、`affd89e9f8f5c49b0f9909824c779187782ae5ab`、`67a183600a13e8a0170bf6780e2fb60ee3e9501b`、`a6ab6d15cab3d5fb2dcc2d2c65da1c6f6400625b`。

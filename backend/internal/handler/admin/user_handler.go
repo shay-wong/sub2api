@@ -89,8 +89,9 @@ type UpdateUserRequest struct {
 }
 
 type UpdateUserAdminAccessRequest struct {
-	Role             string   `json:"role" binding:"required,oneof=admin user"`
-	AdminPermissions []string `json:"admin_permissions"`
+	Role             string                     `json:"role" binding:"required,oneof=admin user"`
+	AdminPermissions []string                   `json:"admin_permissions"`
+	ResourceScope    service.AdminResourceScope `json:"resource_scope"`
 }
 
 // UpdateBalanceRequest represents balance update request
@@ -360,6 +361,7 @@ func (h *UserHandler) UpdateAdminAccess(c *gin.Context) {
 	user, err := h.adminService.UpdateUserAdminAccess(c.Request.Context(), userID, &service.UpdateUserAdminAccessInput{
 		Role:             req.Role,
 		AdminPermissions: req.AdminPermissions,
+		ResourceScope:    req.ResourceScope,
 		ActorAdminID:     getAdminIDFromContext(c),
 	})
 	if err != nil {

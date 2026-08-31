@@ -564,18 +564,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	if scope.isScoped() {
-		if groupID == service.AccountListGroupUngrouped {
-			response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
-			return
-		}
 		if groupID > 0 {
 			if err := scope.ensureGroup(groupID); err != nil {
 				response.ErrorFrom(c, err)
 				return
 			}
-		} else if len(scope.GroupIDs) == 1 {
-			groupID = scope.GroupIDs[0]
-		} else if len(scope.GroupIDs) == 0 {
+		}
+		if len(scope.AccountIDs) == 0 {
 			response.Paginated(c, []AccountWithConcurrency{}, 0, page, pageSize)
 			return
 		}
@@ -585,11 +580,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var total int64
 	var listErr error
 	usedScopedList := false
-	if scope.isScoped() && groupID == 0 {
+	if scope.isScoped() {
 		if scopedList, ok := h.adminService.(interface {
-			ListAccountsByGroupScope(context.Context, int, int, string, string, string, string, []int64, string, string, string) ([]service.Account, int64, error)
+			ListAccountsByIDScope(context.Context, int, int, string, string, string, string, int64, []int64, string, string, string) ([]service.Account, int64, error)
 		}); ok {
-			accounts, total, listErr = scopedList.ListAccountsByGroupScope(c.Request.Context(), page, pageSize, platform, accountType, status, search, scope.GroupIDs, privacyMode, sortBy, sortOrder)
+			accounts, total, listErr = scopedList.ListAccountsByIDScope(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, scope.AccountIDs, privacyMode, sortBy, sortOrder)
 			usedScopedList = true
 		} else {
 			accounts, total, listErr = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
@@ -601,7 +596,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, listErr)
 		return
 	}
-	if scope.isScoped() && groupID == 0 {
+	if scope.isScoped() {
 		filtered := accounts[:0]
 		for i := range accounts {
 			if scope.accountVisible(&accounts[i]) {
@@ -774,6 +769,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 // GetProxyOptions returns active proxies visible to the current account-management scope.
 // GET /api/v1/admin/accounts/proxy-options
 func (h *AccountHandler) GetProxyOptions(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	proxies, err := h.adminService.GetAccountProxyOptions(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -782,6 +782,9 @@ func (h *AccountHandler) GetProxyOptions(c *gin.Context) {
 
 	out := make([]dto.ProxyOption, 0, len(proxies))
 	for i := range proxies {
+		if !scope.containsProxy(proxies[i].ID) {
+			continue
+		}
 		out = append(out, *dto.ProxyOptionFromService(&proxies[i]))
 	}
 	response.Success(c, out)
@@ -862,7 +865,7 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if scope.Unrestricted && h.ollamaCloudUsage != nil {
@@ -1243,7 +1246,7 @@ func (h *AccountHandler) ensureAccountInScope(c *gin.Context, scope *adminAccess
 		return err
 	}
 	if !scope.accountVisible(account) {
-		return service.ErrOperatorAccountForbidden
+		return service.ErrAdminAccountScopeForbidden
 	}
 	return nil
 }
@@ -1267,7 +1270,7 @@ func (h *AccountHandler) ensureAccountsInScope(c *gin.Context, scope *adminAcces
 		}
 		for _, id := range normalizeInt64IDList(accountIDs) {
 			if _, ok := visible[id]; !ok {
-				return service.ErrOperatorAccountForbidden
+				return service.ErrAdminAccountScopeForbidden
 			}
 		}
 		return nil
@@ -1606,7 +1609,7 @@ func (h *AccountHandler) refreshAccount(c *gin.Context, requiredPlatform string)
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if requiredPlatform != "" && account.Platform != requiredPlatform {
@@ -1678,7 +1681,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(existing) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if !existing.IsOAuth() {
@@ -1861,6 +1864,11 @@ func (h *AccountHandler) RevertProxyFallback(c *gin.Context) {
 // BatchDelete handles deleting multiple accounts with bounded concurrency.
 // POST /api/v1/admin/accounts/batch-delete
 func (h *AccountHandler) BatchDelete(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req struct {
 		AccountIDs []int64 `json:"account_ids"`
 	}
@@ -1872,6 +1880,10 @@ func (h *AccountHandler) BatchDelete(c *gin.Context) {
 	accountIDs := normalizeInt64IDList(req.AccountIDs)
 	if len(accountIDs) == 0 {
 		response.BadRequest(c, "account_ids is required")
+		return
+	}
+	if err := h.ensureAccountsInScope(c, scope, accountIDs); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -2460,9 +2472,6 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 					response.ErrorFrom(c, err)
 					return
 				}
-			} else if len(req.AccountIDs) == 0 && len(scope.GroupIDs) == 0 {
-				response.ErrorFrom(c, service.ErrOperatorAccountScopeRequired)
-				return
 			}
 		}
 	}
@@ -2496,6 +2505,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
 		AccountIDs:            req.AccountIDs,
+		AccountScopeIDs:       accountMutationAccountScope(scope),
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
 		ProxyID:               req.ProxyID,
@@ -2568,6 +2578,13 @@ func accountMutationGroupScope(scope *adminAccessScope) []int64 {
 		return nil
 	}
 	return append([]int64(nil), scope.GroupIDs...)
+}
+
+func accountMutationAccountScope(scope *adminAccessScope) []int64 {
+	if scope == nil || !scope.isScoped() {
+		return nil
+	}
+	return append([]int64{}, scope.AccountIDs...)
 }
 
 // ========== OAuth Handlers ==========
@@ -3112,7 +3129,7 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 
@@ -3316,7 +3333,7 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 
@@ -3358,7 +3375,7 @@ func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 		return
 	}
 	if scope.isScoped() {
-		response.ErrorFrom(c, service.ErrOperatorScopeForbidden)
+		response.ErrorFrom(c, service.ErrAdminGroupScopeForbidden)
 		return
 	}
 	var req struct {
@@ -3435,7 +3452,7 @@ func (h *AccountHandler) SetPrivacy(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 	if account.Type != service.AccountTypeOAuth {
@@ -3491,7 +3508,7 @@ func (h *AccountHandler) RefreshTier(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 
@@ -3553,7 +3570,7 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 
 	if len(req.AccountIDs) == 0 {
 		if scope.isScoped() {
-			response.ErrorFrom(c, service.ErrOperatorAccountScopeRequired)
+			response.ErrorFrom(c, service.ErrAdminAccountScopeRequired)
 			return
 		}
 		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, "", "name", "asc")

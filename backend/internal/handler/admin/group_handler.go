@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/platform/liveattestation"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -97,6 +98,29 @@ func NewGroupHandler(adminService service.AdminService, dashboardService *servic
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
 		permissionService:    perm,
+	}
+}
+
+func (h *GroupHandler) RequireResourceScope() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope, err := resolveAdminAccessScope(c, h.permissionService)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || groupID <= 0 {
+			response.BadRequest(c, "Invalid group ID")
+			c.Abort()
+			return
+		}
+		if err := scope.ensureGroup(groupID); err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 
@@ -256,6 +280,11 @@ type CompositeRoutePreviewRequest struct {
 // List handles listing all groups with pagination
 // GET /api/v1/admin/groups
 func (h *GroupHandler) List(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	platform := c.Query("platform")
 	status := c.Query("status")
@@ -275,7 +304,28 @@ func (h *GroupHandler) List(c *gin.Context) {
 		isExclusive = &val
 	}
 
-	groups, total, err := h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
+	var groups []service.Group
+	var total int64
+	var err error
+	if scope.isScoped() {
+		if scoped, ok := h.adminService.(interface {
+			ListGroupsByIDScope(context.Context, int, int, string, string, string, *bool, string, string, []int64) ([]service.Group, int64, error)
+		}); ok {
+			groups, total, err = scoped.ListGroupsByIDScope(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder, scope.GroupIDs)
+		} else {
+			groups, total, err = h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
+			filtered := groups[:0]
+			for _, group := range groups {
+				if scope.containsGroup(group.ID) {
+					filtered = append(filtered, group)
+				}
+			}
+			groups = filtered
+			total = int64(len(groups))
+		}
+	} else {
+		groups, total, err = h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -503,6 +553,10 @@ func (h *GroupHandler) GetModelsListCandidates(c *gin.Context) {
 // Create handles creating a new group
 // POST /api/v1/admin/groups
 func (h *GroupHandler) Create(c *gin.Context) {
+	if _, err := resolveAdminAccessScope(c, h.permissionService); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	var req CreateGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -755,6 +809,11 @@ func (h *GroupHandler) GetStats(c *gin.Context) {
 // GetUsageSummary returns today's, yesterday's, and cumulative cost for all groups.
 // GET /api/v1/admin/groups/usage-summary
 func (h *GroupHandler) GetUsageSummary(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	todayStart := service.GroupUsageTodayStart(time.Now())
 
 	results, err := h.dashboardService.GetGroupUsageSummary(c.Request.Context(), todayStart)
@@ -763,18 +822,51 @@ func (h *GroupHandler) GetUsageSummary(c *gin.Context) {
 		return
 	}
 
+	results = filterGroupUsageSummaries(scope, results)
 	response.Success(c, results)
 }
 
 // GetCapacitySummary returns aggregated capacity (concurrency/sessions/RPM) for all active groups.
 // GET /api/v1/admin/groups/capacity-summary
 func (h *GroupHandler) GetCapacitySummary(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	results, err := h.groupCapacityService.GetAllGroupCapacity(c.Request.Context())
 	if err != nil {
 		response.Error(c, 500, "Failed to get group capacity summary")
 		return
 	}
+	results = filterGroupCapacitySummaries(scope, results)
 	response.Success(c, results)
+}
+
+func filterGroupUsageSummaries(scope *adminAccessScope, results []usagestats.GroupUsageSummary) []usagestats.GroupUsageSummary {
+	if !scope.isScoped() {
+		return results
+	}
+	filtered := results[:0]
+	for _, result := range results {
+		if scope.containsGroup(result.GroupID) {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
+}
+
+func filterGroupCapacitySummaries(scope *adminAccessScope, results []service.GroupCapacitySummary) []service.GroupCapacitySummary {
+	if !scope.isScoped() {
+		return results
+	}
+	filtered := results[:0]
+	for _, result := range results {
+		if scope.containsGroup(result.GroupID) {
+			filtered = append(filtered, result)
+		}
+	}
+	return filtered
 }
 
 // GetGroupAPIKeys handles getting API keys in a group
@@ -923,6 +1015,11 @@ type UpdateSortOrderRequest struct {
 // UpdateSortOrder handles updating group sort orders
 // PUT /api/v1/admin/groups/sort-order
 func (h *GroupHandler) UpdateSortOrder(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req UpdateSortOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -931,6 +1028,10 @@ func (h *GroupHandler) UpdateSortOrder(c *gin.Context) {
 
 	updates := make([]service.GroupSortOrderUpdate, 0, len(req.Updates))
 	for _, u := range req.Updates {
+		if err := scope.ensureGroup(u.ID); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 		updates = append(updates, service.GroupSortOrderUpdate{
 			ID:        u.ID,
 			SortOrder: u.SortOrder,

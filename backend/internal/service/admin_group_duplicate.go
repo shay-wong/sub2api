@@ -192,6 +192,9 @@ func (s *adminServiceImpl) DuplicateGroup(ctx context.Context, id int64, actorSc
 		return nil, err
 	}
 	if existing != nil {
+		if err := s.bindCreatedAdminResource(ctx, AdminResourceGroup, existing.ID); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 
@@ -215,6 +218,9 @@ func (s *adminServiceImpl) DuplicateGroup(ctx context.Context, id int64, actorSc
 			if loadErr != nil {
 				return nil, fmt.Errorf("load duplicate group: %w", loadErr)
 			}
+			if bindErr := s.bindCreatedAdminResource(ctx, AdminResourceGroup, hydrated.ID); bindErr != nil {
+				return nil, bindErr
+			}
 			return hydrated, nil
 		} else if !errors.Is(err, ErrGroupExists) {
 			return nil, fmt.Errorf("create duplicate group: %w", err)
@@ -227,6 +233,9 @@ func (s *adminServiceImpl) DuplicateGroup(ctx context.Context, id int64, actorSc
 			return nil, recoverErr
 		}
 		if recovered != nil {
+			if bindErr := s.bindCreatedAdminResource(ctx, AdminResourceGroup, recovered.ID); bindErr != nil {
+				return nil, bindErr
+			}
 			return recovered, nil
 		}
 	}

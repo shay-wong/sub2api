@@ -942,8 +942,11 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	return r.ListWithGroupScope(ctx, params, platform, accountType, status, search, groupIDs, privacyMode)
 }
 
-func (r *accountRepository) accountListFilteredQuery(ctx context.Context, platform, accountType, status, search string, groupIDs []int64, privacyMode string) *dbent.AccountQuery {
+func (r *accountRepository) accountListFilteredQuery(ctx context.Context, platform, accountType, status, search string, groupIDs, accountIDs []int64, privacyMode string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
+	if accountIDs != nil {
+		q = q.Where(dbaccount.IDIn(accountIDs...))
+	}
 
 	if platform != "" {
 		q = q.Where(dbaccount.PlatformEQ(platform))
@@ -1042,7 +1045,16 @@ func (r *accountRepository) accountListFilteredQuery(ctx context.Context, platfo
 }
 
 func (r *accountRepository) ListWithGroupScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
-	q := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, privacyMode)
+	q := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, nil, privacyMode)
+	return r.listAccountsQuery(ctx, params, q)
+}
+
+func (r *accountRepository) ListWithIDScope(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupIDs, accountIDs []int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, accountIDs, privacyMode)
+	return r.listAccountsQuery(ctx, params, q)
+}
+
+func (r *accountRepository) listAccountsQuery(ctx context.Context, params pagination.PaginationParams, q *dbent.AccountQuery) ([]service.Account, *pagination.PaginationResult, error) {
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -1103,7 +1115,7 @@ func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, ac
 	} else if groupID > 0 {
 		groupIDs = []int64{groupID}
 	}
-	accounts, err := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, privacyMode).All(ctx)
+	accounts, err := r.accountListFilteredQuery(ctx, platform, accountType, status, search, groupIDs, nil, privacyMode).All(ctx)
 	if err != nil {
 		return nil, err
 	}

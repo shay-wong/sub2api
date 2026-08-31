@@ -35,6 +35,50 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 	return proxies, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListProxiesWithAccountCountByIDScope(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string, proxyIDs []int64) ([]ProxyWithAccountCount, int64, error) {
+	if len(proxyIDs) == 0 {
+		return []ProxyWithAccountCount{}, 0, nil
+	}
+	repo, ok := s.proxyRepo.(interface {
+		ListWithFiltersAndAccountCountByIDs(context.Context, pagination.PaginationParams, string, string, string, []int64) ([]ProxyWithAccountCount, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, fmt.Errorf("proxy repository does not support direct ID scope listing")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	proxies, result, err := repo.ListWithFiltersAndAccountCountByIDs(ctx, params, protocol, status, search, proxyIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	s.attachProxyLatency(ctx, proxies)
+	return proxies, result.Total, nil
+}
+
+func (s *adminServiceImpl) GetAllProxiesByIDScope(ctx context.Context, proxyIDs []int64) ([]Proxy, error) {
+	repo, ok := s.proxyRepo.(interface {
+		ListActiveByIDs(context.Context, []int64) ([]Proxy, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("proxy repository does not support direct ID scope listing")
+	}
+	return repo.ListActiveByIDs(ctx, proxyIDs)
+}
+
+func (s *adminServiceImpl) GetAllProxiesWithAccountCountByIDScope(ctx context.Context, proxyIDs []int64) ([]ProxyWithAccountCount, error) {
+	repo, ok := s.proxyRepo.(interface {
+		ListActiveWithAccountCountByIDs(context.Context, []int64) ([]ProxyWithAccountCount, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("proxy repository does not support direct ID scope listing")
+	}
+	proxies, err := repo.ListActiveWithAccountCountByIDs(ctx, proxyIDs)
+	if err != nil {
+		return nil, err
+	}
+	s.attachProxyLatency(ctx, proxies)
+	return proxies, nil
+}
+
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
 	return s.proxyRepo.ListActive(ctx)
 }
@@ -106,6 +150,9 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		ExpiryWarnDays: expiryWarnDays,
 	}
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
+		return nil, err
+	}
+	if err := s.bindCreatedAdminResource(ctx, AdminResourceProxy, proxy.ID); err != nil {
 		return nil, err
 	}
 	// Probe latency asynchronously so creation isn't blocked by network timeout.

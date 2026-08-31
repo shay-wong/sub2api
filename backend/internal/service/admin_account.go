@@ -95,6 +95,30 @@ func (s *adminServiceImpl) ListAccountsByGroupScope(ctx context.Context, page, p
 	return accounts, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListAccountsByIDScope(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, accountIDs []int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
+	if len(accountIDs) == 0 {
+		return []Account{}, 0, nil
+	}
+	groupIDs := []int64(nil)
+	if groupID == AccountListGroupUngrouped {
+		groupIDs = []int64{AccountListGroupUngrouped}
+	} else if groupID > 0 {
+		groupIDs = []int64{groupID}
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	repo, ok := s.accountRepo.(interface {
+		ListWithIDScope(context.Context, pagination.PaginationParams, string, string, string, string, []int64, []int64, string) ([]Account, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, 0, fmt.Errorf("account repository does not support direct ID scope listing")
+	}
+	accounts, result, err := repo.ListWithIDScope(ctx, params, platform, accountType, status, search, groupIDs, accountIDs, privacyMode)
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
 func (s *adminServiceImpl) ListAccountsForSchedulerScoreFilter(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, nil
@@ -307,6 +331,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		return nil, err
 	}
 	if existing != nil {
+		if bindErr := s.bindCreatedAdminResource(ctx, AdminResourceAccount, existing.ID); bindErr != nil {
+			return nil, bindErr
+		}
 		return existing, nil
 	}
 
@@ -403,6 +430,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 			return nil, errors.Join(fmt.Errorf("create duplicate account: %w", err), recoverErr)
 		}
 		if committed != nil {
+			if bindErr := s.bindCreatedAdminResource(ctx, AdminResourceAccount, committed.ID); bindErr != nil {
+				return nil, bindErr
+			}
 			return committed, nil
 		}
 		return nil, fmt.Errorf("create duplicate account: %w", err)
@@ -412,6 +442,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	}
 	duplicate.AccountGroups = groups
 	duplicate.GroupIDs = groupIDs
+	if bindErr := s.bindCreatedAdminResource(ctx, AdminResourceAccount, duplicate.ID); bindErr != nil {
+		return nil, bindErr
+	}
 	return duplicate, nil
 }
 
@@ -614,6 +647,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.bindCreatedAdminResource(ctx, AdminResourceAccount, account.ID); err != nil {
+		return nil, err
 	}
 
 	// OAuth 账号：创建后异步设置隐私。
@@ -1033,7 +1069,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, OllamaCloudUsageSnapshotExtraKey)
 
 	if len(input.AccountIDs) == 0 && input.Filters != nil {
-		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters, input.GroupScopeIDs)
+		accountIDs, err := s.resolveBulkUpdateTargetIDs(ctx, input.Filters, input.GroupScopeIDs, input.AccountScopeIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -1406,7 +1442,7 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 	return identity
 }
 
-func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters, groupScopeIDs []int64) ([]int64, error) {
+func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filters *BulkUpdateAccountFilters, groupScopeIDs, accountScopeIDs []int64) ([]int64, error) {
 	if filters == nil {
 		return nil, nil
 	}
@@ -1432,7 +1468,22 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 		var accounts []Account
 		var total int64
 		var err error
-		if groupID == 0 && len(groupScopeIDs) > 0 {
+		if accountScopeIDs != nil {
+			accounts, total, err = s.ListAccountsByIDScope(
+				ctx,
+				page,
+				pageSize,
+				filters.Platform,
+				filters.Type,
+				filters.Status,
+				filters.Search,
+				groupID,
+				accountScopeIDs,
+				filters.PrivacyMode,
+				"",
+				"",
+			)
+		} else if groupID == 0 && len(groupScopeIDs) > 0 {
 			accounts, total, err = s.ListAccountsByGroupScope(
 				ctx,
 				page,

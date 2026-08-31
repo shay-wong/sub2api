@@ -21,6 +21,7 @@ type User struct {
 	PasswordAuthResolved bool
 	Role                 string
 	AdminPermissions     []string
+	AdminResourceScope   AdminResourceScope
 	Balance              float64
 	FrozenBalance        float64
 	Concurrency          int

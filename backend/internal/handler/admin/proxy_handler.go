@@ -18,13 +18,39 @@ import (
 
 // ProxyHandler handles admin proxy management
 type ProxyHandler struct {
-	adminService service.AdminService
+	adminService      service.AdminService
+	permissionService *service.PermissionService
 }
 
 // NewProxyHandler creates a new admin proxy handler
-func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
-	return &ProxyHandler{
-		adminService: adminService,
+func NewProxyHandler(adminService service.AdminService, permissionService ...*service.PermissionService) *ProxyHandler {
+	var permissions *service.PermissionService
+	if len(permissionService) > 0 {
+		permissions = permissionService[0]
+	}
+	return &ProxyHandler{adminService: adminService, permissionService: permissions}
+}
+
+func (h *ProxyHandler) RequireResourceScope() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope, err := resolveAdminAccessScope(c, h.permissionService)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		proxyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || proxyID <= 0 {
+			response.BadRequest(c, "Invalid proxy ID")
+			c.Abort()
+			return
+		}
+		if err := scope.ensureProxy(proxyID); err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 
@@ -100,6 +126,11 @@ type UpdateProxyRequest struct {
 // List handles listing all proxies with pagination
 // GET /api/v1/admin/proxies
 func (h *ProxyHandler) List(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	protocol := c.Query("protocol")
 	status := c.Query("status")
@@ -112,7 +143,20 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		search = search[:100]
 	}
 
-	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+	var proxies []service.ProxyWithAccountCount
+	var total int64
+	var err error
+	if scope.isScoped() {
+		if scoped, ok := h.adminService.(interface {
+			ListProxiesWithAccountCountByIDScope(context.Context, int, int, string, string, string, string, string, []int64) ([]service.ProxyWithAccountCount, int64, error)
+		}); ok {
+			proxies, total, err = scoped.ListProxiesWithAccountCountByIDScope(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder, scope.ProxyIDs)
+		} else {
+			proxies, total, err = h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+		}
+	} else {
+		proxies, total, err = h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -125,10 +169,27 @@ func (h *ProxyHandler) List(c *gin.Context) {
 // GET /api/v1/admin/proxies/all
 // Optional query param: with_count=true to include account count per proxy
 func (h *ProxyHandler) GetAll(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	withCount := c.Query("with_count") == "true"
 
 	if withCount {
-		proxies, err := h.adminService.GetAllProxiesWithAccountCount(c.Request.Context())
+		var proxies []service.ProxyWithAccountCount
+		var err error
+		if scope.isScoped() {
+			if scoped, ok := h.adminService.(interface {
+				GetAllProxiesWithAccountCountByIDScope(context.Context, []int64) ([]service.ProxyWithAccountCount, error)
+			}); ok {
+				proxies, err = scoped.GetAllProxiesWithAccountCountByIDScope(c.Request.Context(), scope.ProxyIDs)
+			} else {
+				proxies, err = h.adminService.GetAllProxiesWithAccountCount(c.Request.Context())
+			}
+		} else {
+			proxies, err = h.adminService.GetAllProxiesWithAccountCount(c.Request.Context())
+		}
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -137,7 +198,19 @@ func (h *ProxyHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	proxies, err := h.adminService.GetAllProxies(c.Request.Context())
+	var proxies []service.Proxy
+	var err error
+	if scope.isScoped() {
+		if scoped, ok := h.adminService.(interface {
+			GetAllProxiesByIDScope(context.Context, []int64) ([]service.Proxy, error)
+		}); ok {
+			proxies, err = scoped.GetAllProxiesByIDScope(c.Request.Context(), scope.ProxyIDs)
+		} else {
+			proxies, err = h.adminService.GetAllProxies(c.Request.Context())
+		}
+	} else {
+		proxies, err = h.adminService.GetAllProxies(c.Request.Context())
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -167,6 +240,10 @@ func (h *ProxyHandler) GetByID(c *gin.Context) {
 // Create handles creating a new proxy
 // POST /api/v1/admin/proxies
 func (h *ProxyHandler) Create(c *gin.Context) {
+	if _, err := resolveAdminAccessScope(c, h.permissionService); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	var req CreateProxyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -274,6 +351,11 @@ func (h *ProxyHandler) Delete(c *gin.Context) {
 // BatchDelete handles batch deleting proxies
 // POST /api/v1/admin/proxies/batch-delete
 func (h *ProxyHandler) BatchDelete(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	type BatchDeleteRequest struct {
 		IDs []int64 `json:"ids" binding:"required,min=1"`
 	}
@@ -282,6 +364,12 @@ func (h *ProxyHandler) BatchDelete(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	for _, id := range req.IDs {
+		if err := scope.ensureProxy(id); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	result, err := h.adminService.BatchDeleteProxies(c.Request.Context(), req.IDs)
@@ -356,9 +444,18 @@ func (h *ProxyHandler) GetStats(c *gin.Context) {
 // GetProxyAccounts handles getting accounts using a proxy
 // GET /api/v1/admin/proxies/:id/accounts
 func (h *ProxyHandler) GetProxyAccounts(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	proxyID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid proxy ID")
+		return
+	}
+	if err := scope.ensureProxy(proxyID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -370,6 +467,11 @@ func (h *ProxyHandler) GetProxyAccounts(c *gin.Context) {
 
 	out := make([]dto.ProxyAccountSummary, 0, len(accounts))
 	for i := range accounts {
+		if scope.isScoped() {
+			if _, ok := scope.accountSet[accounts[i].ID]; !ok {
+				continue
+			}
+		}
 		out = append(out, *dto.ProxyAccountSummaryFromService(&accounts[i]))
 	}
 	response.Success(c, out)
@@ -392,6 +494,10 @@ type BatchCreateRequest struct {
 // BatchCreate handles batch creating proxies
 // POST /api/v1/admin/proxies/batch
 func (h *ProxyHandler) BatchCreate(c *gin.Context) {
+	if _, err := resolveAdminAccessScope(c, h.permissionService); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	var req BatchCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())

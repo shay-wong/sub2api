@@ -678,6 +678,19 @@ export default {
         description: 'Configure global admin access for {email}.',
         enableAdmin: 'Enable admin access',
         permissions: 'Permissions',
+        resourceScope: 'Resource scope',
+        allResources: 'All resources',
+        restrictedResources: 'Selected resources only',
+        searchResources: 'Search resources',
+        noResources: 'No resources',
+        directAccountBindingHint: 'Group access does not grant access to accounts in that group. Accounts must be selected directly.',
+        failedToLoadResources: 'Failed to load permission resources',
+        resourceTypes: {
+          groups: 'Groups',
+          accounts: 'Accounts',
+          proxies: 'Proxies',
+          subscriptions: 'Subscriptions'
+        },
         updated: 'Admin permissions updated',
         failed: 'Failed to update admin permissions',
         permissionLabels: {

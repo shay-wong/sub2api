@@ -49,6 +49,9 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			}
 		}
 	}
+	if err := s.loadAdminResourceScopes(ctx, users); err != nil {
+		return nil, 0, err
+	}
 	// 批量加载用户专属分组倍率
 	if s.userGroupRateRepo != nil && len(users) > 0 {
 		if batchRepo, ok := s.userGroupRateRepo.(userGroupRateBatchReader); ok {
@@ -108,7 +111,42 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 			user.GroupRates = rates
 		}
 	}
+	if err := s.loadAdminResourceScopes(ctx, []User{*user}); err != nil {
+		return nil, err
+	}
+	if user.Role == RoleAdmin && s.permissionService != nil {
+		scope, scopeErr := s.permissionService.GetAdminResourceScope(ctx, user.ID)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		user.AdminResourceScope = scope
+	} else {
+		user.AdminResourceScope = UnrestrictedAdminResourceScope()
+	}
 	return user, nil
+}
+
+func (s *adminServiceImpl) loadAdminResourceScopes(ctx context.Context, users []User) error {
+	adminIDs := make([]int64, 0, len(users))
+	for i := range users {
+		users[i].AdminResourceScope = UnrestrictedAdminResourceScope()
+		if users[i].Role == RoleAdmin {
+			adminIDs = append(adminIDs, users[i].ID)
+		}
+	}
+	if len(adminIDs) == 0 || s.permissionService == nil {
+		return nil
+	}
+	scopes, err := s.permissionService.GetAdminResourceScopesByUserIDs(ctx, adminIDs)
+	if err != nil {
+		return err
+	}
+	for i := range users {
+		if scope, ok := scopes[users[i].ID]; ok {
+			users[i].AdminResourceScope = scope
+		}
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) (*User, error) {
@@ -299,18 +337,24 @@ func (s *adminServiceImpl) UpdateUserAdminAccess(ctx context.Context, id int64, 
 	if err != nil {
 		return nil, err
 	}
-	oldRole := user.Role
-	oldPermissions := append([]string(nil), user.AdminPermissions...)
-	user.Role = input.Role
-	user.AdminPermissions = permissions
-	if err := s.userRepo.Update(ctx, user, UserUpdateFields{Role: true, AdminPermissions: true}); err != nil {
+	scope, err := NormalizeAdminResourceScope(input.Role, input.ResourceScope)
+	if err != nil {
 		return nil, err
 	}
+	oldRole := user.Role
+	oldPermissions := append([]string(nil), user.AdminPermissions...)
+	actorAdminID := input.ActorAdminID
+	if err := s.permissionService.UpdateUserAdminAccess(ctx, user.ID, input.Role, permissions, scope, &actorAdminID); err != nil {
+		return nil, err
+	}
+	user.Role = input.Role
+	user.AdminPermissions = permissions
+	user.AdminResourceScope = scope
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 	}
-	logger.LegacyPrintf("service.admin", "audit: user admin access changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s old_permissions=%v new_permissions=%v",
-		input.ActorAdminID, user.ID, oldRole, user.Role, oldPermissions, user.AdminPermissions)
+	logger.LegacyPrintf("service.admin", "audit: user admin access changed actor_admin_id=%d target_user_id=%d old_role=%s new_role=%s old_permissions=%v new_permissions=%v resource_scope=%s",
+		input.ActorAdminID, user.ID, oldRole, user.Role, oldPermissions, user.AdminPermissions, scope.Mode)
 	return user, nil
 }
 

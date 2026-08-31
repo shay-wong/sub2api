@@ -16,7 +16,8 @@ import (
 )
 
 type operatorPermissionRepoStub struct {
-	scopes map[int64][]int64
+	scopes      map[int64][]int64
+	adminScopes map[int64]service.AdminResourceScope
 }
 
 func (r *operatorPermissionRepoStub) ListOperatorPermissionSubjects(context.Context) ([]service.OperatorPermissionSubject, error) {
@@ -36,6 +37,33 @@ func (r *operatorPermissionRepoStub) SetOperatorGroupIDs(context.Context, int64,
 }
 
 func (r *operatorPermissionRepoStub) ClearOperatorGroupIDs(context.Context, int64) error {
+	return nil
+}
+
+func (r *operatorPermissionRepoStub) GetAdminResourceScope(_ context.Context, userID int64) (service.AdminResourceScope, error) {
+	if scope, ok := r.adminScopes[userID]; ok {
+		return scope, nil
+	}
+	return service.UnrestrictedAdminResourceScope(), nil
+}
+
+func (r *operatorPermissionRepoStub) GetAdminResourceScopesByUserIDs(_ context.Context, userIDs []int64) (map[int64]service.AdminResourceScope, error) {
+	out := make(map[int64]service.AdminResourceScope, len(userIDs))
+	for _, userID := range userIDs {
+		scope, err := r.GetAdminResourceScope(context.Background(), userID)
+		if err != nil {
+			return nil, err
+		}
+		out[userID] = scope
+	}
+	return out, nil
+}
+
+func (r *operatorPermissionRepoStub) UpdateUserAdminAccess(context.Context, int64, string, []string, service.AdminResourceScope, *int64) error {
+	return nil
+}
+
+func (r *operatorPermissionRepoStub) BindAdminResource(context.Context, int64, string, int64, *int64) error {
 	return nil
 }
 
@@ -203,6 +231,140 @@ func newAdminAccountScopeRouter(adminSvc *stubAdminService) *gin.Engine {
 	router.POST("/api/v1/admin/accounts/bulk-update", handler.BulkUpdate)
 	router.POST("/api/v1/admin/accounts/:id/apply-oauth-credentials", handler.ApplyOAuthCredentials)
 	return router
+}
+
+func newRestrictedAdminAccountScopeRouter(adminSvc *stubAdminService, scope service.AdminResourceScope) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	permissionSvc := service.NewPermissionService(
+		&operatorPermissionRepoStub{adminScopes: map[int64]service.AdminResourceScope{101: scope}},
+		operatorUserRepoStub{},
+		operatorGroupRepoStub{},
+	)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, permissionSvc)
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), service.RoleAdmin))
+		c.Next()
+	})
+	router.GET("/api/v1/admin/accounts", handler.List)
+	router.GET("/api/v1/admin/accounts/:id", handler.GetByID)
+	router.GET("/api/v1/admin/accounts/proxy-options", handler.GetProxyOptions)
+	router.POST("/api/v1/admin/accounts/batch-delete", handler.BatchDelete)
+	router.POST("/api/v1/admin/accounts/bulk-update", handler.BulkUpdate)
+	return router
+}
+
+func TestRestrictedAdminAccountScopeUsesDirectBindingsOnly(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "group-only", Status: service.StatusActive, GroupIDs: []int64{10}},
+		{ID: 2, Name: "direct", Status: service.StatusActive, GroupIDs: []int64{20}},
+	}
+	router := newRestrictedAdminAccountScopeRouter(adminSvc, service.AdminResourceScope{
+		Mode:       service.AdminResourceScopeRestricted,
+		GroupIDs:   []int64{10},
+		AccountIDs: []int64{2},
+	})
+
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil))
+	require.Equal(t, http.StatusOK, listRec.Code)
+	require.NotContains(t, listRec.Body.String(), "group-only")
+	require.Contains(t, listRec.Body.String(), "direct")
+
+	groupOnlyRec := httptest.NewRecorder()
+	router.ServeHTTP(groupOnlyRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/1", nil))
+	require.Equal(t, http.StatusForbidden, groupOnlyRec.Code)
+	require.Contains(t, groupOnlyRec.Body.String(), "ADMIN_ACCOUNT_SCOPE_FORBIDDEN")
+
+	directRec := httptest.NewRecorder()
+	router.ServeHTTP(directRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/2", nil))
+	require.Equal(t, http.StatusOK, directRec.Code)
+}
+
+func TestRestrictedAdminAccountBatchOperationsUseDirectBindings(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{
+		{ID: 1, Name: "group-only", Status: service.StatusActive, GroupIDs: []int64{10}},
+		{ID: 2, Name: "direct", Status: service.StatusActive, GroupIDs: []int64{10}},
+	}
+	router := newRestrictedAdminAccountScopeRouter(adminSvc, service.AdminResourceScope{
+		Mode:       service.AdminResourceScopeRestricted,
+		GroupIDs:   []int64{10},
+		AccountIDs: []int64{2},
+	})
+
+	deleteRec := httptest.NewRecorder()
+	deleteReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/batch-delete", bytes.NewBufferString(`{"account_ids":[1]}`))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(deleteRec, deleteReq)
+	require.Equal(t, http.StatusForbidden, deleteRec.Code)
+	require.Contains(t, deleteRec.Body.String(), "ADMIN_ACCOUNT_SCOPE_FORBIDDEN")
+
+	bulkRec := httptest.NewRecorder()
+	bulkReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewBufferString(`{"filters":{"group":"10"},"schedulable":true}`))
+	bulkReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(bulkRec, bulkReq)
+	require.Equal(t, http.StatusOK, bulkRec.Code)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput)
+	require.Equal(t, []int64{2}, adminSvc.lastBulkUpdateAccountInput.AccountScopeIDs)
+}
+
+func TestRestrictedAdminProxyCollectionsUseDirectBindings(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.proxies = []service.Proxy{
+		{ID: 10, Name: "hidden", Status: service.StatusActive},
+		{ID: 20, Name: "visible", Status: service.StatusActive},
+	}
+	scope := service.AdminResourceScope{
+		Mode:       service.AdminResourceScopeRestricted,
+		AccountIDs: []int64{2},
+		ProxyIDs:   []int64{20},
+	}
+	permissionSvc := service.NewPermissionService(
+		&operatorPermissionRepoStub{adminScopes: map[int64]service.AdminResourceScope{101: scope}},
+		operatorUserRepoStub{},
+		operatorGroupRepoStub{},
+	)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Next()
+	})
+	accountHandler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, permissionSvc)
+	proxyHandler := NewProxyHandler(&scopedProxyAccountsAdminService{
+		stubAdminService: adminSvc,
+		proxyAccounts: []service.ProxyAccountSummary{
+			{ID: 1, Name: "hidden-account"},
+			{ID: 2, Name: "visible-account"},
+		},
+	}, permissionSvc)
+	router.GET("/api/v1/admin/accounts/proxy-options", accountHandler.GetProxyOptions)
+	router.GET("/api/v1/admin/proxies/:id/accounts", proxyHandler.GetProxyAccounts)
+
+	optionsRec := httptest.NewRecorder()
+	router.ServeHTTP(optionsRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/proxy-options", nil))
+	require.Equal(t, http.StatusOK, optionsRec.Code)
+	require.NotContains(t, optionsRec.Body.String(), "hidden")
+	require.Contains(t, optionsRec.Body.String(), "visible")
+
+	accountsRec := httptest.NewRecorder()
+	router.ServeHTTP(accountsRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/20/accounts", nil))
+	require.Equal(t, http.StatusOK, accountsRec.Code)
+	require.NotContains(t, accountsRec.Body.String(), "hidden-account")
+	require.Contains(t, accountsRec.Body.String(), "visible-account")
+}
+
+type scopedProxyAccountsAdminService struct {
+	*stubAdminService
+	proxyAccounts []service.ProxyAccountSummary
+}
+
+func (s *scopedProxyAccountsAdminService) GetProxyAccounts(context.Context, int64) ([]service.ProxyAccountSummary, error) {
+	return s.proxyAccounts, nil
 }
 
 func TestOperatorAccountRoutesRejectLegacyRole(t *testing.T) {

@@ -818,6 +818,75 @@
             <span class="text-sm text-gray-700 dark:text-dark-200">{{ option.label }}</span>
           </label>
         </fieldset>
+        <fieldset :disabled="!adminAccessEnabled" class="space-y-3 disabled:opacity-50">
+          <legend class="text-sm font-medium text-gray-800 dark:text-dark-100">
+            {{ t('admin.users.adminAccess.resourceScope') }}
+          </legend>
+          <label class="flex items-center gap-3">
+            <input
+              v-model="adminResourceScope.mode"
+              value="all"
+              type="radio"
+              class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-dark-200">
+              {{ t('admin.users.adminAccess.allResources') }}
+            </span>
+          </label>
+          <label class="flex items-center gap-3">
+            <input
+              v-model="adminResourceScope.mode"
+              value="restricted"
+              type="radio"
+              class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-dark-200">
+              {{ t('admin.users.adminAccess.restrictedResources') }}
+            </span>
+          </label>
+          <div v-if="adminResourceScope.mode === 'restricted'" class="grid gap-4 sm:grid-cols-2">
+            <fieldset v-for="resourceType in adminResourceTypes" :key="resourceType" class="min-w-0 space-y-2">
+              <legend class="text-sm font-medium text-gray-700 dark:text-dark-200">
+                {{ t(`admin.users.adminAccess.resourceTypes.${resourceType}`) }}
+              </legend>
+              <input
+                v-model.trim="adminResourceSearch[resourceType]"
+                type="search"
+                class="input h-9"
+                :placeholder="t('admin.users.adminAccess.searchResources')"
+              />
+              <div class="h-36 overflow-y-auto border-y border-gray-200 py-1 dark:border-dark-600">
+                <p v-if="loadingAdminResources" class="px-2 py-3 text-xs text-gray-500 dark:text-dark-300">
+                  {{ t('common.loading') }}
+                </p>
+                <p v-else-if="filteredAdminResourceOptions(resourceType).length === 0" class="px-2 py-3 text-xs text-gray-500 dark:text-dark-300">
+                  {{ t('admin.users.adminAccess.noResources') }}
+                </p>
+                <label
+                  v-for="option in filteredAdminResourceOptions(resourceType)"
+                  v-else
+                  :key="`${resourceType}-${option.id}`"
+                  class="flex items-start gap-2 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-dark-700"
+                >
+                  <input
+                    v-model="adminResourceScope[adminResourceIDKey(resourceType)]"
+                    :data-test="`admin-resource-${resourceType}-${option.id}`"
+                    :value="option.id"
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span class="min-w-0 text-sm text-gray-700 dark:text-dark-200">
+                    <span class="block truncate">{{ option.label }}</span>
+                    <span v-if="option.detail" class="block truncate text-xs text-gray-500 dark:text-dark-400">{{ option.detail }}</span>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+          </div>
+          <p v-if="adminResourceScope.mode === 'restricted'" class="text-xs text-gray-500 dark:text-dark-300">
+            {{ t('admin.users.adminAccess.directAccountBindingHint') }}
+          </p>
+        </fieldset>
       </div>
       <template #footer>
         <div class="flex justify-end gap-3">
@@ -851,7 +920,7 @@ import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
-import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
+import type { Account, AdminGroup, AdminResourceScope, AdminUser, Proxy, UserAttributeDefinition, UserSubscription } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
 import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
@@ -1442,6 +1511,31 @@ const adminAccessUser = ref<AdminUser | null>(null)
 const adminAccessEnabled = ref(false)
 const adminAccessPermissions = ref<AdminPermission[]>([])
 const savingAdminAccess = ref(false)
+type AdminResourceType = 'groups' | 'accounts' | 'proxies' | 'subscriptions'
+type AdminResourceIDKey = 'group_ids' | 'account_ids' | 'proxy_ids' | 'subscription_ids'
+type AdminResourceOption = { id: number; label: string; detail?: string }
+const adminResourceTypes: AdminResourceType[] = ['groups', 'accounts', 'proxies', 'subscriptions']
+const emptyAdminResourceScope = (): AdminResourceScope => ({
+  mode: 'all',
+  group_ids: [],
+  account_ids: [],
+  proxy_ids: [],
+  subscription_ids: []
+})
+const adminResourceScope = reactive<AdminResourceScope>(emptyAdminResourceScope())
+const adminResourceOptions = reactive<Record<AdminResourceType, AdminResourceOption[]>>({
+  groups: [],
+  accounts: [],
+  proxies: [],
+  subscriptions: []
+})
+const adminResourceSearch = reactive<Record<AdminResourceType, string>>({
+  groups: '',
+  accounts: '',
+  proxies: '',
+  subscriptions: ''
+})
+const loadingAdminResources = ref(false)
 const adminPermissionOptions = computed(() => [
   { value: AdminPermissions.dashboard, label: t('admin.users.adminAccess.permissionLabels.dashboard') },
   { value: AdminPermissions.ops, label: t('admin.users.adminAccess.permissionLabels.ops') },
@@ -1453,6 +1547,84 @@ const adminPermissionOptions = computed(() => [
   { value: AdminPermissions.usage, label: t('admin.users.adminAccess.permissionLabels.usage') }
 ])
 
+const adminResourceIDKey = (type: AdminResourceType): AdminResourceIDKey => {
+  switch (type) {
+    case 'groups': return 'group_ids'
+    case 'accounts': return 'account_ids'
+    case 'proxies': return 'proxy_ids'
+    case 'subscriptions': return 'subscription_ids'
+  }
+}
+
+const filteredAdminResourceOptions = (type: AdminResourceType) => {
+  const query = adminResourceSearch[type].toLocaleLowerCase()
+  return query
+    ? adminResourceOptions[type].filter(option => `${option.label} ${option.detail ?? ''}`.toLocaleLowerCase().includes(query))
+    : adminResourceOptions[type]
+}
+
+const resetAdminResourceScope = (scope?: AdminResourceScope) => {
+  const source = scope ?? emptyAdminResourceScope()
+  adminResourceScope.mode = source.mode
+  for (const type of adminResourceTypes) {
+    adminResourceScope[adminResourceIDKey(type)] = [...source[adminResourceIDKey(type)]]
+    adminResourceSearch[type] = ''
+  }
+}
+
+const withBoundAdminResources = (type: AdminResourceType, options: AdminResourceOption[]) => {
+  const byID = new Map(options.map(option => [option.id, option]))
+  for (const id of adminResourceScope[adminResourceIDKey(type)]) {
+    if (!byID.has(id)) byID.set(id, { id, label: `#${id}` })
+  }
+  adminResourceOptions[type] = [...byID.values()]
+}
+
+const loadAllAdminResourcePages = async <T,>(loadPage: (page: number) => Promise<{ items: T[]; pages: number }>) => {
+  const first = await loadPage(1)
+  if (first.pages <= 1) return first.items
+  const rest = await Promise.all(
+    Array.from({ length: first.pages - 1 }, (_, index) => loadPage(index + 2))
+  )
+  return first.items.concat(...rest.map(page => page.items))
+}
+
+const loadAdminResourceOptions = async () => {
+  loadingAdminResources.value = true
+  try {
+    const [groups, accounts, proxies, subscriptions] = await Promise.all([
+      adminAPI.groups.getAllIncludingInactive(),
+      loadAllAdminResourcePages((page) => adminAPI.accounts.list(page, 1000, { lite: 'true' })),
+      loadAllAdminResourcePages((page) => adminAPI.proxies.list(page, 1000)),
+      loadAllAdminResourcePages((page) => adminAPI.subscriptions.list(page, 1000))
+    ])
+    withBoundAdminResources('groups', groups.map((group: AdminGroup) => ({
+      id: group.id,
+      label: group.name,
+      detail: group.platform
+    })))
+    withBoundAdminResources('accounts', accounts.map((account: Account) => ({
+      id: account.id,
+      label: account.name || `#${account.id}`,
+      detail: account.platform
+    })))
+    withBoundAdminResources('proxies', proxies.map((proxy: Proxy) => ({
+      id: proxy.id,
+      label: proxy.name || `#${proxy.id}`,
+      detail: `${proxy.protocol}://${proxy.host}:${proxy.port}`
+    })))
+    withBoundAdminResources('subscriptions', subscriptions.map((subscription: UserSubscription) => ({
+      id: subscription.id,
+      label: subscription.user?.email || `#${subscription.user_id}`,
+      detail: subscription.group?.name || `#${subscription.group_id}`
+    })))
+  } catch (error) {
+    appStore.showError(t('admin.users.adminAccess.failedToLoadResources'))
+  } finally {
+    loadingAdminResources.value = false
+  }
+}
+
 const openAdminAccess = (user: AdminUser) => {
   if (!authStore.isAdmin || user.role === 'super_admin') return
   adminAccessUser.value = user
@@ -1460,7 +1632,9 @@ const openAdminAccess = (user: AdminUser) => {
   adminAccessPermissions.value = allAdminPermissions.filter(permission =>
     (user.admin_permissions ?? []).includes(permission)
   )
+  resetAdminResourceScope(user.admin_resource_scope)
   showAdminAccessModal.value = true
+  void loadAdminResourceOptions()
 }
 
 const closeAdminAccess = () => {
@@ -1475,7 +1649,16 @@ const saveAdminAccess = async () => {
   try {
     await adminAPI.users.updateAdminAccess(adminAccessUser.value.id, {
       role: adminAccessEnabled.value ? 'admin' : 'user',
-      admin_permissions: adminAccessEnabled.value ? adminAccessPermissions.value : []
+      admin_permissions: adminAccessEnabled.value ? adminAccessPermissions.value : [],
+      resource_scope: adminAccessEnabled.value
+        ? {
+            mode: adminResourceScope.mode,
+            group_ids: [...adminResourceScope.group_ids],
+            account_ids: [...adminResourceScope.account_ids],
+            proxy_ids: [...adminResourceScope.proxy_ids],
+            subscription_ids: [...adminResourceScope.subscription_ids]
+          }
+        : emptyAdminResourceScope()
     })
     appStore.showSuccess(t('admin.users.adminAccess.updated'))
     showAdminAccessModal.value = false

@@ -827,9 +827,25 @@ func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, u
 }
 
 // ListGroupSubscriptions 获取分组的所有订阅
-func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupID int64, page, pageSize int) ([]UserSubscription, *pagination.PaginationResult, error) {
+func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupID int64, page, pageSize int, subscriptionIDs ...[]int64) ([]UserSubscription, *pagination.PaginationResult, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
-	subs, pag, err := s.userSubRepo.ListByGroupID(ctx, groupID, params)
+	var subs []UserSubscription
+	var pag *pagination.PaginationResult
+	var err error
+	if len(subscriptionIDs) > 0 {
+		if len(subscriptionIDs[0]) == 0 {
+			return []UserSubscription{}, &pagination.PaginationResult{Total: 0, Page: page, PageSize: pageSize}, nil
+		}
+		repo, ok := s.userSubRepo.(interface {
+			ListByGroupIDAndIDs(context.Context, int64, pagination.PaginationParams, []int64) ([]UserSubscription, *pagination.PaginationResult, error)
+		})
+		if !ok {
+			return nil, nil, fmt.Errorf("subscription repository does not support direct group ID scope listing")
+		}
+		subs, pag, err = repo.ListByGroupIDAndIDs(ctx, groupID, params, subscriptionIDs[0])
+	} else {
+		subs, pag, err = s.userSubRepo.ListByGroupID(ctx, groupID, params)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -842,6 +858,27 @@ func (s *SubscriptionService) ListGroupSubscriptions(ctx context.Context, groupI
 func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, userID, groupID *int64, status, platform, sortBy, sortOrder string) ([]UserSubscription, *pagination.PaginationResult, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
 	subs, pag, err := s.userSubRepo.List(ctx, params, userID, groupID, status, platform, sortBy, sortOrder)
+	if err != nil {
+		return nil, nil, err
+	}
+	normalizeExpiredWindows(subs)
+	normalizeSubscriptionStatus(subs)
+	return subs, pag, nil
+}
+
+func (s *SubscriptionService) ListByIDScope(ctx context.Context, page, pageSize int, userID, groupID *int64, status, platform, sortBy, sortOrder string, subscriptionIDs []int64) ([]UserSubscription, *pagination.PaginationResult, error) {
+	if len(subscriptionIDs) == 0 {
+		params := pagination.PaginationParams{Page: page, PageSize: pageSize}
+		return []UserSubscription{}, &pagination.PaginationResult{Total: 0, Page: params.Page, PageSize: params.PageSize, Pages: 0}, nil
+	}
+	repo, ok := s.userSubRepo.(interface {
+		ListByIDs(context.Context, pagination.PaginationParams, *int64, *int64, string, string, string, string, []int64) ([]UserSubscription, *pagination.PaginationResult, error)
+	})
+	if !ok {
+		return nil, nil, fmt.Errorf("subscription repository does not support direct ID scope listing")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
+	subs, pag, err := repo.ListByIDs(ctx, params, userID, groupID, status, platform, sortBy, sortOrder, subscriptionIDs)
 	if err != nil {
 		return nil, nil, err
 	}

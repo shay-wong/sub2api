@@ -116,6 +116,15 @@ export interface AdminUser extends User {
   restrict_public_groups?: boolean
   // 当前并发数（仅管理员列表接口返回）
   current_concurrency?: number
+  admin_resource_scope?: AdminResourceScope
+}
+
+export interface AdminResourceScope {
+  mode: 'all' | 'restricted'
+  group_ids: number[]
+  account_ids: number[]
+  proxy_ids: number[]
+  subscription_ids: number[]
 }
 
 export interface LoginRequest {

@@ -29,12 +29,38 @@ func toResponsePagination(p *pagination.PaginationResult) *response.PaginationRe
 // SubscriptionHandler handles admin subscription management
 type SubscriptionHandler struct {
 	subscriptionService *service.SubscriptionService
+	permissionService   *service.PermissionService
 }
 
 // NewSubscriptionHandler creates a new admin subscription handler
-func NewSubscriptionHandler(subscriptionService *service.SubscriptionService) *SubscriptionHandler {
-	return &SubscriptionHandler{
-		subscriptionService: subscriptionService,
+func NewSubscriptionHandler(subscriptionService *service.SubscriptionService, permissionService ...*service.PermissionService) *SubscriptionHandler {
+	var permissions *service.PermissionService
+	if len(permissionService) > 0 {
+		permissions = permissionService[0]
+	}
+	return &SubscriptionHandler{subscriptionService: subscriptionService, permissionService: permissions}
+}
+
+func (h *SubscriptionHandler) RequireResourceScope() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scope, err := resolveAdminAccessScope(c, h.permissionService)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || subscriptionID <= 0 {
+			response.BadRequest(c, "Invalid subscription ID")
+			c.Abort()
+			return
+		}
+		if err := scope.ensureSubscription(subscriptionID); err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
 
@@ -62,6 +88,11 @@ type AdjustSubscriptionRequest struct {
 // List handles listing all subscriptions with pagination and filters
 // GET /api/v1/admin/subscriptions
 func (h *SubscriptionHandler) List(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 
 	// Parse optional filters
@@ -83,7 +114,14 @@ func (h *SubscriptionHandler) List(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort_by", "created_at")
 	sortOrder := c.DefaultQuery("sort_order", "desc")
 
-	subscriptions, pagination, err := h.subscriptionService.List(c.Request.Context(), page, pageSize, userID, groupID, status, platform, sortBy, sortOrder)
+	var subscriptions []service.UserSubscription
+	var pageResult *pagination.PaginationResult
+	var err error
+	if scope.isScoped() {
+		subscriptions, pageResult, err = h.subscriptionService.ListByIDScope(c.Request.Context(), page, pageSize, userID, groupID, status, platform, sortBy, sortOrder, scope.SubscriptionIDs)
+	} else {
+		subscriptions, pageResult, err = h.subscriptionService.List(c.Request.Context(), page, pageSize, userID, groupID, status, platform, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -93,7 +131,7 @@ func (h *SubscriptionHandler) List(c *gin.Context) {
 	for i := range subscriptions {
 		out = append(out, *dto.UserSubscriptionFromServiceAdmin(&subscriptions[i]))
 	}
-	response.PaginatedWithResult(c, out, toResponsePagination(pagination))
+	response.PaginatedWithResult(c, out, toResponsePagination(pageResult))
 }
 
 // GetByID handles getting a subscription by ID
@@ -135,9 +173,18 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 // Assign handles assigning a subscription to a user
 // POST /api/v1/admin/subscriptions/assign
 func (h *SubscriptionHandler) Assign(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req AssignSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureGroup(req.GroupID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -155,6 +202,10 @@ func (h *SubscriptionHandler) Assign(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if err := scope.bindCreatedResource(c.Request.Context(), h.permissionService, service.AdminResourceSubscription, subscription.ID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	response.Success(c, dto.UserSubscriptionFromServiceAdmin(subscription))
 }
@@ -162,9 +213,18 @@ func (h *SubscriptionHandler) Assign(c *gin.Context) {
 // BulkAssign handles bulk assigning subscriptions to multiple users
 // POST /api/v1/admin/subscriptions/bulk-assign
 func (h *SubscriptionHandler) BulkAssign(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	var req BulkAssignSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := scope.ensureGroup(req.GroupID); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 
@@ -181,6 +241,12 @@ func (h *SubscriptionHandler) BulkAssign(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	for i := range result.Subscriptions {
+		if err := scope.bindCreatedResource(c.Request.Context(), h.permissionService, service.AdminResourceSubscription, result.Subscriptions[i].ID); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	response.Success(c, dto.BulkAssignResultFromService(result))
@@ -289,15 +355,30 @@ func (h *SubscriptionHandler) Restore(c *gin.Context) {
 // ListByGroup handles listing subscriptions for a specific group
 // GET /api/v1/admin/groups/:id/subscriptions
 func (h *SubscriptionHandler) ListByGroup(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	groupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid group ID")
 		return
 	}
+	if err := scope.ensureGroup(groupID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
 	page, pageSize := response.ParsePagination(c)
 
-	subscriptions, pagination, err := h.subscriptionService.ListGroupSubscriptions(c.Request.Context(), groupID, page, pageSize)
+	var subscriptions []service.UserSubscription
+	var pagination *pagination.PaginationResult
+	if scope.isScoped() {
+		subscriptions, pagination, err = h.subscriptionService.ListGroupSubscriptions(c.Request.Context(), groupID, page, pageSize, scope.SubscriptionIDs)
+	} else {
+		subscriptions, pagination, err = h.subscriptionService.ListGroupSubscriptions(c.Request.Context(), groupID, page, pageSize)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -313,16 +394,29 @@ func (h *SubscriptionHandler) ListByGroup(c *gin.Context) {
 // ListByUser handles listing subscriptions for a specific user
 // GET /api/v1/admin/users/:id/subscriptions
 func (h *SubscriptionHandler) ListByUser(c *gin.Context) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return
+	}
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid user ID")
 		return
 	}
-
 	subscriptions, err := h.subscriptionService.ListUserSubscriptions(c.Request.Context(), userID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if scope.isScoped() {
+		filtered := subscriptions[:0]
+		for _, subscription := range subscriptions {
+			if scope.containsSubscription(subscription.ID) {
+				filtered = append(filtered, subscription)
+			}
+		}
+		subscriptions = filtered
 	}
 
 	out := make([]dto.AdminUserSubscription, 0, len(subscriptions))

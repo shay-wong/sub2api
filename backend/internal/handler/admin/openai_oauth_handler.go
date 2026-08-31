@@ -282,7 +282,7 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(account) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 
@@ -558,7 +558,7 @@ func (h *OpenAIOAuthHandler) QueryQuota(c *gin.Context) {
 			return
 		}
 		if !scope.accountVisible(account) {
-			response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+			response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 			return
 		}
 	}
@@ -601,7 +601,7 @@ func (h *OpenAIOAuthHandler) RefreshQuota(c *gin.Context) {
 			return
 		}
 		if !scope.accountVisible(account) {
-			response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+			response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 			return
 		}
 	}
@@ -661,7 +661,7 @@ func (h *OpenAIOAuthHandler) CreateShadow(c *gin.Context) {
 		return
 	}
 	if !scope.accountVisible(parent) {
-		response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+		response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 		return
 	}
 
@@ -705,7 +705,7 @@ func (h *OpenAIOAuthHandler) ResetQuota(c *gin.Context) {
 			return
 		}
 		if !scope.accountVisible(account) {
-			response.ErrorFrom(c, service.ErrOperatorAccountForbidden)
+			response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
 			return
 		}
 	}

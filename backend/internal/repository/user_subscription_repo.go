@@ -223,8 +223,19 @@ func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, use
 }
 
 func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.UserSubscription, *pagination.PaginationResult, error) {
+	return r.listByGroupID(ctx, groupID, params, nil)
+}
+
+func (r *userSubscriptionRepository) ListByGroupIDAndIDs(ctx context.Context, groupID int64, params pagination.PaginationParams, subscriptionIDs []int64) ([]service.UserSubscription, *pagination.PaginationResult, error) {
+	return r.listByGroupID(ctx, groupID, params, subscriptionIDs)
+}
+
+func (r *userSubscriptionRepository) listByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams, subscriptionIDs []int64) ([]service.UserSubscription, *pagination.PaginationResult, error) {
 	client := clientFromContext(ctx, r.client)
 	q := client.UserSubscription.Query().Where([]predicate.UserSubscription{usersubscription.GroupIDEQ(groupID)}...)
+	if subscriptionIDs != nil {
+		q = q.Where(usersubscription.IDIn(subscriptionIDs...))
+	}
 
 	total, err := q.Clone().Count(ctx)
 	if err != nil {
@@ -246,8 +257,19 @@ func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID 
 }
 
 func (r *userSubscriptionRepository) List(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string) ([]service.UserSubscription, *pagination.PaginationResult, error) {
+	return r.list(ctx, params, userID, groupID, status, platform, sortBy, sortOrder, nil)
+}
+
+func (r *userSubscriptionRepository) ListByIDs(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string, subscriptionIDs []int64) ([]service.UserSubscription, *pagination.PaginationResult, error) {
+	return r.list(ctx, params, userID, groupID, status, platform, sortBy, sortOrder, subscriptionIDs)
+}
+
+func (r *userSubscriptionRepository) list(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string, subscriptionIDs []int64) ([]service.UserSubscription, *pagination.PaginationResult, error) {
 	client := clientFromContext(ctx, r.client)
 	q := client.UserSubscription.Query()
+	if subscriptionIDs != nil {
+		q = q.Where(usersubscription.IDIn(subscriptionIDs...))
+	}
 	includeSoftDeleted := status == "" || status == service.SubscriptionStatusRevoked
 	if userID != nil {
 		q = q.Where(usersubscription.UserIDEQ(*userID))

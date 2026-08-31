@@ -7,6 +7,10 @@ import UsersView from '../UsersView.vue'
 const {
   listUsers,
   getAllGroups,
+  getAllGroupsIncludingInactive,
+	listAccounts,
+	listProxies,
+	listSubscriptions,
   getBatchUsersUsage,
   listEnabledDefinitions,
   getBatchUserAttributes,
@@ -15,6 +19,10 @@ const {
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
+	getAllGroupsIncludingInactive: vi.fn(),
+	listAccounts: vi.fn(),
+	listProxies: vi.fn(),
+	listSubscriptions: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
     getBatchUserAttributes: vi.fn(),
@@ -33,7 +41,17 @@ vi.mock('@/api/admin', () => ({
       delete: vi.fn()
     },
     groups: {
-      getAll: getAllGroups
+		getAll: getAllGroups,
+		getAllIncludingInactive: getAllGroupsIncludingInactive
+	},
+	accounts: {
+		list: listAccounts
+	},
+	proxies: {
+		list: listProxies
+	},
+	subscriptions: {
+		list: listSubscriptions
     },
     dashboard: {
       getBatchUsersUsage
@@ -176,6 +194,10 @@ describe('admin UsersView', () => {
 
     listUsers.mockReset()
     getAllGroups.mockReset()
+		getAllGroupsIncludingInactive.mockReset()
+		listAccounts.mockReset()
+		listProxies.mockReset()
+		listSubscriptions.mockReset()
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
@@ -190,6 +212,10 @@ describe('admin UsersView', () => {
       pages: 1
     })
     getAllGroups.mockResolvedValue([])
+		getAllGroupsIncludingInactive.mockResolvedValue([])
+		listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
+		listProxies.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1000, pages: 0 })
+		listSubscriptions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, pages: 0 })
     getBatchUsersUsage.mockResolvedValue({ stats: {} })
     listEnabledDefinitions.mockResolvedValue([])
     getBatchUserAttributes.mockResolvedValue({ values: {} })
@@ -428,7 +454,17 @@ describe('admin UsersView', () => {
   it('lets super admins update global admin permissions from the user list', async () => {
     authState.isAdmin = true
     listUsers.mockResolvedValue({
-      items: [createAdminUser({ role: 'admin', admin_permissions: ['admin.dashboard.read'] })],
+		items: [createAdminUser({
+			role: 'admin',
+			admin_permissions: ['admin.dashboard.read'],
+			admin_resource_scope: {
+				mode: 'restricted',
+				group_ids: [10],
+				account_ids: [20],
+				proxy_ids: [30],
+				subscription_ids: [40]
+			}
+		})],
       total: 1,
       page: 1,
       page_size: 20,
@@ -446,7 +482,80 @@ describe('admin UsersView', () => {
 
     expect(updateAdminAccess).toHaveBeenCalledWith(42, {
       role: 'admin',
-      admin_permissions: ['admin.dashboard.read']
+		admin_permissions: ['admin.dashboard.read'],
+		resource_scope: {
+			mode: 'restricted',
+			group_ids: [10],
+			account_ids: [20],
+			proxy_ids: [30],
+			subscription_ids: [40]
+		}
     })
+  })
+
+  it('keeps group and account resource grants independent', async () => {
+    authState.isAdmin = true
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({
+        role: 'admin',
+        admin_permissions: ['admin.accounts.manage'],
+        admin_resource_scope: {
+          mode: 'restricted',
+          group_ids: [],
+          account_ids: [],
+          proxy_ids: [],
+          subscription_ids: []
+        }
+      })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    getAllGroupsIncludingInactive.mockResolvedValue([{ id: 10, name: 'OpenAI Pro', platform: 'openai' }])
+    listAccounts.mockResolvedValue({
+      items: [{ id: 20, name: 'Direct account', platform: 'openai' }],
+      total: 1,
+      page: 1,
+      page_size: 1000,
+      pages: 1
+    })
+    listProxies.mockResolvedValue({
+      items: [{ id: 30, name: 'US proxy', protocol: 'http', host: '127.0.0.1', port: 8080 }],
+      total: 1,
+      page: 1,
+      page_size: 1000,
+      pages: 1
+    })
+    listSubscriptions.mockResolvedValue({
+      items: [{ id: 40, user_id: 42, group_id: 10, user: { email: 'scoped@example.com' }, group: { name: 'OpenAI Pro' } }],
+      total: 1,
+      page: 1,
+      page_size: 1000,
+      pages: 1
+    })
+
+    const wrapper = mountUsersView()
+    await flushPromises()
+    await wrapper.get('[data-test="actions-42"] button:last-child').trigger('click')
+    await wrapper.get('[data-test="admin-access-action"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="admin-resource-groups-10"]').setValue(true)
+    await wrapper.get('[data-test="admin-resource-proxies-30"]').setValue(true)
+    await wrapper.get('[data-test="admin-resource-subscriptions-40"]').setValue(true)
+    expect((wrapper.get('[data-test="admin-resource-accounts-20"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('[data-test="save-admin-access"]').trigger('click')
+    await flushPromises()
+
+    expect(updateAdminAccess).toHaveBeenCalledWith(42, expect.objectContaining({
+      resource_scope: {
+        mode: 'restricted',
+        group_ids: [10],
+        account_ids: [],
+        proxy_ids: [30],
+        subscription_ids: [40]
+      }
+    }))
   })
 })
