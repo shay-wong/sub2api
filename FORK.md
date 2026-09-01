@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `2ac784c51a5d0925b324efef2ba6b3446c364781` |
-| 当前比较范围 | `2ac784c51a5d0925b324efef2ba6b3446c364781..HEAD` |
+| 已合并上游提交 / 比较基线 | `a2fb09260a955676f99cdc92f05469febee82a08` |
+| 当前比较范围 | `a2fb09260a955676f99cdc92f05469febee82a08..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `2ac784c51a5d0925b324efef2ba6b3446c364781`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `a2fb09260a955676f99cdc92f05469febee82a08`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -29,14 +29,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.184` |
+| 当前上游版本 | `0.1.185` |
 | 当前 Fork 版本 | `0.1.183-fork.4` |
 | 已发布同基线 Fork 版本 | `v0.1.183-fork.4`（版本基数与当前上游基线不一致） |
-| 下次发布所需版本 | `0.1.184-fork.1` |
+| 下次发布所需版本 | `0.1.185-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-发布流程已将版本源同步为 `0.1.183-fork.4`，但当前上游基线版本已是 `0.1.184`，该 release 不符合本契约的版本基数要求。下次发布前必须将版本源提升为 `0.1.184-fork.1`；本次 CI 测试修复不修改 VERSION，也不重写既有 tag。
+发布流程已将版本源同步为 `0.1.183-fork.4`，但当前上游基线版本已是 `0.1.185`，该 release 不符合本契约的版本基数要求。下次发布前必须将版本源提升为 `0.1.185-fork.1`；本次上游合并不发布新版本，也不重写既有 tag。
 
 ## 能力索引
 
@@ -388,4 +388,4 @@ git diff --check
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/目录化长上下文阶梯计费、service-tier 请求/响应分离与 Codex OAuth 计费判定、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、native compaction v2 用量记录与筛选、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、passthrough WebSocket session 隔离、oversized passthrough HTTP bridge、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录与 Priority 声明、API Key instructions 保持、delegation bootstrap 兼容、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、WS ingress 容量错误改写与陈旧连接回收、数据库启动瞬时错误重试、Plugins 管理入口、Go 1.27.0 builder、Claude Code Messages 粘性路由、Responses 透传首输出前 keepalive、Grok cache key 优先级与 vision tool output 图片保留、Anthropic 工具参数保真、Antigravity 混合内置工具、周/月订阅重置锚点、分组局部更新保留未提交限额、配额 cooldown 原子重置与 scheduler rate-limit 重置、配额 singleflight 去重、可配置图片工具 cooldown、Ollama Cloud 国产平台用量、OpenAI refresh token 重新授权、兑换码本地时区过期解析、智谱团队 Coding Plan、轻量倍率快照刷新、批量关闭指纹收敛、Claude attribution header 保留、充值币种展示、连字符版本后缀解析、Spark 模型级限流与重置语义，以及 WS/流式模型级 failover 均已包含在 `2ac784c51a5d0925b324efef2ba6b3446c364781` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/目录化长上下文阶梯计费、service-tier 请求/响应分离与 Codex OAuth 计费判定、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、native compaction v2 用量记录与筛选、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、passthrough WebSocket session 隔离、oversized passthrough HTTP bridge、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录与 Priority 声明、API Key instructions 保持、delegation bootstrap 兼容、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、WS ingress 容量错误改写与陈旧连接回收、数据库启动瞬时错误重试、Plugins 管理入口、Go 1.27.0 builder、Claude Code Messages 粘性路由、Responses 透传首输出前 keepalive、Grok cache key 优先级与 vision tool output 图片保留、Anthropic 工具参数保真、Antigravity 混合内置工具、周/月订阅重置锚点、分组局部更新保留未提交限额、配额 cooldown 原子重置与 scheduler rate-limit 重置、配额 singleflight 去重、可配置图片工具 cooldown、Ollama Cloud 国产平台用量、OpenAI refresh token 重新授权、兑换码本地时区过期解析、智谱团队 Coding Plan、轻量倍率快照刷新、批量关闭指纹收敛、Claude attribution header 保留、充值币种展示、连字符版本后缀解析、Spark 模型级限流与重置语义，以及 WS/流式模型级 failover 均已包含在 `a2fb09260a955676f99cdc92f05469febee82a08` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
