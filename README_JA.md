@@ -186,7 +186,7 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
 - **APIキー配布** - ユーザー向けの APIキーの生成と管理
 - **きめ細かな管理者権限** - プロジェクト空間を復元せず、ユーザー一覧で 8 つの管理者権限とグループ・アカウント・プロキシ・サブスクリプションの直接スコープを設定
 - **精密な課金** - トークンレベルの使用量追跡とコスト計算
-- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket で `service_tier: "ultrafast"` を Fast に変換せずそのまま転送します。OpenAI が Ultrafast 料金を公開するまでは Fast と同じ Standard の `2 倍`を既定値とし、チャネルのモデル料金で変更できます。OpenAI の応答が示す実際の tier は課金 tier を下げる場合にのみ使用し、引き上げには使用しません
+- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket で `service_tier: "ultrafast"` を Fast に変換せずそのまま転送し、OpenAI OAuth アカウント向けに対応する `tier=ultrafast` Codex ルーティングヒントも生成します。OpenAI が Ultrafast 料金を公開するまでは Fast と同じ Standard の `2 倍`を既定値とし、チャネルのモデル料金で変更できます。OpenAI の応答が示す実際の tier は課金 tier を下げる場合にのみ使用し、引き上げには使用しません
 - **スマートスケジューリング** - スティッキーセッション付きのインテリジェントなアカウント選択
 - **同時実行制御** - ユーザーごと・アカウントごとの同時実行数制限
 - **レート制限** - 設定可能なリクエスト数およびトークンレート制限
