@@ -303,6 +303,8 @@ jobs:
             TAG_NAME=${GITHUB_REF#refs/tags/}
           fi
           VERSION=${TAG_NAME#v}
+          TAG_HASHTAG=${TAG_NAME//./_}
+          TAG_HASHTAG=${TAG_HASHTAG//_/\\_}
           REPO="${{ github.repository }}"
           GHCR_IMAGE="ghcr.io/${REPO,,}"  # ${,,} converts to lowercase
 
@@ -343,10 +345,11 @@ jobs:
             MESSAGE+="• [Docker Hub](https://hub.docker.com/r/${DOCKERHUB_IMAGE})"$'\n'
           fi
           MESSAGE+="• [GitHub Packages](https://github.com/${REPO}/pkgs/container/sub2api)"$'\n'$'\n'
-          MESSAGE+="#Sub2API #Release #${TAG_NAME//./_}"
+          MESSAGE+="#Sub2API #Release #${TAG_HASHTAG}"
 
           # 发送消息
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          curl --silent --show-error --fail-with-body \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
             -d "$(jq -n \
               --arg chat_id "${TELEGRAM_CHAT_ID}" \
@@ -356,7 +359,8 @@ jobs:
                 text: $text,
                 parse_mode: "Markdown",
                 disable_web_page_preview: true
-              }')"
+              }')" \
+            | jq -e '.ok == true' >/dev/null
 
   sync-version-file:
     needs: [release]
