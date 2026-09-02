@@ -12,12 +12,23 @@ import (
 // Every OpenAI ingress path must derive reasoning policy after scheduler selection.
 func TestOpenAIIngressPathsUseEffectiveReasoningPolicy(t *testing.T) {
 	tests := []struct {
-		file        string
-		method      string
-		helperCalls []string
+		file                 string
+		method               string
+		helperCalls          []string
+		forbiddenHelperCalls []string
 	}{
-		{file: "openai_chat_completions.go", method: "ChatCompletions", helperCalls: []string{"ApplyEffectiveOpenAIReasoningEffortPolicy"}},
-		{file: "openai_gateway_handler.go", method: "Responses", helperCalls: []string{"ApplyEffectiveOpenAIReasoningEffortPolicy"}},
+		{
+			file:                 "openai_chat_completions.go",
+			method:               "ChatCompletions",
+			helperCalls:          []string{"bindRequestedReasoningEffort", "ApplyEffectiveOpenAIReasoningEffortPolicy"},
+			forbiddenHelperCalls: []string{"applyOpenAIReasoningEffortPolicyForRequest"},
+		},
+		{
+			file:                 "openai_gateway_handler.go",
+			method:               "Responses",
+			helperCalls:          []string{"bindRequestedReasoningEffort", "ApplyEffectiveOpenAIReasoningEffortPolicy"},
+			forbiddenHelperCalls: []string{"applyOpenAIReasoningEffortPolicyForRequest"},
+		},
 		{
 			file:   "openai_gateway_handler.go",
 			method: "ResponsesWebSocket",
@@ -38,6 +49,10 @@ func TestOpenAIIngressPathsUseEffectiveReasoningPolicy(t *testing.T) {
 			for _, helperCall := range tt.helperCalls {
 				require.True(t, functionCallsIdentifier(method, helperCall),
 					"%s must use %s for the scheduler-selected group's reasoning policy", tt.method, helperCall)
+			}
+			for _, helperCall := range tt.forbiddenHelperCalls {
+				require.False(t, functionCallsIdentifier(method, helperCall),
+					"%s must not apply %s before scheduler selection", tt.method, helperCall)
 			}
 		})
 	}

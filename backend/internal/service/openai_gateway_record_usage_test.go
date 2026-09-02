@@ -3593,26 +3593,28 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 		nil,
 	)
 	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
-	groupID := int64(77)
+	apiKeyGroupID := int64(76)
+	billingGroupID := int64(77)
 	serviceTier := "priority"
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
 	inputPrice := 0.001
 	outputPrice := 0.002
 	fastMultiplier := 3.0
+	billingGroup := &Group{
+		ID: billingGroupID, Platform: PlatformOpenAI, Status: StatusActive,
+		Hydrated: true, RateMultiplier: 0.5, FreeOpenAIFast: true,
+		ModelPricing: []ChannelModelPricing{{
+			Models:         []string{"gpt-5.6-sol"},
+			BillingMode:    BillingModeToken,
+			InputPrice:     &inputPrice,
+			OutputPrice:    &outputPrice,
+			FastMultiplier: &fastMultiplier,
+		}},
+	}
 	apiKey := &APIKey{
 		ID:      1020,
-		GroupID: &groupID,
-		Group: &Group{
-			ID: groupID, Platform: PlatformOpenAI, Status: StatusActive,
-			Hydrated: true, RateMultiplier: 0.5, FreeOpenAIFast: true,
-			ModelPricing: []ChannelModelPricing{{
-				Models:         []string{"gpt-5.6-sol"},
-				BillingMode:    BillingModeToken,
-				InputPrice:     &inputPrice,
-				OutputPrice:    &outputPrice,
-				FastMultiplier: &fastMultiplier,
-			}},
-		},
+		GroupID: &apiKeyGroupID,
+		Group:   &Group{ID: apiKeyGroupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true},
 	}
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
@@ -3624,9 +3626,11 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 			Model:                       "gpt-5.6-sol",
 			Duration:                    time.Second,
 		},
-		APIKey:  apiKey,
-		User:    &User{ID: 2020},
-		Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		APIKey:           apiKey,
+		User:             &User{ID: 2020},
+		Account:          &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		EffectiveGroupID: &billingGroupID,
+		EffectiveGroup:   billingGroup,
 	})
 
 	require.NoError(t, err)

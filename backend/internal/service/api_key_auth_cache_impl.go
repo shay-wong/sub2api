@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 22 // v22: fork snapshot fields plus group free_openai_fast
+const apiKeyAuthSnapshotVersion = 23 // v23: union of fork fields and upstream group Fast/reasoning policy fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int

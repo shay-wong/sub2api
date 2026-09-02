@@ -514,12 +514,13 @@ func TestApplyEffectiveOpenAIReasoningEffortPolicy_SelectionGroupWins(t *testing
 		MaxReasoningEffort: "medium",
 	}
 
-	got, changed := ApplyEffectiveOpenAIReasoningEffortPolicy(
+	got, changed, err := ApplyEffectiveOpenAIReasoningEffortPolicy(
 		[]byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`),
 		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
 		&service.APIKey{GroupID: &apiKeyGroup.ID, Group: apiKeyGroup},
 	)
 
+	require.NoError(t, err)
 	require.True(t, changed)
 	require.Equal(t, "medium", gjson.GetBytes(got, "reasoning.effort").String())
 	require.NotEqual(t, service.HashUsageRequestPayload([]byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`)), service.HashUsageRequestPayload(got))
@@ -541,17 +542,19 @@ func TestApplyEffectiveOpenAIReasoningEffortPolicy_FailoverReappliesFromOriginal
 		MaxReasoningEffort: "medium",
 	}
 
-	first, firstChanged := ApplyEffectiveOpenAIReasoningEffortPolicy(
+	first, firstChanged, firstErr := ApplyEffectiveOpenAIReasoningEffortPolicy(
 		original,
 		&service.AccountSelectionResult{GroupID: &firstGroup.ID, Group: firstGroup},
 		nil,
 	)
-	second, secondChanged := ApplyEffectiveOpenAIReasoningEffortPolicy(
+	second, secondChanged, secondErr := ApplyEffectiveOpenAIReasoningEffortPolicy(
 		original,
 		&service.AccountSelectionResult{GroupID: &secondGroup.ID, Group: secondGroup},
 		nil,
 	)
 
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
 	require.True(t, firstChanged)
 	require.True(t, secondChanged)
 	require.Equal(t, "low", gjson.GetBytes(first, "reasoning.effort").String())
@@ -564,7 +567,7 @@ func TestApplyEffectiveOpenAIReasoningEffortPolicy_DoesNotUseWrongGroupSnapshot(
 	selectionGroupID := int64(20)
 	body := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`)
 
-	got, changed := ApplyEffectiveOpenAIReasoningEffortPolicy(
+	got, changed, err := ApplyEffectiveOpenAIReasoningEffortPolicy(
 		body,
 		&service.AccountSelectionResult{GroupID: &selectionGroupID},
 		&service.APIKey{
@@ -577,8 +580,53 @@ func TestApplyEffectiveOpenAIReasoningEffortPolicy_DoesNotUseWrongGroupSnapshot(
 		},
 	)
 
+	require.NoError(t, err)
 	require.False(t, changed)
 	require.Equal(t, body, got)
+}
+
+func TestApplyEffectiveOpenAIReasoningEffortPolicy_SelectionGroupDenyWins(t *testing.T) {
+	apiKeyGroup := &service.Group{
+		ID:                          10,
+		Platform:                    service.PlatformOpenAI,
+		MaxReasoningEffort:          "xhigh",
+		MaxReasoningEffortOverLimit: service.ReasoningEffortOverLimitDowngrade,
+	}
+	selectionGroup := &service.Group{
+		ID:                          20,
+		Platform:                    service.PlatformOpenAI,
+		MaxReasoningEffort:          "medium",
+		MaxReasoningEffortOverLimit: service.ReasoningEffortOverLimitDeny,
+	}
+	body := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`)
+
+	got, changed, err := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		body,
+		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
+		&service.APIKey{GroupID: &apiKeyGroup.ID, Group: apiKeyGroup},
+	)
+
+	require.Error(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, got)
+}
+
+func TestApplyEffectiveOpenAIReasoningEffortPolicy_CompositeGroupPolicyApplies(t *testing.T) {
+	selectionGroup := &service.Group{
+		ID:                 20,
+		Platform:           service.PlatformComposite,
+		MaxReasoningEffort: "medium",
+	}
+
+	got, changed, err := ApplyEffectiveOpenAIReasoningEffortPolicy(
+		[]byte(`{"model":"gpt-5.4","reasoning":{"effort":"xhigh"}}`),
+		&service.AccountSelectionResult{GroupID: &selectionGroup.ID, Group: selectionGroup},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "medium", gjson.GetBytes(got, "reasoning.effort").String())
 }
 
 func TestEffectiveQuotaPlatform_SelectionGroupWinsOverAPIKeyGroup(t *testing.T) {

@@ -481,12 +481,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
 		return
 	}
-	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
-		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
-		return
-	} else if changed {
-		body = cappedBody
-	}
+	bindRequestedReasoningEffort(c, body, reqModel)
 	if normalizedBody, changed := normalizeCodexAutomationBootstrap(body); changed {
 		body = normalizedBody
 		reqLog.Info("openai.codex_automation_bootstrap_normalized",
@@ -796,7 +791,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		effectiveBody := body
-		if cappedBody, changed := ApplyEffectiveOpenAIReasoningEffortPolicy(body, selection, apiKey); changed {
+		if cappedBody, changed, policyErr := ApplyEffectiveOpenAIReasoningEffortPolicy(body, selection, apiKey); policyErr != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			respondOpenAIReasoningEffortPolicyError(c, policyErr, func(c *gin.Context, status int, code, message string) {
+				h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			})
+			return
+		} else if changed {
 			effectiveBody = cappedBody
 		}
 		forwardBody := openAIModelMappedBody(effectiveBody, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
@@ -2786,7 +2789,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
 
-		maxReasoningEffort, reasoningEffortMappings, maxReasoningEffortOverLimit, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
+		maxReasoningEffort, reasoningEffortMappings, maxReasoningEffortOverLimit := EffectiveOpenAIReasoningEffortPolicy(selection, apiKey)
 		var requestPayloadHash string
 		fixedRequestModel := ""
 		if compositeRouteMatched {
@@ -3088,7 +3091,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 		// WebSocket 首包可能很大，hash 必须在 hooks 外算成字符串，避免 AfterTurn 闭包保活请求体。
 		// 转发层稍后会应用相同策略；这里只生成临时副本，避免首包被重复映射。
-		effectiveWSFirstMessage, _ := ApplyEffectiveOpenAIReasoningEffortPolicy(wsFirstMessage, selection, apiKey)
+		effectiveWSFirstMessage := wsFirstMessage
+		if fixedRequestModel != "" {
+			effectiveWSFirstMessage = h.gatewayService.ReplaceModelInBody(effectiveWSFirstMessage, fixedRequestModel)
+		}
+		effectiveWSFirstMessage, _, policyErr := ApplyEffectiveOpenAIReasoningEffortPolicy(effectiveWSFirstMessage, selection, apiKey)
+		if policyErr != nil {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, policyErr.Error())
+			return
+		}
 		requestPayloadHash = service.HashUsageRequestPayload(effectiveWSFirstMessage)
 		if preemptCtx, cleanupPreempt, armed := h.gatewayService.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, wsFirstMessage); armed {
 			ctx = preemptCtx
