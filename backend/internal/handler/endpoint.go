@@ -388,7 +388,8 @@ func ApplyEffectiveOpenAIReasoningEffortPolicy(body []byte, selection *service.A
 	if maxEffort == "" && len(mappings) == 0 {
 		return body, false
 	}
-	return service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings)
+	capped, changed, _ := service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings, "")
+	return capped, changed
 }
 
 func EffectiveQuotaPlatform(ctx context.Context, selection *service.AccountSelectionResult, apiKey *service.APIKey) string {

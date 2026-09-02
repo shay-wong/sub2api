@@ -994,6 +994,8 @@ var (
 		{Name: "sort_order", Type: field.TypeInt, Default: 0},
 		{Name: "allow_messages_dispatch", Type: field.TypeBool, Default: false},
 		{Name: "allow_live", Type: field.TypeBool, Default: false},
+		{Name: "force_openai_fast", Type: field.TypeBool, Default: false},
+		{Name: "free_openai_fast", Type: field.TypeBool, Default: false},
 		{Name: "require_oauth_only", Type: field.TypeBool, Default: false},
 		{Name: "require_privacy_set", Type: field.TypeBool, Default: false},
 		{Name: "default_mapped_model", Type: field.TypeString, Size: 100, Default: ""},
@@ -1001,6 +1003,7 @@ var (
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
 		{Name: "max_reasoning_effort", Type: field.TypeString, Size: 20, Default: ""},
+		{Name: "max_reasoning_effort_over_limit", Type: field.TypeString, Size: 20, Default: "downgrade"},
 		{Name: "reasoning_effort_mappings", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "profit_control_enabled", Type: field.TypeBool, Default: false},
 		{Name: "profit_min_margin", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
@@ -1015,7 +1018,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_projects_groups",
-				Columns:    []*schema.Column{GroupsColumns[63]},
+				Columns:    []*schema.Column{GroupsColumns[66]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1029,7 +1032,7 @@ var (
 			{
 				Name:    "group_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[63]},
+				Columns: []*schema.Column{GroupsColumns[66]},
 			},
 			{
 				Name:    "group_platform",
@@ -1059,7 +1062,7 @@ var (
 			{
 				Name:    "group_project_id_platform_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[63], GroupsColumns[14], GroupsColumns[12]},
+				Columns: []*schema.Column{GroupsColumns[66], GroupsColumns[14], GroupsColumns[12]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",

@@ -18,10 +18,10 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `a2fb09260a955676f99cdc92f05469febee82a08` |
-| 当前比较范围 | `a2fb09260a955676f99cdc92f05469febee82a08..HEAD` |
+| 已合并上游提交 / 比较基线 | `5097b31457e6dc9f49e5f5c9c72b925ce79543b3` |
+| 当前比较范围 | `5097b31457e6dc9f49e5f5c9c72b925ce79543b3..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `a2fb09260a955676f99cdc92f05469febee82a08`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并固定上游提交为 `5097b31457e6dc9f49e5f5c9c72b925ce79543b3`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
 ## Fork 发布版本
 
@@ -29,14 +29,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.1.185` |
-| 当前 Fork 版本 | `0.1.183-fork.4` |
-| 已发布同基线 Fork 版本 | `v0.1.183-fork.4`（版本基数与当前上游基线不一致） |
-| 下次发布所需版本 | `0.1.185-fork.1` |
+| 当前上游版本 | `0.2.0` |
+| 当前 Fork 版本 | `0.1.183-fork.5` |
+| 已发布同基线 Fork 版本 | `v0.1.183-fork.5`（版本基数与当前上游基线不一致） |
+| 下次发布所需版本 | `0.2.0-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-发布流程已将版本源同步为 `0.1.183-fork.4`，但当前上游基线版本已是 `0.1.185`，该 release 不符合本契约的版本基数要求。下次发布前必须将版本源提升为 `0.1.185-fork.1`；本次上游合并不发布新版本，也不重写既有 tag。
+当前版本源仍为已发布的 `0.1.183-fork.5`，但当前上游基线版本已是 `0.2.0`，版本基数不一致。下次发布前必须将版本源提升为 `0.2.0-fork.1`；本次上游合并不发布新版本，也不重写既有 tag。
 
 ## 能力索引
 
@@ -197,6 +197,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次基线继续吸收**：`5d9c7abed` 将 Spark 配额 429 限定到具体模型，`3c22e78af` 保留 Spark quota reset 语义，`571d1e1d9` 隔离 WebSocket 语义限流，`804679d99` 让流式 failover 保留模型范围。Chat 与 WS HTTP bridge 的人工冲突解决保留 fork 的流式内存优化、client-tool 恢复和账号健康判定，同时把 `upstreamModel` / `mappedModel` 传入上游的模型级 failover；这些上游行为不登记为 fork 差异，也不覆盖 Ultrafast、实际分组、外部取消 join、health-neutral failover 与 subscription 限额 429 契约。
 - **本次基线继续吸收**：`624e4eef6`、`8b4b3f4a9`、`2b8cb628b` 与 `d39fc491e` 将最终出站 `service_tier` 和上游回显分离，并在 Chat/Responses fallback 与 WebSocket 路径保留两者；`3a9070359`、`f323d8464`、`50ad6e2e5` 与 `82105f260` 让 Codex OAuth/setup-token 的 `default` 回显不再误降级 Fast 计费，同时保持公共 API 回显可权威降级并按实际 shadow 凭据判定。自动合并继续保留 fork 的 Ultrafast 原样转发、独立倍率和“响应只能降低、不能抬高计费 tier”契约。
 - **本次基线新增吸收**：`57c76584a` 在 Codex 模型目录声明 Fast/Priority，`1be69e56a` 接受缺少 call ID 的 delegation bootstrap，`e21b849a9` 停止为 API Key 请求合成 instructions，`1dc0a0900` 将 WebSocket ingress 容量降载改写为客户端可识别错误码，`6d5f02784` 回收陈旧 idle WebSocket 连接。上述行为来自上游，不登记为 fork 差异；冲突解决继续保留 fork 的实际分组归因、Ultrafast 原样转发、大请求内存保护和账号健康语义。
+- **本次基线继续吸收**：`a4fb58e42`、`f2804eb2c` 提供分组强制 Fast 与免费 Fast，`3510aa22b`、`559960865` 增加按模型生效的 reasoning effort 映射及超限 deny/downgrade，`34b8bf1a6` 增加渠道 1h cache-write 定价，`d596d0844`、`e50bffb7e`、`6566039bc` 修复自动化 bootstrap、API Key Chat cache identity 与 WebSocket terminal-close 判定。这些均为上游能力，不登记为 fork 差异；合并后继续保留 Ultrafast、实际选中分组策略、公开/固定模型和外部取消 join 等 fork 不变量。
 - **人工合并解决**：`0b7eed0738a608971d9711e99ba824d89536f947` 保留 request-scoped proxy quarantine context；`caae38b9abf429d1326ec174b54210a21b023309` 保留 `ShouldUseOpenAIResponsesPassthrough` 和 compact-aware namespace 处理；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将 proxy quarantine、passthrough cancellation/close code 与上游 profit admission、load-shed 和 WS turn pricing 合并；`9527e0fc1d85897baf72fbb9ff32027ff3d63aaa` 合入上游取消检查与身份/配额恢复，并保留 public/fixed model、`ClientLifecycleContext`、`NeutralForAccountHealth` 和 `RequestScopedTransient`；`0bd492e7e7887cec0832981b27c4b164029a6c2c` 让上游 OAuth `count_tokens` HTML 403 fallback 复用 fork 已有的 privacy HTML 响应分类，消除同 package helper 重名且保留两边语义；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在 OpenAI gateway、passthrough、WS 和调度冲突中保留协议恢复、取消与 health-neutral failover，并合入上游 response-model 审计、容量降载和 routing hints。上述提交中的 Project 归属和项目范围 scheduler cache 已失效，不得恢复。
 - **前次合并解决**：合入上游父提交 `7b693ae4295e20329f18ff451b29a38879cb4705` 时，OpenAI HTTP/WS 继续保留 fork 的实际分组归因、passthrough 实际路径标记、reasoning cache、部分成功告警、外部取消和 health-neutral 语义，同时吸收上游 requested reasoning effort、Cyber passthrough 与客户端关闭归因；其中 Project 归属不再是当前契约。
 - **合并审查**：逐项比较协议测试和状态清理，不得因为上游出现同名 helper 就删除本地行为；特别检查 streaming 已写出后的 failover、credential redaction 和 retry 次数。
@@ -388,4 +389,4 @@ git diff --check
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、provider snapshot、退款审计兼容等不变量。
 - **既有上游部分吸收**：上游父提交 `00b8596176809906993169c283671811ad04f58d` 包含 `1b04e03cc4c7c23c216ae0f4830b593700b06eda` 的 Responses `output_text` 解析和 `30d2589ef0f0dc839b934b0b21a270d18b7af52b` 的 lease-loss terminal event 保留；能力 5 与 7 只移除这些重叠子项，其余隐私、授权、fail-closed、取消、代理、故障转移和配额清理契约继续保留。
 - **既有基线上游新增**：Composite 分组模型广场、Codex WebSocket prewarm continuation、OAuth `count_tokens` HTML 403 fallback、Grok 视频 `task_id`、Gemini 3.6 Flash 模型、Ops 自定义错误时间范围，以及 upstream transport / SOCKS5 的 TCP 建连超时均来自既有上游基线，不登记为 fork 能力；`count_tokens` 人工解决仅复用 fork 已有的 privacy HTML 响应分类。
-- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/目录化长上下文阶梯计费、service-tier 请求/响应分离与 Codex OAuth 计费判定、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、native compaction v2 用量记录与筛选、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、passthrough WebSocket session 隔离、oversized passthrough HTTP bridge、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录与 Priority 声明、API Key instructions 保持、delegation bootstrap 兼容、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、WS ingress 容量错误改写与陈旧连接回收、数据库启动瞬时错误重试、Plugins 管理入口、Go 1.27.0 builder、Claude Code Messages 粘性路由、Responses 透传首输出前 keepalive、Grok cache key 优先级与 vision tool output 图片保留、Anthropic 工具参数保真、Antigravity 混合内置工具、周/月订阅重置锚点、分组局部更新保留未提交限额、配额 cooldown 原子重置与 scheduler rate-limit 重置、配额 singleflight 去重、可配置图片工具 cooldown、Ollama Cloud 国产平台用量、OpenAI refresh token 重新授权、兑换码本地时区过期解析、智谱团队 Coding Plan、轻量倍率快照刷新、批量关闭指纹收敛、Claude attribution header 保留、充值币种展示、连字符版本后缀解析、Spark 模型级限流与重置语义，以及 WS/流式模型级 failover 均已包含在 `a2fb09260a955676f99cdc92f05469febee82a08` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
+- **当前基线上游原生能力**：Composite 图片/Codex/CN/视频/Messages 路由、OAuth outbound plugin、daily-midnight/阈值自动 reset、Channel Monitor V2、response-model/service-tier/Fast 与渠道时段/目录化长上下文阶梯计费、service-tier 请求/响应分离与 Codex OAuth 计费判定、requested reasoning effort、系统日志退避、Grok 4.6/JWT tier/x_search/inline-image/retry/Codex 请求清理、Codex OAuth 指纹和账号身份收敛、分组每日 rollup、用户公开分组限制、remote compaction v2/turn-state provenance、native compaction v2 用量记录与筛选、request-scoped capacity recovery、Responses WS session preemption/后续 turn 429 failover/Cyber policy/client-close attribution、passthrough WebSocket session 隔离、oversized passthrough HTTP bridge、client-tool discovery/follow-up、HTTP bridge replay 去重、adaptive protocol、guardian parent affinity、用量单次聚合、模型广场、按实际路由生成的 Codex 模型目录与 Priority 声明、API Key instructions 保持、delegation bootstrap 兼容、实际上游 endpoint 错误观测、WSv2 陈旧 native tool ID 清理、WS ingress 容量错误改写与陈旧连接回收、数据库启动瞬时错误重试、Plugins 管理入口、Go 1.27.0 builder、Claude Code Messages 粘性路由、Responses 透传首输出前 keepalive、Grok cache key 优先级与 vision tool output 图片保留、Anthropic 工具参数保真、Antigravity 混合内置工具、周/月订阅重置锚点、分组局部更新保留未提交限额、配额 cooldown 原子重置与 scheduler rate-limit 重置、配额 singleflight 去重、可配置图片工具 cooldown、Ollama Cloud 国产平台用量、OpenAI refresh token 重新授权、兑换码本地时区过期解析、智谱团队 Coding Plan、轻量倍率快照刷新、批量关闭指纹收敛、Claude attribution header 保留、充值币种展示、连字符版本后缀解析、Spark 模型级限流与重置语义、WS/流式模型级 failover、分组普通 Fast/免费 Fast、模型级 reasoning effort 映射与超限策略，以及渠道 1h cache-write 定价均已包含在 `5097b31457e6dc9f49e5f5c9c72b925ce79543b3` 基线，不登记为 fork 能力，也不得在后续冲突中因同名本地 helper 而删除。
