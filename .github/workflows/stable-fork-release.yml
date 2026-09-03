@@ -40,7 +40,27 @@ jobs:
             exit 1
           fi
 
-          upstream_tag="v${BASH_REMATCH[1]}"
+          local_base="${BASH_REMATCH[1]}"
+          git fetch --no-tags "$upstream_url" main
+          if ! merged_upstream_commit=$(git merge-base HEAD FETCH_HEAD); then
+            echo "Unable to resolve the merged upstream baseline." >&2
+            exit 1
+          fi
+          if ! merged_upstream_version=$(git show "${merged_upstream_commit}:backend/cmd/server/VERSION" | tr -d '\r\n'); then
+            echo "Unable to read VERSION from merged upstream commit ${merged_upstream_commit}." >&2
+            exit 1
+          fi
+          if [[ ! "$merged_upstream_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid merged upstream VERSION: ${merged_upstream_version}" >&2
+            exit 1
+          fi
+          if [[ "$local_base" != "$merged_upstream_version" ]]; then
+            echo "VERSION base v${local_base} does not match merged upstream base v${merged_upstream_version} (${merged_upstream_commit})." >&2
+            echo "Update backend/cmd/server/VERSION before releasing." >&2
+            exit 1
+          fi
+
+          upstream_tag="v${local_base}"
           if ! git ls-remote --exit-code --tags --refs "$upstream_url" "refs/tags/${upstream_tag}" >/dev/null; then
             echo "VERSION base ${upstream_tag} is not a stable tag in ${UPSTREAM_REPOSITORY}." >&2
             exit 1

@@ -30,13 +30,13 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.0` |
-| 当前 Fork 版本 | `0.1.183-fork.5` |
-| 已发布同基线 Fork 版本 | `v0.1.183-fork.5`（版本基数与当前上游基线不一致） |
+| 当前 Fork 版本 | `0.2.0-fork.1`（待发布） |
+| 已发布同基线 Fork 版本 | 无 |
 | 下次发布所需版本 | `0.2.0-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源仍为已发布的 `0.1.183-fork.5`，但当前上游基线版本已是 `0.2.0`，版本基数不一致。下次发布前必须将版本源提升为 `0.2.0-fork.1`；本次上游合并不发布新版本，也不重写既有 tag。
+当前版本源已提升为 `0.2.0-fork.1`，与已合并上游基线一致；既有 `v0.1.183-fork.6` 作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
 ## 能力索引
 
@@ -120,13 +120,13 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：从 `stable` 构建 fork 二进制和镜像，复用主 release pipeline，同时保持登录身份、发布目标、rolling tag 和更新检查彼此独立。
-- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；发布 base 必须取自当前检出代码的 `backend/cmd/server/VERSION` 并验证对应上游稳定 tag，不得取远端最新 tag 替代尚未合并的版本；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；只有当前运行版本本身属于 fork channel 时，rollback 才可接受 GitHub 标为 prerelease 的严格 `vX.Y.Z-fork.N`，不得混入 rc/beta 或让 plain upstream channel 跨入 fork；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags；Telegram 发布通知中的动态 Markdown 必须完整转义，并校验 API 返回的 `ok`，不得把发送失败静默记为成功。
+- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；发布 base 必须取自当前检出代码的 `backend/cmd/server/VERSION`，与 `HEAD` 和上游 `main` 共同基线中的版本一致，并验证对应上游稳定 tag，不得取远端最新 tag 替代尚未合并的版本；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；只有当前运行版本本身属于 fork channel 时，rollback 才可接受 GitHub 标为 prerelease 的严格 `vX.Y.Z-fork.N`，不得混入 rc/beta 或让 plain upstream channel 跨入 fork；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags；Telegram 发布通知中的动态 Markdown 必须完整转义，并校验 API 返回的 `ok`，不得把发送失败静默记为成功。
 - **当前代码**：`.github/workflows/stable-fork-release.yml`、`.github/workflows/release.yml`、`.goreleaser.yaml`、`backend/cmd/server/VERSION`、`backend/internal/service/update_service.go`、`backend/internal/repository/github_release_service.go`、`deploy/install.sh`。
 - **测试**：`backend/internal/service/update_service_test.go`、`backend/internal/repository/github_release_service_test.go`。
 - **来源提交**：`c6af7d1ce7c5a3962e283aa7dd843e5602fd6e74`、`59af010693739c41834f1f5e16d1c4e564abefb6`、`4a7594f2f756dd6c60cfcbd425509dc94e740cb5`、`5ad3a11a1c46561c82a9a9452d8884bfe6423a54`。
 - **当前变更定位**：运行 `git log -S'forkPart := strings.TrimPrefix' -- backend/internal/service/update_service.go`，可定位同时支持任意连字符后缀与 `-fork.N` revision 比较的兼容提交。
 - **人工合并解决**：合入 `ac18c588c81821b3c4fd4f2c2457dd9a3e341737` 后，独立功能提交保留同 base 下 fork revision 的顺序，并吸收上游对 `-custom` 等普通连字符后缀的解析；VERSION-only 提交只是该策略的派生元数据。
-- **合并审查**：先判断上游是否 bump base version；若已 bump，版本源改为新 base 的 `fork.1`；否则按该 base 已发布的最高 fork revision 递增。不得把 registry login 名重新当作镜像 namespace。
+- **合并审查**：先判断已合并上游是否 bump base version；若已 bump，版本源改为新 base 的 `fork.1`；否则按该 base 已发布的最高 fork revision 递增。发布流水线必须拒绝本地 base 与已合并上游共同基线版本不一致的提交，不得把 registry login 名重新当作镜像 namespace。
 - **删除条件**：不主动删除。只有 fork 停止独立发布和更新时才可移除。
 - **聚焦验证**：
 
