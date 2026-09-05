@@ -303,7 +303,7 @@ jobs:
             TAG_NAME=${GITHUB_REF#refs/tags/}
           fi
           VERSION=${TAG_NAME#v}
-          TAG_HASHTAG=${TAG_NAME//./_}
+          TAG_HASHTAG=$(printf '%s' "$TAG_NAME" | sed 's/[^[:alnum:]_]/_/g')
           TAG_HASHTAG=${TAG_HASHTAG//_/\\_}
           REPO="${{ github.repository }}"
           GHCR_IMAGE="ghcr.io/${REPO,,}"  # ${,,} converts to lowercase

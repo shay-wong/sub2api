@@ -30,13 +30,13 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.0` |
-| 当前 Fork 版本 | `0.2.0-fork.2`（待发布） |
-| 已发布同基线 Fork 版本 | `v0.2.0-fork.1` |
-| 下次发布所需版本 | `0.2.0-fork.2` |
+| 当前 Fork 版本 | `0.2.0-fork.3`（已发布） |
+| 已发布同基线 Fork 版本 | `v0.2.0-fork.3` |
+| 下次发布所需版本 | `0.2.0-fork.4` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已递增为 `0.2.0-fork.2`，与已合并上游基线一致；既有 `v0.2.0-fork.1` 作为同基线历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+当前已发布版本为 `0.2.0-fork.3`，与已合并上游基线一致；既有同基线 fork tag 作为历史发布保留，不重写。下一次同基线发布使用 `0.2.0-fork.4`。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
 ## 能力索引
 
@@ -120,7 +120,7 @@
 
 - **生命周期**：`长期保留`
 - **原始意图**：从 `stable` 构建 fork 二进制和镜像，复用主 release pipeline，同时保持登录身份、发布目标、rolling tag 和更新检查彼此独立。
-- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；发布 base 必须取自当前检出代码的 `backend/cmd/server/VERSION`，与 `HEAD` 和上游 `main` 共同基线中的版本一致，并验证对应上游稳定 tag，不得取远端最新 tag 替代尚未合并的版本；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；只有当前运行版本本身属于 fork channel 时，rollback 才可接受 GitHub 标为 prerelease 的严格 `vX.Y.Z-fork.N`，不得混入 rc/beta 或让 plain upstream channel 跨入 fork；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags；Telegram 发布通知中的动态 Markdown 必须完整转义，并校验 API 返回的 `ok`，不得把发送失败静默记为成功。
+- **行为不变量**：Fork release 使用 `vX.Y.Z-fork.N`；发布 base 必须取自当前检出代码的 `backend/cmd/server/VERSION`，与 `HEAD` 和上游 `main` 共同基线中的版本一致，并验证对应上游稳定 tag，不得取远端最新 tag 替代尚未合并的版本；上游提升 base version 时立即使用新 base 的 `fork.1`，同一 base 后续发布递增 `N`；相同 base version 下 plain release 小于 fork release；只有当前运行版本本身属于 fork channel 时，rollback 才可接受 GitHub 标为 prerelease 的严格 `vX.Y.Z-fork.N`，不得混入 rc/beta 或让 plain upstream channel 跨入 fork；`DOCKERHUB_USERNAME` 只表示登录身份，发布目标由 `DOCKERHUB_NAME`/`DOCKERHUB_IMAGE` 决定；fork release 不更新上游 rolling tags；Telegram 发布通知中的动态 Markdown 必须完整转义，版本 hashtag 只能包含字母、数字和下划线，并校验 API 返回的 `ok`，不得把发送失败静默记为成功。
 - **当前代码**：`.github/workflows/stable-fork-release.yml`、`.github/workflows/release.yml`、`.goreleaser.yaml`、`backend/cmd/server/VERSION`、`backend/internal/service/update_service.go`、`backend/internal/repository/github_release_service.go`、`deploy/install.sh`。
 - **测试**：`backend/internal/service/update_service_test.go`、`backend/internal/repository/github_release_service_test.go`。
 - **来源提交**：`c6af7d1ce7c5a3962e283aa7dd843e5602fd6e74`、`59af010693739c41834f1f5e16d1c4e564abefb6`、`4a7594f2f756dd6c60cfcbd425509dc94e740cb5`、`5ad3a11a1c46561c82a9a9452d8884bfe6423a54`。
