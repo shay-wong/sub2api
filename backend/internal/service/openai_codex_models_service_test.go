@@ -345,6 +345,16 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.True(t, gpt56.SupportsReasoningSummaryParameter)
 	require.Equal(t, "none", gpt56.DefaultReasoningSummary)
 
+	gpt6 := newConfiguredCodexModelDescriptor("gpt-6-astra")
+	require.Equal(t, "GPT-6 Astra", gpt6.DisplayName)
+	require.Equal(t, "medium", *gpt6.DefaultReasoningLevel)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt6.SupportedReasoningLevels))
+	require.Equal(t, []configuredCodexServiceTier{{ID: "priority", Name: "Fast", Description: "Priority processing for lower latency."}}, gpt6.ServiceTiers)
+	require.Equal(t, int64(922_000), gpt6.ContextWindow)
+	require.Equal(t, int64(922_000), gpt6.MaxContextWindow)
+	require.True(t, gpt6.SupportsParallelToolCalls)
+	require.True(t, gpt6.SupportVerbosity)
+
 	gpt56Luna := newConfiguredCodexModelDescriptor("gpt-5.6-luna")
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(gpt56Luna.SupportedReasoningLevels))
 	require.Equal(t, "medium", *gpt56Luna.DefaultReasoningLevel)
@@ -435,10 +445,11 @@ func TestBuildCodexModelsManifestAdvertisesPriorityServiceTierForFastGPTModels(t
 		"gpt-5.4-mini",
 		"gpt-5.5",
 		"gpt-5.6-sol",
+		"gpt-6-astra",
 	})
 	require.NoError(t, err)
 	models := decodeCodexManifestModels(t, body)
-	require.Len(t, models, 3)
+	require.Len(t, models, 4)
 
 	for _, model := range models {
 		require.Equal(t, []any{

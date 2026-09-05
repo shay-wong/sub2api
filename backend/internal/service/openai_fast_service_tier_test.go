@@ -129,7 +129,7 @@ func TestValidateOpenAIServiceTierField(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 计费：gpt-5.6 系列 / gpt-5.4 按标准价 2x，gpt-5.5 按标准价 2.5x
+// 计费：gpt-6-astra / gpt-5.6 系列 / gpt-5.4 按标准价 2x，gpt-5.5 按标准价 2.5x
 // ---------------------------------------------------------------------------
 
 func TestApplyModelSpecificPricingPolicy_EnforcesOpenAIFastRatios(t *testing.T) {
@@ -241,6 +241,14 @@ func TestOpenAIFastBillingMultiplier_2xAnd25x(t *testing.T) {
 			CacheReadInputTokenCost:         0.5e-6,
 			CacheReadInputTokenCostPriority: 1e-6,
 		},
+		"gpt-6-astra": {
+			InputCostPerToken:               10e-6,
+			InputCostPerTokenPriority:       20e-6,
+			OutputCostPerToken:              50e-6,
+			OutputCostPerTokenPriority:      100e-6,
+			CacheReadInputTokenCost:         1e-6,
+			CacheReadInputTokenCostPriority: 2e-6,
+		},
 	}
 	billing := NewBillingService(&config.Config{}, &PricingService{pricingData: catalog})
 	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000}
@@ -265,6 +273,7 @@ func TestOpenAIFastBillingMultiplier_2xAnd25x(t *testing.T) {
 		{model: "gpt-5.6-sol", ratio: 2.0},
 		{model: "gpt-5.6-terra", ratio: 2.0},
 		{model: "gpt-5.6-luna", ratio: 2.0},
+		{model: "gpt-6-astra", ratio: 2.0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model+"/fast", func(t *testing.T) {

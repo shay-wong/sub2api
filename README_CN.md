@@ -187,6 +187,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **API Key 分发** - 为用户生成和管理 API Key
 - **细粒度管理员权限** - 不恢复项目空间，在用户列表中同时配置 8 项管理员能力及分组、账号、代理、订阅的直接资源范围
 - **精确计费** - Token 级别的用量追踪和成本计算
+- **OpenAI GPT-6 Astra** - 支持展示并原样转发 `gpt-6-astra`，包含图片输入、`low` 至 `max` 推理档位、922K 最大输入、Priority/Fast，以及官方价格和 272K 长上下文阶梯计费
 - **OpenAI Ultrafast** - 在 Responses、Chat Completions 和 Responses WebSocket 中原样转发 `service_tier: "ultrafast"`，不会转换为普通 Fast，并为 OpenAI OAuth 账号生成匹配的 `tier=ultrafast` Codex 路由提示。OpenAI 公布 Ultrafast 定价前默认与 Fast 一致，按 Standard 的 `2 倍`计费，可在渠道模型定价中修改；OpenAI 响应回显的实际档位只能降低、不能抬高计费档位
 - **智能调度** - 智能账号选择，支持粘性会话
 - **并发控制** - 用户级和账号级并发限制

@@ -211,6 +211,23 @@ func TestGetModelPricing_OpenAIGPT54Fallback(t *testing.T) {
 	require.Zero(t, pricing.LongContextOutputMultiplier)
 }
 
+func TestGetModelPricing_OpenAIGPT6AstraFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("openai/gpt-6-astra-2026-09-04")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	require.InDelta(t, 10e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 20e-6, pricing.InputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 50e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 100e-6, pricing.OutputPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 12.5e-6, pricing.CacheCreationPricePerToken, 1e-12)
+	require.InDelta(t, 25e-6, pricing.CacheCreationPricePerTokenPriority, 1e-12)
+	require.InDelta(t, 1e-6, pricing.CacheReadPricePerToken, 1e-12)
+	require.InDelta(t, 2e-6, pricing.CacheReadPricePerTokenPriority, 1e-12)
+	require.Zero(t, pricing.LongContextInputThreshold)
+}
+
 func TestGetModelPricing_CatalogAboveTierFieldsDriveLongContext(t *testing.T) {
 	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
 
