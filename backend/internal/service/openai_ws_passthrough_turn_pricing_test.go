@@ -116,6 +116,11 @@ func TestPassthroughIngressFollowUpCallsBeforeTurnAfterBeforeRequest(t *testing.
 	event, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+	require.Eventually(t, func() bool {
+		hooksMu.Lock()
+		defer hooksMu.Unlock()
+		return afterTurnCalls == 2
+	}, time.Second, time.Millisecond)
 
 	hooksMu.Lock()
 	gotCallbacks := append([]string(nil), callbacks...)
