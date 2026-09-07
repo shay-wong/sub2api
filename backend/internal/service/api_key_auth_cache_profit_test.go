@@ -53,7 +53,6 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
 	require.NotNil(t, snapshot)
 	require.Equal(t, apiKeyAuthSnapshotVersion, snapshot.Version)
-	require.Equal(t, 23, snapshot.Version, "v23 同时携带 fork 字段与上游分组 Fast/reasoning 策略字段")
 
 	// 模拟 L2 缓存的完整 JSON 往返（与 apiKeyCache.SetAuthCache/GetAuthCache 同构）。
 	payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
@@ -79,15 +78,16 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.InDelta(t, 0.06*(1-0.25), gate.threshold, 1e-12)
 }
 
-// 旧版本快照（v16 及更早，无利润字段保真保证）必须被淘汰回源，不得复用。
+// 旧版本快照缺少利润字段或 Codex manifest 配置，必须被淘汰回源。
 func TestAPIKeyAuthSnapshotOldVersionEvicted(t *testing.T) {
 	svc := &APIKeyService{}
 	snapshot := svc.snapshotFromAPIKey(context.Background(), profitAuthTestAPIKey())
 	require.NotNil(t, snapshot)
-	snapshot.Version = 16
-
-	materialized, used, err := svc.applyAuthCacheEntry("sk-old", &APIKeyAuthCacheEntry{Snapshot: snapshot})
-	require.NoError(t, err)
-	require.False(t, used, "版本不匹配的缓存条目必须淘汰并回源重建")
-	require.Nil(t, materialized)
+	for _, version := range []int{16, 23} {
+		snapshot.Version = version
+		materialized, used, err := svc.applyAuthCacheEntry("sk-old", &APIKeyAuthCacheEntry{Snapshot: snapshot})
+		require.NoError(t, err)
+		require.False(t, used, "版本不匹配的缓存条目必须淘汰并回源重建: v%d", version)
+		require.Nil(t, materialized)
+	}
 }

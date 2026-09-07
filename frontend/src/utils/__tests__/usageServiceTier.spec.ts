@@ -29,6 +29,7 @@ describe('usageServiceTier utils', () => {
     const translate = (key: string) => ({
       'usage.serviceTierUltrafast': 'Ultrafast',
       'usage.serviceTierPriority': 'Fast',
+      'usage.serviceTierUltrafast': 'Ultrafast',
       'usage.serviceTierFlex': 'Flex',
       'usage.serviceTierStandard': 'Standard',
     })[key] ?? key

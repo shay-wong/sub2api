@@ -1001,6 +1001,7 @@ var (
 		{Name: "default_mapped_model", Type: field.TypeString, Size: 100, Default: ""},
 		{Name: "messages_dispatch_model_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "codex_models_manifest_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
 		{Name: "max_reasoning_effort", Type: field.TypeString, Size: 20, Default: ""},
 		{Name: "max_reasoning_effort_over_limit", Type: field.TypeString, Size: 20, Default: "downgrade"},
@@ -1018,7 +1019,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_projects_groups",
-				Columns:    []*schema.Column{GroupsColumns[66]},
+				Columns:    []*schema.Column{GroupsColumns[67]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1032,7 +1033,7 @@ var (
 			{
 				Name:    "group_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[66]},
+				Columns: []*schema.Column{GroupsColumns[67]},
 			},
 			{
 				Name:    "group_platform",
@@ -1062,7 +1063,7 @@ var (
 			{
 				Name:    "group_project_id_platform_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[66], GroupsColumns[14], GroupsColumns[12]},
+				Columns: []*schema.Column{GroupsColumns[67], GroupsColumns[14], GroupsColumns[12]},
 			},
 			{
 				Name:    "idx_groups_duplicate_operation_id_active",

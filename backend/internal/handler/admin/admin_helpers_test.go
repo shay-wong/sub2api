@@ -32,6 +32,41 @@ func TestParseTimeRange(t *testing.T) {
 	require.False(t, end.IsZero())
 }
 
+func TestAccountHandlerListLitePreservesRestrictedAdminScope(t *testing.T) {
+	adminSvc := newStubAdminService()
+	adminSvc.accounts = []service.Account{{
+		ID: 2, Name: "direct", Status: service.StatusActive,
+		GroupIDs: []int64{10, 20},
+		Extra: map[string]any{
+			service.UpstreamBillingProbeEnabledExtraKey: true,
+			service.UpstreamBillingProbeExtraKey:        map[string]any{"balance": 42},
+			"privacy_mode":                              "training_off",
+		},
+	}}
+	router := newRestrictedAdminAccountScopeRouter(adminSvc, service.AdminResourceScope{
+		Mode: service.AdminResourceScopeRestricted, GroupIDs: []int64{10}, AccountIDs: []int64{2},
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?lite=1", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var payload struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Items, 1)
+	item := payload.Data.Items[0]
+	require.Equal(t, []any{float64(10)}, item["group_ids"])
+	require.NotContains(t, item, "groups")
+	require.NotContains(t, item, "account_groups")
+	extra, ok := item["extra"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "training_off", extra["privacy_mode"])
+	require.NotContains(t, extra, service.UpstreamBillingProbeEnabledExtraKey)
+	require.NotContains(t, extra, service.UpstreamBillingProbeExtraKey)
+}
+
 func TestParseTimeRangeUsesCalendarDayAcrossDST(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

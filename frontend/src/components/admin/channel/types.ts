@@ -30,6 +30,7 @@ export interface PricingFormEntry {
   fast_multiplier?: number | string | null
   ultrafast_multiplier?: number | string | null
   flex_multiplier?: number | string | null
+  max_reasoning_effort_multiplier?: number | string | null
   image_input_price: number | string | null
   image_output_price: number | string | null
   per_request_price: number | string | null

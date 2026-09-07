@@ -25,6 +25,7 @@ func TestSetOpenAICodexRoutingHintCanonicalizesOfficialServiceTiers(t *testing.T
 		{name: "priority", model: "gpt-5.6", serviceTier: "priority", want: "model=gpt-5.6;tier=priority"},
 		{name: "ultrafast", model: "gpt-5.6-sol", serviceTier: "ultrafast", want: "model=gpt-5.6-sol;tier=ultrafast"},
 		{name: "flex", model: "gpt-5.6", serviceTier: "flex", want: "model=gpt-5.6;tier=flex"},
+		{name: "ultrafast", model: "gpt-5.6", serviceTier: "ultrafast", want: "model=gpt-5.6;tier=ultrafast"},
 		{name: "explicit default sentinel", model: "gpt-5.6", serviceTier: "default", want: "model=gpt-5.6"},
 		{name: "omitted tier", model: "gpt-5.6", want: "model=gpt-5.6"},
 		{name: "auto is not expanded without catalog support", model: "gpt-5.6", serviceTier: "auto", want: "model=gpt-5.6"},
@@ -92,6 +93,7 @@ func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
 		{name: "fast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"fast"}`), want: "model=gpt-5.6-codex;tier=priority"},
 		{name: "ultrafast", body: []byte(`{"model":"gpt-5.6-sol","service_tier":"ultrafast"}`), want: "model=gpt-5.6-sol;tier=ultrafast"},
 		{name: "flex", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"flex"}`), want: "model=gpt-5.6-codex;tier=flex"},
+		{name: "ultrafast", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"ultrafast"}`), want: "model=gpt-5.6-codex;tier=ultrafast"},
 		{name: "default", body: []byte(`{"model":"gpt-5.6-codex","service_tier":"default"}`), want: "model=gpt-5.6-codex"},
 		{name: "omitted", body: []byte(`{"model":"gpt-5.6-codex"}`), want: "model=gpt-5.6-codex"},
 	}

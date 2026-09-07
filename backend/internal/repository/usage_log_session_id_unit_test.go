@@ -31,7 +31,7 @@ func newSessionIDUsageLog(sessionID *string) *service.UsageLog {
 // TestPrepareUsageLogInsert_SessionIDArgWiring pins the project/model audit,
 // requested reasoning, session, and native compaction fields to the shared INSERT layout.
 func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
-	require.Len(t, usageLogInsertArgTypes, 62, "arg-type table must include fork audit fields and native_compaction_v2")
+	require.Len(t, usageLogInsertArgTypes, 63, "arg-type table must include fork audit fields and native_compaction_v2")
 
 	sessionID := "sess-persisted-123"
 	prepared := prepareUsageLogInsert(newSessionIDUsageLog(&sessionID))
