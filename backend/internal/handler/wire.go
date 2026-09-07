@@ -179,8 +179,8 @@ func ProvideAdminDashboardHandler(dashboardService *service.DashboardService, ag
 	return h
 }
 
-func ProvideAdminGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, permissionService *service.PermissionService) *admin.GroupHandler {
-	return admin.NewGroupHandler(adminService, dashboardService, groupCapacityService, permissionService)
+func ProvideAdminGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, cfg *config.Config, permissionService *service.PermissionService) *admin.GroupHandler {
+	return admin.NewGroupHandlerWithConfig(adminService, dashboardService, groupCapacityService, cfg, permissionService)
 }
 
 func ProvideAdminProxyHandler(adminService service.AdminService, permissionService *service.PermissionService) *admin.ProxyHandler {

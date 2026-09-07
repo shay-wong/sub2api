@@ -206,7 +206,6 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			}
 			return nil, ErrLiveConcurrencyFull
 		}
-
 		now := time.Now()
 		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
 		if model == "" {
@@ -267,7 +266,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 				return nil, createErr
 			}
 			s.closeLiveCreateIntent(intent)
-			if !s.shouldFailoverLiveCreateError(createErr) {
+			if !s.shouldFailoverLiveCreateError(account, createErr) {
 				return nil, createErr
 			}
 			excluded[account.ID] = struct{}{}
@@ -342,7 +341,7 @@ func (s *OpenAIGatewayService) closeLiveCreateIntent(intent *LiveCallRecord) {
 	}
 }
 
-func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(account *Account, err error) bool {
 	var ambiguousErr *liveCreateAmbiguousError
 	if errors.As(err, &ambiguousErr) {
 		return false
@@ -352,7 +351,7 @@ func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
 		// 请求发出前的凭证读取或请求构造错误可能只影响当前账号。
 		return true
 	}
-	return s.shouldFailoverOpenAIUpstreamResponse(
+	return s.shouldFailoverOpenAIUpstreamResponse(account,
 		upstreamErr.StatusCode,
 		"",
 		upstreamErr.ResponseBody,

@@ -350,7 +350,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.POST("", groupManage, h.Admin.Group.Create)
 
 		scopedGroup := groups.Group("/:id", groupManage, h.Admin.Group.RequireResourceScope())
-		scopedGroup.GET("/models-list-candidates", h.Admin.Group.GetModelsListCandidates)
+		scopedGroup.GET("/model-allowlist-candidates", h.Admin.Group.GetGroupModelAllowlistCandidates)
 		scopedGroup.GET("/composite-routes", h.Admin.Group.ListCompositeRoutes)
 		scopedGroup.POST("/composite-routes", h.Admin.Group.CreateCompositeRoute)
 		scopedGroup.POST("/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)

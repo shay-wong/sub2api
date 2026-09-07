@@ -94,7 +94,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		if err := s.handleOpenAIAlphaSearchCyberPolicyResponse(c, resp, respBody); err != nil {
 			return nil, err
 		}
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) ||
+		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMessage, respBody) ||
 			isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode) {
 			endpointUnavailable := isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -182,7 +182,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 		if err := s.handleOpenAIAlphaSearchCyberPolicyResponse(c, resp, respBody); err != nil {
 			return nil, err
 		}
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) {
+		if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMessage, respBody) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			// 仍按 alpha/search 工具请求处理：PAT 的工具链路失败不能直接永久置错。
 			shouldDisable := false

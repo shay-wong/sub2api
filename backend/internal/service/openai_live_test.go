@@ -206,7 +206,7 @@ func TestCreateUpstreamLiveCallDoesNotFailOverAcceptedResponseWithoutLocation(t 
 	require.False(t, accepted)
 	var ambiguousErr *liveCreateAmbiguousError
 	require.ErrorAs(t, err, &ambiguousErr)
-	require.False(t, service.shouldFailoverLiveCreateError(err))
+	require.False(t, service.shouldFailoverLiveCreateError(account, err))
 }
 
 func TestCreateUpstreamLiveCallDoesNotFailOverAmbiguousTransportError(t *testing.T) {
@@ -223,7 +223,7 @@ func TestCreateUpstreamLiveCallDoesNotFailOverAmbiguousTransportError(t *testing
 	require.Nil(t, created)
 	var ambiguousErr *liveCreateAmbiguousError
 	require.ErrorAs(t, err, &ambiguousErr)
-	require.False(t, service.shouldFailoverLiveCreateError(err))
+	require.False(t, service.shouldFailoverLiveCreateError(account, err))
 }
 
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {
@@ -294,17 +294,18 @@ func TestLiveSidebandNormalCloseEndsCall(t *testing.T) {
 
 func TestLiveCreateFailoverUsesExistingOpenAIPolicy(t *testing.T) {
 	service := &OpenAIGatewayService{}
-	require.False(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	account := newOpenAIUpstreamErrorTestAccount()
+	require.False(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode:   http.StatusBadRequest,
 		ResponseBody: []byte(`{"error":{"message":"invalid session"}}`),
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	require.True(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode: http.StatusForbidden,
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	require.True(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode: http.StatusBadGateway,
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(errors.New("preflight failed")))
+	require.True(t, service.shouldFailoverLiveCreateError(account, errors.New("preflight failed")))
 }
 
 func TestLiveCallIDFromLocation(t *testing.T) {

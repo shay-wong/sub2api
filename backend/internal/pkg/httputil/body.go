@@ -23,6 +23,33 @@ const (
 	maxDecompressedBodySize = 64 << 20
 )
 
+// PrereadBody wraps a fully buffered body so later consumers can reread it
+// without another allocation or copy.
+type PrereadBody struct {
+	body   []byte
+	reader *bytes.Reader
+}
+
+func NewPrereadBody(body []byte) *PrereadBody {
+	return &PrereadBody{body: body, reader: bytes.NewReader(body)}
+}
+
+func (p *PrereadBody) Read(b []byte) (int, error) {
+	if p == nil {
+		return 0, io.EOF
+	}
+	return p.reader.Read(b)
+}
+
+func (p *PrereadBody) Close() error { return nil }
+
+func (p *PrereadBody) Bytes() []byte {
+	if p == nil {
+		return nil
+	}
+	return p.body
+}
+
 // ReadRequestBodyWithDiskSpill keeps small bodies on the existing in-memory
 // path and stores large, chunked, or compressed bodies in a read-only mmap.
 func ReadRequestBodyWithDiskSpill(req *http.Request, threshold int64) ([]byte, func(), error) {
@@ -68,9 +95,14 @@ func ReadRequestBodyWithDiskSpill(req *http.Request, threshold int64) ([]byte, f
 // ReadRequestBodyWithPrealloc reads request body with preallocated buffer based
 // on content length, transparently decoding any Content-Encoding the upstream
 // client used to compress the body (zstd, gzip, deflate).
+// 已由 PrereadBody 回填的请求体直接返回其完整切片（零拷贝），不检查内部
+// reader 是否已被消费——见 PrereadBody 的文档说明。
 func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
+	}
+	if preread, ok := req.Body.(*PrereadBody); ok {
+		return preread.Bytes(), nil
 	}
 
 	var raw []byte

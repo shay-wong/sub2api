@@ -785,7 +785,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon, adminPermission: AdminPermissions.dashboard },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring, adminPermission: AdminPermissions.ops },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.users },
-    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.groups },
+    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, adminPermission: AdminPermissions.groups },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, adminPermission: AdminPermissions.subscriptions },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon, adminPermission: AdminPermissions.accounts },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon, adminPermission: AdminPermissions.proxies },
@@ -793,12 +793,11 @@ const adminNavItems = computed((): NavItem[] => {
   ]
 
   if (!authStore.isAdmin) {
-    return applyAdminPermissions(applyFeatureFlags(permissionItems))
+    return applyAdminPermissions(finalizeNav(permissionItems))
   }
 
   const baseItems: NavItem[] = [
-    ...permissionItems.slice(0, 2),
-    ...permissionItems.slice(2, 4),
+    ...permissionItems.slice(0, 4),
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),

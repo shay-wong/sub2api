@@ -42,7 +42,7 @@ func TestAPIKeyService_RejectsV16AuthSnapshotWithoutWebSearchPrice(t *testing.T)
 	}
 }
 
-func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.T) {
+func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelAllowlist(t *testing.T) {
 	groupID := int64(9)
 	svc := &APIKeyService{}
 
@@ -75,7 +75,7 @@ func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.
 		t.Fatalf("expected stale snapshot to be ignored without error, got %v", err)
 	}
 	if ok {
-		t.Fatalf("expected v10 auth snapshot to be rejected after models_list_config was added")
+		t.Fatalf("expected v10 auth snapshot to be rejected after model_allowlist was added")
 	}
 	if apiKey != nil {
 		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)
