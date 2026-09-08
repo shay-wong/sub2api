@@ -372,10 +372,7 @@ func (s *GroupRepoSuite) TestDelete() {
 func (s *GroupRepoSuite) TestDeleteCascadeIfEmptyRejectsGroupWithNonDeletedAccount() {
 	group := &service.Group{Name: "guarded-non-empty", Platform: service.PlatformAnthropic, RateMultiplier: 1, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard}
 	s.Require().NoError(s.repo.Create(s.ctx, group))
-	var accountID int64
-	s.Require().NoError(scanSingleRow(s.ctx, s.tx,
-		"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
-		[]any{"guarded-account", service.PlatformAnthropic, service.AccountTypeOAuth}, &accountID))
+	accountID := s.insertAccount("guarded-account", "", "")
 	_, err := s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, 1, NOW())", accountID, group.ID)
 	s.Require().NoError(err)
 
@@ -401,10 +398,7 @@ func (s *GroupRepoSuite) TestDeleteCascadeIfEmptyDeletesEmptyGroup() {
 func (s *GroupRepoSuite) TestDeleteCascadeIfEmptyIgnoresBindingsToSoftDeletedAccounts() {
 	group := &service.Group{Name: "guarded-soft-deleted-account", Platform: service.PlatformAnthropic, RateMultiplier: 1, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard}
 	s.Require().NoError(s.repo.Create(s.ctx, group))
-	var accountID int64
-	s.Require().NoError(scanSingleRow(s.ctx, s.tx,
-		"INSERT INTO accounts (name, platform, type, deleted_at) VALUES ($1, $2, $3, NOW()) RETURNING id",
-		[]any{"guarded-deleted-account", service.PlatformAnthropic, service.AccountTypeOAuth}, &accountID))
+	accountID := s.insertAccount("guarded-deleted-account", ", deleted_at", ", NOW()")
 	_, err := s.tx.ExecContext(s.ctx, "INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES ($1, $2, 1, NOW())", accountID, group.ID)
 	s.Require().NoError(err)
 
@@ -419,12 +413,13 @@ func TestBindAccountsToGroupWaitingBehindGuardedDeleteCannotCommit(t *testing.T)
 	defer cancel()
 
 	var groupID, accountID int64
+	projectID := mustDefaultProjectID(t, integrationEntClient)
 	require.NoError(t, scanSingleRow(ctx, integrationDB,
-		"INSERT INTO groups (name, platform, rate_multiplier, status, subscription_type) VALUES ($1, $2, 1, $3, $4) RETURNING id",
-		[]any{"guarded-delete-bind-race", service.PlatformAnthropic, service.StatusActive, service.SubscriptionTypeStandard}, &groupID))
+		"INSERT INTO groups (name, platform, rate_multiplier, status, subscription_type, project_id) VALUES ($1, $2, 1, $3, $4, $5) RETURNING id",
+		[]any{"guarded-delete-bind-race", service.PlatformAnthropic, service.StatusActive, service.SubscriptionTypeStandard, projectID}, &groupID))
 	require.NoError(t, scanSingleRow(ctx, integrationDB,
-		"INSERT INTO accounts (name, platform, type) VALUES ($1, $2, $3) RETURNING id",
-		[]any{"guarded-delete-bind-race-account", service.PlatformAnthropic, service.AccountTypeOAuth}, &accountID))
+		"INSERT INTO accounts (name, platform, type, project_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		[]any{"guarded-delete-bind-race-account", service.PlatformAnthropic, service.AccountTypeOAuth, projectID}, &accountID))
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM account_groups WHERE group_id = $1 OR account_id = $2", groupID, accountID)
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)

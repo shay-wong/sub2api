@@ -18,10 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `b7dba62678a834080564966c002fd0ca2b328b7a` |
-| 当前比较范围 | `b7dba62678a834080564966c002fd0ca2b328b7a..HEAD` |
+| 已合并上游提交 / 比较基线 | `772a0382f079676983c06f24b0d41e09139a8462` |
+| 当前比较范围 | `772a0382f079676983c06f24b0d41e09139a8462..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `02285936d463180af755fdc2834faabd1fe2be8a`，固定上游 parent 为 `b7dba62678a834080564966c002fd0ca2b328b7a`，共同基线为 `ab99d56e9626e6cd731592dae8553c9758a0efa2`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `2e483679ac21b69de4da54810a491a67456fbf63`，固定上游 parent 为 `772a0382f079676983c06f24b0d41e09139a8462`，共同基线为 `b7dba62678a834080564966c002fd0ca2b328b7a`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+
+本次新增的模型白名单修复迁移（`4a7739acd`）、账号测试模型显示名称（`e094a3f40`）和 Ollama 跨协议输出上限及 Bearer 鉴权（`cc91155fe`、`2fc24d887`、`57387445f`）均为上游行为，不新增 fork 能力条目。上游 `236_group_model_allowlist_repair.sql` 与 fork `236_admin_resource_scopes.sql` 以完整文件名独立记账，保留两者及既有 checksum，不修改已发布迁移。模型白名单迁移及分组删除的集成测试复用默认项目 helper 补齐旧 `project_id` 必填存储列，不恢复 Project 权限逻辑。此前 `2e483679a` 的构造参数与 WebSocket 测试同步修复继续保留。
 
 ## Fork 发布版本
 
@@ -29,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.2` |
-| 当前 Fork 版本 | `0.2.2-fork.1`（待发布） |
+| 当前上游版本 | `0.2.3` |
+| 当前 Fork 版本 | `0.2.3-fork.1`（待发布） |
 | 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.2.2-fork.1` |
+| 下次发布所需版本 | `0.2.3-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已随上游 `0.2.2` 重置为 `0.2.2-fork.1`；既有 `v0.2.1-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+当前版本源已随上游 `0.2.3` 重置为 `0.2.3-fork.1`；既有 `v0.2.2-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
 ## 能力索引
 
