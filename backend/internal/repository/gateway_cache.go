@@ -638,10 +638,12 @@ func (c *gatewayCache) ListRecoverableLiveCalls(ctx context.Context, before time
 	if limit <= 0 {
 		return nil, nil
 	}
-	hashes, err := c.rdb.ZRangeByScore(ctx, liveCallRecoveryIndexKey, &redis.ZRangeBy{
-		Min:   "-inf",
-		Max:   strconv.FormatInt(before.UnixMilli(), 10),
-		Count: limit,
+	hashes, err := c.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     liveCallRecoveryIndexKey,
+		Start:   "-inf",
+		Stop:    strconv.FormatInt(before.UnixMilli(), 10),
+		ByScore: true,
+		Count:   limit,
 	}).Result()
 	if err != nil {
 		return nil, err

@@ -94,9 +94,16 @@ func (h *AccountHandler) UpdateGrokMediaEligibility(c *gin.Context) {
 }
 
 func (h *AccountHandler) getGrokOAuthAccount(c *gin.Context) (*service.Account, error) {
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		return nil, err
+	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		return nil, infraerrors.BadRequest("INVALID_ACCOUNT_ID", "Invalid account ID")
+	}
+	if err := h.ensureAccountInScope(c, scope, accountID); err != nil {
+		return nil, err
 	}
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
 	if err != nil {
