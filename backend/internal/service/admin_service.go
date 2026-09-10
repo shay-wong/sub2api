@@ -544,22 +544,23 @@ type CreateProxyInput struct {
 	ExpiryWarnDays *int
 }
 
+// UpdateProxyInput preserves omitted expiry/backup values; Clear flags explicitly
+// remove them. A nil ExpiryWarnDays preserves the current warning period.
 type UpdateProxyInput struct {
-	Name                   string
-	Protocol               string
-	Host                   string
-	Port                   int
-	Username               string
-	Password               string
-	Status                 string
-	ExpiresAt              *time.Time
-	ExpiresAtProvided      bool
-	FallbackMode           string
-	FallbackModeProvided   bool
-	BackupProxyID          *int64
-	BackupProxyIDProvided  bool
-	ExpiryWarnDays         *int
-	ExpiryWarnDaysProvided bool
+	Name                 string
+	Protocol             string
+	Host                 string
+	Port                 int
+	Username             string
+	Password             string
+	Status               string
+	ExpiresAt            *time.Time
+	ClearExpiresAt       bool
+	FallbackMode         string
+	FallbackModeProvided bool
+	BackupProxyID        *int64
+	ClearBackupID        bool
+	ExpiryWarnDays       *int
 }
 
 type GenerateRedeemCodesInput struct {

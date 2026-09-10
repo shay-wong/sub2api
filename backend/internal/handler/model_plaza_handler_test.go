@@ -112,6 +112,12 @@ func (modelPlazaUserRepoStub) GetByID(_ context.Context, id int64) (*service.Use
 	return &service.User{ID: id}, nil
 }
 
+type modelPlazaSubscriptionRepoStub struct{ service.UserSubscriptionRepository }
+
+func (modelPlazaSubscriptionRepoStub) ListActiveByUserID(context.Context, int64) ([]service.UserSubscription, error) {
+	return nil, nil
+}
+
 type modelPlazaRateRepoStub struct {
 	service.UserGroupRateRepository
 }
@@ -124,7 +130,7 @@ func TestModelPlazaHandler_UserRateFailureReturnsError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewModelPlazaHandler(
 		service.NewModelPlazaService(modelPlazaChannelRepoStub{}, modelPlazaGroupRepoStub{}, nil, nil, nil),
-		service.NewAPIKeyService(nil, modelPlazaUserRepoStub{}, nil, nil, modelPlazaRateRepoStub{}, nil, nil),
+		service.NewAPIKeyService(nil, modelPlazaUserRepoStub{}, nil, modelPlazaSubscriptionRepoStub{}, modelPlazaRateRepoStub{}, nil, nil),
 		service.NewSettingService(modelPlazaSettingRepoStub{}, nil),
 	)
 	w := httptest.NewRecorder()
@@ -295,4 +301,18 @@ func TestToModelPlazaGroupDTO_TimePricing(t *testing.T) {
 	weekdaysModel := decoded["models"].([]any)[1].(map[string]any)
 	weekdaysTP := weekdaysModel["time_pricing"].(map[string]any)
 	require.Equal(t, true, weekdaysTP["weekdays_only"])
+}
+
+func TestFilterPlazaVisibleGroups_SubscribedExclusiveGroup(t *testing.T) {
+	groups := []service.PlazaGroup{
+		{ID: 42, IsExclusive: true, SubscriptionType: "subscription"},
+		{ID: 43, IsExclusive: true, SubscriptionType: "subscription"},
+		{ID: 44, IsExclusive: true, SubscriptionType: "standard"},
+	}
+	require.Empty(t, filterPlazaVisibleGroups(groups, nil, false))
+	for _, restricted := range []bool{false, true} {
+		visible := filterPlazaVisibleGroups(groups, map[int64]struct{}{42: {}}, restricted)
+		require.Len(t, visible, 1)
+		require.Equal(t, int64(42), visible[0].ID)
+	}
 }

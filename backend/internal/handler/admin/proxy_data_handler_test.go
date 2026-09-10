@@ -296,10 +296,12 @@ func TestProxyImportDataReusesAndTriggersLatencyProbe(t *testing.T) {
 	require.Contains(t, updatedIDs, int64(1))
 	require.Len(t, updatedProxies, 1)
 	require.Equal(t, "inactive", updatedProxies[0].Status)
-	require.False(t, updatedProxies[0].ExpiresAtProvided)
-	require.False(t, updatedProxies[0].FallbackModeProvided)
-	require.False(t, updatedProxies[0].BackupProxyIDProvided)
-	require.False(t, updatedProxies[0].ExpiryWarnDaysProvided)
+	require.Nil(t, updatedProxies[0].ExpiresAt)
+	require.False(t, updatedProxies[0].ClearExpiresAt)
+	require.Empty(t, updatedProxies[0].FallbackMode)
+	require.Nil(t, updatedProxies[0].BackupProxyID)
+	require.False(t, updatedProxies[0].ClearBackupID)
+	require.Nil(t, updatedProxies[0].ExpiryWarnDays)
 
 	require.Eventually(t, func() bool {
 		adminSvc.mu.Lock()

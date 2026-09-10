@@ -20,6 +20,10 @@ func (s *updatingProxyRepoStub) GetByID(context.Context, int64) (*Proxy, error) 
 	return &copy, nil
 }
 
+func (s *updatingProxyRepoStub) GetByIDForManagement(ctx context.Context, id int64) (*Proxy, error) {
+	return s.GetByID(ctx, id)
+}
+
 func (s *updatingProxyRepoStub) Update(_ context.Context, proxy *Proxy) error {
 	s.updateCalls++
 	copy := *proxy
@@ -57,11 +61,12 @@ func TestBothProxyUpdateServicesUseRepositoryUpdateBoundary(t *testing.T) {
 			},
 		}
 		svc := &adminServiceImpl{proxyRepo: repo}
+		warnDays := 7
 
 		_, err := svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{
 			Host:           "new.example",
 			FallbackMode:   FallbackModeNone,
-			ExpiryWarnDays: testPtrInt(7),
+			ExpiryWarnDays: &warnDays,
 		})
 
 		require.NoError(t, err)

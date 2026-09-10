@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `772a0382f079676983c06f24b0d41e09139a8462` |
-| 当前比较范围 | `772a0382f079676983c06f24b0d41e09139a8462..HEAD` |
+| 已合并上游提交 / 比较基线 | `98d86915becae9fe9491a91ffc6defd5235c8d2b` |
+| 当前比较范围 | `98d86915becae9fe9491a91ffc6defd5235c8d2b..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `2e483679ac21b69de4da54810a491a67456fbf63`，固定上游 parent 为 `772a0382f079676983c06f24b0d41e09139a8462`，共同基线为 `b7dba62678a834080564966c002fd0ca2b328b7a`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `ff23e3900d076abf5d4c6a683753d531ee58232f`，固定上游 parent 为 `98d86915becae9fe9491a91ffc6defd5235c8d2b`，共同基线为 `772a0382f079676983c06f24b0d41e09139a8462`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次新增的模型白名单修复迁移（`4a7739acd`）、账号测试模型显示名称（`e094a3f40`）和 Ollama 跨协议输出上限及 Bearer 鉴权（`cc91155fe`、`2fc24d887`、`57387445f`）均为上游行为，不新增 fork 能力条目。上游 `236_group_model_allowlist_repair.sql` 与 fork `236_admin_resource_scopes.sql` 以完整文件名独立记账，保留两者及既有 checksum，不修改已发布迁移。模型白名单迁移及分组删除的集成测试复用默认项目 helper 补齐旧 `project_id` 必填存储列，不恢复 Project 权限逻辑。此前 `2e483679a` 的构造参数与 WebSocket 测试同步修复继续保留。
+本次合入 MiniMax 平台、GPT Image 2.5 与 OAuth 生图主控模型修复、HTTP/2 长流 PING、持久化冷却对账、429 fallback 禁用语义、Grok 媒体资格控制、代理有向共享备份与重复过期切换、Channel Monitor 排名开关、OpenAI 周成本估算、系统日志存储上限、Redis 连接池修复及账号菜单/失效分组交互。这些均为上游行为，不新增 fork 能力条目。机械冲突解决保留 fork 的细粒度管理员权限、批量操作、Astra 静态价格兜底和 probe 缓存失效；代理 Ent 输出从合并后的 schema 重新生成。历史迁移仍按完整文件名记账，不改名或重写 checksum；新增迁移与测试继续兼容旧 `project_id` 存储列，不恢复 Project 权限逻辑。
 
 ## Fork 发布版本
 
@@ -31,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.3` |
-| 当前 Fork 版本 | `0.2.3-fork.1`（待发布） |
+| 当前上游版本 | `0.2.4` |
+| 当前 Fork 版本 | `0.2.4-fork.1`（待发布） |
 | 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.2.3-fork.1` |
+| 下次发布所需版本 | `0.2.4-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已随上游 `0.2.3` 重置为 `0.2.3-fork.1`；既有 `v0.2.2-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+当前版本源已随上游 `0.2.4` 重置为 `0.2.4-fork.1`；既有 `v0.2.3-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
 ## 能力索引
 

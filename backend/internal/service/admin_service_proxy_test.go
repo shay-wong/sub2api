@@ -79,13 +79,11 @@ func TestAdminService_UpdateProxyExplicitlyClearsOrSetsOptionalFields(t *testing
 	svc := &adminServiceImpl{proxyRepo: repo}
 
 	proxy, err := svc.UpdateProxy(context.Background(), 1, &UpdateProxyInput{
-		ExpiresAtProvided:      true,
-		FallbackModeProvided:   true,
-		FallbackMode:           "",
-		BackupProxyIDProvided:  true,
-		BackupProxyID:          nil,
-		ExpiryWarnDaysProvided: true,
-		ExpiryWarnDays:         &warnDays,
+		ClearExpiresAt:       true,
+		FallbackMode:         "",
+		FallbackModeProvided: true,
+		ClearBackupID:        true,
+		ExpiryWarnDays:       &warnDays,
 	})
 
 	require.NoError(t, err)
