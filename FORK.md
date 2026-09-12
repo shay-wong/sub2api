@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `98d86915becae9fe9491a91ffc6defd5235c8d2b` |
-| 当前比较范围 | `98d86915becae9fe9491a91ffc6defd5235c8d2b..HEAD` |
+| 已合并上游提交 / 比较基线 | `bdb42e22f81fcb633ff0a060961211dd2bcb515b` |
+| 当前比较范围 | `bdb42e22f81fcb633ff0a060961211dd2bcb515b..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `ff23e3900d076abf5d4c6a683753d531ee58232f`，固定上游 parent 为 `98d86915becae9fe9491a91ffc6defd5235c8d2b`，共同基线为 `772a0382f079676983c06f24b0d41e09139a8462`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `d96d312ce44efffc4a98e3c3d2e15567fe6b93e2`，固定上游 parent 为 `bdb42e22f81fcb633ff0a060961211dd2bcb515b`，共同基线为 `98d86915becae9fe9491a91ffc6defd5235c8d2b`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入 MiniMax 平台、GPT Image 2.5 与 OAuth 生图主控模型修复、HTTP/2 长流 PING、持久化冷却对账、429 fallback 禁用语义、Grok 媒体资格控制、代理有向共享备份与重复过期切换、Channel Monitor 排名开关、OpenAI 周成本估算、系统日志存储上限、Redis 连接池修复及账号菜单/失效分组交互。这些均为上游行为，不新增 fork 能力条目。机械冲突解决保留 fork 的细粒度管理员权限、批量操作、Astra 静态价格兜底和 probe 缓存失效；代理 Ent 输出从合并后的 schema 重新生成。历史迁移仍按完整文件名记账，不改名或重写 checksum；新增迁移与测试继续兼容旧 `project_id` 存储列，不恢复 Project 权限逻辑。
+本次合入 OpenCode Zen/GO 平台、OAuth 原生 Codex Images 与图片缓存计价、Codex 默认/最大上下文分别持久化、按执行作用域隔离 WebSocket 状态与新版上下文池容量、缺省 service tier 强制 Priority 策略、站点计费类型、全平台 Token 请求统计及登录/导出/配额状态修复。这些均为上游行为，不新增 fork 能力条目。冲突解决保留细粒度管理员权限、实际分组归因、非 Codex 图片策略、Astra 静态价格、mmap body 生命周期和隐私错误分类；Ent 输出从合并后的 schema 重新生成。历史迁移仍按完整文件名记账，不改名或重写 checksum；旧 `project_id` 存储列不作为恢复 Project 权限逻辑的依据。
 
 ## Fork 发布版本
 
@@ -32,13 +32,15 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.4` |
-| 当前 Fork 版本 | `0.2.4-fork.1`（待发布） |
-| 已发布同基线 Fork 版本 | 无 |
-| 下次发布所需版本 | `0.2.4-fork.1` |
+| 当前 Fork 版本 | `0.2.4-fork.1`（版本文件当前值） |
+| 已发布同基线 Fork 版本 | `v0.2.4-fork.1` |
+| 下次发布所需版本 | `0.2.4-fork.2` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
 当前版本源已随上游 `0.2.4` 重置为 `0.2.4-fork.1`；既有 `v0.2.3-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+
+本次仅合并代码，不发布或创建 tag；版本文件未单独递增。已发布的 `v0.2.4-fork.1` 指向本次 fork parent，下一次同 base 发布应由发布流程使用尚未占用的 `0.2.4-fork.2`。
 
 ## 能力索引
 
@@ -167,6 +169,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **测试**：`backend/internal/service/openai_image_generation_controls_test.go`、`backend/internal/handler/openai_images_controls_test.go`。
 - **来源提交**：`d43bbf80f6ad4dd05cd704036ecce940f4c2def9`。
 - **上游相邻行为**：`3c53ba01a`、`c227863d5` 为 OpenAI API Key 非流式 Images 增加账号 opt-in 的 URL 到 `b64_json` 回填、私网/重定向目的地校验和图片字节嗅探；它不处理本条的非 Codex Responses 图片工具注入、strip、group permission 或 compact 例外，因此不构成等价吸收。
+- **本次上游相邻行为**：`c0d511937` 及后续修复让支持的 OAuth 图片模型走原生 Codex Images，旧模型和显式兼容场景继续使用 Responses bridge；图片缓存用量和计价也已由上游提供。这改变 Images 请求的出站路径，不替代非 Codex Responses 的账号 opt-in、strip、group permission 和 compact 例外。旧 bridge 测试使用仍走该路径的模型，原生路径由上游 direct-images 测试覆盖。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：区分 client identity、account policy、group permission 和 endpoint type；任何一层同名开关都不能替代其他层。
 - **删除条件**：不主动删除；只有产品取消非 Codex 图片策略时才可移除。

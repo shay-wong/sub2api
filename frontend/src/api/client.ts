@@ -208,6 +208,17 @@ apiClient.interceptors.response.use(
               })
             }
 
+            if (axios.isAxiosError(refreshError)) {
+              const refreshStatus = refreshError.response?.status ?? 0
+              if (refreshStatus === 0 || refreshStatus === 429 || refreshStatus >= 500) {
+                return Promise.reject({
+                  status: refreshStatus,
+                  code: 'TOKEN_REFRESH_UNAVAILABLE',
+                  message: refreshError.response?.data?.message || refreshError.message
+                })
+              }
+            }
+
             // Clear tokens and redirect to login
             localStorage.removeItem('auth_token')
             localStorage.removeItem('refresh_token')

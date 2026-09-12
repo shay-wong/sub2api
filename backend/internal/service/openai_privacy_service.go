@@ -123,6 +123,14 @@ func isHTMLResponse(headers http.Header, lowerBody string) bool {
 	return strings.HasPrefix(body, "<!doctype html") || strings.HasPrefix(body, "<html")
 }
 
+// isCloudflareChallengeResponse 判断 chatgpt.com 返回的是否为 Cloudflare 质询/拦截页。
+// 优先看 cf-mitigated 响应头（质询时为 "challenge"），再回退到正文关键字。
+func isCloudflareChallengeResponse(cfMitigated, body string) bool {
+	headers := make(http.Header)
+	headers.Set("cf-mitigated", cfMitigated)
+	return httputil.IsCloudflareChallengeResponse(http.StatusForbidden, headers, []byte(body))
+}
+
 // ChatGPTAccountInfo 从 chatgpt.com/backend-api/accounts/check 获取的账号信息
 type ChatGPTAccountInfo struct {
 	PlanType string
@@ -168,12 +176,12 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 		Get(chatGPTAccountsCheckURL)
 
 	if err != nil {
-		slog.Debug("chatgpt_account_check_request_error", "error", err.Error())
+		slog.Warn("chatgpt_account_check_request_error", "error", err.Error())
 		return nil
 	}
 
 	if !resp.IsSuccessState() {
-		slog.Debug("chatgpt_account_check_failed", "status", resp.StatusCode, "body", truncate(resp.String(), 200))
+		slog.Warn("chatgpt_account_check_failed", "status", resp.StatusCode, "cf_challenge", isCloudflareChallengeResponse(resp.Header.Get("cf-mitigated"), resp.String()), "body", truncate(resp.String(), 200))
 		return nil
 	}
 
@@ -284,11 +292,11 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 		SetQueryParam("account_id", accountID).
 		Get(chatGPTSubscriptionsURL)
 	if err != nil {
-		slog.Debug("chatgpt_subscription_request_error", "error", err.Error())
+		slog.Warn("chatgpt_subscription_request_error", "error", err.Error())
 		return ""
 	}
 	if !resp.IsSuccessState() {
-		slog.Debug("chatgpt_subscription_failed", "status", resp.StatusCode, "body", truncate(resp.String(), 200))
+		slog.Warn("chatgpt_subscription_failed", "status", resp.StatusCode, "cf_challenge", isCloudflareChallengeResponse(resp.Header.Get("cf-mitigated"), resp.String()), "body", truncate(resp.String(), 200))
 		return ""
 	}
 

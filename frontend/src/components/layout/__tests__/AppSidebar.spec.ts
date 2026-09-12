@@ -81,8 +81,12 @@ vi.mock('@/utils/featureFlags', () => ({
     channelMonitor: 'channelMonitor',
     payment: 'payment',
     riskControl: 'riskControl',
+    subscription: 'subscription',
+    modelPlaza: 'modelPlaza',
+    pluginManagement: 'pluginManagement',
   },
   makeSidebarFlag: () => () => true,
+  resolveFeatureFlag: () => true,
 }))
 
 beforeEach(() => {
@@ -216,7 +220,7 @@ describe('AppSidebar admin/user hierarchy', () => {
 
     const projectAdminBranchMatch = componentSource.match(/if \(!authStore\.isAdmin\) \{[\s\S]*?\n {2}\}/)
     const projectAdminBranchSource = projectAdminBranchMatch?.[0] ?? ''
-    expect(projectAdminBranchSource).toContain('return applyAdminPermissions(applyFeatureFlags(permissionItems))')
+    expect(projectAdminBranchSource).toContain('return applyAdminPermissions(finalizeNav(permissionItems))')
     expect(componentSource).toContain('function applyAdminPermissions')
     expect(componentSource).toContain('authStore.hasAdminPermission(item.adminPermission)')
     expect(componentSource).toContain('AdminPermissions.proxies')
@@ -228,5 +232,23 @@ describe('AppSidebar admin/user hierarchy', () => {
 
   it('removes project-space management navigation', () => {
     expect(componentSource).not.toContain("path: '/admin/projects'")
+  })
+})
+
+describe('AppSidebar subscription feature flag', () => {
+  it('gates the My Subscriptions entry behind the subscription public-settings flag', () => {
+    expect(componentSource).toContain('const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)')
+    expect(componentSource).toMatch(/path: '\/subscriptions'[^\n]*featureFlag: flagSubscription/)
+  })
+
+  it('also hides the admin Subscription Management entry on recharge-only sites', () => {
+    expect(componentSource).toMatch(/path: '\/admin\/subscriptions'[^\n]*featureFlag: flagSubscription/)
+  })
+
+  it('derives the purchase entry label from the site billing mode', () => {
+    expect(componentSource).toContain("import { resolveSiteBillingMode } from '@/utils/siteBillingMode'")
+    expect(componentSource).toMatch(/case 'recharge_only':\s*return t\('nav\.recharge'\)/)
+    expect(componentSource).toMatch(/case 'subscription_only':\s*return t\('nav\.subscribe'\)/)
+    expect(componentSource).toMatch(/path: '\/purchase'[^\n]*label: purchaseNavLabel\.value/)
   })
 })
