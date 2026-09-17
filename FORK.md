@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `bdb42e22f81fcb633ff0a060961211dd2bcb515b` |
-| 当前比较范围 | `bdb42e22f81fcb633ff0a060961211dd2bcb515b..HEAD` |
+| 已合并上游提交 / 比较基线 | `881f3202694c6bc932446931a30c27d9675178b9` |
+| 当前比较范围 | `881f3202694c6bc932446931a30c27d9675178b9..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `d96d312ce44efffc4a98e3c3d2e15567fe6b93e2`，固定上游 parent 为 `bdb42e22f81fcb633ff0a060961211dd2bcb515b`，共同基线为 `98d86915becae9fe9491a91ffc6defd5235c8d2b`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `14a618e38a45d68436873cbc31078f65fd9cd6ca`，固定上游 parent 为 `881f3202694c6bc932446931a30c27d9675178b9`，共同基线为 `bdb42e22f81fcb633ff0a060961211dd2bcb515b`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入 OpenCode Zen/GO 平台、OAuth 原生 Codex Images 与图片缓存计价、Codex 默认/最大上下文分别持久化、按执行作用域隔离 WebSocket 状态与新版上下文池容量、缺省 service tier 强制 Priority 策略、站点计费类型、全平台 Token 请求统计及登录/导出/配额状态修复。这些均为上游行为，不新增 fork 能力条目。冲突解决保留细粒度管理员权限、实际分组归因、非 Codex 图片策略、Astra 静态价格、mmap body 生命周期和隐私错误分类；Ent 输出从合并后的 schema 重新生成。历史迁移仍按完整文件名记账，不改名或重写 checksum；旧 `project_id` 存储列不作为恢复 Project 权限逻辑的依据。
+本次合入订阅批量操作、API Key 批量编辑与按供应商筛选分组、注册确认密码、OAuth 注册优惠码保留、Codex 规范配额窗口与调度统计修复、Responses Lite namespace 和终态文本恢复、OAuth input metadata 清理、Ollama Cloud 异步额度恢复，以及 Antigravity 账号缓存隔离、工具与 SSE 修复。这些均为上游行为，不新增 fork 能力条目。机械冲突解决保留管理员资源范围、无 Project 上下文、退款期限补偿、事务行锁与代理凭据清空语义。新增订阅批量入口的资源范围和事务后缓存失效适配必须作为紧随合并的独立功能提交验证，不能把上游批量能力视为绕过 fork 契约的例外。
 
 ## Fork 发布版本
 
@@ -31,16 +31,16 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.4` |
-| 当前 Fork 版本 | `0.2.4-fork.1`（版本文件当前值） |
-| 已发布同基线 Fork 版本 | `v0.2.4-fork.1` |
-| 下次发布所需版本 | `0.2.4-fork.2` |
+| 当前上游版本 | `0.2.5` |
+| 当前 Fork 版本 | `0.2.5-fork.1`（版本文件当前值） |
+| 已发布同基线 Fork 版本 | 无（当前已获取 tag 中不存在 `v0.2.5-fork.*`） |
+| 下次发布所需版本 | `0.2.5-fork.1` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已随上游 `0.2.4` 重置为 `0.2.4-fork.1`；既有 `v0.2.3-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+当前版本源已随上游 `0.2.5` 重置为 `0.2.5-fork.1`；既有 `v0.2.4-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
-本次仅合并代码，不发布或创建 tag；版本文件未单独递增。已发布的 `v0.2.4-fork.1` 指向本次 fork parent，下一次同 base 发布应由发布流程使用尚未占用的 `0.2.4-fork.2`。
+本次仅合并代码，不发布或创建 tag；版本文件按既有合并策略随上游 base 更新，下一次发布使用尚未占用的 `0.2.5-fork.1`。
 
 ## 能力索引
 

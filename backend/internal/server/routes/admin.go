@@ -707,6 +707,7 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		subscriptions.GET("", h.Admin.Subscription.List)
 		subscriptions.POST("/assign", h.Admin.Subscription.Assign)
 		subscriptions.POST("/bulk-assign", h.Admin.Subscription.BulkAssign)
+		subscriptions.POST("/bulk-action", h.Admin.Subscription.BulkAction)
 
 		scopedSubscription := subscriptions.Group("/:id", h.Admin.Subscription.RequireResourceScope())
 		scopedSubscription.GET("", h.Admin.Subscription.GetByID)

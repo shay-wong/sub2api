@@ -724,6 +724,9 @@ func (s *SubscriptionService) extendSubscription(ctx context.Context, subscripti
 			return err
 		}
 		now := time.Now()
+		if s.now != nil {
+			now = s.now()
+		}
 		isExpired := !locked.ExpiresAt.After(now)
 		if isExpired && days < 0 {
 			return infraerrors.BadRequest("CANNOT_SHORTEN_EXPIRED", "cannot shorten an expired subscription")
