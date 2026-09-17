@@ -179,6 +179,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
+  - Bulk subscription actions check every direct subscription binding before execution or idempotent replay. Any unauthorized subscription rejects the entire batch with `403` and no mutations. Group bindings do not grant subscription access, and revoked access also blocks replay of earlier results.
 - **Precise Billing** - Token-level usage tracking and cost calculation
 - **OpenAI GPT-6 Astra** - Exposes and forwards `gpt-6-astra` with image input, `low` through `max` reasoning, a 922K-token maximum input, Priority/Fast support, official pricing, and the 272K long-context price tier
 - **OpenAI Ultrafast** - Passes `service_tier: "ultrafast"` through Responses, Chat Completions, and Responses WebSocket without converting it to Fast, and generates the matching `tier=ultrafast` Codex routing hint for OpenAI OAuth accounts. Until OpenAI publishes Ultrafast pricing, billing defaults to the same `2x` Standard multiplier as Fast and can be overridden per channel model; the tier reported by OpenAI may lower, but never raise, the billed tier

@@ -88,22 +88,19 @@ func (s *SubscriptionService) BulkSubscriptionAction(ctx context.Context, input 
 				var mutationErr error
 				switch input.Action {
 				case "extend":
-					changed, mutationErr = s.ExtendSubscription(txCtx, id, input.Days)
+					changed, mutationErr = s.extendSubscription(txCtx, id, input.Days, true)
 				case "reset_quota":
-					changed, mutationErr = s.AdminResetQuota(txCtx, id, input.Daily, input.Weekly, input.Monthly)
+					changed, mutationErr = s.adminResetQuota(txCtx, id, input.Daily, input.Weekly, input.Monthly, true)
 				case "revoke":
-					changed, mutationErr = s.userSubRepo.GetByID(txCtx, id)
-					if mutationErr == nil {
-						mutationErr = s.RevokeSubscription(txCtx, id)
-					}
+					changed, mutationErr = s.revokeSubscription(txCtx, id, true)
 				case "restore":
-					changed, mutationErr = s.RestoreSubscription(txCtx, id)
+					changed, mutationErr = s.restoreSubscription(txCtx, id, true)
 				}
 				return mutationErr
 			})
 			if err == nil && changed != nil {
-				// Invalidate again after commit: concurrent readers could have filled
-				// a cache with the old row while the transaction was still open.
+				// Invalidate only after commit; cache failures must not roll back or
+				// misreport an otherwise successful subscription mutation.
 				if cacheErr := s.invalidateSubscriptionCaches(changed.UserID, changed.GroupID); cacheErr != nil {
 					log.Printf("[SubscriptionBulkAction] committed action=%s subscription_id=%d cache_error=%s", input.Action, id, logredact.RedactText(cacheErr.Error()))
 				}

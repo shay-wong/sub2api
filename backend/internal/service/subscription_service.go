@@ -951,6 +951,10 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 
 // AdminResetQuota manually resets the daily, weekly, and/or monthly usage windows.
 func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionID int64, resetDaily, resetWeekly, resetMonthly bool) (*UserSubscription, error) {
+	return s.adminResetQuota(ctx, subscriptionID, resetDaily, resetWeekly, resetMonthly, false)
+}
+
+func (s *SubscriptionService) adminResetQuota(ctx context.Context, subscriptionID int64, resetDaily, resetWeekly, resetMonthly, deferCacheInvalidation bool) (*UserSubscription, error) {
 	if !resetDaily && !resetWeekly && !resetMonthly {
 		return nil, ErrInvalidInput
 	}
@@ -967,9 +971,11 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	// Invalidate L1 ristretto cache. Ristretto's Del() is asynchronous by design,
 	// so call Wait() immediately after to flush pending operations and guarantee
 	// the deleted key is not returned on the very next Get() call.
-	s.InvalidateSubCacheSync(sub.UserID, sub.GroupID)
-	if s.billingCacheService != nil {
-		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
+	if !deferCacheInvalidation {
+		s.InvalidateSubCacheSync(sub.UserID, sub.GroupID)
+		if s.billingCacheService != nil {
+			_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
+		}
 	}
 	// Return the refreshed subscription from DB
 	return s.userSubRepo.GetByID(ctx, subscriptionID)

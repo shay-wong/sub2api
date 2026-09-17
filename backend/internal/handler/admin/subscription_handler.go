@@ -265,6 +265,17 @@ func (h *SubscriptionHandler) BulkAction(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	for _, id := range req.SubscriptionIDs {
+		if err := scope.ensureSubscription(id); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	executeAdminIdempotentJSONWithTimeout(c, "admin.subscriptions.bulk-action", req, service.DefaultWriteIdempotencyTTL(), 2*time.Minute, func(ctx context.Context) (any, error) {
 		return h.subscriptionService.BulkSubscriptionAction(ctx, &req)
 	})
