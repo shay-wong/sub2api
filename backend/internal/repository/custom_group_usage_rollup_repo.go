@@ -89,8 +89,19 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 	// 换成参数之后走 idx_usage_logs_created_at：
 	//   Index Scan … Index Cond: (created_at >= $7)
 	//   Execution Time: 34 ms
+	// Recheck the watermark in the aggregation's own snapshot: a historical
+	// write can invalidate buckets after the first query. Keep the indexed tail
+	// for an unchanged watermark; only a mismatch scans the full raw history.
 	const query = `
-		WITH historical AS (
+		WITH usable_rollup AS (
+			SELECT $4::boolean AND EXISTS (
+				SELECT 1 FROM usage_group_rollup_state
+				WHERE id = 1
+					AND closed_before = $6::date
+					AND (retained_from AT TIME ZONE $8::text)::date = $5::date
+					AND timezone_name = $8
+			) AS usable
+		), historical AS (
 			SELECT
 				rollup.group_id,
 				COALESCE(SUM(rollup.actual_cost), 0) AS actual_cost,
@@ -98,12 +109,22 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 					WHERE rollup.bucket_date = $3::date
 				), 0) AS yesterday_cost
 			FROM usage_group_daily_rollups rollup
-			WHERE $4::boolean
+			WHERE (SELECT usable FROM usable_rollup)
 				AND rollup.bucket_date >= $5::date
 				AND rollup.bucket_date < $6::date
 			GROUP BY rollup.group_id
 		),
-		tail AS (
+		usage_tail AS (
+			SELECT ul.group_id, ul.actual_cost, ul.created_at
+			FROM usage_logs ul
+			WHERE ul.created_at >= $7
+				AND (SELECT usable FROM usable_rollup)
+			UNION ALL
+			SELECT ul.group_id, ul.actual_cost, ul.created_at
+			FROM usage_logs ul
+			WHERE ul.created_at >= TIMESTAMPTZ '1970-01-01 00:00:00+00'
+				AND NOT (SELECT usable FROM usable_rollup)
+		), tail AS (
 			SELECT
 				ul.group_id,
 				COALESCE(SUM(ul.actual_cost), 0) AS actual_cost,
@@ -112,8 +133,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 					WHERE ul.created_at >= $2
 						AND ul.created_at < $1
 				), 0) AS yesterday_cost
-			FROM usage_logs ul
-			WHERE ul.created_at >= $7
+			FROM usage_tail ul
 			GROUP BY ul.group_id
 		)
 		SELECT
@@ -137,6 +157,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 		state.retainedDate,
 		state.closedBefore,
 		state.tailStart,
+		timezoneName,
 	)
 	if err != nil {
 		return nil, err

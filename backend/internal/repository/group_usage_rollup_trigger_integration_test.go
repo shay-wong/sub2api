@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -313,6 +314,97 @@ func TestGroupUsageSummaryIncludesYesterdayAcrossWatermark(t *testing.T) {
 			require.InDelta(t, 3, result[0].YesterdayCost, 0.0000001)
 		})
 	}
+}
+
+type groupUsageSummaryConcurrentWrite struct {
+	sqlExecutor
+	beforeSummary func()
+	plan          *[]string
+}
+
+func (e groupUsageSummaryConcurrentWrite) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(query, "FROM usage_logs ul") {
+		if e.beforeSummary != nil {
+			e.beforeSummary()
+		}
+		if e.plan != nil {
+			rows, err := e.sqlExecutor.QueryContext(ctx, "EXPLAIN ANALYZE "+query, args...)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return nil, err
+				}
+				*e.plan = append(*e.plan, line)
+			}
+			if err := rows.Err(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return e.sqlExecutor.QueryContext(ctx, query, args...)
+}
+
+func TestGroupUsageSummaryRevalidatesWatermarkAfterConcurrentWrite(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
+	seed := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
+	defer func() { _ = seed.Rollback() }()
+	_, err := seed.ExecContext(ctx, `
+		CREATE INDEX usage_summary_created_at ON usage_logs(created_at);
+		INSERT INTO groups (id) VALUES (10);
+		INSERT INTO users (id) VALUES (1);
+		INSERT INTO usage_logs (id, user_id, group_id, actual_cost, created_at)
+		VALUES (1, 1, 10, 1, TIMESTAMPTZ '2026-08-13 12:00:00+08');
+		INSERT INTO usage_group_daily_rollups (bucket_date, group_id, actual_cost)
+		VALUES (DATE '2026-08-13', 10, 1);
+		UPDATE usage_group_rollup_state
+		SET closed_before = DATE '2026-08-14',
+			retained_from = TIMESTAMPTZ '2026-08-13 00:00:00+08'
+		WHERE id = 1;
+	`)
+	require.NoError(t, err)
+	require.NoError(t, seed.Commit())
+
+	reader := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
+	defer func() { _ = reader.Rollback() }()
+	repo := newUsageLogRepositoryWithSQL(nil, groupUsageSummaryConcurrentWrite{
+		sqlExecutor: reader,
+		beforeSummary: func() {
+			// Commit between the watermark read and aggregation. The trigger
+			// invalidates yesterday's bucket but does not update its old total.
+			writer := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
+			defer func() { _ = writer.Rollback() }()
+			require.NoError(t, setGroupUsageRollupTriggerTimeZone(ctx, writer, "Asia/Shanghai"))
+			_, err := writer.ExecContext(ctx, `UPDATE usage_logs SET created_at = TIMESTAMPTZ '2026-08-14 12:00:00+08' WHERE id = 1`)
+			require.NoError(t, err)
+			require.NoError(t, writer.Commit())
+		},
+	})
+	result, err := repo.GetAllGroupUsageSummary(ctx, time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.InDelta(t, 1, result[0].TotalCost, 0.0000001)
+	require.InDelta(t, 1, result[0].TodayCost, 0.0000001)
+	require.Zero(t, result[0].YesterdayCost)
+
+	// With a stable watermark the raw-history branch must stay unexecuted,
+	// and the tail bound must remain usable as an index condition.
+	_, err = reader.ExecContext(ctx, "SET LOCAL enable_seqscan = off")
+	require.NoError(t, err)
+	var plan []string
+	repo = newUsageLogRepositoryWithSQL(nil, groupUsageSummaryConcurrentWrite{sqlExecutor: reader, plan: &plan})
+	_, err = repo.GetAllGroupUsageSummary(ctx, time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	planText := strings.Join(plan, "\n")
+	require.Contains(t, planText, "Index Cond: (created_at >=", planText)
+	require.Regexp(t, `Scan on usage_logs[^\n]+\(never executed\)\n[^\n]+created_at >= '1970-01-01`, planText)
+	t.Log(planText)
 }
 
 func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
