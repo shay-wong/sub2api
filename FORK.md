@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `881f3202694c6bc932446931a30c27d9675178b9` |
-| 当前比较范围 | `881f3202694c6bc932446931a30c27d9675178b9..HEAD` |
+| 已合并上游提交 / 比较基线 | `efe9aab1e4ec89a42ba45e8dac20e882c5409a6a` |
+| 当前比较范围 | `efe9aab1e4ec89a42ba45e8dac20e882c5409a6a..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `14a618e38a45d68436873cbc31078f65fd9cd6ca`，固定上游 parent 为 `881f3202694c6bc932446931a30c27d9675178b9`，共同基线为 `bdb42e22f81fcb633ff0a060961211dd2bcb515b`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `b22344f9470d93d0216c32016dddbdecc64b7b89`，固定上游 parent 为 `efe9aab1e4ec89a42ba45e8dac20e882c5409a6a`，共同基线为 `881f3202694c6bc932446931a30c27d9675178b9`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入订阅批量操作、API Key 批量编辑与按供应商筛选分组、注册确认密码、OAuth 注册优惠码保留、Codex 规范配额窗口与调度统计修复、Responses Lite namespace 和终态文本恢复、OAuth input metadata 清理、Ollama Cloud 异步额度恢复，以及 Antigravity 账号缓存隔离、工具与 SSE 修复。这些均为上游行为，不新增 fork 能力条目。机械冲突解决保留管理员资源范围、无 Project 上下文、退款期限补偿、事务行锁与代理凭据清空语义。新增订阅批量入口的资源范围和事务后缓存失效适配必须作为紧随合并的独立功能提交验证，不能把上游批量能力视为绕过 fork 契约的例外。
+本次合入暂停调度 OAuth 账号继续刷新令牌、分组用量汇总索引扫描、兑换历史分页、DeepSeek Responses 工具图片与并行输出顺序、严格 Chat 上游 developer 角色兼容、客户端取消后响应亲和性持久化、Gemini/Antigravity 模型目录，以及支付、TOTP、分页、剪贴板等界面修复和 gRPC 依赖安全升级。这些均为上游行为，不新增 fork 能力条目。唯一文本冲突是 OAuth 刷新候选查询：保留现有 `accounts AS a` 别名，采用上游移除 `schedulable` 过滤的修复，其他状态、冷却和全局账号边界不变。保留 `b22344f94` 的 mmap 标量独立存储回归。当前 main 不含 Codex 票据采集提交；本地残留 `v0.2.6` / `v0.3.0` 标签不能作为本次合并或发布基线。
 
 ## Fork 发布版本
 
@@ -33,14 +33,14 @@
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.5` |
 | 当前 Fork 版本 | `0.2.5-fork.1`（版本文件当前值） |
-| 已发布同基线 Fork 版本 | 无（当前已获取 tag 中不存在 `v0.2.5-fork.*`） |
-| 下次发布所需版本 | `0.2.5-fork.1` |
+| 已发布同基线 Fork 版本 | `v0.2.5-fork.1` |
+| 下次发布所需版本 | `0.2.5-fork.2` |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-当前版本源已随上游 `0.2.5` 重置为 `0.2.5-fork.1`；既有 `v0.2.4-fork.1` 及更早版本作为历史发布保留，不重写 tag。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
+当前版本源仍为已发布的 `0.2.5-fork.1`；同上游 base 的下次发布需递增到 `0.2.5-fork.2`。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝继续从不一致的旧 base 生成 fork tag。
 
-本次仅合并代码，不发布或创建 tag；版本文件按既有合并策略随上游 base 更新，下一次发布使用尚未占用的 `0.2.5-fork.1`。
+本次仅合并代码，不发布或创建 tag；上游 base 未变化，不为合并单独改版本文件，下一次发布由发布流程确定未占用的 fork 修订号。
 
 ## 能力索引
 
