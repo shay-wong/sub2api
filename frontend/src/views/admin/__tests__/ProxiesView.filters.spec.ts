@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import ProxiesView from '../ProxiesView.vue'
 
 const { listProxies, getAllWithCount } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ vi.mock('vue-i18n', async () => ({
 
 const mountView = () => shallowMount(ProxiesView, {
   global: {
+    plugins: [createPinia()],
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
       TablePageLayout: {
