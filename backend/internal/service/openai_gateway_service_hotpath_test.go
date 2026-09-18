@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -26,6 +27,38 @@ func TestOpenAIRequestView_ExtractsRawScalars(t *testing.T) {
 	require.Equal(t, "resp-1", view.PreviousResponseID)
 	require.Equal(t, "fast", view.ServiceTier)
 	require.Equal(t, "medium", view.ReasoningEffort)
+}
+
+func TestOpenAIRequestView_ScalarsOutliveMappedBody(t *testing.T) {
+	mapped, err := pkghttputil.NewMappedBody(func(w io.Writer) error {
+		_, err := io.WriteString(w, `{"model":" gpt-6-astra ","stream":true,"prompt_cache_key":" session-1 ","previous_response_id":" resp-1 ","service_tier":" ultrafast ","reasoning":{"effort":" high "}}`)
+		return err
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = mapped.Close() })
+	view := newOpenAIRequestView(mapped.Bytes())
+	model, stream, promptKey := extractOpenAIRequestMetaFromBody(mapped.Bytes())
+	result := &OpenAIForwardResult{Model: view.Model}
+	require.NoError(t, mapped.Close())
+
+	// Turn a stale mmap access into a test failure instead of killing the suite.
+	previous := debug.SetPanicOnFault(true)
+	defer debug.SetPanicOnFault(previous)
+	defer func() {
+		if fault := recover(); fault != nil {
+			t.Fatalf("request metadata references released mmap: %v", fault)
+		}
+	}()
+	require.Equal(t, "gpt-6-astra", forwardResultBillingModel(result.Model, ""))
+	require.Equal(t, "gpt-6-astra", model)
+	require.True(t, stream)
+	require.Equal(t, "session-1", promptKey)
+	// Database drivers copy strings when encoding deferred usage inserts.
+	require.Equal(t, []byte("gpt-6-astra"), []byte(result.Model))
+	require.Equal(t, "session-1", view.PromptCacheKey)
+	require.Equal(t, "resp-1", view.PreviousResponseID)
+	require.Equal(t, "ultrafast", view.ServiceTier)
+	require.Equal(t, "high", view.ReasoningEffort)
 }
 
 func TestOpenAIRequestView_ExtractsFieldsAfterLargeInput(t *testing.T) {
