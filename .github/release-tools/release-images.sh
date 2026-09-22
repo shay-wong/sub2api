@@ -2,10 +2,20 @@
 set -euo pipefail
 : "${RELEASE_VERSION:?}" "${RELEASE_SHA:?}" "${GITHUB_REPOSITORY:?}" "${RUNNER_TEMP:?}"
 owner=${GITHUB_REPOSITORY%%/*}
-registries=("ghcr.io/${owner,,}/sub2api")
-if [[ ${SIMPLE_RELEASE:-false} != true && ${DOCKERHUB_USERNAME:-skip} != skip ]]; then
-  registries+=("${DOCKERHUB_USERNAME}/sub2api")
+owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+registries=("ghcr.io/$owner/sub2api")
+dockerhub_image=${DOCKERHUB_IMAGE:-}
+if [[ -z "$dockerhub_image" ]]; then
+  dockerhub_image=skip
+  if [[ -n ${DOCKERHUB_USERNAME:-} && ${DOCKERHUB_USERNAME:-skip} != skip ]]; then
+    dockerhub_image="${DOCKERHUB_USERNAME}/sub2api"
+  fi
 fi
+if [[ ${SIMPLE_RELEASE:-false} != true && "$dockerhub_image" != skip ]]; then
+  registries+=("$dockerhub_image")
+fi
+publish_rolling_tags=${PUBLISH_ROLLING_TAGS:-true}
+if [[ "$RELEASE_VERSION" == *-fork.* ]]; then publish_rolling_tags=false; fi
 arches=(amd64 arm64)
 if [[ ${SIMPLE_RELEASE:-false} == true ]]; then arches=(amd64); fi
 for arch in "${arches[@]}"; do
@@ -16,7 +26,8 @@ for arch in "${arches[@]}"; do
   for registry in "${registries[@]}"; do
     args+=(--tag "$registry:$RELEASE_VERSION-$arch")
     if [[ ${SIMPLE_RELEASE:-false} == true ]]; then
-      args+=(--tag "$registry:$RELEASE_VERSION" --tag "$registry:latest")
+      args+=(--tag "$registry:$RELEASE_VERSION")
+      if [[ "$publish_rolling_tags" == true ]]; then args+=(--tag "$registry:latest"); fi
     fi
   done
   if [[ ${DRY_RUN:-false} == true ]]; then
@@ -30,9 +41,11 @@ if [[ ${DRY_RUN:-false} != true && ${SIMPLE_RELEASE:-false} != true ]]; then
   major=${RELEASE_VERSION%%.*}
   minor=${RELEASE_VERSION#*.}; minor=${minor%%.*}
   for registry in "${registries[@]}"; do
-    docker buildx imagetools create \
-      --tag "$registry:$RELEASE_VERSION" --tag "$registry:latest" \
-      --tag "$registry:$major.$minor" --tag "$registry:$major" \
+    tags=(--tag "$registry:$RELEASE_VERSION")
+    if [[ "$publish_rolling_tags" == true ]]; then
+      tags+=(--tag "$registry:latest" --tag "$registry:$major.$minor" --tag "$registry:$major")
+    fi
+    docker buildx imagetools create "${tags[@]}" \
       "$registry:$RELEASE_VERSION-amd64" "$registry:$RELEASE_VERSION-arm64"
   done
 fi
