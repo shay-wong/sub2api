@@ -179,6 +179,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
+  - Codex invitation eligibility refresh and invitation sending require direct account access. Group access alone returns `403` before contacting OpenAI or updating the snapshot.
   - Bulk subscription actions check every direct subscription binding before execution or idempotent replay. Any unauthorized subscription rejects the entire batch with `403` and no mutations. Group bindings do not grant subscription access, and revoked access also blocks replay of earlier results.
 - **Precise Billing** - Token-level usage tracking and cost calculation
   - Group usage summaries revalidate the aggregation watermark to prevent double counting or omissions during concurrent historical usage changes; request billing is unchanged.

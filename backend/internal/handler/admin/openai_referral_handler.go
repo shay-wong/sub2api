@@ -29,10 +29,26 @@ type openAIReferralSendResponse struct {
 }
 
 func (h *OpenAIOAuthHandler) referralAccountID(c *gin.Context) (int64, bool) {
+	scope, scopeErr := resolveAdminAccessScope(c, h.permissionService)
+	if scopeErr != nil {
+		response.ErrorFrom(c, scopeErr)
+		return 0, false
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		response.BadRequest(c, "Invalid account ID")
 		return 0, false
+	}
+	if !scope.Unrestricted {
+		account, err := h.adminService.GetAccount(c.Request.Context(), id)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return 0, false
+		}
+		if !scope.accountVisible(account) {
+			response.ErrorFrom(c, service.ErrAdminAccountScopeForbidden)
+			return 0, false
+		}
 	}
 	if h.referralService == nil {
 		response.BadRequest(c, "OpenAI referral service is not enabled")
