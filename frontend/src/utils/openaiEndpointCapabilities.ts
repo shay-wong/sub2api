@@ -5,7 +5,7 @@ const defaultCapabilities: OpenAIEndpointCapability[] = ['chat_completions', 'em
 export function normalizeOpenAIEndpointCapabilities(
   values: OpenAIEndpointCapability[]
 ): OpenAIEndpointCapability[] {
-  const allowed: OpenAIEndpointCapability[] = [...defaultCapabilities, 'alpha_search']
+  const allowed: OpenAIEndpointCapability[] = [...defaultCapabilities, 'alpha_search', 'seedance']
   const selected = allowed.filter((value) => values.includes(value))
   return selected.length > 0 ? selected : [...defaultCapabilities]
 }
@@ -42,14 +42,17 @@ export function readOpenAIEndpointCapabilities(
   if (Array.isArray(raw)) {
     return normalizeOpenAIEndpointCapabilities(
       raw.filter((value): value is OpenAIEndpointCapability =>
-        value === 'chat_completions' || value === 'embeddings' || value === 'alpha_search'
+        value === 'chat_completions' ||
+        value === 'embeddings' ||
+        value === 'alpha_search' ||
+        value === 'seedance'
       )
     )
   }
   if (raw !== null && typeof raw === 'object') {
     const capabilityMap = raw as Record<string, unknown>
     return normalizeOpenAIEndpointCapabilities(
-      (['chat_completions', 'embeddings', 'alpha_search'] as OpenAIEndpointCapability[]).filter(
+      (['chat_completions', 'embeddings', 'alpha_search', 'seedance'] as OpenAIEndpointCapability[]).filter(
         (value) => capabilityMap[value] === true
       )
     )
