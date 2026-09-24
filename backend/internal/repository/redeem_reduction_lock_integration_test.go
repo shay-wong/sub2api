@@ -35,7 +35,7 @@ func newReductionLockFixture(t *testing.T, name string) (*service.RedeemService,
 	client := testEntClient(t)
 	user, err := client.User.Create().SetEmail(name + "@example.com").SetPasswordHash("test").Save(ctx)
 	require.NoError(t, err)
-	group, err := client.Group.Create().SetName(name).Save(ctx)
+	group, err := client.Group.Create().SetProjectID(mustDefaultProjectID(t, client)).SetName(name).Save(ctx)
 	require.NoError(t, err)
 	// Redemption commits its own transaction; remove fixtures explicitly so
 	// repository list/count tests cannot observe this test's subscriptions.

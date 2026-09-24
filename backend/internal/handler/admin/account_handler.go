@@ -760,7 +760,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				return
 			}
 		}
-		if h.opencodeGoUsage != nil {
+		if scope.Unrestricted && h.opencodeGoUsage != nil {
 			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
 				response.ErrorFrom(c, err)
 				return
@@ -1059,7 +1059,7 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 			return
 		}
 	}
-	if h.opencodeGoUsage != nil {
+	if scope.Unrestricted && h.opencodeGoUsage != nil {
 		if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
 			response.ErrorFrom(c, err)
 			return

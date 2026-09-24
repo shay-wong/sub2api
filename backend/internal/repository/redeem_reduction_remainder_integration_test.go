@@ -15,7 +15,7 @@ func TestRedeemReductionPreservesPartialDay(t *testing.T) {
 	client := testEntClient(t)
 	user, err := client.User.Create().SetEmail("reduction-remainder@example.com").SetPasswordHash("test").Save(ctx)
 	require.NoError(t, err)
-	group, err := client.Group.Create().SetName("reduction-remainder").Save(ctx)
+	group, err := client.Group.Create().SetProjectID(mustDefaultProjectID(t, client)).SetName("reduction-remainder").Save(ctx)
 	require.NoError(t, err)
 	// Redemption commits its own transaction; remove fixtures explicitly so
 	// repository list/count tests cannot observe this test's subscriptions.

@@ -203,13 +203,14 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the upstream model restriction check fails")
 	})
 
-	t.Run("quarantined owner proxy releases its slot and falls back", func(t *testing.T) {
+	t.Run("quarantined owner proxy falls back before acquiring its slot", func(t *testing.T) {
+		acquired := make([]int64, 0)
 		released := make([]int64, 0)
 		healthyProxy, quarantinedProxy := int64(38113), int64(38114)
 		accounts := newLegacySchedulerDecisionTestAccounts(groupID, true)
 		accounts[0].ProxyID = &healthyProxy
 		accounts[1].ProxyID = &quarantinedProxy
-		svc := newLegacySchedulerDecisionTestService(accounts, false, schedulerTestConcurrencyCache{releasedIDs: &released})
+		svc := newLegacySchedulerDecisionTestService(accounts, false, schedulerTestConcurrencyCache{acquiredIDs: &acquired, releasedIDs: &released})
 		svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
 			failureThreshold: 1,
 			failureWindow:    time.Minute,
@@ -231,7 +232,11 @@ func TestLegacySchedulerDecision_PreviousResponseRouting(t *testing.T) {
 		require.Equal(t, int64(38101), selection.Account.ID)
 		require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 		require.False(t, decision.StickyPreviousHit)
-		require.Contains(t, released, int64(38102), "the owning account's slot must be released after the proxy quarantine check fails")
+		require.Equal(t, []int64{38101}, acquired, "the quarantined owner's slot must not be acquired")
+		require.Equal(t, acquired, released, "every acquired slot must be released")
+		boundAccountID, err := svc.getOpenAIWSStateStore().GetResponseAccount(ctx, groupID, responseID)
+		require.NoError(t, err)
+		require.Equal(t, int64(38102), boundAccountID, "transient quarantine must preserve the response binding")
 	})
 
 	t.Run("all proxies quarantined fails open to the owner", func(t *testing.T) {

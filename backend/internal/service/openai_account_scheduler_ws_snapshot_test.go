@@ -25,6 +25,10 @@ func (r *schedulerTestGroupRepo) GetByID(ctx context.Context, id int64) (*Group,
 	return r.groups[id], nil
 }
 
+func (r *schedulerTestGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	return r.groups[id], nil
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_UsesWSPassthroughSnapshotFlags(t *testing.T) {
 	groupID := int64(10105)
 	group := &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 2}

@@ -52,6 +52,10 @@ func (r openAIImagesPermissionGroupRepo) GetByID(_ context.Context, _ int64) (*s
 	return r.group, nil
 }
 
+func (r openAIImagesPermissionGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
+}
+
 func TestOpenAIGatewayHandlerImages_SelectedGroupRejectsImagePermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

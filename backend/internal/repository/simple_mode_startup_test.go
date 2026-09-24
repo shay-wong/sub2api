@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 
 	"entgo.io/ent/dialect"
@@ -33,6 +34,10 @@ func TestEnsureSimpleModeStartup(t *testing.T) {
 				if tt.seed {
 					// The first seeding operation backfills auto-created Grok groups.
 					mock.ExpectExec(`UPDATE "groups"`).WillReturnResult(sqlmock.NewResult(0, 0))
+					// Fork keeps the legacy NOT NULL project_id storage compatible.
+					mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM projects WHERE slug = $1`)).
+						WithArgs(defaultProjectSlug).
+						WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 					// Existing groups exercise the complete seeding path without inserts.
 					for i := 0; i < 5; i++ {
 						mock.ExpectQuery(`SELECT COUNT\(.*FROM "groups"`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
