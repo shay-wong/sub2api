@@ -357,6 +357,13 @@ func TestOpenAIFrontierDedicatedFallbacksUseOfficialRates(t *testing.T) {
 			pricing, err := svc.GetModelPricing(tt.model + "-preview")
 			require.NoError(t, err)
 			assertOpenAIFrontierFallbackPricing(t, pricing, tt.input, tt.cached, tt.cacheWrite, tt.output, tt.inputPriority, tt.cachedPriority, tt.cacheWritePriority, tt.outputPriority)
+			if tt.model == "gpt-6-astra" {
+				require.Equal(t, 272000, pricing.LongContextInputThreshold)
+				require.Equal(t, 2.0, pricing.LongContextInputMultiplier)
+				require.Equal(t, 1.5, pricing.LongContextOutputMultiplier)
+			} else {
+				require.Zero(t, pricing.LongContextInputThreshold)
+			}
 		})
 
 		t.Run(tt.model+"/billing_service", func(t *testing.T) {
@@ -364,6 +371,13 @@ func TestOpenAIFrontierDedicatedFallbacksUseOfficialRates(t *testing.T) {
 			pricing, err := svc.GetModelPricing(tt.model)
 			require.NoError(t, err)
 			assertOpenAIFrontierFallbackPricing(t, pricing, tt.input, tt.cached, tt.cacheWrite, tt.output, tt.inputPriority, tt.cachedPriority, tt.cacheWritePriority, tt.outputPriority)
+			if tt.model == "gpt-6-astra" {
+				require.Equal(t, 272000, pricing.LongContextInputThreshold)
+				require.Equal(t, 2.0, pricing.LongContextInputMultiplier)
+				require.Equal(t, 1.5, pricing.LongContextOutputMultiplier)
+			} else {
+				require.Zero(t, pricing.LongContextInputThreshold)
+			}
 		})
 	}
 }
@@ -378,8 +392,6 @@ func assertOpenAIFrontierFallbackPricing(t *testing.T, pricing *ModelPricing, in
 	require.InDelta(t, cachedPriority, pricing.CacheReadPricePerTokenPriority, 1e-12)
 	require.InDelta(t, cacheWritePriority, pricing.CacheCreationPricePerTokenPriority, 1e-12)
 	require.InDelta(t, outputPriority, pricing.OutputPricePerTokenPriority, 1e-12)
-	// 静态兜底只兜基础价；阶梯由目录数据（above_272k 折算或显式字段）驱动。
-	require.Zero(t, pricing.LongContextInputThreshold)
 }
 
 func TestParsePricingData_KeepsImageOnlyPricing(t *testing.T) {
@@ -529,7 +541,7 @@ func TestGetModelPricing_Gpt54UsesStaticFallbackWhenRemoteMissing(t *testing.T) 
 	require.InDelta(t, 2.5e-6, got.InputCostPerToken, 1e-12)
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 	require.InDelta(t, 2.5e-7, got.CacheReadInputTokenCost, 1e-12)
-	// 静态兜底只兜基础价，不携带长上下文阶梯（阶梯由目录数据驱动）。
+	// GPT-5.4 静态兜底只兜基础价。
 	require.Zero(t, got.LongContextInputTokenThreshold)
 }
 

@@ -1,179 +1,88 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-import type { AdminUser, ApiKey, AdminGroup } from '@/types'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import UserApiKeysModal from '../UserApiKeysModal.vue'
+import type { AdminUser } from '@/types'
 
-const {
-  getUserApiKeys,
-  getAllGroups,
-  showError,
-  showSuccess
-} = vi.hoisted(() => ({
-  getUserApiKeys: vi.fn(),
-  getAllGroups: vi.fn(),
-  showError: vi.fn(),
-  showSuccess: vi.fn()
-}))
-
-vi.mock('@/api/admin', () => ({
-  adminAPI: {
-    users: {
-      getUserApiKeys
-    },
-    groups: {
-      getAll: getAllGroups
-    }
-  }
-}))
-
-vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    showError,
-    showSuccess
-  })
-}))
-
-vi.mock('@/utils/format', () => ({
-  formatDateTime: (value: string | null | undefined) => (value ? `date:${value}` : '')
-}))
-
-vi.mock('vue-i18n', async () => {
-  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
-  return {
-    ...actual,
-    useI18n: () => ({
-      t: (key: string, params?: Record<string, unknown>) => {
-        if (!params) return key
-        return `${key}:${JSON.stringify(params)}`
-      }
-    })
-  }
-})
-
-const user: AdminUser = {
-  id: 7,
-  username: 'limited-user',
-  email: 'limited@example.com',
-  role: 'user',
-  balance: 0,
-  concurrency: 1,
-  status: 'active',
-  allowed_groups: [],
-  balance_notify_enabled: false,
-  balance_notify_threshold: null,
-  balance_notify_extra_emails: [],
-  created_at: '2026-06-01T00:00:00Z',
-  updated_at: '2026-06-01T00:00:00Z',
-  notes: ''
+const { getKeys } = vi.hoisted(() => ({ getKeys: vi.fn() }))
+vi.mock('@/api/admin', () => ({ adminAPI: {
+  users: { getUserApiKeys: getKeys }, groups: { getAll: vi.fn().mockResolvedValue([]) },
+} }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
+vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+enableAutoUnmount(afterEach)
+beforeEach(() => { getKeys.mockReset(); vi.spyOn(console, 'error').mockImplementation(() => {}) })
+afterEach(() => vi.restoreAllMocks())
+function deferred() {
+  let resolve!: (value: unknown) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
 }
-
-const group: AdminGroup = {
-  id: 3,
-  name: 'standard',
-  description: null,
-  platform: 'anthropic',
-  rate_multiplier: 1,
-  rpm_limit: 0,
-  is_exclusive: false,
-  status: 'active',
-  subscription_type: 'standard',
-  daily_limit_usd: null,
-  weekly_limit_usd: null,
-  monthly_limit_usd: null,
-  allow_image_generation: false,
-  image_rate_independent: false,
-  image_rate_multiplier: 1,
-  image_price_1k: null,
-  image_price_2k: null,
-  image_price_4k: null,
-  claude_code_only: false,
-  fallback_group_id: null,
-  fallback_group_id_on_invalid_request: null,
-  require_oauth_only: false,
-  require_privacy_set: false,
-  created_at: '2026-06-01T00:00:00Z',
-  updated_at: '2026-06-01T00:00:00Z',
-  model_routing: null,
-  model_routing_enabled: false,
-  mcp_xml_inject: false,
-  sort_order: 0
-}
-
-function createApiKey(overrides: Partial<ApiKey> = {}): ApiKey {
-  return {
-    id: 1,
-    user_id: user.id,
-    key: 'sk-1234567890abcdefghijklmnop',
-    name: 'limited-key',
-    group_id: group.id,
-    group,
-    status: 'active',
-    ip_whitelist: [],
-    ip_blacklist: [],
-    last_used_at: null,
-    quota: 0,
-    quota_used: 0,
-    expires_at: null,
-    created_at: '2026-06-01T00:00:00Z',
-    updated_at: '2026-06-01T00:00:00Z',
-    rate_limit_5h: 10,
-    rate_limit_1d: 0,
-    rate_limit_7d: 50,
-    usage_5h: 1.5,
-    usage_1d: 0,
-    usage_7d: 12,
-    window_5h_start: '2026-06-01T00:00:00Z',
-    window_1d_start: null,
-    window_7d_start: '2026-06-01T00:00:00Z',
-    reset_5h_at: '2026-06-01T05:00:00Z',
-    reset_1d_at: null,
-    reset_7d_at: '2026-06-08T00:00:00Z',
-    ...overrides
-  }
-}
-
-async function mountModal(keys: ApiKey[] = [createApiKey()]) {
-  getUserApiKeys.mockResolvedValue({ items: keys })
-  getAllGroups.mockResolvedValue([group])
-
+const user = (id: number) => ({ id, email: `user${id}@example.com`, username: `user${id}` }) as AdminUser
+const keys = (id: number, name: string) => ({ items: [{ id, name, key: 'sk-example-key-value-for-tests', status: 'active', created_at: '2026-09-20', group_id: null }] })
+async function open(initiallyOpen = false) {
   const wrapper = mount(UserApiKeysModal, {
-    props: {
-      show: true,
-      user
-    },
-    global: {
-      stubs: {
-        BaseDialog: {
-          props: ['show'],
-          template: '<div v-if="show"><slot /></div>'
-        },
-        GroupBadge: {
-          props: ['name'],
-          template: '<span data-test="group-badge">{{ name }}</span>'
-        },
-        GroupOptionItem: true,
-        Teleport: true
-      }
-    }
+    props: { show: initiallyOpen, user: user(1) },
+    global: { stubs: {
+      BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+      GroupBadge: true, GroupOptionItem: true,
+    } },
   })
-
-  await flushPromises()
+  if (!initiallyOpen) await wrapper.setProps({ show: true })
   return wrapper
 }
+async function switchUser(wrapper: Awaited<ReturnType<typeof open>>) {
+  await wrapper.setProps({ show: false })
+  await wrapper.setProps({ show: true, user: user(2) })
+}
 
-describe('UserApiKeysModal', () => {
-  beforeEach(() => {
-    getUserApiKeys.mockReset()
-    getAllGroups.mockReset()
-    showError.mockReset()
-    showSuccess.mockReset()
+describe('user API key loading', () => {
+  it('shows the user API keys when mounted open', async () => {
+    getKeys.mockResolvedValueOnce(keys(1, 'limited-key'))
+    const wrapper = await open(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('limited-key')
+    expect(getKeys).toHaveBeenCalledWith(1)
   })
 
-  it('shows the user API keys', async () => {
-    const wrapper = await mountModal()
+  it('does not display the previous user keys when the next load fails', async () => {
+    getKeys.mockResolvedValueOnce(keys(1, 'first-user-key')).mockRejectedValueOnce(new Error('unavailable'))
+    const wrapper = await open(); await flushPromises()
+    expect(wrapper.text()).toContain('first-user-key')
+    await switchUser(wrapper); await flushPromises()
+    expect(wrapper.text()).toContain('user2@example.com')
+    expect(wrapper.text()).not.toContain('first-user-key')
+  })
 
-    expect(wrapper.text()).toContain('limited-key')
-    expect(getUserApiKeys).toHaveBeenCalledWith(user.id)
+  it('does not replace current keys with a late previous response', async () => {
+    const old = deferred()
+    getKeys.mockReturnValueOnce(old.promise).mockResolvedValueOnce(keys(2, 'current-user-key'))
+    const wrapper = await open()
+    await switchUser(wrapper); await flushPromises()
+    old.resolve(keys(1, 'old-user-key')); await flushPromises()
+    expect(wrapper.text()).toContain('current-user-key')
+    expect(wrapper.text()).not.toContain('old-user-key')
+  })
+
+  it('keeps the current request loading when an obsolete request fails', async () => {
+    const old = deferred(); const current = deferred()
+    getKeys.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const wrapper = await open()
+    await switchUser(wrapper)
+    old.reject(new Error('obsolete')); await flushPromises()
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+    current.resolve(keys(2, 'current-user-key')); await flushPromises()
+    expect(wrapper.text()).toContain('current-user-key')
+    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+  })
+
+  it('loads keys when the selected user changes while the dialog is open', async () => {
+    getKeys.mockResolvedValueOnce(keys(1, 'first-user-key')).mockResolvedValueOnce(keys(2, 'second-user-key'))
+    const wrapper = await open(); await flushPromises()
+    await wrapper.setProps({ user: user(2) }); await flushPromises()
+    expect(getKeys).toHaveBeenLastCalledWith(2)
+    expect(wrapper.text()).toContain('second-user-key')
+    expect(wrapper.text()).not.toContain('first-user-key')
   })
 })

@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `1c0a69c0ceddb2fd21581c17ab09f6c500b89ba1` |
-| 当前比较范围 | `1c0a69c0ceddb2fd21581c17ab09f6c500b89ba1..HEAD` |
+| 已合并上游提交 / 比较基线 | `a3eb7ef302961cba716dc78b39b93b60c467db0e` |
+| 当前比较范围 | `a3eb7ef302961cba716dc78b39b93b60c467db0e..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `11193c00990f3023116806187e81869116c0e7a8`，固定上游 parent 为 `1c0a69c0ceddb2fd21581c17ab09f6c500b89ba1`，共同基线为 `efe9aab1e4ec89a42ba45e8dac20e882c5409a6a`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `b62eb96b0de5e88c97f865ee63783800c423f952`，固定上游 parent 为 `a3eb7ef302961cba716dc78b39b93b60c467db0e`，共同基线为 `1c0a69c0ceddb2fd21581c17ab09f6c500b89ba1`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入 Seedance 原生视频任务、Codex 积分与邀请、按最终思考等级配置计费倍率、TypeSafe 独立审核配置、插件只读账号元数据、发布矩阵并行构建，以及 OpenAI HTTP/2 保活、响应模型别名、账号刷新错误保持、DeepSeek/Gemini/Anthropic 协议兼容修复。这些均为上游行为，不新增 fork 能力条目。机械冲突解决保留 Ultrafast 独立倍率和 SQL 列对齐、AlphaSearch 与 Seedance 能力并存、账号运行时限流清理、管理员权限中间件、实际分组归因，以及 Fork 发布入口和通知。继续保留 `b22344f94` 的 mmap 标量独立存储和 `11193c009` 的历史用量汇总并发修复。新增邀请接口的直接账号范围与新镜像脚本的 Fork 发布约束在紧随合并的独立功能提交中适配。本地历史 `v0.2.6` / `v0.3.0` 标签不替代此精确基线。
+本次合入 OpenCode Go 同 Key 用量窗口及自动刷新、GPT-6 Sol/Luna 和 Claude Opus 5.5、Claude Code 版本自动同步、简易模式可选 API Key 窗口限额、推广线下提现、备份月度归档和日志保留配置，以及流式错误/keepalive、代理恢复和前端异步状态修复。这些均为上游行为，不新增 fork 能力条目。机械冲突解决继续保留 Ultrafast 独立倍率、实际分组归因、细粒度权限、流式资源释放、订阅扣减事务及提交后缓存失效，并保留模型目录缓存并发修复。OpenCode Go 管理权限适配随合并后的独立功能提交记录。本地历史标签不替代此精确基线。
 
 ## Fork 发布版本
 
@@ -31,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.7` |
-| 当前 Fork 版本 | `0.2.7-fork.1`（本次同步，未发布） |
+| 当前上游版本 | `0.2.8` |
+| 当前 Fork 版本 | `0.2.8-fork.1`（本次同步，未发布） |
 | 已发布同基线 Fork 版本 | 本地未发现；发布时再次检查远端 |
-| 下次发布所需版本 | `0.2.7-fork.1`（若远端已占用则递增） |
+| 下次发布所需版本 | `0.2.8-fork.1`（若远端已占用则递增） |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 从 `0.2.5` 变为 `0.2.7`，版本源同步为 `0.2.7-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 从 `0.2.7` 变为 `0.2.8`，版本源同步为 `0.2.8-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
 本次仅合并代码和同步版本基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
 
@@ -189,8 +189,9 @@ actionlint .github/workflows/stable-fork-release.yml
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复 Codex reasoning/Agent Identity、OpenAI privacy、Alpha Search、Responses passthrough、proxy stream circuit、429 清理和 account failover 的通用正确性。
 - **行为不变量**：保留可回放的 encrypted reasoning，剥离不可回查引用；Agent Identity 只恢复一次且不泄漏 assertion；代理 quarantine 只阻断对应请求范围并维持 fail-open 语义；额度重置的上游成功是不可逆结果，本地 429/runtime block 清理失败必须进入 HTTP 200 的部分成功恢复/告警流程，不得返回可重试失败并再次消耗 reset credit；`RequestScopedTransient` 只能驱动请求级重试/failover，不得降低所选账号的 scheduler health；失效 OAuth 账号不能阻断切换；Responses namespace 和 compact/passthrough 决策保持协议一致；passthrough 外部取消必须先选择精确 close code，关闭客户端连接以解除阻塞写，并在 `Relay` 返回前 join 已启动的 relay worker；ingress lease loss 在连接可写时保持 1013。
-- **GPT-6 Astra 剩余不变量**：内置价格目录声明总上下文 `1,050,000`、最大输入 `922,000`，并按官方标准价（输入 $10/M、缓存读取 $1/M、缓存写入 $12.5/M、输出 $50/M）及 Priority `2x` 计费；超过 272K 输入时整次请求输入 `2x`、输出 `1.5x`。静态故障兜底只包含基础价，不推测长上下文阶梯。账号测试默认模型继续使用 `gpt-5.6-sol`，避免新模型权限尚未普及时改变健康检查行为。
+- **GPT-6 Astra 剩余不变量**：内置价格目录声明总上下文 `1,050,000`、最大输入 `922,000`，并按官方标准价（输入 $10/M、缓存读取 $1/M、缓存写入 $12.5/M、输出 $50/M）及 Priority `2x` 计费；超过 272K 输入时整次请求输入 `2x`、输出 `1.5x`，静态故障兜底也保留该阶梯。账号测试默认模型继续使用 `gpt-5.6-sol`，避免新模型权限尚未普及时改变健康检查行为。
 - **GPT-6 Astra 剩余实现**：`backend/internal/service/pricing_service.go`、`backend/internal/service/billing_service.go`、`backend/resources/model-pricing/model_prices_and_context_window.json` 及对应测试。
+- **Astra 静态兜底对齐上游**：本次合并采用上游的 272K 输入阈值、输入 `2x`、输出 `1.5x`，不再保留故障兜底仅基础价的差异。`TestGetModelPricing_OpenAIGPT6AstraFallback` 与 `TestOpenAIFrontierDedicatedFallbacksUseOfficialRates` 覆盖两条兜底路径。
 - **模型目录缓存竞态**：`backend/internal/service/openai_codex_models_service.go` 的共享刷新入口再次检查 fresh cache，避免并发冷缓存请求在前一次 singleflight 已完成后重复请求上游；API Key 与 OAuth 共用此修复，缓存隔离和过期刷新策略不变。回归：`backend/internal/service/openai_models_cache_recheck_test.go`；验证：`go test ./internal/service -run 'TestOpenAIModelsRefreshRechecksFreshCache|TestPinnedOpenAIModelsListMixedAccountsShareColdCacheAcrossGroups' -count=100`。定位：`git log -S'TestOpenAIModelsRefreshRechecksFreshCache' -- backend/internal/service/openai_models_cache_recheck_test.go`；上游提供等价二次检查并通过回归后删除此子项。三语 README 同步说明。
 - **大请求 mmap 生命周期**：`newOpenAIRequestView` 扫描正文仍使用零拷贝，但 Model、PromptCacheKey、PreviousResponseID、ServiceTier、ReasoningEffort 必须拥有独立字符串，不能让异步计费、数据库批量写入或跨正文替换状态引用已解除映射的内存。单纯保留 Go slice 不阻止 `Munmap`。原大请求优化来源为 `10d01a8d4`，本次修复定位：`git log -S'TestOpenAIRequestView_ScalarsOutliveMappedBody' -- backend/internal/service/openai_gateway_service_hotpath_test.go`。验证：`go test ./internal/service -run 'TestOpenAIRequestView'`；回归实际关闭映射后读取全部标量并走计费模型解析与字符串编码。同步三语 README 的大请求稳定性说明；这不改变请求大小上限，也不修复尚未定位的 524 上传中断。上游当前没有 mmap 请求体路径，仅合并上游不能替代本契约。
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。

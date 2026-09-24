@@ -700,23 +700,24 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 	err = s.subscriptionService.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
 		locked, err := s.subscriptionService.userSubRepo.GetByIDForUpdate(txCtx, sub.ID)
 		if err != nil {
-			return err
+			return fmt.Errorf("lock subscription for reduction: %w", err)
 		}
 
 		now := time.Now()
-		remaining := int(locked.ExpiresAt.Sub(now).Hours() / 24)
-		if remaining < 0 {
-			remaining = 0
+		if s.subscriptionService.now != nil {
+			now = s.subscriptionService.now()
 		}
+		// Preserve calendar-day semantics without rounding away the remaining hours.
+		newExpiresAt := locked.ExpiresAt.AddDate(0, 0, -reduceDays)
 
-		if remaining <= reduceDays {
+		if !newExpiresAt.After(now) {
 			if err := s.subscriptionService.userSubRepo.UpdateStatus(txCtx, locked.ID, SubscriptionStatusExpired); err != nil {
 				return fmt.Errorf("cancel subscription: %w", err)
 			}
 			if err := s.subscriptionService.userSubRepo.ExtendExpiry(txCtx, locked.ID, now); err != nil {
 				return fmt.Errorf("set subscription expiry: %w", err)
 			}
-		} else if err := s.subscriptionService.userSubRepo.ExtendExpiry(txCtx, locked.ID, locked.ExpiresAt.AddDate(0, 0, -reduceDays)); err != nil {
+		} else if err := s.subscriptionService.userSubRepo.ExtendExpiry(txCtx, locked.ID, newExpiresAt); err != nil {
 			return fmt.Errorf("reduce subscription: %w", err)
 		}
 

@@ -1755,7 +1755,7 @@ func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillingDisabledWhenGrou
 }
 
 // swapInOpenAILadderCatalog 给测试服务换上带 above_272k 阶梯字段的目录：
-// 静态兜底价已不带阶梯，长上下文相关测试需要目录数据。
+// GPT-5.4 静态兜底价不带阶梯，长上下文相关测试需要目录数据。
 func swapInOpenAILadderCatalog(t *testing.T, svc *OpenAIGatewayService) {
 	t.Helper()
 	cfg := &config.Config{}
