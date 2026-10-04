@@ -91,6 +91,11 @@ func (s *passkeyEmailCacheStub) GetVerificationCode(context.Context, string) (*V
 	return s.data, nil
 }
 
+func (s *passkeyEmailCacheStub) IncrVerificationCodeAttempts(context.Context, string) (int, error) {
+	s.data.Attempts++
+	return s.data.Attempts, nil
+}
+
 func (*passkeyEmailCacheStub) DeleteVerificationCode(context.Context, string) error {
 	return nil
 }

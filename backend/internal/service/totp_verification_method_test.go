@@ -56,6 +56,11 @@ func (s *totpVMEmailCacheStub) GetVerificationCode(context.Context, string) (*Ve
 	return s.data, nil
 }
 
+func (s *totpVMEmailCacheStub) IncrVerificationCodeAttempts(context.Context, string) (int, error) {
+	s.data.Attempts++
+	return s.data.Attempts, nil
+}
+
 func (*totpVMEmailCacheStub) DeleteVerificationCode(context.Context, string) error {
 	return nil
 }

@@ -72,6 +72,7 @@ func TestAdminPaymentRoutesApplyGlobalPanelRateLimit(t *testing.T) {
 		servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		nil,
 		limiter,
+		nil,
 	)
 
 	performRoutePanelRequests(t, router, http.MethodGet, "/api/v1/admin/payment/config", 1)
@@ -107,6 +108,7 @@ func TestAggregateAdminRoutesApplyHeavyPanelRateLimit(t *testing.T) {
 					servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 					nil,
 					limiter,
+					nil,
 				)
 			} else {
 				handlers := &handler.Handlers{Admin: &handler.AdminHandlers{

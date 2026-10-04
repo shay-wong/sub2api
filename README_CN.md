@@ -193,7 +193,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
   - OpenCode Go 的用量设置、查询及刷新控制仅限超管，因为操作会涉及共享同一 Key 的多个账号；受限管理员的账号列表和详情不会关联未绑定账号的用量。
 - **精确计费** - Token 级别的用量追踪和成本计算
 - **OpenAI GPT-6 Astra** - 支持展示并原样转发 `gpt-6-astra`，包含图片输入、`low` 至 `max` 推理档位、922K 最大输入、Priority/Fast，以及官方价格和 272K 长上下文阶梯计费；价格目录不可用时，静态备用价格也保留该阶梯
-- **OpenAI Ultrafast** - 在 Responses、Chat Completions 和 Responses WebSocket 中原样转发 `service_tier: "ultrafast"`，不会转换为普通 Fast，并为 OpenAI OAuth 账号生成匹配的 `tier=ultrafast` Codex 路由提示。OpenAI 公布 Ultrafast 定价前默认与 Fast 一致，按 Standard 的 `2 倍`计费，可在渠道模型定价中修改；OpenAI 响应回显的实际档位只能降低、不能抬高计费档位
+- **OpenAI Ultrafast** - 在 Responses、Chat Completions 和 Responses WebSocket 中原样转发 `service_tier: "ultrafast"`，不会转换为普通 Fast，并为 OpenAI OAuth 账号生成匹配的 `tier=ultrafast` Codex 路由提示。Astra 采用上游模型默认值，按 Standard 的 `6 倍`计费，其他模型默认 `2 倍`；渠道模型中显式配置的倍率优先于模型默认值；OpenAI 响应回显的实际档位只能降低、不能抬高计费档位
 - **智能调度** - 智能账号选择，支持粘性会话
 - **并发控制** - 用户级和账号级并发限制
 - **速率限制** - 可配置的请求和 Token 速率限制
@@ -761,6 +761,31 @@ OAuth / Setup Token 图片请求使用 Responses 主控模型调用 `image_gener
 - 可选密钥窗口：设置 `SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED=true` 后，按每个 API Key 配置的 5 小时、1 天、7 天消费窗口进行限制，默认值为 `false`；启用后仍跳过余额和订阅扣费。
 - 窗口限制以数据库为准，只记录 API Key 窗口用量。它在请求完成后记账，并发中的请求可能以各自最终费用超过窗口上限。启用前的历史用量不会自动补算。
 - 安全注意事项：生产环境需同时设置 `SIMPLE_MODE_CONFIRM=true` 才允许启动
+
+---
+
+## TypeSafe / Jev 使用说明
+
+Sub2API 支持使用 TypeSafe API Key 账户，通过 Jev 原生、非流式的 System One 协议调用模型。
+
+- 平台：`typesafe`；账号类型：API Key
+- 默认上游：`https://api.typesafe.ai`
+- 对外端点：`POST /v1/systemone`
+- 模型：`jev-latest`，TypeSafe 分组的 `/v1/models` 也会返回该模型
+- 问题类型：`noul`、`choice`、`score`
+
+请求和成功响应保持 System One 原生 JSON 结构。该端点不兼容 Chat Completions、Responses、Anthropic Messages 或流式客户端。
+
+问题校验遵循 TypeSafe OpenAPI 的线上协议 schema（SDK v0.5.7 也使用该 schema）。所有问题的 `instructions` 都可以省略或为 `null`。Noul 的 `criteria` 可以省略或为 `null`，其中 `true`/`false` 的描述和 Choice 描述支持字符串、对象、数组或 `null`。Score 的 `criteria` 必须是至少包含一档描述的数组，每档支持字符串、对象或数组；单档也合法。SDK 的整数键 Score 映射会由 SDK 在发送前转换为数组。
+
+```bash
+curl https://your-sub2api.example.com/v1/systemone \
+  -H 'Authorization: Bearer sk-your-sub2api-key' \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"jev-latest","state":"待评估文本","questions":{"safety":{"type":"noul","instructions":"评估文本是否不安全"}}}'
+```
+
+`jev-latest` 内置价格为输入 `$0.042/百万 tokens`、输出 `$0`，渠道定价可以覆盖。凭据、欠费、权限、限流、过载、服务端和网络错误（`401`、`402`、`403`、`429`、`529`、`5xx`、传输错误）沿用现有账号错误策略（含自定义错误码与临时不可调度规则）并切换账号；请求错误（`400`、`413`、`422`）不会切换账号重试，也不会改变账号状态。TypeSafe 分组（以及路由到 TypeSafe 的 Composite 请求）调用 Messages、Chat Completions、Responses、count_tokens 时返回 `404`。
 
 ---
 

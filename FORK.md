@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `a3eb7ef302961cba716dc78b39b93b60c467db0e` |
-| 当前比较范围 | `a3eb7ef302961cba716dc78b39b93b60c467db0e..HEAD` |
+| 已合并上游提交 / 比较基线 | `b8dece9000c68815a5b867ca5a1e6f236e173905` |
+| 当前比较范围 | `b8dece9000c68815a5b867ca5a1e6f236e173905..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `b62eb96b0de5e88c97f865ee63783800c423f952`，固定上游 parent 为 `a3eb7ef302961cba716dc78b39b93b60c467db0e`，共同基线为 `1c0a69c0ceddb2fd21581c17ab09f6c500b89ba1`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `ded21ff1655dc3a69e4073ff056c1e1ae787b715`，固定上游 parent 为 `b8dece9000c68815a5b867ca5a1e6f236e173905`，共同基线为 `a3eb7ef302961cba716dc78b39b93b60c467db0e`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入 OpenCode Go 同 Key 用量窗口及自动刷新、GPT-6 Sol/Luna 和 Claude Opus 5.5、Claude Code 版本自动同步、简易模式可选 API Key 窗口限额、推广线下提现、备份月度归档和日志保留配置，以及流式错误/keepalive、代理恢复和前端异步状态修复。这些均为上游行为，不新增 fork 能力条目。机械冲突解决继续保留 Ultrafast 独立倍率、实际分组归因、细粒度权限、流式资源释放、订阅扣减事务及提交后缓存失效，并保留模型目录缓存并发修复。OpenCode Go 管理权限适配随合并后的独立功能提交记录。本地历史标签不替代此精确基线。
+本次合入上游 0.2.9–0.2.13：GPT-6.1 Sol 与 Sonnet 5.5、远端 Codex 模型目录、Claude 重置额度及兑换、余额并发预占、充值赠送/折扣阶梯、TypeSafe Jev 平台、Dashboard 花费趋势、账号优先级快捷调整，以及已删除 API Key 结算和公开订单校验修复。Astra Ultrafast 模型默认倍率采用上游 6x，Fork 的显式渠道倍率继续优先；其他模型仍沿用既有默认。保留细粒度权限、实际分组归因、退款状态机及流式资源释放。Claude 重置接口权限和选中分组余额预占在合并后的独立功能提交中适配。本地历史标签不替代此精确基线。
 
 ## Fork 发布版本
 
@@ -31,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.8` |
-| 当前 Fork 版本 | `0.2.8-fork.1`（本次同步，未发布） |
+| 当前上游版本 | `0.2.13` |
+| 当前 Fork 版本 | `0.2.13-fork.1`（本次同步，未发布） |
 | 已发布同基线 Fork 版本 | 本地未发现；发布时再次检查远端 |
-| 下次发布所需版本 | `0.2.8-fork.1`（若远端已占用则递增） |
+| 下次发布所需版本 | `0.2.13-fork.1`（若远端已占用则递增） |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 从 `0.2.7` 变为 `0.2.8`，版本源同步为 `0.2.8-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 从 `0.2.8` 变为 `0.2.13`，版本源同步为 `0.2.13-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
 本次仅合并代码和同步版本基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
 
@@ -286,7 +286,7 @@ actionlint .github/workflows/stable-fork-release.yml
 
 - **生命周期**：`等待上游吸收`
 - **原始意图**：分离余额充值倍率与订阅 CNY 定价，以 canonical USD/CNY rate 兼容旧配置；让公开支付结果不泄漏内部 DTO；退款回查以持久化 provider binding/snapshot 为准。
-- **Ultrafast 计费不变量**：上游未提供独立渠道倍率时默认与 Fast 一致，按 Standard 的 `2 倍`计费；fork 允许管理员通过渠道模型定价的 `ultrafast_multiplier` 正数覆盖该默认值。请求 `ultrafast` 而上游响应回显 `priority` 或 `default` 时按实际较低档位降价，任何响应都不得把较低请求档位抬高到 Ultrafast；官方公布价格或可由真实账单可靠校准时，调整默认值而不改变协议透传和渠道覆盖能力。
+- **Ultrafast 计费不变量**：Astra 的模型默认倍率采用上游 `6 倍`，其他模型默认按 Standard 的 `2 倍`计费；fork 允许管理员通过渠道模型定价的 `ultrafast_multiplier` 正数覆盖模型默认值。请求 `ultrafast` 而上游响应回显 `priority` 或 `default` 时按实际较低档位降价，任何响应都不得把较低请求档位抬高到 Ultrafast；官方公布价格或可由真实账单可靠校准时，调整默认值而不改变协议透传和渠道覆盖能力。
 - **Ultrafast 计费实现与测试**：代码位于 `backend/internal/service/billing_service.go`、`backend/internal/service/service_tier_billing.go`、`backend/internal/repository/channel_repo_pricing.go`、`backend/internal/handler/admin/channel_handler.go`、`backend/migrations/231_channel_ultrafast_multiplier.sql`、`backend/migrations/232_update_ultrafast_multiplier_comment.sql`、`frontend/src/components/admin/channel/PricingEntryCard.vue`；测试位于 `backend/internal/service/service_tier_billing_test.go`、`backend/internal/service/channel_pricing_multipliers_test.go`、`backend/migrations/ultrafast_multiplier_migration_test.go`、`frontend/src/components/admin/channel/__tests__/PricingEntryCard.timePricing.spec.ts`。提交后可运行 `git log -S'UltrafastMultiplier' -- backend/internal/service/billing_service.go` 定位当前变更。
 - **行为不变量**：订阅金额只读取 `subscription_usd_to_cny_rate`，legacy multiplier 仅为派生兼容字段；显式 zero/disable 不得复活旧值；公开结果类型不得包含管理端字段；refund finalize 不得从当前订单猜 provider/refund ID，legacy Alipay audit 缺少精确渠道请求 ID 时必须人工核销，旧 pending audit 必须向后兼容，audit 查询失败或内容损坏必须 fail closed；provider 构建、merchant snapshot 校验和本地密钥预检必须先于退款 claim 与权益扣减，退款快照含商户身份或币种而 provider 不提供元数据时必须 fail closed，Wxpay 必须同时报告基础 `appId` 与 JSAPI `mpAppId` 并允许快照匹配实际下单模式使用的任一 AppID，provider 确定性业务失败必须返回 failed 而不能伪装成 pending，Alipay `20000` 或未知错误码等不确定响应必须保留 `REFUNDING` 并复用同一渠道请求 ID；扣减、`REFUNDING` claim 和带 UUID/开始时间的 `dispatching` attempt 快照必须同事务提交，force 余额扣减必须在事务内以 `refundAmount` 为上限按最新可用余额 clamp，不能受 prepare 旧值限制，非 force 余额扣减不足必须整体回滚并要求 force，即时 provider success 不得二次扣减，provider pending 后回查成功也仍须满足同一全额扣减约束；所有 provider outcome、补偿和终态转换必须在事务内校验当前 attempt ID 并重读最新 audit，旧 attempt 的延迟结果或锁前快照不得认领新重试、重复补偿或跳过重新扣减；本地 recovery lease 的 attempt ID 与渠道请求 ID 必须分离：同一次未知结果恢复只轮换 attempt ID 并保持渠道请求 ID，`REFUND_FAILED` 新重试必须生成新的渠道请求 ID；`REFUNDING` 恢复必须等待 5 分钟租约后优先查询 provider，查询与重放分别使用独立的 1 分钟和 3 分钟上下文，只有 Stripe、Alipay、Wxpay、Airwallex 可复用同一渠道请求 ID 重放，query capability 不得绕过该白名单，其余 provider 必须人工核销；provider 明确结果必须先把当前 attempt 原子推进到 `REFUND_PENDING` 并替换 audit，再执行成功或失败终态，未知结果则保留 `REFUNDING`；`REFUND_SUCCESS` 必须保留 attempt ID、渠道请求 ID、退款 ID 和扣减结果后才能删除 mutable pending audit，回查返回的非空退款 ID 必须在终态事务锁定并重读当前 attempt 后合并；legacy pending audit 缺少退款 ID 时，Wxpay 必须按本次退款折算后的渠道金额派生查询 ID，不得使用入账金额；成功和失败终态都必须先原子 claim `REFUND_PENDING`，旧失败查询不得覆盖已提交成功或触发二次退款，失败回查返回的新退款 ID 和 provider failure 必须在锁后重读 attempt，并在终态事务或补偿失败记录事务中重写 pending audit；即使补偿仍失败而保持 `REFUND_PENDING`，也必须在写入 `REFUND_ROLLBACK_FAILED` 的同一事务保留该新退款 ID，失败补偿成功后还必须写入 `deductionRollbackOK=true` 及 `balanceRolledBack`/`subDaysRolledBack`；`REFUND_PENDING` 只能查询或人工核销，不得重新进入 provider refund；`REFUND_FAILED` 重试必须保持原金额、原因、force 和扣减意图，准备阶段必须存在 pending audit 并记录当时订单状态与上一 attempt ID，claim 必须在同一事务内同时匹配该状态和 attempt generation，缺失审计或代际变化必须 fail closed，未补偿的 `REFUND_ROLLBACK_FAILED` 必须在 provider 调用前阻断，补偿成功时必须在同一事务标记 `resolved`；审计表本次先以 expand migration 新增退款状态 `(order_id, action)`、同订单返利 APPLIED/SKIPPED claim 和同订单 `SUBSCRIPTION_ASSIGNED` 三项部分唯一约束，同时保留历史 `(order_id, action)` 全局唯一索引供旧二进制继续匹配无谓词 `ON CONFLICT`；只有下一 fork release 确认旧实例全部下线后，才可用独立 contract migration 删除全局索引并启用普通审计 action 重复追加；进入 pending 的订单状态与当前退款 ID/扣减明细必须通过匹配退款部分唯一索引的原生 upsert 在同一事务内原子替换；余额补偿只能调整 `balance`，不得增加 `total_recharged`；订阅退款必须区分“缩短”与“全量扣减”并可精确补偿，全量扣减必须保留同一订阅行、置为过期并把扣减前后期限写入 audit，失败补偿须在该行锁内合并期间发生的续期，legacy soft-deleted audit 仍可恢复；退款扣减、续期、补偿和兑换码负向调整必须在同一事务内锁定订阅行后基于最新 `expires_at` 重算；幂等分配在锁后发现订阅已被并发请求续期或暂停时，不得再次延长或重新激活；外层事务内不得提前失效订阅缓存，只有 commit 成功后才能同步清除本机 L1、分布式缓存并发布跨实例失效；分布式删除与跨实例发布必须分别使用独立有界上下文并全部尝试，错误合并上报，且缓存失效错误不得记作订阅扣减或补偿失败。
 - **当前代码**：`backend/ent/schema/payment_audit_log.go`、`backend/migrations/194_payment_audit_action_idempotency_scopes.sql`、`backend/internal/repository/user_repo.go`、`backend/internal/repository/user_subscription_repo.go`、`backend/internal/service/payment_amounts.go`、`backend/internal/service/payment_config_service.go`、`backend/internal/service/payment_order.go`、`backend/internal/service/payment_order_provider_snapshot.go`、`backend/internal/service/payment_refund.go`、`backend/internal/service/subscription_service.go`、`backend/internal/service/redeem_service.go`、`backend/internal/payment/provider/stripe.go`、`backend/internal/payment/provider/alipay.go`、`backend/internal/payment/provider/wxpay.go`、`backend/internal/payment/provider/airwallex.go`、`backend/internal/handler/payment_handler.go`、`frontend/src/views/admin/SettingsView.vue`、`frontend/src/views/admin/orders/AdminOrdersView.vue`、`frontend/src/views/user/PaymentView.vue`。

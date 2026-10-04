@@ -198,7 +198,7 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "k3", "k3", nil, time.Now(), true)
+	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "k3", "k3", nil, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 21, result.Usage.InputTokens)
@@ -234,7 +234,7 @@ func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReason
 	}
 
 	svc := &GatewayService{}
-	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now(), true)
+	result, err := svc.handleCCStreamingFromAnthropic(resp, c, "gpt-5", "claude-sonnet-4.5", &reasoningEffort, time.Now())
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 20, result.Usage.InputTokens)
@@ -317,7 +317,7 @@ func TestHandleCCStreamingFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-				&http.Response{Body: tt.body()}, c, "gpt-5", "claude-fable-5", nil, time.Now(), false,
+				&http.Response{Body: tt.body()}, c, "gpt-5", "claude-fable-5", nil, time.Now(),
 			)
 
 			require.Error(t, err)
@@ -345,7 +345,7 @@ func TestHandleCCStreamingFromAnthropic_RequestCancelDrainsLateUsage(t *testing.
 
 	go func() {
 		result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 		)
 		done <- outcome{result: result, err: err}
 	}()
@@ -383,7 +383,7 @@ func TestHandleCCStreamingFromAnthropic_RequestCancelHasConfiguredDrainDeadline(
 
 	go func() {
 		result, _ := svc.handleCCStreamingFromAnthropic(
-			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 		)
 		done <- result
 	}()
@@ -415,7 +415,7 @@ func TestHandleCCStreamingFromAnthropic_ClientDisconnectDrainsLateUsage(t *testi
 	}, "\n")))}
 
 	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
-		resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+		resp, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 	)
 
 	require.NoError(t, err)
@@ -438,7 +438,7 @@ func TestHandleCCStreamingFromAnthropic_ClientDisconnectHasDrainDeadline(t *test
 
 	go func() {
 		result, _ := svc.handleCCStreamingFromAnthropic(
-			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(), true,
+			&http.Response{Body: reader}, c, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 		)
 		done <- result
 	}()

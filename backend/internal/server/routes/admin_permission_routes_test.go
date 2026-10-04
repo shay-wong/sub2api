@@ -72,6 +72,7 @@ func registerPaymentRoutesForPermissionTest(
 		servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() }),
 		settingService,
 		nil,
+		nil,
 	)
 }
 

@@ -18,6 +18,8 @@ func TestConfiguredServiceTierMultiplier(t *testing.T) {
 		{name: "gpt-5.5 fast", serviceTier: "fast", pricing: &ModelPricing{FastMultiplier: pricingMultiplier(2.5)}, want: 2.5},
 		{name: "priority alias", serviceTier: "priority", pricing: &ModelPricing{FastMultiplier: pricingMultiplier(2)}, want: 2},
 		{name: "ultrafast configured", serviceTier: "ultrafast", pricing: &ModelPricing{UltrafastMultiplier: pricingMultiplier(8)}, want: 8},
+		{name: "ultrafast model default", serviceTier: "ultrafast", pricing: &ModelPricing{ModelUltrafastMultiplier: 6}, want: 6},
+		{name: "ultrafast channel overrides model", serviceTier: "ultrafast", pricing: &ModelPricing{ModelUltrafastMultiplier: 6, UltrafastMultiplier: pricingMultiplier(2)}, want: 2},
 		{name: "flex configured", serviceTier: "flex", pricing: &ModelPricing{FlexMultiplier: pricingMultiplier(0.4)}, want: 0.4},
 		{name: "legacy fast default", serviceTier: "fast", pricing: &ModelPricing{}, want: 2},
 		{name: "ultrafast default", serviceTier: "ultrafast", pricing: &ModelPricing{}, want: 2},

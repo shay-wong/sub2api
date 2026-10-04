@@ -188,7 +188,7 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
   - グループ使用量集計では集計境界を再検証し、過去の使用量が並行して変更された際の重複や集計漏れを防ぎます。リクエストの実際の課金は変わりません。
 - **大容量リクエストの安定性** - 画像履歴などを含む大きな Responses リクエストの終了後、非同期課金でプロセスがクラッシュする問題を修正します。リクエストサイズの上限は変わらず、アップロードのタイムアウトは別途調査が必要です。
 - **OpenAI GPT-6 Astra** - `gpt-6-astra` の表示とそのままの転送に対応し、画像入力、`low` から `max` までの推論レベル、最大 922K トークン入力、Priority/Fast、公式価格、および 272K の長文コンテキスト料金階層を提供します。料金カタログを利用できない場合も、静的フォールバック価格に同じ料金階層を適用します
-- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket で `service_tier: "ultrafast"` を Fast に変換せずそのまま転送し、OpenAI OAuth アカウント向けに対応する `tier=ultrafast` Codex ルーティングヒントも生成します。OpenAI が Ultrafast 料金を公開するまでは Fast と同じ Standard の `2 倍`を既定値とし、チャネルのモデル料金で変更できます。OpenAI の応答が示す実際の tier は課金 tier を下げる場合にのみ使用し、引き上げには使用しません
+- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket で `service_tier: "ultrafast"` を Fast に変換せずそのまま転送し、OpenAI OAuth アカウント向けに対応する `tier=ultrafast` Codex ルーティングヒントも生成します。Astra は上流のモデル既定値である Standard の `6 倍`、その他のモデルは既定で `2 倍`です。チャネルの明示的な倍率はモデル既定値より優先されます。OpenAI の応答が示す実際の tier は課金 tier を下げる場合にのみ使用し、引き上げには使用しません
 - **スマートスケジューリング** - スティッキーセッション付きのインテリジェントなアカウント選択
   - モデル一覧の同時取得では更新済みキャッシュを再利用し、上流への重複リクエストを防ぎます。キャッシュの分離と有効期限の動作は変わりません。
 - **同時実行制御** - ユーザーごと・アカウントごとの同時実行数制限
