@@ -483,6 +483,9 @@ func (s *AntigravityGatewayService) handleAntigravityCompatStreamWithKeepaliveIn
 				return preContentTimeout()
 			}
 			session.writePreContentKeepalive(now)
+			if writer.Disconnected() {
+				startDisconnectDrain()
+			}
 			if !session.hasMeaningfulData() && !writer.Disconnected() {
 				preContentTimer.Reset(interval)
 			}

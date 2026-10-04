@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -98,17 +97,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
-	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: reqModel, BodyBytes: len(body), MaxTokens: 1, Kind: service.InflightEstimateToken})
-	if inflightErr != nil {
-		status, code, message, retryAfter := billingErrorDetails(inflightErr)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.errorResponse(c, status, code, message)
-		return
-	}
-	defer inflightDone()
+	inflight := selectedInflightBalance{request: service.InflightEstimateRequest{Model: reqModel, BodyBytes: len(body), MaxTokens: 1, Kind: service.InflightEstimateToken}}
+	defer inflight.close()
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -202,6 +192,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			func(status int, code, message string) {
 				h.errorResponse(c, status, code, message)
 			},
+			&inflight,
 		)
 		if preflightFailed {
 			return

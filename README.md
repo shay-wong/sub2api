@@ -179,10 +179,12 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
+  - Claude reset-credit queries and redemption require account-management permission and direct account access. Group access alone returns `403` without upstream actions or idempotent replay; full account scope and super admins remain allowed.
   - Codex invitation eligibility refresh and invitation sending require direct account access. Group access alone returns `403` before contacting OpenAI or updating the snapshot.
   - Bulk subscription actions check every direct subscription binding before execution or idempotent replay. Any unauthorized subscription rejects the entire batch with `403` and no mutations. Group bindings do not grant subscription access, and revoked access also blocks replay of earlier results.
   - OpenCode Go usage settings, queries, and refresh controls are super-admin-only because they operate across accounts sharing a key. Restricted account lists and details do not resolve usage from unbound sibling accounts.
 - **Precise Billing** - Token-level usage tracking and cost calculation
+  - Inflight balance reservations follow the group and subscription actually selected after failover; same-group retries reuse the reservation, and queued billing retains it until settlement.
   - Group usage summaries revalidate the aggregation watermark to prevent double counting or omissions during concurrent historical usage changes; request billing is unchanged.
 - **Large Request Stability** - Fixes a process crash during asynchronous billing after large Responses requests, including image history. Request size limits are unchanged; upload timeouts require separate diagnosis.
 - **OpenAI GPT-6 Astra** - Exposes and forwards `gpt-6-astra` with image input, `low` through `max` reasoning, a 922K-token maximum input, Priority/Fast support, official pricing, and the 272K long-context price tier, including static fallback pricing when the pricing catalog is unavailable
@@ -190,6 +192,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
   - Concurrent model catalog requests reuse a freshly populated cache instead of repeating the upstream fetch; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits
+  - Antigravity streams start bounded cleanup when a pre-content keepalive fails to reach the client, even if the upstream keeps sending pings.
 - **Rate Limiting** - Configurable request and token rate limits
 - **Subscription Limit Semantics** - When selected-group billing preflight detects exhausted daily, weekly, or monthly subscription usage, it returns HTTP `429` with `rate_limit_exceeded`, allowing compatible clients to back off instead of treating it as a permanent authorization failure
 - **Built-in Payment System** - Supports EasyPay, Alipay, WeChat Pay, and Stripe for user self-service top-up, no separate payment service needed ([Configuration Guide](docs/PAYMENT.md))

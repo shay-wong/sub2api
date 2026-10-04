@@ -62,6 +62,8 @@
 
 ## 1. 全局管理员角色与细粒度权限
 
+- **Claude 重置额度接口**：查询和兑换均要求 `admin.accounts.write` 与直接账号绑定；仅有分组绑定返回 `403`，不查询上游、兑换或回放幂等结果；全量范围和超管保持可用。实现位于 `backend/internal/handler/admin/claude_reset_handler.go`，验证：`go test -tags=unit ./internal/handler/admin -run '^TestClaudeReset'`。独立适配提交定位：`git log -S'TestClaudeResetRequiresDirectAccountBinding' -- backend/internal/handler/admin/claude_reset_scope_test.go`。三语 README 权限条目同步此边界。
+
 - **生命周期**：`长期保留`
 - **原始意图**：取消面向用户的 Project 空间、成员和资源隔离模型；保留 `super_admin`、`admin`、`user` 三种角色，并把管理员功能权限和分组、账号、代理、订阅四类资源范围统一配置在用户管理列表。
 - **行为不变量**：`super_admin` 始终拥有全部后台权限，且不能通过管理员权限接口修改；`admin` 只拥有用户记录 `admin_permissions` 中显式授予的 8 项白名单权限，并按 `all/restricted` 资源模式访问四类管理资源；`user` 的管理员权限和资源范围必须为空。受限模式的分组、账号、代理、订阅均为独立直接绑定，勾选分组不得隐式开放分组内账号，所有列表、详情、汇总和批量操作都必须与对应直接绑定取交集；受限管理员新建资源后自动绑定给自己。创建用户和普通用户编辑接口不得提升或降级角色，只有超级管理员完成 step-up 验证后，才能通过 `PUT /api/v1/admin/users/:id/admin-access` 在同一事务内修改其他用户的 `admin/user` 角色、功能权限和资源范围；无效资源 ID 必须使整次更新回滚，修改后必须立即失效鉴权缓存。该资源范围不是 Project 空间：API Key、用量、日志、批量图片任务、Dashboard、Ops 和调度缓存仍不得读取 Project context、成员关系、Profile binding、`X-Project-ID` 或前端选中项目状态。
@@ -87,6 +89,8 @@
 ```
 
 ## 2. 实际调度分组归因
+
+- **0.2.13 余额预占适配**：预占在选后检查中使用实际分组与订阅；同组重试复用，切组释放旧 handler 引用但保留已排队计费引用，切入订阅组清除旧预占上下文。实现位于 `backend/internal/handler/gateway_inflight_reservation.go` 与 `endpoint.go`；验证：`go test -tags=unit ./internal/handler -run 'TestSelectedInflight|TestReserveInflight|TestHandleSelectedOpenAIPreflight'`。独立适配提交定位：`git log -S'selectedInflightBalance' -- backend/internal/handler/gateway_inflight_reservation.go`。三语 README 计费条目同步此边界。
 
 - **生命周期**：`长期保留`
 - **原始意图**：确保 fallback/composite 调度后的计费、并发、sticky session、利润准入、推理策略、配额平台、Cyber policy 和用量日志归因符合各自契约。
@@ -186,6 +190,8 @@ actionlint .github/workflows/stable-fork-release.yml
 ```
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
+
+- **0.2.13 首内容前断线清理**：Antigravity 首内容前 keepalive 写入失败时也启动已有的有界 drain，不能因上游持续 ping 而永久占用请求。实现位于 `backend/internal/service/antigravity_gateway_compat_stream.go`；验证：`go test -tags=unit ./internal/service -run '^TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline$'`。独立适配提交定位：`git log -S'TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline' -- backend/internal/service/antigravity_gateway_compat_test.go`。三语 README 同步断线行为。
 
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复 Codex reasoning/Agent Identity、OpenAI privacy、Alpha Search、Responses passthrough、proxy stream circuit、429 清理和 account failover 的通用正确性。

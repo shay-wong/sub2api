@@ -2,10 +2,11 @@ package admin
 
 import (
 	"context"
+	"strconv"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"strconv"
 )
 
 type claudeResetReader interface {
@@ -16,14 +17,32 @@ type claudeResetReader interface {
 func (h *AccountHandler) SetClaudeResetCreditService(s *service.ClaudeResetCreditService) {
 	h.claudeResetCredits = s
 }
-func (h *AccountHandler) ClaudeResetCredits(c *gin.Context) {
+
+func (h *AccountHandler) claudeResetAccountID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		response.BadRequest(c, "Invalid account ID")
-		return
+		return 0, false
+	}
+	scope, err := resolveAdminAccessScope(c, h.permissionService)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return 0, false
+	}
+	if err := h.ensureAccountInScope(c, scope, id); err != nil {
+		response.ErrorFrom(c, err)
+		return 0, false
 	}
 	if h.claudeResetCredits == nil {
 		response.Error(c, 503, "Claude reset service unavailable")
+		return 0, false
+	}
+	return id, true
+}
+
+func (h *AccountHandler) ClaudeResetCredits(c *gin.Context) {
+	id, ok := h.claudeResetAccountID(c)
+	if !ok {
 		return
 	}
 	status, err := h.claudeResetCredits.Query(c.Request.Context(), id)
@@ -38,13 +57,8 @@ func (h *AccountHandler) ClaudeResetCredits(c *gin.Context) {
 // no body: the server picks the grant; the Idempotency-Key header identifies one
 // operator confirmation and replays its outcome.
 func (h *AccountHandler) RedeemClaudeResetCredit(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "Invalid account ID")
-		return
-	}
-	if h.claudeResetCredits == nil {
-		response.Error(c, 503, "Claude reset service unavailable")
+	id, ok := h.claudeResetAccountID(c)
+	if !ok {
 		return
 	}
 	result, err := h.claudeResetCredits.Redeem(c.Request.Context(), id, c.GetHeader("Idempotency-Key"))

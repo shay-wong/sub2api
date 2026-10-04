@@ -1003,6 +1003,51 @@ func TestAntigravityCompatDisabledStreamTimeoutStillHasDisconnectDeadline(t *tes
 	require.Equal(t, defaultDisconnectedStreamDrainTimeout, disconnectedStreamDrainTimeout(svc.antigravityCompatStreamTimeout()))
 }
 
+func TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline(t *testing.T) {
+	svc := newAntigravityCompatService(config.GatewayConfig{StreamDataIntervalTimeout: 1}, nil)
+	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", nil)
+	c.Writer = &antigravityFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	reader, writer := io.Pipe()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				if _, err := io.WriteString(writer, ": upstream ping\n\n"); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	type outcome struct {
+		result *antigravityStreamResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := svc.handleAntigravityCompatStreamWithKeepaliveInterval(
+			c, &http.Response{Body: reader}, time.Now(), "gemini-3.1-pro",
+			newAntigravityChatStreamAdapter("gemini-3.1-pro", false), "test", time.Millisecond, 2*time.Second,
+		)
+		done <- outcome{result: result, err: err}
+	}()
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		require.NotNil(t, got.result)
+		require.True(t, got.result.clientDisconnect)
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed pre-content ping did not start disconnect drain deadline")
+	}
+}
+
 func TestAntigravityCompatStreamErrorCommitsSingleTerminalFrame(t *testing.T) {
 	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, nil)
 	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/responses", nil)

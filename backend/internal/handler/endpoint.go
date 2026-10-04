@@ -424,6 +424,7 @@ func handleSelectedOpenAIPreflight(
 	release func(),
 	logFailure func(error),
 	respond func(status int, code, message string),
+	inflight ...*selectedInflightBalance,
 ) (*service.UserSubscription, bool) {
 	if apiKey == nil {
 		return subscription, false
@@ -464,7 +465,14 @@ func handleSelectedOpenAIPreflight(
 	if billingCacheService == nil {
 		return actualSubscription, false
 	}
-	if err := billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, selectedGroup, actualSubscription, EffectiveQuotaPlatform(ctx, selection, apiKey)); err != nil {
+	err := billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, selectedGroup, actualSubscription, EffectiveQuotaPlatform(ctx, selection, apiKey))
+	if err == nil && len(inflight) > 0 {
+		err = inflight[0].reserve(ctx, billingCacheService, gatewayService, selection, apiKey, actualSubscription)
+		if err == nil && c != nil && c.Request != nil {
+			c.Request = c.Request.WithContext(service.WithInflightReservation(c.Request.Context(), inflight[0].reservation))
+		}
+	}
+	if err != nil {
 		if logFailure != nil {
 			logFailure(err)
 		}

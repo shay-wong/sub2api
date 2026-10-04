@@ -643,18 +643,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
-	if err != nil {
-		reqLog.Info("openai.inflight_reservation_rejected", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.handleStreamingAwareError(c, status, code, message, streamStarted)
-		return
-	}
-	defer inflightRelease()
+	inflight := selectedInflightBalance{request: tokenInflightEstimate(reqModel, body)}
+	defer inflight.close()
 	// Generate session hash (header first; fallback to prompt_cache_key)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
@@ -832,6 +822,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			func(status int, code, message string) {
 				h.handleStreamingAwareError(c, status, code, message, streamStarted)
 			},
+			&inflight,
 		)
 		if preflightFailed {
 			return
@@ -1363,17 +1354,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
-	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
-	if inflightErr != nil {
-		status, code, message, retryAfter := billingErrorDetails(inflightErr)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
-		return
-	}
-	defer inflightDone()
+	inflight := selectedInflightBalance{request: tokenInflightEstimate(reqModel, body)}
+	defer inflight.close()
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(c, sessionHash, promptCacheKey, reqModel, body)
@@ -1487,6 +1469,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			func(status int, code, message string) {
 				h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
 			},
+			&inflight,
 		)
 		if preflightFailed {
 			return
@@ -2689,16 +2672,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		requiredTransport = service.OpenAIUpstreamTransportHTTPSSE
 	}
 
-	// 余额模式在途预留（会话级）：按首帧估算一次，会话期间续期；每轮计费任务接管引用，
-	// 会话结束且所有轮次扣减落地后释放。
-	inflightCtx, inflightDone, inflightErr := reserveInflightBalanceCtx(ctx, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, firstMessage))
-	if inflightErr != nil {
-		reqLog.Info("openai.websocket_inflight_reservation_rejected", zap.Error(inflightErr))
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
-		return
-	}
-	defer inflightDone()
-	ctx = inflightCtx
+	inflight := selectedInflightBalance{request: tokenInflightEstimate(reqModel, firstMessage)}
+	defer inflight.close()
 
 	// A WebSocket may outlive a key's remaining spending window. Recheck
 	// after acquiring turn slots, including the first account-selection wait.
@@ -2952,11 +2927,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, reason)
 			},
+			&inflight,
 		)
 		if preflightFailed {
 			return
 		}
 
+		ctx = service.WithInflightReservation(ctx, inflight.reservation)
 		token, _, err := h.gatewayService.GetRequestCredential(ctx, c, account)
 		if err != nil {
 			reqLog.Warn("openai.websocket_get_access_token_failed", zap.Int64("account_id", account.ID), zap.Error(err))

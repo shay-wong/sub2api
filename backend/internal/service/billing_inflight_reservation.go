@@ -171,9 +171,6 @@ type inflightReservationCtxKey struct{}
 
 // WithInflightReservation 把预留句柄挂到 context 上，供计费任务提交时交接。
 func WithInflightReservation(ctx context.Context, r *InflightReservation) context.Context {
-	if r == nil {
-		return ctx
-	}
 	return context.WithValue(ctx, inflightReservationCtxKey{}, r)
 }
 

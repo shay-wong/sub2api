@@ -35,6 +35,54 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 
 func inflightNoop() {}
 
+// selectedInflightBalance owns the handler reference across account failover.
+// Billing tasks keep their own references when a new group replaces the reservation.
+type selectedInflightBalance struct {
+	request        service.InflightEstimateRequest
+	groupID        int64
+	subscriptionID int64
+	prepared       bool
+	reservation    *service.InflightReservation
+	done           func()
+}
+
+func (s *selectedInflightBalance) close() {
+	if s.done != nil {
+		s.done()
+		s.done = nil
+	}
+	s.reservation = nil
+	s.prepared = false
+}
+
+func (s *selectedInflightBalance) reserve(ctx context.Context, billing *service.BillingCacheService, estimator inflightReservationEstimator, selection *service.AccountSelectionResult, apiKey *service.APIKey, subscription *service.UserSubscription) error {
+	if s == nil || apiKey == nil {
+		return nil
+	}
+	selectedKey := *apiKey
+	selectedKey.GroupID = ResolveEffectiveGroupID(selection, apiKey)
+	selectedKey.Group = ResolveEffectiveGroup(selection, apiKey)
+	var groupID, subscriptionID int64
+	if selectedKey.GroupID != nil {
+		groupID = *selectedKey.GroupID
+	}
+	if subscription != nil {
+		subscriptionID = subscription.ID
+	}
+	if s.prepared && s.groupID == groupID && s.subscriptionID == subscriptionID {
+		return nil
+	}
+	s.close()
+	ctx = service.WithInflightReservation(ctx, nil)
+	reservedCtx, done, err := reserveInflightBalanceCtx(ctx, billing, estimator, &selectedKey, subscription, s.request)
+	if err != nil {
+		return err
+	}
+	s.groupID, s.subscriptionID, s.prepared = groupID, subscriptionID, true
+	s.reservation, s.done = service.InflightReservationFromContext(reservedCtx), done
+	return nil
+}
+
 // reserveInflightBalance 在 CheckBillingEligibility 之后为余额模式请求登记在途预留。
 //
 // 成功时把预留句柄挂到 c.Request 的 context 上：之后通过 submit*UsageRecordTask 提交的
