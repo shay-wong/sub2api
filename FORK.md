@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `b8dece9000c68815a5b867ca5a1e6f236e173905` |
-| 当前比较范围 | `b8dece9000c68815a5b867ca5a1e6f236e173905..HEAD` |
+| 已合并上游提交 / 比较基线 | `3f1a2ea0a760730e3bc528105c00b4ee4f23e469` |
+| 当前比较范围 | `3f1a2ea0a760730e3bc528105c00b4ee4f23e469..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `ded21ff1655dc3a69e4073ff056c1e1ae787b715`，固定上游 parent 为 `b8dece9000c68815a5b867ca5a1e6f236e173905`，共同基线为 `a3eb7ef302961cba716dc78b39b93b60c467db0e`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `cec61d608c81d2a75d2a4499fe0d618ff848a364`，固定上游 parent 为 `3f1a2ea0a760730e3bc528105c00b4ee4f23e469`，共同基线为 `b8dece9000c68815a5b867ca5a1e6f236e173905`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游 0.2.9–0.2.13：GPT-6.1 Sol 与 Sonnet 5.5、远端 Codex 模型目录、Claude 重置额度及兑换、余额并发预占、充值赠送/折扣阶梯、TypeSafe Jev 平台、Dashboard 花费趋势、账号优先级快捷调整，以及已删除 API Key 结算和公开订单校验修复。Astra Ultrafast 模型默认倍率采用上游 6x，Fork 的显式渠道倍率继续优先；其他模型仍沿用既有默认。保留细粒度权限、实际分组归因、退款状态机及流式资源释放。Claude 重置接口权限和选中分组余额预占在合并后的独立功能提交中适配。本地历史标签不替代此精确基线。
+本次合入上游 0.2.14 的 8 个提交：初始管理员随机登录邮箱和密码、统一邮箱及 bcrypt 密码长度校验、EasyPay 回调参数白名单与支付返回 URL 查询参数清理、远端 Codex 模型目录的 API Key discovery，以及 Vue/source-map-js 依赖安全更新。初始化冲突将上游凭据准备接入既有 `createInitialAdmin`，继续创建 `super_admin`、识别两种管理员角色并保持事务提交和不创建 Project 成员关系；测试同时覆盖两侧契约。这些是既有边界的机械衔接，不新增 Fork 能力。上游更新未等价吸收当前 13 项 Fork 能力；本地历史标签不替代精确基线。
 
 ## Fork 发布版本
 
@@ -31,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.13` |
-| 当前 Fork 版本 | `0.2.13-fork.1`（本次同步，未发布） |
+| 当前上游版本 | `0.2.14` |
+| 当前 Fork 版本 | `0.2.14-fork.1`（本次同步，未发布） |
 | 已发布同基线 Fork 版本 | 本地未发现；发布时再次检查远端 |
-| 下次发布所需版本 | `0.2.13-fork.1`（若远端已占用则递增） |
+| 下次发布所需版本 | `0.2.14-fork.1`（若远端已占用则递增） |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 从 `0.2.8` 变为 `0.2.13`，版本源同步为 `0.2.13-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 从 `0.2.13` 变为 `0.2.14`，版本源同步为 `0.2.14-fork.1`，避免发布流水线因旧 base 拒绝构建。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
 本次仅合并代码和同步版本基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
 
