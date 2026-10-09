@@ -551,6 +551,47 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it.each([
+    ['command_code', undefined, 'adaptive'],
+    ['command_code', 'unknown', 'adaptive'],
+    ['opencode_go', undefined, 'adaptive'],
+    ['opencode_go', 'unknown', 'adaptive'],
+    ['cline', undefined, 'chat_completions'],
+    ['cline', 'unknown', 'chat_completions'],
+    ['command_code', 'chat_completions', 'chat_completions'],
+    ['command_code', 'anthropic', 'anthropic'],
+    ['command_code', 'responses', 'responses']
+  ])('preserves effective protocol for %s with stored protocol %s', async (platform, storedProtocol, expectedProtocol) => {
+    const account = buildAccount()
+    account.platform = platform
+    const endpoints = {
+      chat_completions: 'https://relay.example.com/chat/v1',
+      anthropic: 'https://relay.example.com/anthropic',
+      responses: 'https://relay.example.com/responses/v1'
+    }
+    account.credentials = {
+      api_key: 'sk-provider',
+      base_url: endpoints.chat_completions,
+      api_base_urls: endpoints
+    }
+    if (storedProtocol !== undefined) account.credentials.api_protocol = storedProtocol
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const submittedCredentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(submittedCredentials.api_protocol).toBe(expectedProtocol)
+    if (expectedProtocol === 'adaptive') {
+      expect(submittedCredentials.api_base_urls).toEqual(endpoints)
+      expect(submittedCredentials.base_url).toBe(endpoints.chat_completions)
+    } else {
+      expect(submittedCredentials).not.toHaveProperty('api_base_urls')
+    }
+  })
+
   describe('providers using the generic form', () => {
     beforeEach(() => {
       setPlatformCatalog({

@@ -177,6 +177,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 ## Features
 
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)
+  - Editing an imported Command Code or OpenCode account with a missing or invalid API protocol preserves automatic model-based routing and custom protocol endpoints. Cline still defaults to Chat Completions, and explicitly selected valid protocols remain unchanged.
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
   - Claude reset-credit queries and redemption require account-management permission and direct account access. Group access alone returns `403` without upstream actions or idempotent replay; full account scope and super admins remain allowed.

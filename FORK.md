@@ -358,6 +358,8 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 12. 管理端交互与紧凑诊断体验
 
+- **多协议账号编辑默认值**：API 导入的 Command Code / OpenCode 账号缺失或含无效 `api_protocol` 时，编辑保存必须维持后端按模型分流的 `adaptive` 默认值及自定义 `api_base_urls`，不能因仅修改名称而锁定 Chat 协议；Cline 缺省仍为 Chat，显式有效协议继续保留。`frontend/src/components/account/EditAccountModal.vue` 复用平台目录的 `providerRoutesByModel`，由 `frontend/src/components/account/__tests__/EditAccountModal.spec.ts` 的 `preserves effective protocol` 表驱动回归覆盖。验证：`cd frontend && pnpm exec vitest run src/components/account/__tests__/EditAccountModal.spec.ts`；独立功能提交定位：`git log -S'preserves effective protocol' -- frontend/src/components/account/__tests__/EditAccountModal.spec.ts`。三语 README 的多账号管理条目同步此边界；上游默认值及回归等价后可删除本子项。
+
 - **生命周期**：`等待上游吸收`
 - **原始意图**：让账号错误在主列表保持短码、详情进入 tooltip；Pagination 尊重传入的大页选项；DataTable 各渲染路径统一忽略交互控件 row-click；iOS 输入聚焦不触发页面缩放。
 - **行为不变量**：主表不得铺开完整 JSON/error message；`status` 裸字段不得误识别为错误码；500/1000 page size 不得被默认配置覆盖；按钮、链接、输入框和 `data-row-click-stop` 不得触发行点击；iOS 修复保持 CSS/viewport 可访问性。
