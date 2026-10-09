@@ -185,6 +185,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - OpenCode Go usage settings, queries, and refresh controls are super-admin-only because they operate across accounts sharing a key. Restricted account lists and details do not resolve usage from unbound sibling accounts.
 - **Precise Billing** - Token-level usage tracking and cost calculation
   - Inflight balance reservations follow the group and subscription actually selected after failover; same-group retries reuse the reservation, and queued billing retains it until settlement.
+  - Later Responses WebSocket turns use refreshed pricing for the same group without reconnecting. If routing selected a different fallback group, billing remains attributed to that group.
   - Group usage summaries revalidate the aggregation watermark to prevent double counting or omissions during concurrent historical usage changes; request billing is unchanged.
 - **Large Request Stability** - Fixes a process crash during asynchronous billing after large Responses requests, including image history. Request size limits are unchanged; upload timeouts require separate diagnosis.
 - **OpenAI GPT-6 Astra** - Exposes and forwards `gpt-6-astra` with image input, `low` through `max` reasoning, a 922K-token maximum input, Priority/Fast support, official pricing, and the 272K long-context price tier, including static fallback pricing when the pricing catalog is unavailable

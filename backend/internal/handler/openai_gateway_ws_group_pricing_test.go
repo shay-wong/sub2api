@@ -282,12 +282,57 @@ func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.
 	turn2 := &service.APIKey{ID: 2}
 	turn3 := &service.APIKey{ID: 3}
 	var keys openAIWSTurnBillingAPIKeys
-	require.Same(t, conn, keys.forTurn(1, conn), "a turn without BeforeTurn bills with the connection snapshot")
+	key, _ := keys.forTurn(1, conn, nil)
+	require.Same(t, conn, key, "a turn without BeforeTurn bills with the connection snapshot")
 	keys.set(2, turn2)
 	keys.set(3, turn3) // turn 3 starts before turn 2's usage is submitted
-	require.Same(t, turn2, keys.forTurn(2, conn))
-	require.Same(t, turn3, keys.forTurn(3, conn))
+	key, _ = keys.forTurn(2, conn, nil)
+	require.Same(t, turn2, key)
+	key, _ = keys.forTurn(3, conn, nil)
+	require.Same(t, turn3, key)
 	keys.set(4, conn)
-	require.Same(t, conn, keys.forTurn(2, conn), "only the current and previous turn are kept")
+	key, _ = keys.forTurn(2, conn, nil)
+	require.Same(t, conn, key, "only the current and previous turn are kept")
 	require.Len(t, keys.keys, 2)
+}
+
+func TestOpenAIWSTurnBillingAPIKeysPreserveSelectedGroup(t *testing.T) {
+	groupID, fallbackID := int64(77), int64(78)
+	conn := &service.APIKey{
+		GroupID: &groupID,
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 3},
+	}
+	refreshed := *conn
+	refreshed.Group = &service.Group{ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 0.3}
+	fallback := &service.Group{ID: fallbackID, Platform: service.PlatformOpenAI, RateMultiplier: 5}
+	otherPlatform := &service.Group{ID: groupID, Platform: service.PlatformAnthropic}
+	otherSubscription := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeSubscription}
+	for _, tc := range []struct {
+		name      string
+		selection *service.AccountSelectionResult
+		want      *service.Group
+	}{
+		{"auth group without selection", nil, refreshed.Group},
+		{"same selected group", &service.AccountSelectionResult{GroupID: &groupID, Group: conn.Group}, refreshed.Group},
+		{"same group without snapshot", &service.AccountSelectionResult{GroupID: &groupID}, refreshed.Group},
+		{"fallback group", &service.AccountSelectionResult{GroupID: &fallbackID, Group: fallback}, fallback},
+		{"fallback without snapshot", &service.AccountSelectionResult{GroupID: &fallbackID}, nil},
+		{"different platform", &service.AccountSelectionResult{GroupID: &groupID, Group: otherPlatform}, otherPlatform},
+		{"different subscription", &service.AccountSelectionResult{GroupID: &groupID, Group: otherSubscription}, otherSubscription},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var keys openAIWSTurnBillingAPIKeys
+			keys.set(2, &refreshed)
+			key, group := keys.forTurn(2, conn, tc.selection)
+			require.Same(t, &refreshed, key)
+			if tc.want == nil {
+				require.Nil(t, group, "missing fallback metadata must not use the auth group")
+			} else {
+				require.Same(t, tc.want, group)
+			}
+			_, firstGroup := keys.forTurn(1, conn, tc.selection)
+			require.Equal(t, ResolveEffectiveGroup(tc.selection, conn), firstGroup, "an unrefreshed turn keeps its selected snapshot")
+			require.Equal(t, 3.0, conn.Group.RateMultiplier, "the connection snapshot remains immutable")
+		})
+	}
 }

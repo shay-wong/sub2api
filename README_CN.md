@@ -194,6 +194,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
   - OpenCode Go 的用量设置、查询及刷新控制仅限超管，因为操作会涉及共享同一 Key 的多个账号；受限管理员的账号列表和详情不会关联未绑定账号的用量。
 - **精确计费** - Token 级别的用量追踪和成本计算
   - 余额并发预占跟随故障转移后实际选中的分组和订阅；同组重试复用预占，已排队计费完成结算后才释放所持引用。
+  - Responses WebSocket 后续轮次采用同一分组刷新后的价格，无需重连；若实际路由到其他备用分组，仍按备用分组归因和计费。
 - **OpenAI GPT-6 Astra** - 支持展示并原样转发 `gpt-6-astra`，包含图片输入、`low` 至 `max` 推理档位、922K 最大输入、Priority/Fast，以及官方价格和 272K 长上下文阶梯计费；价格目录不可用时，静态备用价格也保留该阶梯
 - **OpenAI Ultrafast** - 在 Responses、Chat Completions 和 Responses WebSocket 中原样转发 `service_tier: "ultrafast"`，不会转换为普通 Fast，并为 OpenAI OAuth 账号生成匹配的 `tier=ultrafast` Codex 路由提示。Astra 采用上游模型默认值，按 Standard 的 `6 倍`计费，其他模型默认 `2 倍`；渠道模型中显式配置的倍率优先于模型默认值；OpenAI 响应回显的实际档位只能降低、不能抬高计费档位
 - **智能调度** - 智能账号选择，支持粘性会话

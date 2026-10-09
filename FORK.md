@@ -90,6 +90,8 @@
 
 ## 2. 实际调度分组归因
 
+- **WebSocket 逐轮调价适配**：上游 `73381fc9c` 在后续 turn 刷新 API Key 的同组定价快照；Fork 显式传入的 `EffectiveGroup` 不得覆盖为建连旧价格。只有刷新快照与实际选中组的 ID、平台、订阅类型一致时才使用该 turn 的新价格；真实 fallback 或缺失备用组快照时继续服从 selection，不能借用原 API Key 组。实现位于 `backend/internal/handler/openai_gateway_handler.go`，回归位于 `openai_gateway_ws_group_pricing_test.go`；验证 `go test -tags=unit ./internal/handler -run 'TestOpenAIResponsesWebSocket_.*Group|TestOpenAIWSTurnBillingAPIKeys|TestRefreshOpenAIWSTurnBillingAPIKey'`。本次以合并后的独立功能提交保留该契约，定位：`git log -S'turnBillingAPIKey, effectiveGroup' -- backend/internal/handler/openai_gateway_handler.go`；三语 README 的计费条目同步此边界。
+
 - **预占内存回归隔离（维护者内部）**：`TestInflightEstimate_AccountMappingNoDBAndBoundedMemory` 在独立测试子进程测量进程级堆增量，避免整个 service 套件的后台分配污染结果；保留 20,000 次未定价模型查询、无直接数据库访问和 8 MiB 上限。验证：`go test -tags=unit ./internal/service -run '^TestInflightEstimate_AccountMappingNoDBAndBoundedMemory$' -count=3`；定位：`git log -S'SUB2API_INFLIGHT_MEMORY_TEST' -- backend/internal/service/billing_inflight_reservation_test.go`。上游采用等价隔离后可删除此适配。
 
 - **0.2.13 余额预占适配**：预占在选后检查中使用实际分组与订阅；同组重试复用，切组释放旧 handler 引用但保留已排队计费引用，切入订阅组清除旧预占上下文。实现位于 `backend/internal/handler/gateway_inflight_reservation.go` 与 `endpoint.go`；验证：`go test -tags=unit ./internal/handler -run 'TestSelectedInflight|TestReserveInflight|TestHandleSelectedOpenAIPreflight'`。独立适配提交定位：`git log -S'selectedInflightBalance' -- backend/internal/handler/gateway_inflight_reservation.go`。三语 README 计费条目同步此边界。

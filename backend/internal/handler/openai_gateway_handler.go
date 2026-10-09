@@ -2283,13 +2283,22 @@ func (k *openAIWSTurnBillingAPIKeys) set(turn int, key *service.APIKey) {
 	k.keys[turn] = key
 }
 
-func (k *openAIWSTurnBillingAPIKeys) forTurn(turn int, conn *service.APIKey) *service.APIKey {
+func (k *openAIWSTurnBillingAPIKeys) forTurn(turn int, conn *service.APIKey, selection *service.AccountSelectionResult) (*service.APIKey, *service.Group) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	turnKey := conn
 	if key := k.keys[turn]; key != nil {
-		return key
+		turnKey = key
 	}
-	return conn
+	groupID := ResolveEffectiveGroupID(selection, conn)
+	group := ResolveEffectiveGroup(selection, conn)
+	// A refreshed auth group replaces only the same selected group, never a fallback group.
+	if turnKey != conn && turnKey != nil && turnKey.Group != nil &&
+		groupID != nil && *groupID == turnKey.Group.ID &&
+		(group == nil || (group.Platform == turnKey.Group.Platform && group.SubscriptionType == turnKey.Group.SubscriptionType)) {
+		group = turnKey.Group
+	}
+	return turnKey, group
 }
 
 // refreshOpenAIWSTurnBillingAPIKey 返回本 turn 计费用的 API Key：分组取当前认证
@@ -3299,11 +3308,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
-				effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
+				turnBillingAPIKey, effectiveGroup := turnBillingAPIKeys.forTurn(turn, apiKey, selection)
 				quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 				sessionID := service.ExtractClientSessionID(c)
 				turnRecordPricingAt := turnPricing.currentOr(turnStart)
-				turnBillingAPIKey := turnBillingAPIKeys.forTurn(turn, apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
