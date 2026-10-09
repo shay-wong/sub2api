@@ -15,6 +15,7 @@ import (
 func TestOpsOutputTPSDistribution(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
+	projectID := mustDefaultProjectID(t, client)
 	user := mustCreateUser(t, client, &service.User{})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID})
 	account := mustCreateAccount(t, client, &service.Account{Name: "output-tps", Platform: service.PlatformAnthropic})
@@ -33,9 +34,9 @@ func TestOpsOutputTPSDistribution(t *testing.T) {
 	insert := func(at time.Time, groupID *int64, output int, duration *int, requestType service.RequestType, imageCount, imageTokens int, billingMode string) {
 		t.Helper()
 		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs
-   (user_id, api_key_id, account_id, group_id, request_id, model, input_tokens, output_tokens, duration_ms, request_type, image_count, image_output_tokens, billing_mode, created_at, image_size)
-   VALUES ($1,$2,$3,$4,$5,'gpt-test',100000,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $9 > 0 THEN '1K' ELSE NULL END)`,
-			user.ID, key.ID, account.ID, groupID, fmt.Sprintf("output-tps-%d-%d", user.ID, time.Now().UnixNano()), output, duration, requestType, imageCount, imageTokens, billingMode, at)
+   (user_id, api_key_id, account_id, group_id, request_id, model, input_tokens, output_tokens, duration_ms, request_type, image_count, image_output_tokens, billing_mode, created_at, image_size, project_id)
+   VALUES ($1,$2,$3,$4,$5,'gpt-test',100000,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $9 > 0 THEN '1K' ELSE NULL END,$13)`,
+			user.ID, key.ID, account.ID, groupID, fmt.Sprintf("output-tps-%d-%d", user.ID, time.Now().UnixNano()), output, duration, requestType, imageCount, imageTokens, billingMode, at, projectID)
 		require.NoError(t, err)
 	}
 	// Rates 1, 10, 100, 1000: unequal durations catch ratio-of-sums mistakes.

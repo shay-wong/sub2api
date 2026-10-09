@@ -329,6 +329,8 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 11. 用量与运维可观测性、查询性能
 
+- **输出 TPS 集成测试兼容（仅维护者）**：上游逐请求 TPS 分位数测试直接写入 `usage_logs`，补充 `mustDefaultProjectID` 生成的兼容字段，满足尚未删除的 `project_id NOT NULL` 约束；不恢复 Project 权限或统计范围。验证：`go test -tags=integration ./internal/repository -run '^TestOpsOutputTPS'`。代码为 `backend/internal/repository/ops_repo_dashboard_integration_test.go`，当前提交定位：`git log -S'mustDefaultProjectID' -- backend/internal/repository/ops_repo_dashboard_integration_test.go`；删除旧列后同步删除此测试适配。
+
 - **生命周期**：`等待上游吸收`
 - **原始意图**：避免大表分页重复精确 COUNT，统一全局筛选口径，暴露 usage-record runtime，恢复已删除 API Key 归因，并保持 Dashboard 健康因子的统计语义一致。
 - **行为不变量**：翻页复用同一筛选条件的精确总数，筛选变化必须失效缓存；列表、统计和错误页使用同一全局 filter scope；deleted key 只用 digest 归因；健康分不得混用语义不同的指标；旧 `project_id` 仅作为兼容存储，不得参与范围过滤或聚合分组；IP geo 仅显式启用。
