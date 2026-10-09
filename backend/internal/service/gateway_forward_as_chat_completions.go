@@ -461,13 +461,18 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			return false
 		}
 		if event.Type == "ping" {
+			if clientDisconnected {
+				return false
+			}
 			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
-				return true
+				clientDisconnected = true
+				startDisconnectDrainTimer()
+				return false
 			}
 			c.Writer.Flush()
 			return false
 		}
-		if firstChunk {
+		if firstChunk && !clientDisconnected {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms

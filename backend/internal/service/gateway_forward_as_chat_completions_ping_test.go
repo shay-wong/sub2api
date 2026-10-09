@@ -182,6 +182,7 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 				stream += "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_failure\",\"usage\":{\"input_tokens\":10}}}\n\n"
 			}
 			stream += "event: ping\ndata: {\"type\":\"ping\"}\n\n" +
+				"event: ping\ndata: {\"type\":\"ping\"}\n\n" +
 				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":7}}\n\n" +
 				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
@@ -193,7 +194,8 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			require.Zero(t, writer.writesAfterError)
 			require.Zero(t, writer.flushesAfterError)
 			require.NotContains(t, writer.Body.String(), "[DONE]")
-			require.Zero(t, result.Usage.OutputTokens)
+			require.True(t, result.ClientDisconnect)
+			require.Equal(t, 7, result.Usage.OutputTokens, "drain retains upstream usage after downstream disconnect")
 			if withUsage {
 				require.Equal(t, 10, result.Usage.InputTokens)
 			} else {

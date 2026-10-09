@@ -193,6 +193,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
   - Concurrent model catalog requests reuse a freshly populated cache instead of repeating the upstream fetch; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits
+  - When a heartbeat write fails while converting an Anthropic stream to Chat Completions, downstream writes stop and upstream usage is collected within a bounded drain period.
   - Antigravity streams start bounded cleanup when a pre-content keepalive fails to reach the client, even if the upstream keeps sending pings.
 - **Rate Limiting** - Configurable request and token rate limits
 - **Subscription Limit Semantics** - When selected-group billing preflight detects exhausted daily, weekly, or monthly subscription usage, it returns HTTP `429` with `rate_limit_exceeded`, allowing compatible clients to back off instead of treating it as a permanent authorization failure

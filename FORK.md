@@ -195,6 +195,8 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
 
+- **Anthropic 转 Chat 心跳断线适配**：上游 `9f84204c2` 将 ping 转成 SSE 注释；心跳写失败须进入 Fork 原有的有界 drain，停止后续数据/心跳/flush，不再写 `[DONE]`，但仍收集上游晚到用量，且断线后的事件不得设置首字时间。实现与回归为 `backend/internal/service/gateway_forward_as_chat_completions.go`、`gateway_forward_as_chat_completions_ping_test.go`；验证 `go test -tags=unit ./internal/service -run '^TestHandleCCStreamingFromAnthropic_'`。当前独立提交定位：`git log -S'drain retains upstream usage after downstream disconnect' -- backend/internal/service/gateway_forward_as_chat_completions_ping_test.go`；三语 README 同步该行为。上游提供等价断线 drain 和回归后删除此适配。
+
 - **0.2.13 首内容前断线清理**：Antigravity 首内容前 keepalive 写入失败时也启动已有的有界 drain，不能因上游持续 ping 而永久占用请求。实现位于 `backend/internal/service/antigravity_gateway_compat_stream.go`；验证：`go test -tags=unit ./internal/service -run '^TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline$'`。独立适配提交定位：`git log -S'TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline' -- backend/internal/service/antigravity_gateway_compat_test.go`。三语 README 同步断线行为。
 
 - **生命周期**：`等待上游吸收`
