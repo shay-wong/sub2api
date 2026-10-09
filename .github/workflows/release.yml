@@ -325,7 +325,7 @@ jobs:
       - name: Build images and publish manifests
         env:
           DOCKERHUB_IMAGE: ${{ env.DRY_RUN == 'true' && 'skip' || steps.dockerhub.outputs.image }}
-          PUBLISH_ROLLING_TAGS: ${{ !contains(needs.prepare.outputs.tag, '-fork.') }}
+          PUBLISH_ROLLING_TAGS: "true"
         run: bash "$RUNNER_TEMP/release-tools/release-images.sh"
       - name: Get annotated tag notes
         id: tag_message
@@ -359,7 +359,7 @@ jobs:
           GITHUB_INSTALL_BRANCH: ${{ contains(needs.prepare.outputs.tag, '-fork.') && 'stable' || github.event.repository.default_branch }}
           DOCKERHUB_IMAGE: ${{ steps.dockerhub.outputs.image }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || 'skip' }}
-          PUBLISH_ROLLING_TAGS: ${{ !contains(needs.prepare.outputs.tag, '-fork.') }}
+          PUBLISH_ROLLING_TAGS: "true"
       - name: Upload dry-run checksums and metadata
         if: ${{ env.DRY_RUN == 'true' }}
         uses: actions/upload-artifact@v7

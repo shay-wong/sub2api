@@ -15,7 +15,6 @@ if [[ ${SIMPLE_RELEASE:-false} != true && "$dockerhub_image" != skip ]]; then
   registries+=("$dockerhub_image")
 fi
 publish_rolling_tags=${PUBLISH_ROLLING_TAGS:-true}
-if [[ "$RELEASE_VERSION" == *-fork.* ]]; then publish_rolling_tags=false; fi
 arches=(amd64 arm64)
 if [[ ${SIMPLE_RELEASE:-false} == true ]]; then arches=(amd64); fi
 for arch in "${arches[@]}"; do

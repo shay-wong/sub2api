@@ -8,7 +8,7 @@ Go caches are isolated by target and refreshed on each source commit, with fallb
 
 All build jobs use the commit resolved by `prepare`, including a manual release's selected tag. Helper scripts come from the workflow revision and are passed as a run-local artifact, so older application tags do not need to contain the new scripts. The workflow serializes release runs to prevent simultaneous updates to moving image tags.
 
-Fork publishing keeps registry login and image destination separate: `DOCKERHUB_USERNAME` authenticates, while the workflow resolves `DOCKERHUB_NAME` into the full `DOCKERHUB_IMAGE` repository path. The image helper uses that path unchanged; direct callers without it retain the username/sub2api fallback. Fork versions (`X.Y.Z-fork.N`) publish version tags only, including in simple mode. Plain releases retain rolling tags unless `PUBLISH_ROLLING_TAGS=false`.
+Fork publishing keeps registry login and image destination separate: `DOCKERHUB_USERNAME` authenticates, while the workflow resolves `DOCKERHUB_NAME` into the full `DOCKERHUB_IMAGE` repository path. The image helper uses that path unchanged; direct callers without it retain the username/sub2api fallback. Fork versions (`X.Y.Z-fork.N`) and plain releases publish version tags and update `latest`, major and minor tags in the configured repositories. Simple mode updates only the GHCR version tags and `latest`. The workflow enables rolling tags; direct helper callers can opt out with `PUBLISH_ROLLING_TAGS=false`. Existing remote tags change only after a successful publication.
 
 ## Validate without publication
 

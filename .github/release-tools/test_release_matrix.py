@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import importlib.util
 import io
+import itertools
 import json
 import os
 from pathlib import Path
@@ -187,33 +188,43 @@ class ReleaseMatrixTest(unittest.TestCase):
 
 
 
-    def test_custom_fork_image_does_not_duplicate_path_or_publish_rolling_tags(self):
+    def test_custom_fork_image_preserves_path_and_rolling_tag_setting(self):
         fake_bin = Path('bin')
         fake_bin.mkdir()
         docker = fake_bin / 'docker'
         docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
         docker.chmod(0o755)
-        for simple in (False, True):
-            with self.subTest(simple=simple):
-                log_path = Path(f'fork-{simple}.log').resolve()
+        for simple, rolling in itertools.product((False, True), ('true', 'false')):
+            with self.subTest(simple=simple, rolling=rolling):
+                log_path = Path(f'fork-{simple}-{rolling}.log').resolve()
                 env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
                        'DOCKER_LOG': str(log_path), 'RUNNER_TEMP': self.temp.name,
                        'RELEASE_VERSION': '9.8.7-fork.1', 'RELEASE_SHA': 'a' * 40,
                        'GITHUB_REPOSITORY': 'ExampleOwner/sub2api', 'DRY_RUN': 'false',
                        'SIMPLE_RELEASE': str(simple).lower(), 'DOCKERHUB_USERNAME': 'login-only',
-                       'DOCKERHUB_IMAGE': 'custom-owner/custom-image', 'PUBLISH_ROLLING_TAGS': 'true'}
+                       'DOCKERHUB_IMAGE': 'custom-owner/custom-image', 'PUBLISH_ROLLING_TAGS': rolling}
                 subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
                 log = log_path.read_text()
                 self.assertIn('ghcr.io/exampleowner/sub2api:9.8.7-fork.1', log)
-                self.assertNotIn(':latest', log)
-                self.assertNotIn('--tag ghcr.io/exampleowner/sub2api:9 ', log)
-                self.assertNotIn('--tag ghcr.io/exampleowner/sub2api:9.8 ', log)
+                self.assertEqual('--tag ghcr.io/exampleowner/sub2api:latest ' in log, rolling == 'true')
+                for tag in ('9', '9.8'):
+                    self.assertEqual(f'--tag ghcr.io/exampleowner/sub2api:{tag} ' in log,
+                                     rolling == 'true' and not simple)
                 self.assertNotIn('login-only', log)
                 self.assertNotIn('custom-image/sub2api', log)
                 if simple:
                     self.assertNotIn('custom-owner', log)
                 else:
                     self.assertIn('--tag custom-owner/custom-image:9.8.7-fork.1 ', log)
+                    for tag in ('latest', '9', '9.8'):
+                        self.assertEqual(f'--tag custom-owner/custom-image:{tag} ' in log, rolling == 'true')
+
+    def test_release_workflow_enables_rolling_tags_for_images_and_release_notes(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        steps = {step.get('name'): step for step in workflow['jobs']['release']['steps']}
+        for name in ('Build images and publish manifests', 'Publish existing archives and release notes'):
+            with self.subTest(step=name):
+                self.assertEqual(steps[name]['env']['PUBLISH_ROLLING_TAGS'], 'true')
 
 
 if __name__ == '__main__':
