@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `5fc0e486c3f6a8a191b8bd140f39b60457f611cf` |
-| 当前比较范围 | `5fc0e486c3f6a8a191b8bd140f39b60457f611cf..HEAD` |
+| 已合并上游提交 / 比较基线 | `3a6fd1c9db07203ca308aaba69e502bc1f35b307` |
+| 当前比较范围 | `3a6fd1c9db07203ca308aaba69e502bc1f35b307..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `bb125fbeae996224fa06cda0b04b4f5f1ad1d6d7`，固定上游 parent 为 `5fc0e486c3f6a8a191b8bd140f39b60457f611cf`，共同基线为 `3f1a2ea0a760730e3bc528105c00b4ee4f23e469`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `6d5466f2bb92138b873d70282e8785d3294d931c`，固定上游 parent 为 `3a6fd1c9db07203ca308aaba69e502bc1f35b307`，共同基线为 `5fc0e486c3f6a8a191b8bd140f39b60457f611cf`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游 124 个提交（含 58 个 merge）：单次输出 TPS 与分位数、紧凑账号筛选、远端 Codex 目录账号映射与非空 service tiers、Composite 模型别名、WebSocket 逐轮分组价格及图片输入用量、协议转换/心跳/推理签名兼容、Grok/OpenCode 接入与后台异步状态修复。三处文本冲突分别合并测试 import、接入 TPS 查询并沿用现有筛选 helper 签名、在 OAuth 表单消费 choice state 前检查已卸载状态，属于机械衔接。上述新能力来自上游，不登记为 Fork 差异；现有 13 项能力仍有未被等价吸收的边界。
+本次合入上游 22 个提交：Cline / Command Code 平台、统一平台目录与 provider profile 协议路由、迁移 242 移除固定平台 CHECK 并改用应用层目录校验、OAuth 历史 web_search 工具声明修复，以及 Go 1.27.2 / x/net 安全升级。三处文本冲突分别保留 Fork 版本格式、在批量账号 Grok URL 校验后调用上游重命名的协议规则校验、合并平台目录类型与 Fork 管理员权限类型导入，属于机械衔接。上述新能力来自上游，不登记为 Fork 差异；现有 13 项能力仍有未被等价吸收的边界。
 
 ## Fork 发布版本
 
@@ -31,14 +31,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.14` |
-| 当前 Fork 版本 | `0.2.14-fork.2`（本次准备，未发布） |
-| 已发布同基线 Fork 版本 | 远端已存在 `v0.2.14-fork.1`；发布时再次检查远端 |
-| 下次发布所需版本 | `0.2.14-fork.2`（若远端已占用则递增） |
+| 当前上游版本 | `0.2.15` |
+| 当前 Fork 版本 | `0.2.15-fork.1`（本次准备，未发布） |
+| 已发布同基线 Fork 版本 | 本次检查远端未发现 `v0.2.15-fork.*`；发布时再次检查远端 |
+| 下次发布所需版本 | `0.2.15-fork.1`（若远端已占用则递增） |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 仍为 `0.2.14`，远端已有 `v0.2.14-fork.1`，版本源准备为 `0.2.14-fork.2`。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 升为 `0.2.15`，Fork 修订号从 `1` 开始，版本源准备为 `0.2.15-fork.1`。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
 本次仅合并代码和同步版本基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
 
