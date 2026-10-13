@@ -101,6 +101,27 @@ func TestGeminiCachedContentStorageOnlyIsNotARequest(t *testing.T) {
 	require.Nil(t, extended.AccountStatsCost, "账号统计成本回落 total_cost，不套按次规则")
 }
 
+func TestGeminiCachedContentQuoteUsesEffectiveGroup(t *testing.T) {
+	svc, usageRepo := newGeminiCacheBillingGatewayForTest(t)
+	ownerID, selectedID := int64(33), int64(34)
+	key := &APIKey{ID: 821, GroupID: &ownerID, User: &User{ID: 621},
+		Group: &Group{ID: ownerID, Platform: PlatformGemini, RateMultiplier: 1, Hydrated: true}}
+	selected := &Group{ID: selectedID, Platform: PlatformGemini, RateMultiplier: 3, Hydrated: true}
+	input := &RecordUsageInput{
+		Result: &ForwardResult{RequestID: "cc-effective-group", Model: "gemini-2.5-pro", Usage: ClaudeUsage{InputTokens: 1000}, CacheStorageTokenHours: 1000},
+		APIKey: key, User: key.User, Account: &Account{ID: 713, Platform: PlatformGemini},
+		EffectiveGroupID: &selectedID, EffectiveGroup: selected,
+	}
+	ctx := context.Background()
+	require.True(t, svc.CacheStoragePriced(ctx, input))
+	want := (1000*0.00000125 + 1000*0.0000045) * 3
+	require.InDelta(t, want, svc.QuoteUsageCost(ctx, input), 1e-12)
+	require.NoError(t, svc.RecordUsage(ctx, input))
+	require.InDelta(t, want, usageRepo.lastLog.ActualCost, 1e-12)
+	require.Equal(t, selectedID, *usageRepo.lastLog.GroupID)
+	require.Equal(t, ownerID, *key.GroupID)
+}
+
 func TestFindGeminiCachedContentReferenceRejectsAmbiguousKeys(t *testing.T) {
 	for name, body := range map[string]string{
 		"duplicate top-level":       `{"cachedContent":"cachedContents/a","contents":[],"cachedContent":"cachedContents/b"}`,

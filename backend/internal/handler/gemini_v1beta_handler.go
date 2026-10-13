@@ -364,6 +364,15 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
+	if cachedContentBinding != nil {
+		// Ownership was checked above against the original key/group. Resolve the
+		// stored billing group before admission and scheduling the bound account.
+		apiKey, subscription, err = h.geminiCachedContentRecordBillingKey(c.Request.Context(), apiKey, cachedContentBinding, subscription)
+		if err != nil {
+			writeGeminiCachedContentBillingError(c, err)
+			return
+		}
+	}
 
 	// For Gemini native API, do not send Claude-style ping frames.
 	geminiConcurrency := NewConcurrencyHelper(h.concurrencyHelper.concurrencyService, SSEPingFormatNone, 0)
@@ -545,7 +554,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			excludedAccountIDs = mergeAccountIDSets(cachedContentExclusions, fs.FailedAccountIDs)
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, excludedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
-		if err == nil && cachedContentBinding != nil && selection.Account.ID != cachedContentBinding.AccountID {
+		if err == nil && cachedContentBinding != nil && (selection.Account.ID != cachedContentBinding.AccountID ||
+			ResolveEffectiveGroupID(selection, apiKey) == nil || *ResolveEffectiveGroupID(selection, apiKey) != *apiKey.GroupID) {
 			if selection.Acquired && selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}

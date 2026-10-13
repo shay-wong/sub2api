@@ -85,6 +85,9 @@ type GeminiCachedContent struct {
 	UserID   int64
 	APIKeyID int64
 	GroupID  int64
+	// BillingGroupID is the selected group; GroupID remains the resource owner's group.
+	// Zero preserves the original billing group for records created before this field existed.
+	BillingGroupID int64
 	// AccountID 是持有上游缓存的账号；引用缓存的请求只能发往该账号。
 	AccountID    int64
 	UpstreamName string

@@ -28,6 +28,7 @@ func TestGeminiCachedContentRepository_Lifecycle(t *testing.T) {
 		}
 	}
 	first := newRecord("a", apiKeyID, 42, now.Add(time.Hour))
+	first.BillingGroupID = 43
 	require.NoError(t, repo.Create(ctx, first))
 	require.Positive(t, first.ID)
 	require.False(t, first.CreatedAt.IsZero())
@@ -49,6 +50,8 @@ func TestGeminiCachedContentRepository_Lifecycle(t *testing.T) {
 	require.Equal(t, int64(2730), got.TotalTokenCount)
 	require.True(t, got.ExpireTime.Equal(first.ExpireTime))
 	require.Equal(t, first.ChannelUsage, got.ChannelUsage, "创建时的渠道计费口径随记录持久化")
+	require.Equal(t, int64(43), got.BillingGroupID)
+	require.Equal(t, int64(42), got.GroupID, "resource owner is independent of billing group")
 	_, err = repo.GetForOwner(ctx, apiKeyID+1, first.PublicID)
 	require.ErrorIs(t, err, service.ErrGeminiCachedContentNotFound)
 
@@ -78,6 +81,7 @@ func TestGeminiCachedContentRepository_Lifecycle(t *testing.T) {
 	got, err = repo.GetForOwner(ctx, apiKeyID, first.PublicID)
 	require.NoError(t, err)
 	require.True(t, got.ExpireTime.Equal(newExpire))
+	require.Equal(t, int64(43), got.BillingGroupID, "expiry updates preserve billing metadata")
 	require.ErrorIs(t, repo.CommitMutation(ctx, first.ID, "t1", now), service.ErrGeminiCachedContentMutationConflict, "提交后修改意图已清除")
 
 	acquired, err = repo.BeginMutation(ctx, first.ID, first.ExpireTime, "t3", lease)

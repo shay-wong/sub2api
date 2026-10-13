@@ -305,8 +305,46 @@ type cachedBillingEnv struct {
 	usage    *cachedBillingUsageRepo
 	apiKey   *service.APIKey
 	group    *service.Group
+	groups   *cachedBillingGroupRepo
+	subs     *cachedBillingSubscriptionRepo
 	// accounts 是调度快照桩直接返回的账号对象，测试可改其凭据。
 	accounts map[int64]*service.Account
+}
+
+type cachedBillingSubscriptionRepo struct {
+	service.UserSubscriptionRepository
+	subs     map[int64]*service.UserSubscription
+	billedID int64
+}
+
+func (r *cachedBillingSubscriptionRepo) GetActiveByUserIDAndGroupID(_ context.Context, _ int64, groupID int64) (*service.UserSubscription, error) {
+	sub := r.subs[groupID]
+	if sub == nil {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	return sub, nil
+}
+
+func (r *cachedBillingSubscriptionRepo) IncrementUsage(_ context.Context, id int64, _ float64) error {
+	r.billedID = id
+	return nil
+}
+
+type cachedBillingGroupRepo struct {
+	service.GroupRepository
+	groups map[int64]*service.Group
+}
+
+func (r *cachedBillingGroupRepo) GetByIDLite(_ context.Context, id int64) (*service.Group, error) {
+	group := r.groups[id]
+	if group == nil {
+		return nil, service.ErrGroupNotFound
+	}
+	return group, nil
+}
+
+func (r *cachedBillingGroupRepo) GetByID(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByIDLite(ctx, id)
 }
 
 func newCachedBillingEnv(t *testing.T, balance float64, accountIDs ...int64) *cachedBillingEnv {
@@ -342,20 +380,23 @@ func newCachedBillingEnv(t *testing.T, balance float64, accountIDs ...int64) *ca
 	bcs := service.NewBillingCacheService(nil, userRepo, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(bcs.Stop)
 	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: scheduled}, nil, nil, nil, nil)
-	gw := service.NewGatewayService(nil, &fakeGroupRepo{group: group}, usage, nil, userRepo, nil, nil, nil, cfg, snapshot, nil,
+	groups := &cachedBillingGroupRepo{groups: map[int64]*service.Group{groupID: group}}
+	subs := &cachedBillingSubscriptionRepo{subs: map[int64]*service.UserSubscription{}}
+	gw := service.NewGatewayService(nil, groups, usage, nil, userRepo, subs, nil, nil, cfg, snapshot, nil,
 		billing, nil, &service.BillingCacheService{}, nil, nil, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	upstream := &cachedBillingUpstream{}
 	compat := service.NewGeminiMessagesCompatService(&cachedBillingAccountRepo{accounts: accounts}, nil, nil, nil, nil, nil, upstream, nil, cfg)
 	repo := &cachedBillingRepo{records: map[string]*service.GeminiCachedContent{}, mutations: map[int64]cachedBillingMutation{}}
 	h := &GatewayHandler{
 		gatewayService:             gw,
+		geminiCompatService:        compat,
 		billingCacheService:        bcs,
 		concurrencyHelper:          NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatNone, 0),
 		geminiCachedContentService: service.NewGeminiCachedContentService(repo, compat, cfg),
 	}
 	apiKey := &service.APIKey{ID: 7, UserID: 3, GroupID: &groupID, Group: group, Status: service.StatusActive,
 		User: &service.User{ID: 3, Concurrency: 10, Balance: balance}}
-	return &cachedBillingEnv{h: h, repo: repo, upstream: upstream, usage: usage, apiKey: apiKey, group: group, accounts: accounts}
+	return &cachedBillingEnv{h: h, repo: repo, upstream: upstream, usage: usage, apiKey: apiKey, group: group, groups: groups, subs: subs, accounts: accounts}
 }
 
 // TestGeminiExplicitCacheExclusions_FiltersUnsupportedAccountsFromSnapshot 候选过滤直接按快照里的凭据判定：

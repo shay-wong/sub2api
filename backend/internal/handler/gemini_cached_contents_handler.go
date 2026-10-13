@@ -143,20 +143,8 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
-	if !h.checkGeminiCachedContentBilling(c, reqLog, apiKey, subscription) {
-		return
-	}
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(modelName, body))
-	if err != nil {
-		reqLog.Info("gemini.cached_content.inflight_reservation_rejected", zap.Error(err))
-		status, code, message, retryAfter := billingErrorDetails(err)
-		if retryAfter > 0 {
-			c.Header("Retry-After", strconv.Itoa(retryAfter))
-		}
-		googleErrorWithType(c, status, code, "", message)
-		return
-	}
-	defer inflightRelease()
+	inflight := &selectedInflightBalance{request: tokenInflightEstimate(modelName, body)}
+	defer inflight.close()
 
 	excluded, err := h.gatewayService.GeminiExplicitCacheExclusions(c.Request.Context(), apiKey.GroupID, 0)
 	if err != nil {
@@ -197,6 +185,23 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		if !ok {
 			return
 		}
+		billingKey, actualSubscription, err := h.geminiCachedContentBillingKey(c.Request.Context(), apiKey,
+			ResolveEffectiveGroupID(selection, apiKey), ResolveEffectiveGroup(selection, apiKey), subscription)
+		if err != nil {
+			accountReleaseFunc()
+			writeGeminiCachedContentBillingError(c, err)
+			return
+		}
+		if !h.checkGeminiCachedContentBilling(c, reqLog, billingKey, actualSubscription) {
+			accountReleaseFunc()
+			return
+		}
+		if err := inflight.reserve(c.Request.Context(), h.billingCacheService, h.gatewayService, selection, apiKey, actualSubscription); err != nil {
+			accountReleaseFunc()
+			writeGeminiCachedContentBillingError(c, err)
+			return
+		}
+		c.Request = c.Request.WithContext(service.WithInflightReservation(c.Request.Context(), inflight.reservation))
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
 		if vetoed {
@@ -213,7 +218,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, mappedModel)
 		if !h.gatewayService.CacheStoragePriced(c.Request.Context(), &service.RecordUsageInput{
 			Result:             &service.ForwardResult{Model: modelName, UpstreamModel: mappedModel, CacheStorageTokenHours: 1},
-			APIKey:             apiKey,
+			APIKey:             billingKey,
 			ChannelUsageFields: usageFields,
 		}) {
 			accountReleaseFunc()
@@ -275,14 +280,15 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 				Model: modelName, UpstreamModel: mappedModel,
 				Usage: service.ClaudeUsage{InputTokens: int(tokens)}, CacheStorageTokenHours: storageTokenHours,
 			},
-			APIKey: apiKey, User: apiKey.User, Subscription: subscription, PricingAt: pricingAt, ChannelUsageFields: usageFields,
+			APIKey: billingKey, User: apiKey.User, Subscription: actualSubscription, PricingAt: pricingAt, ChannelUsageFields: usageFields,
 		})
-		inflightRelease()
-		chargeDone, err := h.reserveGeminiCachedContentCharge(c, apiKey, subscription, amount)
+		inflight.close()
+		c.Request = c.Request.WithContext(service.WithInflightReservation(c.Request.Context(), nil))
+		chargeDone, err := h.reserveGeminiCachedContentCharge(c, billingKey, actualSubscription, amount)
 		if err != nil {
 			reqLog.Info("gemini.cached_content.storage_charge_rejected", zap.Float64("amount", amount), zap.Error(err))
 			h.cleanupGeminiCachedContentUpstream(reqLog, account, upstream.Name)
-			h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
+			h.submitGeminiCachedContentUsage(c, billingKey, account, actualSubscription, pricingAt,
 				service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), 0, usageFields, body)
 			writeGeminiCachedContentBillingError(c, err)
 			return
@@ -295,6 +301,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			UserID:          authSubject.UserID,
 			APIKeyID:        apiKey.ID,
 			GroupID:         *apiKey.GroupID,
+			BillingGroupID:  *billingKey.GroupID,
 			AccountID:       account.ID,
 			UpstreamName:    upstream.Name,
 			Model:           modelName,
@@ -314,7 +321,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			return
 		}
 
-		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
+		h.submitGeminiCachedContentUsage(c, billingKey, account, actualSubscription, pricingAt,
 			service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), storageTokenHours, usageFields, body)
 		c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 		return
@@ -431,23 +438,29 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
+	billingKey := apiKey
 	if extension := svc.Now().Add(ttl).Sub(record.ExpireTime); extension > 0 {
+		billingKey, subscription, err = h.geminiCachedContentRecordBillingKey(c.Request.Context(), apiKey, record, subscription)
+		if err != nil {
+			writeGeminiCachedContentBillingError(c, err)
+			return
+		}
 		usage := &service.RecordUsageInput{
 			Result: &service.ForwardResult{
 				Model: record.Model, UpstreamModel: record.UpstreamModelID(),
 				CacheStorageTokenHours: service.GeminiCachedContentStorageTokenHours(record.TotalTokenCount, extension),
 			},
-			APIKey: apiKey, User: apiKey.User, Subscription: subscription, PricingAt: pricingAt,
+			APIKey: billingKey, User: apiKey.User, Subscription: subscription, PricingAt: pricingAt,
 			ChannelUsageFields: record.ChannelUsage,
 		}
 		if !h.gatewayService.CacheStoragePriced(c.Request.Context(), usage) {
 			googlePlatformError(c, http.StatusBadRequest, fmt.Sprintf("Explicit context caching is not available for model %s: storage pricing is not configured", record.Model))
 			return
 		}
-		if !h.checkGeminiCachedContentBilling(c, reqLog, apiKey, subscription) {
+		if !h.checkGeminiCachedContentBilling(c, reqLog, billingKey, subscription) {
 			return
 		}
-		chargeDone, err := h.reserveGeminiCachedContentCharge(c, apiKey, subscription, h.gatewayService.QuoteUsageCost(c.Request.Context(), usage))
+		chargeDone, err := h.reserveGeminiCachedContentCharge(c, billingKey, subscription, h.gatewayService.QuoteUsageCost(c.Request.Context(), usage))
 		if err != nil {
 			reqLog.Info("gemini.cached_content.storage_charge_rejected", zap.Error(err))
 			writeGeminiCachedContentBillingError(c, err)
@@ -511,7 +524,7 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 	}
 	// 提交前库中的到期时间一直是修改前的值：按本次实际推进的时长收费。
 	if extended := expireTime.Sub(mutation.Baseline()); extended > 0 {
-		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
+		h.submitGeminiCachedContentUsage(c, billingKey, account, subscription, pricingAt,
 			service.GeminiCachedContentPatchUsageRequestID(record.PublicID), record.Model, record.UpstreamModelID(), 0,
 			service.GeminiCachedContentStorageTokenHours(record.TotalTokenCount, extended), record.ChannelUsage, body)
 	}
@@ -574,6 +587,44 @@ func (h *GatewayHandler) resolveGeminiCachedContentOrWrite(c *gin.Context, reqLo
 		return nil, false
 	}
 	return record, true
+}
+
+// Resource ownership stays on the original key/group; billing follows the group
+// that supplied the account, including later extensions of the same resource.
+func (h *GatewayHandler) geminiCachedContentBillingKey(ctx context.Context, apiKey *service.APIKey, groupID *int64, group *service.Group, subscription *service.UserSubscription) (*service.APIKey, *service.UserSubscription, error) {
+	if groupID == nil || *groupID <= 0 {
+		return nil, nil, service.ErrBillingServiceUnavailable
+	}
+	if group == nil || group.ID != *groupID {
+		var err error
+		group, err = h.gatewayService.ResolveGroupByID(ctx, *groupID)
+		if err != nil {
+			return nil, nil, service.ErrBillingServiceUnavailable.WithCause(err)
+		}
+	}
+	if group == nil || group.Platform != service.PlatformGemini || group.Status != service.StatusActive {
+		return nil, nil, service.ErrBillingServiceUnavailable
+	}
+	actualSubscription, err := h.gatewayService.ResolveGatewayUsageSubscription(ctx, apiKey.User, group, subscription)
+	if err != nil {
+		return nil, nil, err
+	}
+	key := *apiKey
+	id := group.ID
+	key.GroupID, key.Group = &id, group
+	return &key, actualSubscription, nil
+}
+
+func (h *GatewayHandler) geminiCachedContentRecordBillingKey(ctx context.Context, apiKey *service.APIKey, record *service.GeminiCachedContent, subscription *service.UserSubscription) (*service.APIKey, *service.UserSubscription, error) {
+	id := record.BillingGroupID
+	if id == 0 {
+		id = record.GroupID
+	}
+	var group *service.Group
+	if apiKey.Group != nil && apiKey.Group.ID == id {
+		group = apiKey.Group
+	}
+	return h.geminiCachedContentBillingKey(ctx, apiKey, &id, group, subscription)
 }
 
 // resolveGeminiCachedContentBinding 处理 generateContent / countTokens 请求对显式缓存的引用：

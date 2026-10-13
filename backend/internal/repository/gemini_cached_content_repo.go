@@ -27,8 +27,17 @@ func NewGeminiCachedContentRepository(db *sql.DB) service.GeminiCachedContentRep
 const geminiCachedContentColumns = `id, public_id, user_id, api_key_id, group_id, account_id, upstream_name, model,
  upstream_model, display_name, total_token_count, expire_time, channel_usage, created_at, updated_at`
 
+// Keep the existing flat channel_usage JSON compatible with older records.
+type geminiCachedContentBillingMetadata struct {
+	service.ChannelUsageFields
+	BillingGroupID int64 `json:"billing_group_id,omitempty"`
+}
+
 func (r *geminiCachedContentRepository) Create(ctx context.Context, record *service.GeminiCachedContent) error {
-	channelUsage, err := json.Marshal(record.ChannelUsage)
+	channelUsage, err := json.Marshal(geminiCachedContentBillingMetadata{
+		ChannelUsageFields: record.ChannelUsage,
+		BillingGroupID:     record.BillingGroupID,
+	})
 	if err != nil {
 		return err
 	}
@@ -197,9 +206,12 @@ func scanGeminiCachedContent(row geminiCachedContentScanner) (*service.GeminiCac
 		return nil, err
 	}
 	if len(channelUsage) > 0 {
-		if err := json.Unmarshal(channelUsage, &record.ChannelUsage); err != nil {
+		var metadata geminiCachedContentBillingMetadata
+		if err := json.Unmarshal(channelUsage, &metadata); err != nil {
 			return nil, err
 		}
+		record.ChannelUsage = metadata.ChannelUsageFields
+		record.BillingGroupID = metadata.BillingGroupID
 	}
 	return &record, nil
 }

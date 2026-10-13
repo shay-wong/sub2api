@@ -5,7 +5,7 @@
 本文档面向 fork 维护者和 AI 编码代理，只记录相对已合并上游基线仍然生效、且有意保留的行为差异。
 
 - 新增、修改或删除 fork 行为时，必须在同一提交更新对应条目。
-- 对用户可见的 fork 能力，还必须同步英文 `README.md`、中文 `README_CN.md`、日文 `README_JA.md` 及其索引；仓库引入 `CHANGELOG.md` 后同时维护当前未发布段。纯维护者内部差异只写入本文档。
+- 对用户可见的 fork 能力，还必须同步英文 `README.md`、中文 `README_CN.md`、日文 `README_JA.md` 的功能索引与说明，以及 `CHANGELOG.md` 的当前未发布段。三语 README 是现有公共能力说明入口，不另建重复指南。纯维护者内部差异只写入本文档。
 - 只有已合并上游提供等价行为，并且回归测试覆盖等价时，才能删除对应条目。
 - 上游合并审查以本文档中的行为不变量为准，不以冲突文件归属、字段同名或“选 ours/theirs”作为判断标准。
 - 生成文件不是行为来源。Ent、Wire 等输出发生冲突时，应先解决 schema、migration、provider 或 wire source，再重新生成。
@@ -89,6 +89,8 @@
 ```
 
 ## 2. 实际调度分组归因
+
+- **Gemini 显式缓存跨组计费**：创建时的原 API Key/GroupID 只决定资源所有权；实际调度组决定报价、有效订阅、余额及固定费用预留、创建输入/存储费用和后续缓存引用请求的归因。创建时将 BillingGroupID 随既有 channel_usage JSONB 保存，延期沿用该组但使用延期时现行价格和有效订阅；旧记录无此字段时沿用原 GroupID。计费组删除、停用或平台改变时不自动转扣其他组；查询、删除和缩短 TTL 保持原有资源权限。无需新增表或迁移。代码为 `backend/internal/handler/gemini_cached_contents_handler.go`、`gemini_v1beta_handler.go`、`backend/internal/service/gateway_usage_billing.go`、`gemini_cached_content.go` 和 `backend/internal/repository/gemini_cached_content_repo.go`；测试为 `gemini_cached_contents_group_test.go`、`gemini_cached_contents_billing_test.go` 和 `gemini_cached_content_repo_integration_test.go`。验证：`go test -tags=unit ./internal/handler ./internal/service -run 'GeminiCachedContent|QuoteUsageCost'` 与 `go test -tags=integration ./internal/repository -run 'GeminiCachedContent'`。此适配属于合并后独立功能提交，定位：`git log -S'geminiCachedContentRecordBillingKey' -- backend/internal/handler/gemini_cached_contents_handler.go`；用户说明同步三语 README 精确计费条目和 CHANGELOG 未发布段。
 
 - **WebSocket 逐轮调价适配**：上游 `73381fc9c` 在后续 turn 刷新 API Key 的同组定价快照；Fork 显式传入的 `EffectiveGroup` 不得覆盖为建连旧价格。只有刷新快照与实际选中组的 ID、平台、订阅类型一致时才使用该 turn 的新价格；真实 fallback 或缺失备用组快照时继续服从 selection，不能借用原 API Key 组。实现位于 `backend/internal/handler/openai_gateway_handler.go`，回归位于 `openai_gateway_ws_group_pricing_test.go`；验证 `go test -tags=unit ./internal/handler -run 'TestOpenAIResponsesWebSocket_.*Group|TestOpenAIWSTurnBillingAPIKeys|TestRefreshOpenAIWSTurnBillingAPIKey'`。本次以合并后的独立功能提交保留该契约，定位：`git log -S'turnBillingAPIKey, effectiveGroup' -- backend/internal/handler/openai_gateway_handler.go`；三语 README 的计费条目同步此边界。
 

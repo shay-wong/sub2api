@@ -1054,7 +1054,9 @@ func isCacheStorageOnlyResult(result *ForwardResult) bool {
 
 // CacheStoragePriced 判断 RecordUsage 对 input.Result 采用的计费模型（含回退候选）是否配置了显式缓存存储单价。
 func (s *GatewayService) CacheStoragePriced(ctx context.Context, input *RecordUsageInput) bool {
-	billingModel := s.recordUsageBillingModel(ctx, input.APIKey, input.Result, input.ChannelUsageFields)
+	billingGroupID, billingGroup := resolveUsageBillingGroup(input.APIKey, input.EffectiveGroupID, input.EffectiveGroup)
+	billingAPIKey := apiKeyForUsageBillingGroup(input.APIKey, billingGroupID, billingGroup)
+	billingModel := s.recordUsageBillingModel(ctx, billingAPIKey, input.Result, input.ChannelUsageFields)
 	return s.cacheStoragePrice(input.Result, billingModel) > 0
 }
 
@@ -1064,9 +1066,11 @@ func (s *GatewayService) QuoteUsageCost(ctx context.Context, input *RecordUsageI
 	if user == nil {
 		user = input.APIKey.User
 	}
-	multiplier, imageMultiplier, pricingAt := s.recordUsageMultipliers(ctx, input.APIKey, user, input.PricingAt)
-	billingModel := s.recordUsageBillingModel(ctx, input.APIKey, input.Result, input.ChannelUsageFields)
-	cost := s.calculateRecordUsageCost(ctx, input.Result, input.APIKey, billingModel, multiplier, imageMultiplier, pricingAt)
+	billingGroupID, billingGroup := resolveUsageBillingGroup(input.APIKey, input.EffectiveGroupID, input.EffectiveGroup)
+	billingAPIKey := apiKeyForUsageBillingGroup(input.APIKey, billingGroupID, billingGroup)
+	multiplier, imageMultiplier, pricingAt := s.recordUsageMultipliers(ctx, billingAPIKey, user, input.PricingAt)
+	billingModel := s.recordUsageBillingModel(ctx, billingAPIKey, input.Result, input.ChannelUsageFields)
+	cost := s.calculateRecordUsageCost(ctx, input.Result, billingAPIKey, billingModel, multiplier, imageMultiplier, pricingAt)
 	if cost == nil {
 		return 0
 	}
