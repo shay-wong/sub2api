@@ -127,6 +127,7 @@ type RefundPlan struct {
 	Order                                *dbent.PaymentOrder
 	AttemptID                            string
 	ProviderRequestID                    string
+	ProviderRequestedAt                  time.Time
 	RefundID                             string
 	AttemptStartedAt                     time.Time
 	PreviousStatus                       string

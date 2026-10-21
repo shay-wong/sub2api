@@ -978,7 +978,7 @@ func buildCodexAccessOnlyStableIdentityKeys(accountID, userID string) []string {
 		return nil
 	}
 	if accountID != "" {
-		return []string{"account:" + accountID}
+		return []string{"account_user:" + codexCompositeIdentityKey(accountID, userID)}
 	}
 	return []string{"user:" + userID}
 }
@@ -1102,11 +1102,11 @@ func (i *codexAccountIndex) FindRefreshCapableByStableIdentity(accountID, userID
 	}
 	accountID = strings.TrimSpace(accountID)
 	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	if accountID == "" || userID == "" {
 		return nil, ""
 	}
 
-	key := "user:" + userID
+	key := "account_user:" + codexCompositeIdentityKey(accountID, userID)
 	for _, account := range i.accountsByKey[key] {
 		if codexCredentialString(account.Credentials, "refresh_token") == "" {
 			continue

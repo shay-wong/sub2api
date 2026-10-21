@@ -1525,6 +1525,8 @@ func TestRefundRetryPreservesParametersAndReplacesPendingAudit(t *testing.T) {
 	require.False(t, result.Success)
 	require.Equal(t, 1, provider.refundCalls)
 	require.NotEmpty(t, provider.lastRefundRequest.ProviderRequestID)
+	require.False(t, plan.ProviderRequestedAt.IsZero())
+	require.True(t, plan.ProviderRequestedAt.Equal(plan.AttemptStartedAt))
 	require.NotEqual(t, "provider-original", provider.lastRefundRequest.ProviderRequestID)
 	require.Equal(t, "60.00", provider.lastRefundRequest.Amount)
 	require.Equal(t, "original refund reason", provider.lastRefundRequest.Reason)
@@ -1561,6 +1563,9 @@ func TestRefundRetryPreservesParametersAndReplacesPendingAudit(t *testing.T) {
 	require.True(t, pendingDetail.DeductBalance)
 	require.Equal(t, 60.0, pendingDetail.BalanceToDeduct)
 	require.False(t, pendingDetail.DeductionRollbackOK)
+	storedDetail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, plan.ProviderRequestedAt.Equal(storedDetail.ProviderRequestedAt))
 }
 
 func TestQueryAndFinalizeRefundRetriesRollbackBeforeMarkingFailed(t *testing.T) {
@@ -1730,6 +1735,7 @@ func TestRefundingAttemptRecoversFromProviderOutcomePersistenceFailure(t *testin
 	require.Equal(t, 1, provider.queryCalls)
 	require.Equal(t, 1, provider.refundCalls)
 	require.Equal(t, plan.ProviderRequestID, provider.lastQueryRequest.ProviderRequestID)
+	require.True(t, plan.ProviderRequestedAt.Equal(provider.lastQueryRequest.RequestedAt), "recovery must preserve the original provider request time")
 	require.Zero(t, rolledBack)
 
 	reloaded, err = client.PaymentOrder.Get(ctx, order.ID)
@@ -1739,8 +1745,45 @@ func TestRefundingAttemptRecoversFromProviderOutcomePersistenceFailure(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "provider_confirmed", pendingDetail.Phase)
 	require.NotEqual(t, plan.AttemptID, pendingDetail.AttemptID)
+	require.True(t, plan.ProviderRequestedAt.Equal(pendingDetail.ProviderRequestedAt))
 	require.Equal(t, plan.ProviderRequestID, pendingDetail.ProviderRequestID)
 	require.False(t, pendingDetail.DeductionRollbackOK)
+}
+
+func TestRefundProviderRequestedAtUsesRequestGenerationNotAuditCreation(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	requestedAt := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	detailJSON, err := json.Marshal(map[string]any{
+		"providerRequestedAt": requestedAt,
+		"attemptStartedAt":    requestedAt.Add(30 * time.Second),
+		"refundID":            "rf_test",
+		"deductionRollbackOK": true,
+	})
+	require.NoError(t, err)
+	order := createPendingRefundOrderWithDetailForTest(t, ctx, client, "request-time", string(detailJSON))
+	_, err = client.PaymentAuditLog.Delete().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		Exec(ctx)
+	require.NoError(t, err)
+	_, err = client.PaymentAuditLog.Create().SetOrderID(strconv.FormatInt(order.ID, 10)).
+		SetAction("REFUND_PENDING").SetOperator("admin").SetDetail(string(detailJSON)).
+		SetCreatedAt(time.Now().Add(-24 * time.Hour)).Save(ctx)
+	require.NoError(t, err)
+	provider := &refundQueryProviderTestDouble{refundResponse: &payment.RefundResponse{Status: payment.ProviderStatusPending}}
+	restore := replacePaymentProviderFactoryForTest(t, provider)
+	defer restore()
+	svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}}
+	_, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, requestedAt.Equal(provider.lastQueryRequest.RequestedAt))
+
+	legacy, err := decodeRefundPendingAuditDetail([]byte(`{"attemptStartedAt":"2026-10-21T01:00:00Z"}`))
+	require.NoError(t, err)
+	require.True(t, legacy.AttemptStartedAt.Equal(legacy.ProviderRequestedAt))
+	unknown, err := decodeRefundPendingAuditDetail([]byte(`{"refundID":"legacy"}`))
+	require.NoError(t, err)
+	require.True(t, unknown.ProviderRequestedAt.IsZero())
 }
 
 func TestDelayedRefundOutcomeCannotClaimNewAttempt(t *testing.T) {

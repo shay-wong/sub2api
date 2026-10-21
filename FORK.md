@@ -119,6 +119,8 @@
 
 ## 3. 账号数据交换与批量账号操作
 
+- **Codex workspace 复合身份适配**：access-token-only 默认仍按 token 指纹隔离；仅在同 workspace 与同 user 已存在可刷新账号时保留其 refresh token 并更新 access token。同批其他成员不能覆盖已见身份标记，避免 A/B/A 交错导入把 A 的凭据回滚为旧 token。实现与回归位于 `backend/internal/handler/admin/account_codex_import.go`、`account_codex_import_test.go`，验证 `go test -tags=unit ./internal/handler/admin -run 'TestCodexAccountIndexAccessTokenOnly|TestImportCodexSessions'`。独立适配定位：`git log -S'TestImportCodexSessionsInterleavedWorkspaceMembersDoNotRollbackRefreshAccount' -- backend/internal/handler/admin/account_codex_import_test.go`。三语 README 的账号管理条目同步此契约。
+
 - **生命周期**：`长期保留`
 - **原始意图**：支持 native/CPA 账号数据导入导出、文件级错误定位、批量连接测试、按账号选择模型、最近测试跳过和按失败类型清理账号。
 - **行为不变量**：导入不得留下半成功账号或破坏既有代理；CPA schema 自动识别且敏感字段不泄漏；批量测试必须限制并发；只有已加载的完整账号集合可进入测试或删除，失败删除结果必须逐项对账。批量操作不得注入项目请求头；受限管理员的账号批量操作还必须与直接账号绑定取交集，分组绑定不能扩大账号范围。
@@ -295,6 +297,8 @@ actionlint .github/workflows/stable-fork-release.yml
 ```
 
 ## 10. 支付定价、结果 DTO 与退款状态机正确性
+
+本次按维护者确认采用上游的 pending 持续冻结：新退款处理中保留余额/订阅扣减，成功不重复扣减，失败补偿恢复；旧审计仍按原扣减/补偿字段兼容处理。Fork 保留 attempt 并发防重、渠道快照和补偿失败重试。支付宝查询宽限期以持久化的 `providerRequestedAt` 为准：恢复只轮换本地租约，新退款重试才更新渠道时间；旧审计回退到已有 attempt 时间，无时间依据则继续 pending，不能使用复用审计行的 `CreatedAt` 提前判失败。实现为 `backend/internal/service/payment_refund.go`、`payment_service.go` 与 `backend/internal/payment/provider/alipay.go`；回归为 `payment_refund_pending_hold_test.go`、`payment_refund_test.go` 的 `TestRefundProviderRequestedAtUsesRequestGenerationNotAuditCreation`。独立适配提交定位：`git log -S'ProviderRequestedAt' -- backend/internal/service/payment_refund.go`。
 
 订阅批量操作复用既有延后缓存失效入口：单项数据库事务提交后才清理缓存，缓存服务失败不能回滚或误报已完成的操作。实现为 `backend/internal/service/subscription_bulk_action.go` 与 `subscription_service.go`，测试为 `subscription_bulk_action_cache_test.go` 与 `subscription_bulk_action_transaction_test.go`。本次独立功能提交定位：`git log -S'TestBulkSubscriptionAction_CacheFailurePreservesMutationSuccess' -- backend/internal/service/subscription_bulk_action_cache_test.go`。这是现有事务契约适配上游新入口，不新增用户配置。
 

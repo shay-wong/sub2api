@@ -160,6 +160,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 ## Features
 
 - **Multi-Account Management** - Support multiple upstream account types (OAuth, API Key)
+  - Codex imports isolate workspace and user identities. An access-token-only import can update the matching refresh-capable account without losing its refresh token; interleaved members in one batch cannot roll its credentials back to an older token.
   - Editing an imported Command Code or OpenCode account with a missing or invalid API protocol preserves automatic model-based routing and custom protocol endpoints. Cline still defaults to Chat Completions, and explicitly selected valid protocols remain unchanged.
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
@@ -183,6 +184,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Rate Limiting** - Configurable request and token rate limits
 - **Subscription Limit Semantics** - When selected-group billing preflight detects exhausted daily, weekly, or monthly subscription usage, it returns HTTP `429` with `rate_limit_exceeded`, allowing compatible clients to back off instead of treating it as a permanent authorization failure
 - **Built-in Payment System** - Supports EasyPay, Alipay, WeChat Pay, and Stripe for user self-service top-up, no separate payment service needed ([Configuration Guide](docs/PAYMENT.md))
+  - Pending refunds keep the requested balance or subscription deduction in place until confirmation; failure restores it. Alipay confirmation uses the original refund request time even after recovery, while a new refund retry starts a new confirmation window. Legacy records without a reliable timestamp remain pending for reconciliation.
 - **Admin Dashboard** - Web interface for monitoring and management
 - **Composite Groups** - Admin routing layer that resolves requested models to concrete providers for multi-provider groups ([Operator Guide](docs/COMPOSITE_GROUPS.md))
 - **External System Integration** - Embed external systems (e.g. ticketing) via iframe to extend the admin dashboard

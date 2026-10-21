@@ -404,6 +404,7 @@ func (s *PaymentService) beginRefundAttempt(ctx context.Context, p *RefundPlan) 
 	p.AttemptID = uuid.NewString()
 	p.ProviderRequestID = uuid.NewString()
 	p.AttemptStartedAt = time.Now().UTC()
+	p.ProviderRequestedAt = p.AttemptStartedAt
 	if _, err := tx.PaymentOrder.UpdateOneID(p.OrderID).
 		SetRefundAmount(p.RefundAmount).
 		SetRefundReason(p.Reason).
@@ -547,7 +548,7 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 		ProviderRequestID: pendingDetail.ProviderRequestID,
 		RefundID:          pendingDetail.RefundID,
 		Amount:            formatGatewayRefundAmount(plan.GatewayAmount, o),
-		RequestedAt:       pendingDetail.AttemptStartedAt,
+		RequestedAt:       pendingDetail.ProviderRequestedAt,
 	})
 	finishProviderCall()
 	if err != nil {
@@ -618,7 +619,7 @@ func (s *PaymentService) recoverRefundingAttempt(ctx context.Context, prov payme
 			ProviderRequestID: plan.ProviderRequestID,
 			RefundID:          detail.RefundID,
 			Amount:            formatGatewayRefundAmount(plan.GatewayAmount, o),
-			RequestedAt:       detail.AttemptStartedAt,
+			RequestedAt:       detail.ProviderRequestedAt,
 		})
 		finishProviderCall()
 		queryCancel()
@@ -699,6 +700,8 @@ func (s *PaymentService) claimRefundRecovery(ctx context.Context, orderID int64,
 	}
 	raw["attemptID"] = detail.AttemptID
 	raw["attemptStartedAt"] = detail.AttemptStartedAt
+	// 恢复只轮换本地租约；渠道退款的宽限期仍从原始请求计时。
+	raw["providerRequestedAt"] = detail.ProviderRequestedAt
 	detailJSON, err := json.Marshal(raw)
 	if err != nil {
 		return refundPendingAuditDetail{}, fmt.Errorf("encode refund recovery audit: %w", err)
@@ -909,6 +912,7 @@ func (s *PaymentService) refundFinalizePlan(o *dbent.PaymentOrder, pendingDetail
 		Order:                                o,
 		AttemptID:                            pendingDetail.AttemptID,
 		ProviderRequestID:                    pendingDetail.ProviderRequestID,
+		ProviderRequestedAt:                  pendingDetail.ProviderRequestedAt,
 		RefundID:                             pendingDetail.RefundID,
 		AttemptStartedAt:                     pendingDetail.AttemptStartedAt,
 		PreviousStatus:                       pendingDetail.PreviousStatus,
@@ -1147,6 +1151,7 @@ type refundPendingAuditDetail struct {
 	HasDeductionType                     bool      `json:"-"`
 	AttemptID                            string    `json:"attemptID"`
 	ProviderRequestID                    string    `json:"providerRequestID"`
+	ProviderRequestedAt                  time.Time `json:"providerRequestedAt"`
 	AttemptStartedAt                     time.Time `json:"attemptStartedAt"`
 	Phase                                string    `json:"phase"`
 	PreviousStatus                       string    `json:"previousStatus"`
@@ -1213,6 +1218,10 @@ func decodeRefundPendingAuditDetail(detailJSON []byte) (refundPendingAuditDetail
 	detail.HasPendingAudit = true
 	detail.AttemptID = strings.TrimSpace(detail.AttemptID)
 	detail.ProviderRequestID = strings.TrimSpace(detail.ProviderRequestID)
+	if detail.ProviderRequestedAt.IsZero() {
+		// 旧审计只存租约时间；它不早于渠道请求，保守延后确认，不能用复用行的 CreatedAt。
+		detail.ProviderRequestedAt = detail.AttemptStartedAt
+	}
 	detail.Phase = strings.TrimSpace(detail.Phase)
 	detail.PreviousStatus = strings.TrimSpace(detail.PreviousStatus)
 	detail.RefundID = strings.TrimSpace(detail.RefundID)
@@ -1250,6 +1259,7 @@ func refundAttemptAuditDetail(p *RefundPlan, refundID string, rollbackOK bool, p
 	detail := map[string]any{
 		"attemptID":           p.AttemptID,
 		"providerRequestID":   p.ProviderRequestID,
+		"providerRequestedAt": p.ProviderRequestedAt,
 		"attemptStartedAt":    p.AttemptStartedAt,
 		"phase":               phase,
 		"previousStatus":      p.PreviousStatus,

@@ -445,8 +445,8 @@ func TestCodexAccountIndexAccessTokenOnlyCanFindRefreshCapableSameWorkspaceUser(
 	if got == nil || got.ID != existing.ID {
 		t.Fatalf("FindRefreshCapableByStableIdentity = %v, want account ID %d", got, existing.ID)
 	}
-	if matchedKey != "user:user-1" {
-		t.Fatalf("matched key = %q, want user:user-1", matchedKey)
+	if matchedKey != "account_user:6:team-16:user-1" {
+		t.Fatalf("matched key = %q, want account_user:6:team-16:user-1", matchedKey)
 	}
 
 	if got, _ := index.FindRefreshCapableByStableIdentity("team-2", "user-1"); got != nil {
@@ -1087,6 +1087,34 @@ func TestImportCodexSessionsRefreshCreateBlocksAccessOnlyStableRollback(t *testi
 	}
 	if got := svc.createdAccounts[1].Credentials["access_token"]; got != staleToken {
 		t.Fatalf("second account access_token = %v, want stale token isolated", got)
+	}
+}
+
+func TestImportCodexSessionsInterleavedWorkspaceMembersDoNotRollbackRefreshAccount(t *testing.T) {
+	newToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "new-token", time.Now().Add(time.Hour))
+	otherToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-2", "other-token", time.Now().Add(time.Hour))
+	staleToken := buildCodexAccessTokenWithJTI(t, "workspace-1", "user-1", "stale-token", time.Now().Add(time.Hour))
+	svc := newCodexImportMemoryAdminService(nil)
+	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	entries := []codexImportEntry{
+		{Index: 1, Value: map[string]any{"access_token": newToken, "refresh_token": "refresh-new"}},
+		{Index: 2, Value: map[string]any{"access_token": otherToken, "refresh_token": "refresh-other"}},
+		{Index: 3, Value: map[string]any{"access_token": staleToken}},
+	}
+
+	result, err := handler.importCodexSessions(context.Background(), CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}, entries)
+	if err != nil {
+		t.Fatalf("importCodexSessions error = %v", err)
+	}
+	if result.Created != 3 || result.Updated != 0 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want both refresh accounts and isolated stale token", result)
+	}
+	first, err := svc.GetAccount(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("GetAccount error = %v", err)
+	}
+	if first.Credentials["access_token"] != newToken || first.Credentials["refresh_token"] != "refresh-new" {
+		t.Fatal("interleaved member import rolled back the first member's refresh-capable credentials")
 	}
 }
 
