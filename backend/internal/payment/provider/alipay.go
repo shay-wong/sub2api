@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/smartwalle/alipay/v3"
@@ -23,6 +24,9 @@ const (
 const (
 	alipayFundChangeYes    = "Y"
 	alipayErrTradeNotExist = "ACQ.TRADE_NOT_EXIST"
+	alipayRefundStatusSucc = "REFUND_SUCCESS"
+	// 支付宝退款早期可能查不到记录，宽限期内继续等待确认。
+	alipayRefundQueryNotFoundGrace = 10 * time.Minute
 )
 
 var (
@@ -411,11 +415,19 @@ func (a *Alipay) QueryRefund(ctx context.Context, req payment.RefundQueryRequest
 	if result.IsFailure() {
 		return nil, fmt.Errorf("alipay refund query: %s", result.Error.Error())
 	}
-	status := payment.ProviderStatusFailed
-	if strings.EqualFold(strings.TrimSpace(result.RefundStatus), "REFUND_SUCCESS") {
+	status := payment.ProviderStatusPending
+	switch {
+	case strings.EqualFold(strings.TrimSpace(result.RefundStatus), alipayRefundStatusSucc):
 		status = payment.ProviderStatusSuccess
+	case strings.TrimSpace(result.OutRequestNo) == "" && strings.TrimSpace(result.RefundAmount) == "" &&
+		alipayRefundAbsenceIsFinal(req.RequestedAt, time.Now()):
+		status = payment.ProviderStatusFailed
 	}
 	return &payment.RefundResponse{RefundID: refundID, Status: status}, nil
+}
+
+func alipayRefundAbsenceIsFinal(requestedAt, now time.Time) bool {
+	return !requestedAt.IsZero() && now.Sub(requestedAt) >= alipayRefundQueryNotFoundGrace
 }
 
 // CancelPayment closes a pending trade on Alipay.

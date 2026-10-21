@@ -352,6 +352,14 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 	return s.settleRefundProviderOutcome(ctx, p, resp, err)
 }
 
+// 余额变更提交后才失效缓存，避免回滚事务提前暴露旧状态。
+func (s *PaymentService) invalidateRefundBalanceCache(ctx context.Context, p *RefundPlan) {
+	if s.redeemService == nil || p.DeductionType != payment.DeductionTypeBalance || p.BalanceToDeduct <= 0 {
+		return
+	}
+	s.redeemService.invalidateRedeemCaches(ctx, p.Order.UserID, &RedeemCode{Type: RedeemTypeBalance})
+}
+
 func (s *PaymentService) beginRefundAttempt(ctx context.Context, p *RefundPlan) (err error) {
 	if p.PreviousStatus == "" && p.Order != nil {
 		p.PreviousStatus = p.Order.Status
@@ -418,6 +426,7 @@ func (s *PaymentService) beginRefundAttempt(ctx context.Context, p *RefundPlan) 
 		return fmt.Errorf("commit refund attempt: %w", err)
 	}
 	tx = nil
+	s.invalidateRefundBalanceCache(ctx, p)
 	s.invalidateRefundSubscriptionCaches(p.OrderID, mutatedSubscription, "attempt deduction")
 	return nil
 }
@@ -538,6 +547,7 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 		ProviderRequestID: pendingDetail.ProviderRequestID,
 		RefundID:          pendingDetail.RefundID,
 		Amount:            formatGatewayRefundAmount(plan.GatewayAmount, o),
+		RequestedAt:       pendingDetail.AttemptStartedAt,
 	})
 	finishProviderCall()
 	if err != nil {
@@ -567,7 +577,7 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 		}
 		return s.finalizePendingRefundSuccess(ctx, plan)
 	case payment.ProviderStatusPending:
-		if !pendingDetail.DeductionRollbackOK {
+		if !pendingDetail.DeductionHeld && !pendingDetail.DeductionRollbackOK {
 			return s.rollbackPendingRefundDeduction(ctx, plan, pendingDetail, nil)
 		}
 		s.writeAuditLog(ctx, oid, "REFUND_QUERY_PENDING", "admin", map[string]any{"refundID": resp.RefundID})
@@ -608,6 +618,7 @@ func (s *PaymentService) recoverRefundingAttempt(ctx context.Context, prov payme
 			ProviderRequestID: plan.ProviderRequestID,
 			RefundID:          detail.RefundID,
 			Amount:            formatGatewayRefundAmount(plan.GatewayAmount, o),
+			RequestedAt:       detail.AttemptStartedAt,
 		})
 		finishProviderCall()
 		queryCancel()
@@ -745,7 +756,7 @@ func (s *PaymentService) settleRefundProviderOutcome(ctx context.Context, p *Ref
 		}
 		return s.finalizePendingRefundSuccess(ctx, plan)
 	case payment.ProviderStatusPending:
-		return s.rollbackPendingRefundDeduction(ctx, p, detail, providerErr)
+		return &RefundResult{Success: false, Warning: "gateway refund is pending confirmation"}, nil
 	default:
 		if providerErr == nil {
 			providerErr = fmt.Errorf("payment refund returned unknown status: %s", status)
@@ -876,6 +887,7 @@ func (s *PaymentService) finalizePendingRefundSuccess(ctx context.Context, p *Re
 		return nil, fmt.Errorf("commit refund finalization: %w", err)
 	}
 	tx = nil
+	s.invalidateRefundBalanceCache(ctx, p)
 	s.invalidateRefundSubscriptionCaches(p.OrderID, mutatedSubscription, "final deduction")
 	return result, nil
 }
@@ -1123,6 +1135,7 @@ func (s *PaymentService) finalizeRefundFailed(ctx context.Context, o *dbent.Paym
 		return nil, fmt.Errorf("commit refund failure finalization: %w", err)
 	}
 	tx = nil
+	s.invalidateRefundBalanceCache(ctx, failurePlan)
 	s.invalidateRefundSubscriptionCaches(o.ID, compensatedSubscription, "failure compensation")
 	s.writeAuditLog(ctx, o.ID, "REFUND_FAILED", "admin", map[string]any{"detail": psErrMsg(gErr)})
 	return &RefundResult{Success: false, Warning: "gateway refund failed: " + psErrMsg(gErr)}, nil
@@ -1143,6 +1156,7 @@ type refundPendingAuditDetail struct {
 	Force                                bool      `json:"force"`
 	DeductBalance                        bool      `json:"deductBalance"`
 	DeductionApplied                     bool      `json:"deductionApplied"`
+	DeductionHeld                        bool      `json:"deductionHeld,omitempty"`
 	DeductionType                        string    `json:"deductionType"`
 	BalanceToDeduct                      float64   `json:"balanceToDeduct"`
 	BalanceDeducted                      float64   `json:"balanceDeducted"`
@@ -1204,6 +1218,13 @@ func decodeRefundPendingAuditDetail(detailJSON []byte) (refundPendingAuditDetail
 	detail.RefundID = strings.TrimSpace(detail.RefundID)
 	detail.Reason = strings.TrimSpace(detail.Reason)
 	detail.DeductionType = strings.TrimSpace(detail.DeductionType)
+	if detail.DeductionHeld {
+		detail.DeductionRollbackOK = false
+		detail.DeductionApplied = true
+		if !detail.HasDeductBalance {
+			detail.DeductBalance = detail.DeductionType != "" && detail.DeductionType != payment.DeductionTypeNone
+		}
+	}
 	if !detail.HasDeductBalance && !detail.HasDeductionType {
 		detail.DeductBalance = true
 	}
@@ -1238,6 +1259,9 @@ func refundAttemptAuditDetail(p *RefundPlan, refundID string, rollbackOK bool, p
 		"force":               p.Force,
 		"deductBalance":       deductBalance,
 		"deductionApplied":    p.DeductionApplied,
+		"deductionHeld":       !rollbackOK,
+		"balanceDeducted":     p.BalanceToDeduct,
+		"subDaysDeducted":     p.SubDaysToDeduct,
 		"deductionType":       p.DeductionType,
 		"balanceToDeduct":     p.BalanceToDeduct,
 		"subDaysToDeduct":     p.SubDaysToDeduct,
@@ -1464,6 +1488,7 @@ func (s *PaymentService) rollbackPendingRefundDeduction(ctx context.Context, p *
 		return nil, fmt.Errorf("commit refund pending rollback: %w", err)
 	}
 	tx = nil
+	s.invalidateRefundBalanceCache(ctx, compensationPlan)
 	s.invalidateRefundSubscriptionCaches(p.OrderID, mutatedSubscription, "pending rollback")
 	p.BalanceToDeduct = 0
 	p.SubDaysToDeduct = 0

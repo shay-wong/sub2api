@@ -691,7 +691,7 @@ func TestValidateRefundProviderResponseAcceptsPending(t *testing.T) {
 	require.Error(t, validateRefundProviderResponse(nil))
 }
 
-func TestPendingProviderOutcomeMarksOrderPendingAndRollsBackDeduction(t *testing.T) {
+func TestPendingProviderOutcomeMarksOrderPendingAndHoldsDeduction(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 
@@ -750,8 +750,11 @@ func TestPendingProviderOutcomeMarksOrderPendingAndRollsBackDeduction(t *testing
 	require.NotNil(t, result)
 	require.False(t, result.Success)
 	require.Contains(t, result.Warning, "pending confirmation")
-	require.Equal(t, 40.0, rolledBack)
-	require.Zero(t, plan.BalanceToDeduct)
+	require.Zero(t, rolledBack)
+	require.Equal(t, 40.0, plan.BalanceToDeduct)
+	detail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+	require.NoError(t, err)
+	require.True(t, detail.DeductionHeld)
 
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
@@ -929,13 +932,12 @@ func TestPendingRefundFailureRestoresRevokedSubscription(t *testing.T) {
 	_, err = svc.applyRefundSubscriptionDeduction(ctx, plan, false)
 	require.NoError(t, err)
 	require.True(t, plan.SubscriptionRevoked)
-	subRepo.extendFailures = 1
 
 	plan.DeductionApplied = true
 	result, err := svc.settleRefundProviderOutcome(ctx, plan, &payment.RefundResponse{RefundID: "rf_revoked", Status: payment.ProviderStatusPending}, nil)
 	require.NoError(t, err)
 	require.False(t, result.Success)
-	require.Contains(t, result.Warning, "rollback failed")
+	require.Contains(t, result.Warning, "pending confirmation")
 
 	pendingDetail, err := svc.latestRefundPendingDetail(ctx, order.ID)
 	require.NoError(t, err)
@@ -1527,7 +1529,7 @@ func TestRefundRetryPreservesParametersAndReplacesPendingAudit(t *testing.T) {
 	require.Equal(t, "60.00", provider.lastRefundRequest.Amount)
 	require.Equal(t, "original refund reason", provider.lastRefundRequest.Reason)
 	require.Equal(t, 60.0, deducted)
-	require.Equal(t, 60.0, rolledBack)
+	require.Zero(t, rolledBack)
 
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
@@ -1558,7 +1560,7 @@ func TestRefundRetryPreservesParametersAndReplacesPendingAudit(t *testing.T) {
 	require.False(t, pendingDetail.Force)
 	require.True(t, pendingDetail.DeductBalance)
 	require.Equal(t, 60.0, pendingDetail.BalanceToDeduct)
-	require.True(t, pendingDetail.DeductionRollbackOK)
+	require.False(t, pendingDetail.DeductionRollbackOK)
 }
 
 func TestQueryAndFinalizeRefundRetriesRollbackBeforeMarkingFailed(t *testing.T) {
@@ -1728,7 +1730,7 @@ func TestRefundingAttemptRecoversFromProviderOutcomePersistenceFailure(t *testin
 	require.Equal(t, 1, provider.queryCalls)
 	require.Equal(t, 1, provider.refundCalls)
 	require.Equal(t, plan.ProviderRequestID, provider.lastQueryRequest.ProviderRequestID)
-	require.Equal(t, 60.0, rolledBack)
+	require.Zero(t, rolledBack)
 
 	reloaded, err = client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
@@ -1738,7 +1740,7 @@ func TestRefundingAttemptRecoversFromProviderOutcomePersistenceFailure(t *testin
 	require.Equal(t, "provider_confirmed", pendingDetail.Phase)
 	require.NotEqual(t, plan.AttemptID, pendingDetail.AttemptID)
 	require.Equal(t, plan.ProviderRequestID, pendingDetail.ProviderRequestID)
-	require.True(t, pendingDetail.DeductionRollbackOK)
+	require.False(t, pendingDetail.DeductionRollbackOK)
 }
 
 func TestDelayedRefundOutcomeCannotClaimNewAttempt(t *testing.T) {
@@ -2200,6 +2202,11 @@ func TestQueryAndFinalizeRefundUnsupportedProviderReturnsClearError(t *testing.T
 
 func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix string) *dbent.PaymentOrder {
 	t.Helper()
+	return createPendingRefundOrderWithDetailForTest(t, ctx, client, suffix, `{"refundID":"rf_test","deductBalance":true,"deductionType":"balance","balanceToDeduct":100,"deductionRollbackOK":true}`)
+}
+
+func createPendingRefundOrderWithDetailForTest(t *testing.T, ctx context.Context, client *dbent.Client, suffix, pendingDetail string) *dbent.PaymentOrder {
+	t.Helper()
 
 	user, err := client.User.Create().
 		SetEmail(suffix + "@example.com").
@@ -2245,7 +2252,7 @@ func createPendingRefundOrderForTest(t *testing.T, ctx context.Context, client *
 		SetOrderID(strconv.FormatInt(order.ID, 10)).
 		SetAction("REFUND_PENDING").
 		SetOperator("admin").
-		SetDetail(`{"refundID":"rf_test","deductBalance":true,"deductionType":"balance","balanceToDeduct":100,"deductionRollbackOK":true}`).
+		SetDetail(pendingDetail).
 		Save(ctx)
 	require.NoError(t, err)
 	return order

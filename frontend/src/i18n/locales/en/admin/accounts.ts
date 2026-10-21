@@ -101,8 +101,6 @@ export default {
       refreshCookie: 'Refresh Cookie',
       testAccount: 'Test Account',
       searchAccounts: 'Search accounts...',
-      moreFilters: 'More filters',
-      moreFiltersActive: 'More filters ({count} active)',
       notes: 'Notes',
       notesPlaceholder: 'Enter notes',
       notesHint: 'Notes are optional',

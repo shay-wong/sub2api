@@ -352,6 +352,9 @@ func (h *OpenAIGatewayHandler) resolveResponsesWebSocketCompositeRoute(
 		resolver = service.NewCompositeRouteResolver(nil)
 	}
 	decision, err := resolver.Resolve(ctx, apiKey.Group.ID, model, service.CompositeRouteEndpointResponses)
+	if err == nil && decision.OAuthAmbiguous() {
+		return ctx, model, false, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, decision.AmbiguousMessage(), nil)
+	}
 	if err != nil || !decision.Matched {
 		return ctx, model, false, err
 	}
@@ -2649,6 +2652,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	reqModel := publicReqModel
 	ctx, wsRouteModel, _, err := h.resolveResponsesWebSocketCompositeRoute(ctx, apiKey, reqModel)
 	if err != nil {
+		var closeErr *service.OpenAIWSClientCloseError
+		if errors.As(err, &closeErr) {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+			closeOpenAIClientWS(wsConn, closeErr.StatusCode(), closeErr.Reason())
+			return
+		}
 		reqLog.Error("openai.websocket_composite_route_resolve_failed", zap.Error(err))
 		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "Failed to resolve composite model route")
 		return
