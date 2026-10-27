@@ -285,7 +285,7 @@ func TestHandleResponsesStreamingResponse_ParseErrorDoesNotFinalizeSuccess(t *te
 	)
 
 	require.Error(t, err)
-	require.NotNil(t, result)
+	require.Nil(t, result, "no observed usage is not billable")
 	require.True(t, IsResponseCommitted(c))
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed"))
 	require.Contains(t, rec.Body.String(), `"type":"response.failed"`)
@@ -383,7 +383,7 @@ func TestHandleResponsesStreamingResponse_MissingDataDoesNotFinalizeSuccess(t *t
 	)
 
 	require.Error(t, err)
-	require.NotNil(t, result)
+	require.Nil(t, result, "no observed usage is not billable")
 	require.Contains(t, rec.Body.String(), `"type":"response.failed"`)
 	require.NotContains(t, rec.Body.String(), `"type":"response.completed"`)
 }
@@ -444,8 +444,10 @@ func TestHandleResponsesStreamingResponse_AnthropicErrorDoesNotFinalizeSuccess(t
 		apicompat.ResponsesClientToolMapping{},
 	)
 
-	require.ErrorContains(t, err, "upstream overloaded")
-	require.NotNil(t, result)
+	var streamErr *sseStreamErrorEventError
+	require.ErrorAs(t, err, &streamErr)
+	require.Contains(t, streamErr.RawData, "upstream overloaded")
+	require.Nil(t, result, "explicit upstream error is not billable")
 	require.Contains(t, rec.Body.String(), `"type":"response.failed"`)
 	require.NotContains(t, rec.Body.String(), `"type":"response.completed"`)
 }

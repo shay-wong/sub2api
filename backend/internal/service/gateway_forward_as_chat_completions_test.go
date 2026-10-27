@@ -321,10 +321,18 @@ func TestHandleCCStreamingFromAnthropic_RejectsBrokenUpstreamStream(t *testing.T
 			)
 
 			require.Error(t, err)
-			require.NotNil(t, result)
 			require.True(t, IsResponseCommitted(c))
-			require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"stream_conversion_error"`))
-			require.Contains(t, rec.Body.String(), `"type":"stream_conversion_error"`)
+			errType := "stream_conversion_error"
+			if tt.name == "anthropic error" {
+				require.Nil(t, result, "explicit upstream error is not billable")
+				errType = "upstream_error"
+			} else {
+				require.NotNil(t, result)
+				if tt.name == "read failure" {
+					errType = "stream_read_error"
+				}
+			}
+			require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"`+errType+`"`))
 			require.NotContains(t, rec.Body.String(), `[DONE]`)
 		})
 	}

@@ -46,7 +46,11 @@ type anthropicCompatStream struct {
 	upstreamErrMessage string
 	upstreamErrPayload string
 	// readErr 是上游流结束的原因（io.EOF、读错误或 errAnthropicNativeStreamIdle）。
-	readErr error
+	readErr       error
+	parser        openAICompatSSEFrameParser
+	conversionErr error
+	drainTimer    *time.Timer
+	drainDeadline time.Time
 }
 
 // anthropicCompatStreamFailure 描述客户端在线时上游流未正常结束的原因：
@@ -79,6 +83,9 @@ func newAnthropicCompatStream(cfg *config.Config, c *gin.Context, resp *http.Res
 }
 
 func (st *anthropicCompatStream) stop() {
+	if st.drainTimer != nil {
+		st.drainTimer.Stop()
+	}
 	st.pump.stop()
 }
 
@@ -91,6 +98,10 @@ func (st *anthropicCompatStream) markClientDisconnected() {
 	st.clientDisconnected = true
 	st.clientGone = nil
 	st.pump.enableInterval(anthropicCompatDisconnectDrainInterval)
+	// 空闲超时会被 ping 重置；断线后的总回收期限必须独立于上游流量。
+	drainTimeout := disconnectedStreamDrainTimeout(st.pump.interval)
+	st.drainDeadline = time.Now().Add(drainTimeout)
+	st.drainTimer = time.AfterFunc(drainTimeout, func() { _ = st.body.Close() })
 	logger.L().Info(st.logPrefix+" stream: client disconnected, continuing to drain upstream for billing",
 		zap.String("request_id", st.requestID),
 	)
@@ -101,6 +112,9 @@ func (st *anthropicCompatStream) markClientDisconnected() {
 // 上游流结束时请求 ctx 已取消的，按客户端已断开收尾。
 func (st *anthropicCompatStream) nextLine() (string, bool) {
 	for {
+		if !st.drainDeadline.IsZero() && !time.Now().Before(st.drainDeadline) {
+			return "", false
+		}
 		line, err := st.pump.nextOrClientGone(st.clientGone)
 		if err == nil {
 			if payload, ok := extractOpenAISSEDataLine(line); ok && strings.TrimSpace(payload) == "[DONE]" {
@@ -141,6 +155,51 @@ func (st *anthropicCompatStream) nextLine() (string, bool) {
 	}
 }
 
+// nextEvent 保留完整 SSE frame，避免多行 data 或注释把事件拆散后静默丢失。
+func (st *anthropicCompatStream) nextEvent() (*apicompat.AnthropicStreamEvent, string, bool) {
+	for {
+		line, open := st.nextLine()
+		// 尾部读取错误不能丢掉已完整读入、仅缺空行的 terminal frame。
+		if !open && len(st.parser.dataLines) == 0 && st.readErr != nil && !errors.Is(st.readErr, io.EOF) {
+			return nil, "", false
+		}
+		if (!open || line == "") && st.parser.eventType != "" && len(st.parser.dataLines) == 0 {
+			st.conversionErr = fmt.Errorf("missing data field for anthropic %s event", st.parser.eventType)
+			return nil, "", false
+		}
+		var frame openAICompatSSEFrame
+		var ok bool
+		if open {
+			frame, ok = st.parser.AddLine(line)
+		} else {
+			frame, ok = st.parser.Finish()
+		}
+		if ok {
+			if strings.TrimSpace(frame.Data) == "[DONE]" {
+				st.sawTerminal = true
+				if !open {
+					return nil, "", false
+				}
+				continue
+			}
+			if !json.Valid([]byte(frame.Data)) {
+				st.conversionErr = fmt.Errorf("decode anthropic %s event: invalid JSON", frame.EventType)
+				return nil, "", false
+			}
+			payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+			var event apicompat.AnthropicStreamEvent
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				st.conversionErr = fmt.Errorf("decode anthropic %s event: %w", frame.EventType, err)
+				return nil, "", false
+			}
+			return &event, payload, true
+		}
+		if !open {
+			return nil, "", false
+		}
+	}
+}
+
 // observe 记录决定收尾方式的上游事件。收到上游 error 事件时关闭上游 body，
 // 调用方不再处理该事件并结束读取。
 func (st *anthropicCompatStream) observe(event *apicompat.AnthropicStreamEvent, payload string) {
@@ -173,10 +232,15 @@ func (st *anthropicCompatStream) observe(event *apicompat.AnthropicStreamEvent, 
 // 未发出 message_start 即正常关闭时返回 nil，调用方按已累计的 usage 正常收尾。
 // 读间隔超时时 err 为 errAnthropicNativeStreamIdle。
 func (st *anthropicCompatStream) failure() *anthropicCompatStreamFailure {
-	if st.clientDisconnected || st.sawTerminal {
+	if st.clientDisconnected {
+		return nil
+	}
+	if st.sawTerminal && st.conversionErr == nil && st.upstreamErrType == "" {
 		return nil
 	}
 	switch {
+	case st.conversionErr != nil:
+		return &anthropicCompatStreamFailure{err: st.conversionErr, errType: "stream_conversion_error", message: "Failed to convert upstream response stream"}
 	case st.upstreamErrType != "":
 		return &anthropicCompatStreamFailure{
 			err:     &sseStreamErrorEventError{RawData: st.upstreamErrPayload},

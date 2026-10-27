@@ -45,7 +45,7 @@ func (*scopedRouteModelSettings) Get(context.Context, string) (*service.Setting,
 }
 
 func (*scopedRouteUsers) GetByID(context.Context, int64) (*service.User, error) {
-	return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+	return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 }
 func (*scopedRouteUsers) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
 	return nil, nil
@@ -112,6 +112,7 @@ func TestScopedAdminRegisteredRoutesEnforceDefaultDenyAndAccountScope(t *testing
 				{"GET", "/api/v1/admin/accounts/6"},
 				{"DELETE", "/api/v1/admin/accounts/1"},
 				{"GET", "/api/v1/admin/users"},
+				{"PUT", "/api/v1/admin/users/9/admin-access"},
 				{"PUT", "/api/v1/admin/settings"},
 				{"GET", "/api/v1/admin/settings/admin-api-keys"},
 				{"GET", "/api/v1/admin/groups"},

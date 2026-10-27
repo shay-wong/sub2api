@@ -419,6 +419,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
+		if stream.clientDisconnected {
+			return true
+		}
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
@@ -427,6 +430,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		// c 可能持有请求侧注入的 ToolNameRewrite；无则仅做静态前缀还原。
 		out := string(reverseToolNamesIfPresent(c, []byte(sse)))
 		if _, err := fmt.Fprint(c.Writer, out); err != nil {
+			stream.markClientDisconnected()
 			return true // client disconnected
 		}
 		return false
@@ -447,7 +451,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			c.Writer.Flush()
 			return
 		}
-		if firstChunk {
+		if firstChunk && !stream.clientDisconnected {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
@@ -485,38 +489,20 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	for {
-		line, ok := stream.nextLine()
+		event, payload, ok := stream.nextEvent()
 		if !ok {
 			break
-		}
-		// 与缓冲路径一致：接受 SSE 紧凑格式（冒号后无空格，#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
-			continue
-		}
-
-		dataLine, ok := stream.nextLine()
-		if !ok {
-			break
-		}
-		payload, ok := extractOpenAISSEDataLine(dataLine)
-		if !ok {
-			continue
-		}
-
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
 		}
 
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
-		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(&event, payload)
+		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(event, payload)
 
-		stream.observe(&event, payload)
+		stream.observe(event, payload)
 		if stream.upstreamErrType != "" {
 			break
 		}
-		processAnthropicEvent(&event)
+		processAnthropicEvent(event)
 	}
 
 	if failure := stream.failure(); failure != nil {
@@ -542,8 +528,13 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	// Write [DONE] marker
-	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-	c.Writer.Flush()
+	if !stream.clientDisconnected {
+		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
+			stream.markClientDisconnected()
+		} else {
+			c.Writer.Flush()
+		}
+	}
 
 	return resultWithUsage(), nil
 }
@@ -558,22 +549,6 @@ func writeGatewayCCError(c *gin.Context, statusCode int, errType, message string
 			"message": message,
 		},
 	})
-}
-
-func writeGatewayCCStreamError(c *gin.Context, statusCode int, errType, message string) {
-	MarkOpsStreamError(c, errType, message, statusCode)
-	payload, err := json.Marshal(gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
-	if err != nil {
-		return
-	}
-	MarkResponseCommitted(c)
-	_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
-	c.Writer.Flush()
 }
 
 // anthropicChatStreamHasUsage distinguishes an explicit zero-valued usage object

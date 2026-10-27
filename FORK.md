@@ -62,6 +62,7 @@
 
 ## 1. 全局管理员角色与细粒度权限
 
+- **受限管理员 API Key**：上游 `e445cc3e2` 的操作/资源策略保持独立生效；新旧 Key 管理入口仅接受 `super_admin` JWT，受限 Key 的创建人必须仍是 active super_admin，降级后立即返回 401。沿用 `applyAdminContext` 设置身份，但在进入任何 handler 前执行 `adminaccess.RouteAllowed` 的默认拒绝策略，并保留各资源专用校验与 DTO 脱敏；不得让普通管理员借专用账号 dispatcher 绕过其直接绑定。实现为 `custom_admin_keys.go`、`admin_auth.go`；回归为 `TestAdminKeyHandlersRejectOrdinaryAdminJWT`、`TestScopedAdminKeyAuthDefaultDenyAndCreatorStatus` 及 routes 的 scoped-key 跨资源测试。三语 README 同步；独立适配定位：`git log -S'TestAdminKeyHandlersRejectOrdinaryAdminJWT' -- backend/internal/handler/admin/custom_admin_keys_test.go`。
 - **Claude 重置额度接口**：查询和兑换均要求 `admin.accounts.write` 与直接账号绑定；仅有分组绑定返回 `403`，不查询上游、兑换或回放幂等结果；全量范围和超管保持可用。实现位于 `backend/internal/handler/admin/claude_reset_handler.go`，验证：`go test -tags=unit ./internal/handler/admin -run '^TestClaudeReset'`。独立适配提交定位：`git log -S'TestClaudeResetRequiresDirectAccountBinding' -- backend/internal/handler/admin/claude_reset_scope_test.go`。三语 README 权限条目同步此边界。
 
 - **生命周期**：`长期保留`
@@ -199,6 +200,7 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
 
+- **0.2.18 兼容流适配**：上游 `94c7d6b02` / `4355236e0` 的统一断线回收与错误分类替代旧状态机，但空闲超时不等于总清理期限。Chat/Responses 共用 `gateway_forward_compat_stream.go`，继续完整解析 SSE frame、多行 data 和无空行尾帧；断线后总期限独立于 ping，禁止继续写入或设置 TTFT。明确上游 error 事件按维护者选择不计费；格式/转换失败仍 fail closed 并保留已观测用量。两入口的成功及部分结果经 `submitForwardUsage` 使用实际分组归因，已写出后不得换号拼接。测试为 `gateway_forward_compat_stream_fork_test.go`、`gateway_forward_compat_client_disconnect_test.go` 及原 Chat/Responses 测试；验证 `go test -tags=unit ./internal/service -run 'Test(HandleCCStreamingFromAnthropic|HandleResponsesStreamingResponse|AnthropicCompat)'`。三语 README 与 CHANGELOG 同步；独立适配定位：`git log -S'TestAnthropicCompatDisconnectDrainDeadlineSurvivesHeartbeats' -- backend/internal/service/gateway_forward_compat_stream_fork_test.go`。
 - **Anthropic 转 Chat 心跳断线适配**：上游 `9f84204c2` 将 ping 转成 SSE 注释；心跳写失败须进入 Fork 原有的有界 drain，停止后续数据/心跳/flush，不再写 `[DONE]`，但仍收集上游晚到用量，且断线后的事件不得设置首字时间。实现与回归为 `backend/internal/service/gateway_forward_as_chat_completions.go`、`gateway_forward_as_chat_completions_ping_test.go`；验证 `go test -tags=unit ./internal/service -run '^TestHandleCCStreamingFromAnthropic_'`。当前独立提交定位：`git log -S'drain retains upstream usage after downstream disconnect' -- backend/internal/service/gateway_forward_as_chat_completions_ping_test.go`；三语 README 同步该行为。上游提供等价断线 drain 和回归后删除此适配。
 
 - **0.2.13 首内容前断线清理**：Antigravity 首内容前 keepalive 写入失败时也启动已有的有界 drain，不能因上游持续 ping 而永久占用请求。实现位于 `backend/internal/service/antigravity_gateway_compat_stream.go`；验证：`go test -tags=unit ./internal/service -run '^TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline$'`。独立适配提交定位：`git log -S'TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline' -- backend/internal/service/antigravity_gateway_compat_test.go`。三语 README 同步断线行为。

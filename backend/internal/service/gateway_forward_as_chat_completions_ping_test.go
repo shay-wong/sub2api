@@ -198,8 +198,10 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			require.Equal(t, 7, result.Usage.OutputTokens, "drain retains upstream usage after downstream disconnect")
 			if withUsage {
 				require.Equal(t, 10, result.Usage.InputTokens)
+				require.NotNil(t, result.FirstTokenMs)
 			} else {
 				require.Zero(t, result.Usage.InputTokens)
+				require.Nil(t, result.FirstTokenMs, "late events after disconnect are not client-visible first output")
 				require.Nil(t, result.FirstTokenMs)
 			}
 		})

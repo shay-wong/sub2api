@@ -578,10 +578,33 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			ClientDisconnect: stream.clientDisconnected,
 		}
 	}
+	writeEvent := func(evt apicompat.ResponsesStreamEvent) {
+		if stream.clientDisconnected || stream.conversionErr != nil {
+			return
+		}
+		payload, err := json.Marshal(evt)
+		if err != nil {
+			stream.conversionErr = fmt.Errorf("marshal responses event: %w", err)
+			return
+		}
+		payload = reverseToolNamesIfPresent(c, payload)
+		payloads, _, err := clientToolRestorer.RestoreEvent(payload)
+		if err != nil {
+			stream.conversionErr = fmt.Errorf("restore responses client tools: %w", err)
+			return
+		}
+		for _, restored := range payloads {
+			eventType := gjson.GetBytes(restored, "type").String()
+			if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+				stream.markClientDisconnected()
+				return
+			}
+		}
+	}
 
 	// processEvent handles a single parsed Anthropic SSE event.
 	processEvent := func(event *apicompat.AnthropicStreamEvent) {
-		if firstChunk {
+		if firstChunk && !stream.clientDisconnected {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
@@ -608,32 +631,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		// Convert to Responses events
 		events := apicompat.AnthropicEventToResponsesEvents(event, state)
 		for _, evt := range events {
-			payload, err := json.Marshal(evt)
-			if err != nil {
-				logger.L().Warn("forward_as_responses stream: failed to marshal event",
-					zap.Error(err),
-					zap.String("request_id", requestID),
-				)
-				continue
-			}
-			payload = reverseToolNamesIfPresent(c, payload)
-			payloads, _, err := clientToolRestorer.RestoreEvent(payload)
-			if err != nil {
-				logger.L().Warn("forward_as_responses stream: failed to restore client tools",
-					zap.Error(err),
-					zap.String("request_id", requestID),
-				)
-				continue
-			}
-			for _, restored := range payloads {
-				eventType := gjson.GetBytes(restored, "type").String()
-				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
-					stream.markClientDisconnected()
-					return
-				}
-			}
+			writeEvent(evt)
 		}
-		if len(events) > 0 {
+		if len(events) > 0 && !stream.clientDisconnected && stream.conversionErr == nil {
 			c.Writer.Flush()
 		}
 	}
@@ -649,54 +649,34 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
 			for _, evt := range finalEvents {
-				sse, err := apicompat.ResponsesEventToSSE(evt)
-				if err != nil {
-					continue
-				}
-				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
+				writeEvent(evt)
 			}
-			c.Writer.Flush()
+			if failure := stream.failure(); failure != nil {
+				return finishAnthropicCompatStreamFailure(c, writerSizeBeforeStream, failure, resultWithUsage(), func() {
+					writeAnthropicCompatResponsesStreamFailure(c, state, clientToolRestorer, failure)
+				})
+			}
+			if !stream.clientDisconnected {
+				c.Writer.Flush()
+			}
 		}
 		return resultWithUsage(), nil
 	}
 
 	// Read Anthropic SSE events
 	for {
-		line, ok := stream.nextLine()
+		event, payload, ok := stream.nextEvent()
 		if !ok {
 			break
 		}
-		eventType, ok := parseAnthropicSSEField(line, "event")
-		if !ok {
-			continue
-		}
-
-		// Read data line
-		dataLine, ok := stream.nextLine()
-		if !ok {
-			break
-		}
-		payload, ok := parseAnthropicSSEField(dataLine, "data")
-		if !ok {
-			continue
-		}
-
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("forward_as_responses stream: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-				zap.String("event_type", eventType),
-			)
-			continue
-		}
-
-		stream.observe(&event, payload)
+		stream.observe(event, payload)
 		if stream.upstreamErrType != "" {
 			break
 		}
-		processEvent(&event)
+		processEvent(event)
+		if stream.conversionErr != nil {
+			break
+		}
 	}
 
 	return finalizeStream()

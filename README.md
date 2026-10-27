@@ -197,6 +197,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - Editing an imported Command Code or OpenCode account with a missing or invalid API protocol preserves automatic model-based routing and custom protocol endpoints. Cline still defaults to Chat Completions, and explicitly selected valid protocols remain unchanged.
 - **API Key Distribution** - Generate and manage API Keys for users
 - **Granular Admin Permissions** - Configure eight administrator capabilities plus direct group, account, proxy, and subscription scopes from the user list, without restoring project workspaces
+  - In Settings, only a super-admin JWT session can manage administrator API keys. Scoped keys remain limited by their configured operations and resources; disabling or demoting their creator invalidates them immediately. Ordinary administrators retain their existing permissions and direct resource bindings.
   - Claude reset-credit queries and redemption require account-management permission and direct account access. Group access alone returns `403` without upstream actions or idempotent replay; full account scope and super admins remain allowed.
   - Codex invitation eligibility refresh and invitation sending require direct account access. Group access alone returns `403` before contacting OpenAI or updating the snapshot.
   - Bulk subscription actions check every direct subscription binding before execution or idempotent replay. Any unauthorized subscription rejects the entire batch with `403` and no mutations. Group bindings do not grant subscription access, and revoked access also blocks replay of earlier results.
@@ -212,6 +213,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
   - Concurrent model catalog requests reuse a freshly populated cache instead of repeating the upstream fetch; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits
+  - Anthropic streams converted to Chat Completions or Responses keep a total cleanup deadline after disconnects, even while upstream pings continue, and bill recovered usage to the actual selected group. Explicit upstream error events are not billed; malformed SSE or conversion failures still terminate the stream instead of appearing successful.
   - When a heartbeat write fails while converting an Anthropic stream to Chat Completions, downstream writes stop and upstream usage is collected within a bounded drain period.
   - Antigravity streams start bounded cleanup when a pre-content keepalive fails to reach the client, even if the upstream keeps sending pings.
 - **Rate Limiting** - Configurable request and token rate limits

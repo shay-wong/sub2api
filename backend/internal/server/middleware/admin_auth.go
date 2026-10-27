@@ -245,16 +245,14 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 		return
 	}
 	user, err := users.GetByID(c.Request.Context(), item.CreatedBy)
-	if err != nil || user == nil || !user.IsActive() || !user.IsAdmin() {
+	// 管理密钥只能由超管委派；创建人降级后立即失效，不能绕过其新的资源范围。
+	if err != nil || user == nil || !user.IsActive() || !service.RoleIsSuperAdmin(user.Role) {
 		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
 		return
 	}
 	principal := &adminaccess.Principal{KeyID: item.ID, KeyName: item.Name, CreatorID: item.CreatedBy, Policy: item.Policy}
 	c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), principal))
-	c.Set(string(ContextKeyUser), AuthSubject{UserID: user.ID, Concurrency: user.Concurrency})
-	c.Set(string(ContextKeyUserRole), user.Role)
-	c.Set(ContextKeyAuthEmail, user.Email)
-	c.Set("auth_method", service.AuditAuthMethodAdminAPIKey)
+	applyAdminContext(c, user, service.AuditAuthMethodAdminAPIKey)
 	c.Set(auditCtxKeySkip, true)
 	if strings.Contains(c.FullPath(), "/settings/admin-api-key") || !adminaccess.RouteAllowed(item.Policy, c.Request.Method, c.FullPath()) {
 		c.Set("admin_key_denial_reason", "permission_denied")

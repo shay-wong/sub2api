@@ -38,12 +38,13 @@ func TestScopedAdminKeyAuthDefaultDenyAndCreatorStatus(t *testing.T) {
 	key, _, err := settings.CreateScopedAdminKey(context.Background(), service.ScopedAdminKeyInput{Name: "只读", Enabled: true, Policy: adminaccess.Policy{GlobalPermissions: []string{"users.read"}}}, 9)
 	require.NoError(t, err)
 	active := true
+	role := service.RoleSuperAdmin
 	users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
 		status := service.StatusActive
 		if !active {
 			status = "disabled"
 		}
-		return &service.User{ID: 9, Role: service.RoleAdmin, Status: status}, nil
+		return &service.User{ID: 9, Role: role, Status: status}, nil
 	}}, nil, nil, nil)
 	r := gin.New()
 	r.Use(gin.HandlerFunc(NewAdminAuthMiddleware(nil, users, settings, nil)))
@@ -66,6 +67,11 @@ func TestScopedAdminKeyAuthDefaultDenyAndCreatorStatus(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, 401, w.Code)
+	active = true
+	role = service.RoleAdmin
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, 401, w.Code, "创建人降级后不得沿用超管委派权限")
 }
 func TestLegacyAdminKeyCannotManageKeys(t *testing.T) {
 	r := gin.New()

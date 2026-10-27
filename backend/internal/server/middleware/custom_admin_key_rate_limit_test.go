@@ -24,7 +24,7 @@ func TestScopedAdminKeyPanelRateLimitAuthenticatedRead(t *testing.T) {
 	}, 9)
 	require.NoError(t, err)
 	users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
-		return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+		return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 	}}, nil, nil, nil)
 	allower := &fakePanelAllower{}
 	p := &PanelRateLimiter{limiter: allower, settingService: settings}
@@ -99,7 +99,7 @@ func TestScopedAdminKeyPanelRateLimitAuthenticatedSensitiveWrite(t *testing.T) {
 			}, 9)
 			require.NoError(t, err)
 			users := service.NewUserService(&stubUserRepo{getByID: func(context.Context, int64) (*service.User, error) {
-				return &service.User{ID: 9, Role: service.RoleAdmin, Status: service.StatusActive}, nil
+				return &service.User{ID: 9, Role: service.RoleSuperAdmin, Status: service.StatusActive}, nil
 			}}, nil, nil, nil)
 			p := &PanelRateLimiter{limiter: &fakePanelAllower{err: tc.redisErr}, settingService: settings}
 			r := gin.New()

@@ -303,8 +303,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			accountReleaseFunc()
 		}
 
-		// 提交 usage 记录。成功路径与"流中断但 Forward 已观测到 usage 的部分结果"
-		// 错误路径共用；failover 错误恒定 result=nil，不会重复计费。
+		// 成功和已观测到用量的中断流共用实际选中分组，避免按原始分组扣费。
 		submitForwardUsage := func(result *service.ForwardResult) {
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
@@ -312,7 +311,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
+			quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
+			effectiveGroupID := ResolveEffectiveGroupID(selection, apiKey)
 			sessionID := service.ExtractClientSessionID(c)
 			stampForwardRequestedReasoningEffort(result, service.RequestedReasoningEffortFromContext(c.Request.Context()))
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -323,14 +324,16 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 					User:               apiKey.User,
 					Account:            account,
 					Subscription:       subscription,
-					PricingAt:          pricingAt,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   upstreamEndpoint,
 					UserAgent:          userAgent,
 					IPAddress:          clientIP,
+					SessionID:          sessionID,
 					RequestPayloadHash: requestPayloadHash,
 					APIKeyService:      h.apiKeyService,
-					SessionID:          sessionID,
+					EffectiveGroupID:   effectiveGroupID,
+					EffectiveGroup:     effectiveGroup,
+					PricingAt:          pricingAt,
 					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
 				}); err != nil {
 					reqLog.Error("gateway.responses.record_usage_failed",

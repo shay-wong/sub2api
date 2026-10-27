@@ -28,6 +28,18 @@ func TestScopedAdminKeyHandlersRejectNonJWT(t *testing.T) {
 	}
 }
 
+func TestAdminKeyHandlersRejectOrdinaryAdminJWT(t *testing.T) {
+	h := &SettingHandler{}
+	for _, fn := range []gin.HandlerFunc{h.ListScopedAdminKeys, h.CreateScopedAdminKey, h.UpdateScopedAdminKey, h.RotateScopedAdminKey, h.RevokeScopedAdminKey, h.DeleteScopedAdminKeyRecord, h.GetAdminAPIKey, h.RegenerateAdminAPIKey, h.DeleteAdminAPIKey} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Set("auth_method", service.AuditAuthMethodJWT)
+		c.Set("user_role", service.RoleAdmin)
+		fn(c)
+		require.Equal(t, 403, w.Code)
+	}
+}
+
 type deleteScopedKeyRecordRepo struct {
 	service.ScopedAdminKeyRepository
 	err error
@@ -48,8 +60,9 @@ func TestScopedAdminKeyDeleteRecordHandler(t *testing.T) {
 		err        error
 		status     int
 	}{
-		{"仅列表移除", "admin", nil, 200},
-		{"未撤销或已移除", "admin", service.ErrScopedAdminKeyNotFound, 404},
+		{"仅列表移除", service.RoleSuperAdmin, nil, 200},
+		{"未撤销或已移除", service.RoleSuperAdmin, service.ErrScopedAdminKeyNotFound, 404},
+		{"普通管理员拒绝", service.RoleAdmin, nil, 403},
 		{"普通用户拒绝", "user", nil, 403},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,7 +78,7 @@ func TestScopedAdminKeyDeleteRecordHandler(t *testing.T) {
 			c.Set("user_role", tc.role)
 			h.DeleteScopedAdminKeyRecord(c)
 			require.Equal(t, tc.status, w.Code)
-			if tc.role != "admin" {
+			if tc.role != service.RoleSuperAdmin {
 				require.Empty(t, repo.id)
 			} else {
 				require.Equal(t, "key-1", repo.id)
