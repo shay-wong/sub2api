@@ -8,6 +8,11 @@ import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
 
+// 密钥管理有独立组件回归；页面测试不应发出其真实后台请求。
+vi.mock("@/components/admin/settings/AdminAccessKeysSettings.vue", () => ({
+  default: { template: "<div />" },
+}));
+
 const {
   getSettings,
   updateSettings,

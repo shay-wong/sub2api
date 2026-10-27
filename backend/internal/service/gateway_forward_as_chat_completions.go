@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -186,7 +187,15 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
+		writerSizeBeforeStream := c.Writer.Size()
 		result, handleErr = s.handleCCStreamingFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
+		var sseErr *sseStreamErrorEventError
+		switch {
+		case errors.As(handleErr, &sseErr):
+			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
+			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		}
 	} else {
 		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 	}
@@ -389,40 +398,10 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
-	clientDisconnected := false
+	writerSizeBeforeStream := c.Writer.Size()
 
-	maxLineSize := defaultMaxLineSize
-	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-		maxLineSize = s.cfg.Gateway.MaxLineSize
-	}
-	scanEvents, stopScanner := startSSELineScanner(resp.Body, maxLineSize)
-	defer stopScanner()
-	streamTimeout := time.Duration(0)
-	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamTimeout = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
-	}
-	timeoutTimer, timeoutCh := newStreamDataTimer(streamTimeout)
-	if timeoutTimer != nil {
-		defer timeoutTimer.Stop()
-	}
-	var disconnectDrainTimer *time.Timer
-	var disconnectDrainCh <-chan time.Time
-	var clientDone <-chan struct{}
-	if c.Request != nil {
-		clientDone = c.Request.Context().Done()
-	}
-	defer func() {
-		if disconnectDrainTimer != nil {
-			disconnectDrainTimer.Stop()
-		}
-	}()
-	startDisconnectDrainTimer := func() {
-		if disconnectDrainTimer != nil {
-			return
-		}
-		disconnectDrainTimer = time.NewTimer(disconnectedStreamDrainTimeout(streamTimeout))
-		disconnectDrainCh = disconnectDrainTimer.C
-	}
+	stream := newAnthropicCompatStream(s.cfg, c, resp, "forward_as_cc", requestID)
+	defer stream.stop()
 
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
@@ -435,14 +414,11 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			Stream:           true,
 			Duration:         time.Since(startTime),
 			FirstTokenMs:     firstTokenMs,
-			ClientDisconnect: clientDisconnected,
+			ClientDisconnect: stream.clientDisconnected,
 		}
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
-		if clientDisconnected {
-			return false
-		}
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
@@ -456,23 +432,22 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		return false
 	}
 
-	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent) bool {
+	processAnthropicEvent := func(event *apicompat.AnthropicStreamEvent) {
 		if event == nil {
-			return false
+			return
 		}
 		if event.Type == "ping" {
-			if clientDisconnected {
-				return false
+			if stream.clientDisconnected {
+				return
 			}
 			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
-				clientDisconnected = true
-				startDisconnectDrainTimer()
-				return false
+				stream.markClientDisconnected()
+				return
 			}
 			c.Writer.Flush()
-			return false
+			return
 		}
-		if firstChunk && !clientDisconnected {
+		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &ms
@@ -486,6 +461,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		if event.Type == "message_start" && event.Message != nil {
 			mergeAnthropicUsage(&usage, event.Message.Usage)
 		}
+		if stream.clientDisconnected {
+			return
+		}
 
 		// Keep the outward Responses/Chat usage on the same normalized buckets used
 		// for billing, including converter handlers that consume event usage.
@@ -498,92 +476,58 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 			for _, chunk := range ccChunks {
 				if disconnected := writeChunk(chunk); disconnected {
-					clientDisconnected = true
-					startDisconnectDrainTimer()
+					stream.markClientDisconnected()
+					return
 				}
 			}
 		}
-		if !clientDisconnected {
-			c.Writer.Flush()
-		}
-		return false
+		c.Writer.Flush()
 	}
 
-	failStream := func(err error) (*ForwardResult, error) {
-		logger.L().Warn("forward_as_cc stream: conversion failed",
-			zap.Error(err),
-			zap.String("request_id", requestID),
-		)
-		if !clientDisconnected {
-			writeGatewayCCStreamError(c, http.StatusBadGateway, "stream_conversion_error", "Failed to convert upstream response stream")
+	for {
+		line, ok := stream.nextLine()
+		if !ok {
+			break
 		}
-		return resultWithUsage(), err
-	}
+		// 与缓冲路径一致：接受 SSE 紧凑格式（冒号后无空格，#4653 同根因）。
+		if _, ok := extractOpenAISSEEventLine(line); !ok {
+			continue
+		}
 
-	processFrame := func(frame openAICompatSSEFrame) error {
-		if !json.Valid([]byte(frame.Data)) {
-			return fmt.Errorf("decode anthropic chat %s event: invalid JSON", frame.EventType)
+		dataLine, ok := stream.nextLine()
+		if !ok {
+			break
 		}
-		payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+		payload, ok := extractOpenAISSEDataLine(dataLine)
+		if !ok {
+			continue
+		}
+
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return fmt.Errorf("decode anthropic chat %s event: %w", frame.EventType, err)
+			continue
 		}
-		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
-			return err
-		}
+
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
 		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(&event, payload)
-		processAnthropicEvent(&event)
-		return nil
-	}
 
-	var parser openAICompatSSEFrameParser
-	for {
-		select {
-		case scanEvent, open := <-scanEvents:
-			if !open {
-				if parser.eventType != "" && len(parser.dataLines) == 0 {
-					return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
-				}
-				if frame, ok := parser.Finish(); ok {
-					if err := processFrame(frame); err != nil {
-						return failStream(err)
-					}
-				}
-				goto streamComplete
-			}
-			resetStreamDataTimer(timeoutTimer, streamTimeout)
-			if scanEvent.err != nil {
-				if clientDisconnected {
-					return resultWithUsage(), nil
-				}
-				return failStream(fmt.Errorf("read anthropic chat stream: %w", scanEvent.err))
-			}
-			if scanEvent.line == "" && parser.eventType != "" && len(parser.dataLines) == 0 {
-				return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
-			}
-			if frame, ok := parser.AddLine(scanEvent.line); ok {
-				if err := processFrame(frame); err != nil {
-					return failStream(err)
-				}
-			}
-		case <-timeoutCh:
-			if clientDisconnected {
-				return resultWithUsage(), nil
-			}
-			return failStream(fmt.Errorf("anthropic chat stream data interval timeout after %s", streamTimeout))
-		case <-clientDone:
-			clientDone = nil
-			clientDisconnected = true
-			startDisconnectDrainTimer()
-		case <-disconnectDrainCh:
-			return resultWithUsage(), nil
+		stream.observe(&event, payload)
+		if stream.upstreamErrType != "" {
+			break
 		}
+		processAnthropicEvent(&event)
 	}
 
-streamComplete:
+	if failure := stream.failure(); failure != nil {
+		return finishAnthropicCompatStreamFailure(c, writerSizeBeforeStream, failure, resultWithUsage(), func() {
+			writeAnthropicCompatCCStreamFailure(c, failure)
+		})
+	}
+	if stream.clientDisconnected {
+		return resultWithUsage(), nil
+	}
+
 	// Finalize both state machines
 	finalResEvents := apicompat.FinalizeAnthropicResponsesStream(anthState)
 	for _, resEvt := range finalResEvents {
@@ -598,10 +542,8 @@ streamComplete:
 	}
 
 	// Write [DONE] marker
-	if !clientDisconnected {
-		fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
-		c.Writer.Flush()
-	}
+	fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
+	c.Writer.Flush()
 
 	return resultWithUsage(), nil
 }

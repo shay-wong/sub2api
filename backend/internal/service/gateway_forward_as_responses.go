@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -197,7 +198,15 @@ func (s *GatewayService) ForwardAsResponses(
 	var result *ForwardResult
 	var handleErr error
 	if clientStream {
+		writerSizeBeforeStream := c.Writer.Size()
 		result, handleErr = s.handleResponsesStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		var sseErr *sseStreamErrorEventError
+		switch {
+		case errors.As(handleErr, &sseErr):
+			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
+			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		}
 	} else {
 		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
 	}
@@ -550,40 +559,10 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
-	clientDisconnected := false
+	writerSizeBeforeStream := c.Writer.Size()
 
-	maxLineSize := defaultMaxLineSize
-	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-		maxLineSize = s.cfg.Gateway.MaxLineSize
-	}
-	scanEvents, stopScanner := startSSELineScanner(resp.Body, maxLineSize)
-	defer stopScanner()
-	streamTimeout := time.Duration(0)
-	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamTimeout = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
-	}
-	timeoutTimer, timeoutCh := newStreamDataTimer(streamTimeout)
-	if timeoutTimer != nil {
-		defer timeoutTimer.Stop()
-	}
-	var disconnectDrainTimer *time.Timer
-	var disconnectDrainCh <-chan time.Time
-	var clientDone <-chan struct{}
-	if c.Request != nil {
-		clientDone = c.Request.Context().Done()
-	}
-	defer func() {
-		if disconnectDrainTimer != nil {
-			disconnectDrainTimer.Stop()
-		}
-	}()
-	startDisconnectDrainTimer := func() {
-		if disconnectDrainTimer != nil {
-			return
-		}
-		disconnectDrainTimer = time.NewTimer(disconnectedStreamDrainTimeout(streamTimeout))
-		disconnectDrainCh = disconnectDrainTimer.C
-	}
+	stream := newAnthropicCompatStream(s.cfg, c, resp, "forward_as_responses", requestID)
+	defer stream.stop()
 
 	resultWithUsage := func() *ForwardResult {
 		return &ForwardResult{
@@ -596,38 +575,12 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			Stream:           true,
 			Duration:         time.Since(startTime),
 			FirstTokenMs:     firstTokenMs,
-			ClientDisconnect: clientDisconnected,
+			ClientDisconnect: stream.clientDisconnected,
 		}
-	}
-	writeEvent := func(evt apicompat.ResponsesStreamEvent) error {
-		if clientDisconnected {
-			return nil
-		}
-		payload, err := json.Marshal(evt)
-		if err != nil {
-			return fmt.Errorf("marshal responses event: %w", err)
-		}
-		payload = reverseToolNamesIfPresent(c, payload)
-		payloads, _, err := clientToolRestorer.RestoreEvent(payload)
-		if err != nil {
-			return fmt.Errorf("restore responses client tools: %w", err)
-		}
-		for _, restored := range payloads {
-			eventType := gjson.GetBytes(restored, "type").String()
-			if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
-				clientDisconnected = true
-				startDisconnectDrainTimer()
-				logger.L().Info("forward_as_responses stream: client disconnected",
-					zap.String("request_id", requestID),
-				)
-				return nil
-			}
-		}
-		return nil
 	}
 
 	// processEvent handles a single parsed Anthropic SSE event.
-	processEvent := func(event *apicompat.AnthropicStreamEvent) error {
+	processEvent := func(event *apicompat.AnthropicStreamEvent) {
 		if firstChunk {
 			firstChunk = false
 			ms := int(time.Since(startTime).Milliseconds())
@@ -642,6 +595,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		if event.Type == "message_start" && event.Message != nil {
 			mergeAnthropicUsage(&usage, event.Message.Usage)
 		}
+		if stream.clientDisconnected {
+			return
+		}
 
 		// Keep the terminal Responses usage aligned with the normalized billing
 		// buckets. Normalize the converter input too, so message handlers cannot
@@ -652,114 +608,98 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		// Convert to Responses events
 		events := apicompat.AnthropicEventToResponsesEvents(event, state)
 		for _, evt := range events {
-			if err := writeEvent(evt); err != nil {
-				return err
+			payload, err := json.Marshal(evt)
+			if err != nil {
+				logger.L().Warn("forward_as_responses stream: failed to marshal event",
+					zap.Error(err),
+					zap.String("request_id", requestID),
+				)
+				continue
+			}
+			payload = reverseToolNamesIfPresent(c, payload)
+			payloads, _, err := clientToolRestorer.RestoreEvent(payload)
+			if err != nil {
+				logger.L().Warn("forward_as_responses stream: failed to restore client tools",
+					zap.Error(err),
+					zap.String("request_id", requestID),
+				)
+				continue
+			}
+			for _, restored := range payloads {
+				eventType := gjson.GetBytes(restored, "type").String()
+				if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", eventType, restored); err != nil {
+					stream.markClientDisconnected()
+					return
+				}
 			}
 		}
-		if len(events) > 0 && !clientDisconnected {
+		if len(events) > 0 {
 			c.Writer.Flush()
 		}
-		return nil
 	}
 
-	finalizeStream := func() error {
-		if clientDisconnected {
-			return nil
+	finalizeStream := func() (*ForwardResult, error) {
+		if failure := stream.failure(); failure != nil {
+			return finishAnthropicCompatStreamFailure(c, writerSizeBeforeStream, failure, resultWithUsage(), func() {
+				writeAnthropicCompatResponsesStreamFailure(c, state, clientToolRestorer, failure)
+			})
+		}
+		if stream.clientDisconnected {
+			return resultWithUsage(), nil
 		}
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
 			for _, evt := range finalEvents {
-				if err := writeEvent(evt); err != nil {
-					return err
+				sse, err := apicompat.ResponsesEventToSSE(evt)
+				if err != nil {
+					continue
 				}
-				if clientDisconnected {
-					return nil
-				}
+				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
+				fmt.Fprint(c.Writer, out) //nolint:errcheck
 			}
 			c.Writer.Flush()
 		}
-		return nil
+		return resultWithUsage(), nil
 	}
 
-	failStream := func(err error) (*ForwardResult, error) {
-		logger.L().Warn("forward_as_responses stream: conversion failed",
-			zap.Error(err),
-			zap.String("request_id", requestID),
-		)
-		if !clientDisconnected {
-			writeOpenAICompactSSEFailureMessage(
-				c,
-				http.StatusBadGateway,
-				"stream_conversion_error",
-				"Failed to convert upstream response stream",
-			)
+	// Read Anthropic SSE events
+	for {
+		line, ok := stream.nextLine()
+		if !ok {
+			break
 		}
-		return resultWithUsage(), err
-	}
+		eventType, ok := parseAnthropicSSEField(line, "event")
+		if !ok {
+			continue
+		}
 
-	processFrame := func(frame openAICompatSSEFrame) (*ForwardResult, error) {
-		payload := frame.Data
+		// Read data line
+		dataLine, ok := stream.nextLine()
+		if !ok {
+			break
+		}
+		payload, ok := parseAnthropicSSEField(dataLine, "data")
+		if !ok {
+			continue
+		}
+
 		var event apicompat.AnthropicStreamEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return failStream(fmt.Errorf("decode anthropic %s event: %w", frame.EventType, err))
+			logger.L().Warn("forward_as_responses stream: failed to parse event",
+				zap.Error(err),
+				zap.String("request_id", requestID),
+				zap.String("event_type", eventType),
+			)
+			continue
 		}
-		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
-			return failStream(err)
+
+		stream.observe(&event, payload)
+		if stream.upstreamErrType != "" {
+			break
 		}
-		if err := processEvent(&event); err != nil {
-			return failStream(err)
-		}
-		if state.CompletedSent {
-			return resultWithUsage(), nil
-		}
-		return nil, nil
+		processEvent(&event)
 	}
 
-	var parser openAICompatSSEFrameParser
-	for {
-		select {
-		case scanEvent, open := <-scanEvents:
-			if !open {
-				if parser.eventType != "" && len(parser.dataLines) == 0 {
-					return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
-				}
-				if frame, ok := parser.Finish(); ok {
-					if result, err := processFrame(frame); result != nil || err != nil {
-						return result, err
-					}
-				}
-				if err := finalizeStream(); err != nil {
-					return failStream(err)
-				}
-				return resultWithUsage(), nil
-			}
-			resetStreamDataTimer(timeoutTimer, streamTimeout)
-			if scanEvent.err != nil {
-				if clientDisconnected {
-					return resultWithUsage(), nil
-				}
-				return failStream(fmt.Errorf("read anthropic stream: %w", scanEvent.err))
-			}
-			if scanEvent.line == "" && parser.eventType != "" && len(parser.dataLines) == 0 {
-				return failStream(fmt.Errorf("missing data field for anthropic %s event", parser.eventType))
-			}
-			if frame, ok := parser.AddLine(scanEvent.line); ok {
-				if result, err := processFrame(frame); result != nil || err != nil {
-					return result, err
-				}
-			}
-		case <-timeoutCh:
-			if clientDisconnected {
-				return resultWithUsage(), nil
-			}
-			return failStream(fmt.Errorf("anthropic stream data interval timeout after %s", streamTimeout))
-		case <-clientDone:
-			clientDone = nil
-			clientDisconnected = true
-			startDisconnectDrainTimer()
-		case <-disconnectDrainCh:
-			return resultWithUsage(), nil
-		}
-	}
+	return finalizeStream()
 }
 
 func anthropicResponsesStreamError(payload []byte) error {
