@@ -122,6 +122,9 @@ type MCPPrincipal struct {
 	Concurrency int
 	Email       string
 	Resource    string
+	// AdminPermissions is copied from the live user at token authentication so
+	// MCP admin dispatch observes the same explicit permission whitelist as JWT.
+	AdminPermissions []string
 }
 
 type MCPOAuthTokenInput struct {
@@ -645,7 +648,8 @@ func (s *MCPOAuthService) Authenticate(ctx context.Context, raw string) (*MCPPri
 		}
 	}
 	return &MCPPrincipal{GrantID: grant.ID, UserID: user.ID, Role: user.Role, Scope: grant.Scope,
-		ReadOnly: grant.ReadOnly, Concurrency: user.Concurrency, Email: user.Email, Resource: grant.Resource}, nil
+		ReadOnly: grant.ReadOnly, Concurrency: user.Concurrency, Email: user.Email, Resource: grant.Resource,
+		AdminPermissions: append([]string(nil), user.AdminPermissions...)}, nil
 }
 
 func (s *MCPOAuthService) ListGrants(ctx context.Context, userID int64) ([]*MCPOAuthGrant, error) {

@@ -90,6 +90,8 @@ func DispatchAuth(admin bool) gin.HandlerFunc {
 func setSubject(c *gin.Context, principal *service.MCPPrincipal) {
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: principal.UserID, Concurrency: principal.Concurrency})
 	c.Set(string(middleware.ContextKeyUserRole), principal.Role)
+	c.Request = c.Request.WithContext(service.WithAdminRole(c.Request.Context(), principal.Role))
+	c.Request = c.Request.WithContext(service.WithAdminPermissions(c.Request.Context(), principal.AdminPermissions))
 	c.Set(middleware.ContextKeyAuthEmail, principal.Email)
 	c.Set("auth_method", AuthMethod)
 	// Never share a legacy user's step-up grant with a machine credential.
@@ -99,7 +101,7 @@ func setSubject(c *gin.Context, principal *service.MCPPrincipal) {
 func toolAllowed(p *service.MCPPrincipal, spec ToolSpec) bool {
 	return p != nil && p.UserID > 0 &&
 		(p.Scope == service.MCPScopeUser || p.Scope == service.MCPScopeAdmin) &&
-		(!spec.Admin || (p.Scope == service.MCPScopeAdmin && p.Role == service.RoleAdmin)) &&
+		(!spec.Admin || (p.Scope == service.MCPScopeAdmin && service.RoleIsAdmin(p.Role))) &&
 		(!p.ReadOnly || spec.ReadOnly)
 }
 

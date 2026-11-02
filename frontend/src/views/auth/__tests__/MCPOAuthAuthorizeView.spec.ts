@@ -5,7 +5,7 @@ import MCPOAuthAuthorizeView from '../MCPOAuthAuthorizeView.vue'
 import type { MCPAuthorization, MCPConsent } from '@/api/mcp'
 
 const { auth, previewAuthorization, authorize, routeState, assign } = vi.hoisted(() => ({
-  auth: { isAdmin: false, user: { email: 'user@example.com' } },
+  auth: { isAdmin: false, canAccessAdminConsole: false, user: { email: 'user@example.com' } },
   previewAuthorization: vi.fn(), authorize: vi.fn(), assign: vi.fn(),
   routeState: { current: {} as { fullPath: string; query: Record<string, unknown> } }
 }))
@@ -39,6 +39,7 @@ function render() {
 beforeEach(() => {
   vi.clearAllMocks()
   auth.isAdmin = false
+  auth.canAccessAdminConsole = false
   routeState.current = reactive({ fullPath: '/oauth/mcp/authorize?request=1', query: { ...request } })
   previewAuthorization.mockResolvedValue({ ...consent })
   authorize.mockResolvedValue({ redirect_url: redirectURL })
@@ -135,8 +136,9 @@ describe('MCP OAuth consent', () => {
     expect(assign).toHaveBeenCalledWith(deniedURL)
   })
 
-  it('requires admin step-up before retrying approval and keeps selected permissions', async () => {
-    auth.isAdmin = true
+  it.each([false, true])('requires admin step-up and keeps selected permissions (super admin: %s)', async (superAdmin) => {
+    auth.isAdmin = superAdmin
+    auth.canAccessAdminConsole = true
     authorize.mockRejectedValueOnce({ reason: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce({ redirect_url: redirectURL })
     const wrapper = render()
     await flushPromises()
@@ -156,6 +158,7 @@ describe('MCP OAuth consent', () => {
 
   it('explains that administrator write access always needs two-factor verification', async () => {
     auth.isAdmin = true
+    auth.canAccessAdminConsole = true
     const wrapper = render()
     await flushPromises()
     expect(wrapper.find('[data-testid="admin-write-hint"]').exists()).toBe(false)
@@ -169,6 +172,7 @@ describe('MCP OAuth consent', () => {
 
   it('cancels admin step-up without granting access', async () => {
     auth.isAdmin = true
+    auth.canAccessAdminConsole = true
     authorize.mockRejectedValue({ reason: 'STEP_UP_REQUIRED' })
     const wrapper = render()
     await flushPromises()

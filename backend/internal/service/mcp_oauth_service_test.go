@@ -187,6 +187,14 @@ func (r *mcpOAuthUserRepo) GetByID(_ context.Context, id int64) (*User, error) {
 	return &copy, nil
 }
 
+func (r *mcpOAuthUserRepo) IncrementTokenVersion(_ context.Context, id int64) error {
+	if r.user == nil || r.user.ID != id {
+		return ErrUserNotFound
+	}
+	r.user.TokenVersion++
+	return nil
+}
+
 const mcpTestResource = "https://platform.example/api/v1/mcp"
 
 type mcpOAuthFixture struct {
@@ -669,6 +677,28 @@ func TestMCPOAuthAuthenticateThrottlesLastUsedWrites(t *testing.T) {
 	require.Equal(t, 2, f.r.touches)
 }
 
+func TestMCPOAuthAuthenticateUsesLiveAdminPermissions(t *testing.T) {
+	for _, role := range []string{RoleSuperAdmin, RoleAdmin} {
+		t.Run(role, func(t *testing.T) {
+			f := newMCPOAuthFixture(t)
+			f.u.user.Role = role
+			f.u.user.AdminPermissions = []string{AdminPermissionAccountsWrite}
+			tokens, err := f.s.Token(context.Background(), f.code(t, MCPScopeAdmin, nil), mcpTestResource)
+			require.NoError(t, err)
+			principal, err := f.s.Authenticate(context.Background(), tokens.AccessToken)
+			require.NoError(t, err)
+			require.Equal(t, role, principal.Role)
+			require.Equal(t, []string{AdminPermissionAccountsWrite}, principal.AdminPermissions)
+			principal.AdminPermissions[0] = AdminPermissionUsersManage
+			require.Equal(t, []string{AdminPermissionAccountsWrite}, f.u.user.AdminPermissions)
+			f.u.user.AdminPermissions = nil
+			principal, err = f.s.Authenticate(context.Background(), tokens.AccessToken)
+			require.NoError(t, err)
+			require.Empty(t, principal.AdminPermissions)
+		})
+	}
+}
+
 func TestMCPOAuthRevokeAllGrantsEndsEveryFamily(t *testing.T) {
 	f := newMCPOAuthFixture(t)
 	first, second := f.tokens(t), f.tokens(t)
@@ -699,10 +729,13 @@ func (r *mcpGrantRevokerStub) RevokeAllGrants(_ context.Context, userID int64) e
 
 func TestRevokeAllUserTokensAlsoRevokesMCPGrants(t *testing.T) {
 	revoker := &mcpGrantRevokerStub{}
-	auth := &AuthService{userRepo: &mcpOAuthUserRepo{user: &User{ID: 7, Status: StatusActive}}}
+	users := &mcpOAuthUserRepo{user: &User{ID: 7, Status: StatusActive}}
+	auth := &AuthService{userRepo: users}
 	auth.SetMCPGrantRevoker(revoker)
 	require.NoError(t, auth.RevokeAllUserTokens(context.Background(), 7))
 	require.Equal(t, []int64{7}, revoker.userIDs)
+	require.EqualValues(t, 1, users.user.TokenVersion)
 	revoker.err = errors.New("database unavailable")
 	require.ErrorIs(t, auth.RevokeAllUserTokens(context.Background(), 7), revoker.err)
+	require.EqualValues(t, 2, users.user.TokenVersion)
 }
