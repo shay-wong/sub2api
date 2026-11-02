@@ -4,9 +4,11 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"reflect"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -178,4 +180,24 @@ func TestAdminServiceUpdateAndDeleteProtectSuperAdmin(t *testing.T) {
 	deleteErr := svc.DeleteUser(context.Background(), 42)
 	require.Error(t, deleteErr)
 	require.Empty(t, base.deletedIDs)
+}
+
+func TestAdminService_UpdateUser_AdminGuardsAreClientErrors(t *testing.T) {
+	for _, role := range []string{RoleAdmin, RoleSuperAdmin} {
+		t.Run(role, func(t *testing.T) {
+			base := &userRepoStub{user: &User{ID: 42, Email: "a@example.com", Role: role}}
+			repo := &rpmUserRepoStub{userRepoStub: base}
+			svc := &adminServiceImpl{userRepo: repo, redeemCodeRepo: &redeemRepoStub{}}
+
+			_, err := svc.UpdateUser(context.Background(), 42, &UpdateUserInput{Status: StatusDisabled})
+			require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+			require.Equal(t, "ADMIN_DISABLE_FORBIDDEN", infraerrors.Reason(err))
+
+			err = svc.DeleteUser(context.Background(), 42)
+			require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+			require.Equal(t, "ADMIN_DELETE_FORBIDDEN", infraerrors.Reason(err))
+			require.Nil(t, repo.lastUpdated)
+			require.Empty(t, base.deletedIDs)
+		})
+	}
 }

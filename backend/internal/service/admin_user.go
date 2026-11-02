@@ -217,7 +217,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	// Protect admin users: cannot disable admin accounts
 	if RoleIsAdmin(user.Role) && input.Status == StatusDisabled {
-		return nil, errors.New("cannot disable admin user")
+		return nil, infraerrors.BadRequest("ADMIN_DISABLE_FORBIDDEN", "cannot disable admin user")
 	}
 
 	oldConcurrency := user.Concurrency
@@ -385,7 +385,7 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 		return err
 	}
 	if RoleIsAdmin(user.Role) {
-		return errors.New("cannot delete admin user")
+		return infraerrors.BadRequest("ADMIN_DELETE_FORBIDDEN", "cannot delete admin user")
 	}
 
 	apiKeys, err := s.listUserAPIKeysForDeletion(ctx, id)
