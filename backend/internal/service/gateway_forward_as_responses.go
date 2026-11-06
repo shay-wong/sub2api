@@ -394,6 +394,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	scanBuf := getSSEScannerBuf64K()
 	defer putSSEScannerBuf64K(scanBuf)
 	scanner.Buffer(scanBuf[:0], maxLineSize)
+	scanner.Split(newBoundedSSESplit(s.cfg, maxLineSize, nil))
 
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
@@ -406,6 +407,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		writeResponsesError(c, http.StatusBadGateway, "stream_conversion_error", "Failed to convert upstream response stream")
 		return nil, err
 	}
+	streamStatus := &anthropicCompatStream{body: resp.Body}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -416,8 +418,8 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 		// Read the data line
 		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return failBuffered(fmt.Errorf("read anthropic stream data: %w", err))
+			if scanner.Err() != nil {
+				break
 			}
 			return failBuffered(io.ErrUnexpectedEOF)
 		}
@@ -433,6 +435,11 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
 			return failBuffered(err)
+		}
+
+		streamStatus.observe(&event, payload)
+		if streamStatus.upstreamErrType != "" {
+			break
 		}
 
 		// message_start carries the initial response structure
@@ -472,8 +479,19 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); errors.Is(err, io.ErrUnexpectedEOF) {
 		return failBuffered(fmt.Errorf("read anthropic stream: %w", err))
+	}
+
+	streamStatus.readErr = scanner.Err()
+	if failure := streamStatus.failure(); failure != nil {
+		_ = resp.Body.Close()
+		writeResponsesError(c, http.StatusBadGateway, "server_error", failure.message)
+		return &ForwardResult{
+			RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+			Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort,
+			Duration: time.Since(startTime),
+		}, failure.err
 	}
 
 	if finalResp == nil {

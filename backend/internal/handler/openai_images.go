@@ -49,6 +49,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
+		if handleRequestBodyReadError(c, err) {
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -131,7 +134,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	inflight := selectedInflightBalance{request: service.InflightEstimateRequest{Model: routingModel, BodyBytes: len(body), Kind: service.InflightEstimateImage, Units: parsed.N}}
 	defer inflight.close()
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
-	requestCtx := service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context()))
+	requestCtx := service.WithOpenAIImageSizeRouting(service.WithOpenAIImagesEndpoint(service.WithOpenAIImageGenerationIntent(c.Request.Context())), parsed.Size)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -164,6 +167,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
+				if tier, unsupported := h.gatewayService.OpenAIImageSizeTierUnsupported(c.Request.Context(), apiKey.GroupID, routingModel, parsed.Size, "", parsed.RequiredCapabilityForModel(channelMapping.MappedModel)); unsupported {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", service.OpenAIImageSizeTierUnsupportedMessage(parsed.Size, tier), streamStarted)
+					return
+				}
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, service.PlatformOpenAI)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -403,6 +411,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		effectiveGroup := ResolveEffectiveGroup(selection, apiKey)
 		quotaPlatform := EffectiveQuotaPlatform(c.Request.Context(), selection, apiKey)
 		sessionID := service.ExtractClientSessionID(c)
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
@@ -420,7 +429,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				EffectiveGroupID:   effectiveGroupID,
 				EffectiveGroup:     effectiveGroup,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
+				ChannelUsageFields: channelUsageFields,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.images"),

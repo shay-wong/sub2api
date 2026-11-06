@@ -243,6 +243,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		maxLineSize = s.cfg.Gateway.MaxLineSize
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	scanner.Split(newBoundedSSESplit(s.cfg, maxLineSize, nil))
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
@@ -254,6 +255,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		writeGatewayCCError(c, http.StatusBadGateway, "stream_conversion_error", "Failed to convert upstream response stream")
 		return nil, err
 	}
+	streamStatus := &anthropicCompatStream{body: resp.Body}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -264,8 +266,8 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return failBuffered(fmt.Errorf("read anthropic chat stream data: %w", err))
+			if scanner.Err() != nil {
+				break
 			}
 			return failBuffered(io.ErrUnexpectedEOF)
 		}
@@ -280,6 +282,11 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 		if err := anthropicResponsesStreamError([]byte(payload)); err != nil {
 			return failBuffered(err)
+		}
+
+		streamStatus.observe(&event, payload)
+		if streamStatus.upstreamErrType != "" {
+			break
 		}
 
 		// message_start carries the initial response structure and cache usage
@@ -315,8 +322,19 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); errors.Is(err, io.ErrUnexpectedEOF) {
 		return failBuffered(fmt.Errorf("read anthropic chat stream: %w", err))
+	}
+
+	streamStatus.readErr = scanner.Err()
+	if failure := streamStatus.failure(); failure != nil {
+		_ = resp.Body.Close()
+		writeGatewayCCError(c, http.StatusBadGateway, "server_error", failure.message)
+		return &ForwardResult{
+			RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage,
+			Model: originalModel, UpstreamModel: mappedModel, ReasoningEffort: reasoningEffort,
+			Duration: time.Since(startTime),
+		}, failure.err
 	}
 
 	if finalResp == nil {

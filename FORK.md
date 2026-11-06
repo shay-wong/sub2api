@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `4a4a83ee5ec86b19d3a2dd9b6471de5128963bec` |
-| 当前比较范围 | `4a4a83ee5ec86b19d3a2dd9b6471de5128963bec..HEAD` |
+| 已合并上游提交 / 比较基线 | `c5ca149a3d856d92fa0b61bea276338be718c5db` |
+| 当前比较范围 | `c5ca149a3d856d92fa0b61bea276338be718c5db..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `bfc0b7587f7260d451eee36d247b2b013f80e382`，固定上游 parent 为 `4a4a83ee5ec86b19d3a2dd9b6471de5128963bec`，共同基线为 `ba81c7fd758e425d67f856d601147ef0c5263d3f`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `d77372fb7404578db1da812d2f2fd6df2c551705`，固定上游 parent 为 `c5ca149a3d856d92fa0b61bea276338be718c5db`，共同基线为 `4a4a83ee5ec86b19d3a2dd9b6471de5128963bec`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游 81 个提交：OAuth 管理 MCP、管理员密钥细化权限和全权兼容模式、GPT-6.1 Terra、Grok 模型目录诊断与响应模型审计、Gemini 模型列表和同账号重试、图片上传单文件 50 MiB 上限及超限明确拒绝、OAuth 非流式响应兼容、DeepSeek 计费修正、分页溢出与依赖安全修复。上述能力来自上游，现有 13 项仍有非等价边界；MCP 的 Fork 角色与权限适配放在合并后的独立功能提交。模型目录缓存二次检查已由 `b2b1bcf26` 等价吸收，保留既有回归而移除重复实现。既有明确上游 error 不计费、实际分组归因、有界 drain、鉴权快照 `v26` 及发布 rolling tag 策略继续保留。
+本次合入上游 29 个提交：网关请求体、SSE 和后台任务资源限制，OpenAI 图片尺寸分流与 sticky 溢出处理，注册邮箱黑名单，Cyber 长会话按已封禁前缀长度精确匹配，原始 instructions 回显，传输错误冷却开关，以及 CSV 每页 1000 条与 429 重试。上述能力来自上游，现有 13 项仍有非等价边界；黑名单三角色保护与磁盘请求体资源预算适配放在合并后的独立功能提交。异步用量记录保留实际分组与定价快照，图片尺寸分流保留代理隔离观察及恢复规则；既有明确上游 error 不计费、有界 drain、鉴权快照 `v26` 及发布 rolling tag 策略继续保留。
 
 ## Fork 发布版本
 
@@ -32,15 +32,15 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.19` |
-| 当前 Fork 版本 | `0.2.19-fork.1`（本次准备，未发布） |
-| 已发布同基线 Fork 版本 | 本次不发布；发布时检查远端已占用修订号 |
-| 下次发布所需版本 | `0.2.19-fork.1`（若远端已占用则递增） |
+| 当前 Fork 版本 | `0.2.19-fork.1`（沿用现有版本源） |
+| 已存在同基线 Fork tag | `v0.2.19-fork.1`；本次不发布 |
+| 下次发布所需版本 | 至少 `0.2.19-fork.2`，发布时检查远端已占用修订号 |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 升为 `0.2.19`，Fork 修订号从 `1` 开始，版本源准备为 `0.2.19-fork.1`。既有 tag 作为历史发布保留，不重写。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 仍为 `0.2.19`，不因同版本合并修改版本源。现有 `v0.2.19-fork.1` tag 保留，不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
-本次仅合并代码和同步版本基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
+本次仅合并代码和同步文档基线，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
 
 ## 能力索引
 
@@ -204,7 +204,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **到期用卡时间预览**：账号编辑页直接读取 `codex_reset_credit_snapshot`，显示最早未过期卡的 `expires_at - 提前量`，随单位/数值变化更新并标注本地时区；进入范围时提示下次检查，卡明细不完整、无效或全部过期时提示先查询额度，不编造计划。仅预览到期条件，用量条件仍可能提前触发；不新增接口或改变消费策略。`EditAccountModal.spec.ts` 覆盖 1000 分钟、三种单位、边界跨越和缺失信息；三语 README、CHANGELOG 同步。定位：`git log -S'autoResetCreditExpiryPreview' -- frontend/src/components/account/EditAccountModal.vue`，随此重置策略被上游等价吸收后移除 Fork 记录。
 - **自动重置策略扩展**：保留 `auto_reset_credit_enabled` 总开关及原 5h/7d 阈值，新增 `auto_reset_credit_5h_disabled`、`auto_reset_credit_7d_disabled`（缺省均为 false），允许单窗口或全部关闭；新增 `auto_reset_credit_expiry_enabled`（缺省 false）和 `auto_reset_credit_expiry_minutes`（整数 1–525600，缺省 60），前端以分钟/小时/天编辑，存储为分钟。到期条件为 `0 < 到期时间 - 当前时间 <= 提前量`，独立于用量，零用量也直接使用；沿用每分钟扫描，不承诺精确时刻执行。关闭窗口用卡不关闭该窗口额度停调，旧账号升级不自动启用到期用卡。
 - **自动重置安全与验证**：选择最早到期的有效卡，每次评估最多处理一张；保留失败退避、配置复核、卡明细缺失时不消费和同卡重试保护，卡 ID 不进入公开快照。实现集中在 `openai_quota_auto_reset.go`、`openai_quota_auto_reset_config.go`、`openai_gateway_scheduling.go` 和 `EditAccountModal.vue`，`scheduler_cache.go` 保留新策略字段；回归为 `openai_quota_auto_reset_test.go`、`openai_quota_auto_reset_policy_test.go`、调度缓存及账号编辑和重置状态组件测试。三语 README 与 CHANGELOG 同步；当前改动定位：`git log -S'auto_reset_credit_expiry_minutes' -- backend/internal/service/openai_quota_auto_reset_config.go`。上游等价覆盖独立开关、到期消费和失败恢复后移除此适配。
-- **0.2.18 兼容流适配**：上游 `94c7d6b02` / `4355236e0` 的统一断线回收与错误分类替代旧状态机，但空闲超时不等于总清理期限。Chat/Responses 共用 `gateway_forward_compat_stream.go`，继续完整解析 SSE frame、多行 data 和无空行尾帧；断线后总期限独立于 ping，禁止继续写入或设置 TTFT。明确上游 error 事件按维护者选择不计费；格式/转换失败仍 fail closed 并保留已观测用量。两入口的成功及部分结果经 `submitForwardUsage` 使用实际分组归因，已写出后不得换号拼接。测试为 `gateway_forward_compat_stream_fork_test.go`、`gateway_forward_compat_client_disconnect_test.go` 及原 Chat/Responses 测试；验证 `go test -tags=unit ./internal/service -run 'Test(HandleCCStreamingFromAnthropic|HandleResponsesStreamingResponse|AnthropicCompat)'`。三语 README 与 CHANGELOG 同步；独立适配定位：`git log -S'TestAnthropicCompatDisconnectDrainDeadlineSurvivesHeartbeats' -- backend/internal/service/gateway_forward_compat_stream_fork_test.go`。
+- **0.2.18 兼容流适配**：上游 `94c7d6b02` / `4355236e0` 的统一断线回收与错误分类替代旧状态机，但空闲超时不等于总清理期限。Chat/Responses 共用 `gateway_forward_compat_stream.go`，继续完整解析 SSE frame、多行 data 和无空行尾帧；断线后总期限独立于 ping，禁止继续写入或设置 TTFT。明确上游 error 事件按维护者选择不计费；格式/转换失败仍 fail closed。流式清理与一般传输故障保留已观测用量，缓冲转换遇到畸形输入或明确截断 `io.ErrUnexpectedEOF` 时不提交结果。本次上游新增的事件大小限制、取消及缺少终止事件也不得伪装成功。两入口的成功及部分结果经 `submitForwardUsage` 使用实际分组归因，已写出后不得换号拼接。测试为 `gateway_forward_compat_stream_fork_test.go`、`gateway_forward_compat_client_disconnect_test.go`、`sse_transport_limits_test.go` 及原 Chat/Responses 测试；验证 `go test -tags=unit ./internal/service -run 'Test(HandleCC|HandleResponses|AnthropicCompat)'`。三语 README 与 CHANGELOG 同步；独立适配定位：`git log -S'TestAnthropicCompatDisconnectDrainDeadlineSurvivesHeartbeats' -- backend/internal/service/gateway_forward_compat_stream_fork_test.go`。
 - **Anthropic 转 Chat 心跳断线适配**：上游 `9f84204c2` 将 ping 转成 SSE 注释；心跳写失败须进入 Fork 原有的有界 drain，停止后续数据/心跳/flush，不再写 `[DONE]`，但仍收集上游晚到用量，且断线后的事件不得设置首字时间。实现与回归为 `backend/internal/service/gateway_forward_as_chat_completions.go`、`gateway_forward_as_chat_completions_ping_test.go`；验证 `go test -tags=unit ./internal/service -run '^TestHandleCCStreamingFromAnthropic_'`。当前独立提交定位：`git log -S'drain retains upstream usage after downstream disconnect' -- backend/internal/service/gateway_forward_as_chat_completions_ping_test.go`；三语 README 同步该行为。上游提供等价断线 drain 和回归后删除此适配。
 
 - **0.2.13 首内容前断线清理**：Antigravity 首内容前 keepalive 写入失败时也启动已有的有界 drain，不能因上游持续 ping 而永久占用请求。实现位于 `backend/internal/service/antigravity_gateway_compat_stream.go`；验证：`go test -tags=unit ./internal/service -run '^TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline$'`。独立适配提交定位：`git log -S'TestAntigravityCompatPreContentPingDisconnectHasDrainDeadline' -- backend/internal/service/antigravity_gateway_compat_test.go`。三语 README 同步断线行为。

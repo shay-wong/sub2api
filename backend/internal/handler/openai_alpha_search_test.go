@@ -19,28 +19,38 @@ import (
 
 type alphaSearchCyberCache struct {
 	service.GatewayCache
-	blockedScopes map[string]bool
-	blockedKeys   map[string]bool
+	blockedScopes     map[string]bool
+	blockedKeys       map[string]bool
+	transcriptLengths map[int64][]int
 }
 
-func (c *alphaSearchCyberCache) SetCyberSessionBlocked(_ context.Context, scopeKey string, keys []string, _ time.Duration) error {
+var _ service.CyberSessionBlockStore = (*alphaSearchCyberCache)(nil)
+
+func (c *alphaSearchCyberCache) SetCyberSessionBlocked(_ context.Context, block service.CyberSessionBlock, _ time.Duration) error {
 	if c.blockedScopes == nil {
 		c.blockedScopes = make(map[string]bool)
 	}
 	if c.blockedKeys == nil {
 		c.blockedKeys = make(map[string]bool)
 	}
-	if scopeKey != "" {
-		c.blockedScopes[scopeKey] = true
+	if block.ScopeKey != "" {
+		c.blockedScopes[block.ScopeKey] = true
+		if c.transcriptLengths == nil {
+			c.transcriptLengths = make(map[int64][]int)
+		}
+		c.transcriptLengths[block.APIKeyID] = append(c.transcriptLengths[block.APIKeyID], block.TranscriptLengths...)
 	}
-	for _, key := range keys {
+	for _, key := range block.Keys {
 		c.blockedKeys[key] = true
 	}
 	return nil
 }
 
-func (c *alphaSearchCyberCache) IsCyberSessionScopeActive(_ context.Context, scopeKey string) (bool, error) {
-	return c.blockedScopes[scopeKey], nil
+func (c *alphaSearchCyberCache) CyberSessionTranscriptLengths(_ context.Context, apiKeyID int64, scopeKey string) ([]int, error) {
+	if !c.blockedScopes[scopeKey] {
+		return nil, nil
+	}
+	return c.transcriptLengths[apiKeyID], nil
 }
 
 func (c *alphaSearchCyberCache) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
