@@ -29,6 +29,7 @@ func (s *UserRepoSuite) TestListActiveUsersByEmailAliasProbeKeys_MatchesInboxVar
 	s.mustCreateUser(&service.User{Email: "bltarget2@gmail.com"})
 	s.mustCreateUser(&service.User{Email: "b.l.target@gmail.com", Status: service.StatusDisabled})
 	s.mustCreateUser(&service.User{Email: "bltarget@gmail.com", Role: service.RoleAdmin})
+	s.mustCreateUser(&service.User{Email: "bltarget+super@gmail.com", Role: service.RoleSuperAdmin})
 	deleted := s.mustCreateUser(&service.User{Email: "bltar.get+x@gmail.com"})
 	s.Require().NoError(s.repo.Delete(s.ctx, deleted.ID))
 
@@ -56,11 +57,12 @@ func (s *UserRepoSuite) TestListActiveUsersByEmailAliasProbeKeys_EmptyKeys() {
 func (s *UserRepoSuite) TestBatchDisableUsers_SkipsAdminDisabledAndDeleted() {
 	active := s.mustCreateUser(&service.User{Email: "bl-disable-active@example.com"})
 	admin := s.mustCreateUser(&service.User{Email: "bl-disable-admin@example.com", Role: service.RoleAdmin})
+	superAdmin := s.mustCreateUser(&service.User{Email: "bl-disable-super-admin@example.com", Role: service.RoleSuperAdmin})
 	already := s.mustCreateUser(&service.User{Email: "bl-disable-already@example.com", Status: service.StatusDisabled})
 	deleted := s.mustCreateUser(&service.User{Email: "bl-disable-deleted@example.com"})
 	s.Require().NoError(s.repo.Delete(s.ctx, deleted.ID))
 
-	disabled, err := s.repo.BatchDisableUsers(s.ctx, []int64{active.ID, admin.ID, already.ID, deleted.ID, 99999999})
+	disabled, err := s.repo.BatchDisableUsers(s.ctx, []int64{active.ID, admin.ID, superAdmin.ID, already.ID, deleted.ID, 99999999})
 	s.Require().NoError(err)
 	s.Require().Equal([]int64{active.ID}, disabled)
 
@@ -71,6 +73,10 @@ func (s *UserRepoSuite) TestBatchDisableUsers_SkipsAdminDisabledAndDeleted() {
 	gotAdmin, err := s.repo.GetByID(s.ctx, admin.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(service.StatusActive, gotAdmin.Status)
+
+	gotSuperAdmin, err := s.repo.GetByID(s.ctx, superAdmin.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.StatusActive, gotSuperAdmin.Status)
 }
 
 // 批量禁用与单个禁用一样持久吊销 MCP 授权：恢复账号后旧授权与令牌不会复活，被跳过的用户授权不受影响。

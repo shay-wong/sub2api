@@ -25,7 +25,7 @@ WITH probes AS (
 		split_part(RTRIM(LOWER(TRIM(email)), '.'), '@', 1) AS local_part,
 		split_part(RTRIM(LOWER(TRIM(email)), '.'), '@', 2) AS domain_part
 	FROM users
-	WHERE deleted_at IS NULL AND status = $2 AND role <> $3
+	WHERE deleted_at IS NULL AND status = $2 AND role = $3
 )
 SELECT c.id, c.email, c.username
 FROM candidates c
@@ -44,7 +44,7 @@ func (r *userRepository) ListActiveUsersByEmailAliasProbeKeys(ctx context.Contex
 	if r.sql == nil {
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
-	rows, err := r.sql.QueryContext(ctx, listActiveUsersByEmailAliasProbeKeysSQL, pq.Array(keys), service.StatusActive, service.RoleAdmin)
+	rows, err := r.sql.QueryContext(ctx, listActiveUsersByEmailAliasProbeKeysSQL, pq.Array(keys), service.StatusActive, service.RoleUser)
 	if err != nil {
 		return nil, fmt.Errorf("list users by email alias probes: %w", err)
 	}
@@ -114,8 +114,8 @@ func (r *userRepository) BatchDisableUsers(ctx context.Context, userIDs []int64)
 func batchDisableUserRows(ctx context.Context, exec sqlQueryExecutor, userIDs []int64) ([]int64, error) {
 	rows, err := exec.QueryContext(ctx, `
 UPDATE users SET status = $1, updated_at = NOW()
-WHERE id = ANY($2) AND deleted_at IS NULL AND role <> $3 AND status <> $1
-RETURNING id`, service.StatusDisabled, pq.Array(userIDs), service.RoleAdmin)
+WHERE id = ANY($2) AND deleted_at IS NULL AND role = $3 AND status <> $1
+RETURNING id`, service.StatusDisabled, pq.Array(userIDs), service.RoleUser)
 	if err != nil {
 		return nil, fmt.Errorf("batch disable users: %w", err)
 	}
