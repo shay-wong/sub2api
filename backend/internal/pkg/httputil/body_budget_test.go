@@ -123,6 +123,68 @@ func TestNormalizedRequestBodySharesMemoryBudget(t *testing.T) {
 	}
 }
 
+func TestDiskSpillRequestBodyEnforcesDecompressionLimits(t *testing.T) {
+	t.Run("zstd window", func(t *testing.T) {
+		raw := []byte{0x28, 0xb5, 0x2f, 0xfd, 0, (24 - 10) << 3, 9, 0, 0, 'x'}
+		budget := NewBodyMemoryBudget(16 << 20)
+		ctx, release := WithRequestBodyMemoryBudget(context.Background(), budget)
+		defer release()
+		body, cleanup, err := ReadRequestBodyWithDiskSpill(newRequestWithBody(t, raw, "zstd").WithContext(ctx), 1024)
+		if err == nil || body != nil || cleanup != nil {
+			t.Fatalf("accepted excessive decoder window: len=%d err=%v", len(body), err)
+		}
+		if used := requestBodyBudgetUsed(budget); used != 0 {
+			t.Fatalf("failed decoder retained %d bytes", used)
+		}
+	})
+	t.Run("decoded size", func(t *testing.T) {
+		var compressed bytes.Buffer
+		encoder := gzip.NewWriter(&compressed)
+		chunk := bytes.Repeat([]byte{' '}, 1<<20)
+		for range maxDecompressedBodySize / len(chunk) {
+			_, _ = encoder.Write(chunk)
+		}
+		_, _ = encoder.Write([]byte{'x'})
+		if err := encoder.Close(); err != nil {
+			t.Fatal(err)
+		}
+		body, cleanup, err := ReadRequestBodyWithDiskSpill(newRequestWithBody(t, compressed.Bytes(), "gzip"), 1024)
+		var maxErr *http.MaxBytesError
+		if body != nil || cleanup != nil || !errors.As(err, &maxErr) || maxErr.Limit != maxDecompressedBodySize {
+			t.Fatalf("silently truncated: len=%d err=%v", len(body), err)
+		}
+	})
+}
+
+func TestDiskSpillRequestBodySharesMemoryBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		payload   []byte
+		encoding  string
+		threshold int64
+		limit     int64
+	}{
+		{name: "copy buffer", payload: []byte(samplePayload), threshold: 1, limit: 1024},
+		{name: "decoder", payload: []byte{0x28, 0xb5, 0x2f, 0xfd, 0, (20 - 10) << 3, 9, 0, 0, 'x'}, encoding: "zstd", threshold: 1, limit: 1 << 20},
+		{name: "mapped normalization", payload: []byte(`{"input":"` + strings.Repeat("\x00", 7000) + `"}`), threshold: 1, limit: 32 << 10},
+		{name: "small normalization", payload: []byte(`{"input":"` + strings.Repeat("\x00", 100) + `"}`), threshold: 1024, limit: 600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			budget := NewBodyMemoryBudget(tc.limit)
+			ctx, release := WithRequestBodyMemoryBudget(context.Background(), budget)
+			defer release()
+			req := newRequestWithBody(t, tc.payload, tc.encoding).WithContext(ctx)
+			body, cleanup, err := ReadLenientJSONRequestBodyWithDiskSpill(req, tc.threshold, 1<<20)
+			if !errors.Is(err, ErrRequestBodyMemoryBudget) || body != nil || cleanup != nil {
+				t.Fatalf("disk spill bypassed budget: len=%d err=%v", len(body), err)
+			}
+			if used := requestBodyBudgetUsed(budget); used != 0 {
+				t.Fatalf("failed read retained %d bytes", used)
+			}
+		})
+	}
+}
+
 func requestBodyBudgetUsed(budget *BodyMemoryBudget) int64 {
 	budget.mu.Lock()
 	defer budget.mu.Unlock()
