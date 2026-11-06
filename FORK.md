@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `c5ca149a3d856d92fa0b61bea276338be718c5db` |
-| 当前比较范围 | `c5ca149a3d856d92fa0b61bea276338be718c5db..HEAD` |
+| 已合并上游提交 / 比较基线 | `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36` |
+| 当前比较范围 | `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `d77372fb7404578db1da812d2f2fd6df2c551705`，固定上游 parent 为 `c5ca149a3d856d92fa0b61bea276338be718c5db`，共同基线为 `4a4a83ee5ec86b19d3a2dd9b6471de5128963bec`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `27c9440cb50890e5bf1189f9bb37b14dc0bd5b9d`，固定上游 parent 为 `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36`，共同基线为 `c5ca149a3d856d92fa0b61bea276338be718c5db`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游 29 个提交：网关请求体、SSE 和后台任务资源限制，OpenAI 图片尺寸分流与 sticky 溢出处理，注册邮箱黑名单，Cyber 长会话按已封禁前缀长度精确匹配，原始 instructions 回显，传输错误冷却开关，以及 CSV 每页 1000 条与 429 重试。上述能力来自上游，现有 13 项仍有非等价边界；黑名单三角色保护与磁盘请求体资源预算适配放在合并后的独立功能提交。异步用量记录保留实际分组与定价快照，图片尺寸分流保留代理隔离观察及恢复规则；既有明确上游 error 不计费、有界 drain、鉴权快照 `v26` 及发布 rolling tag 策略继续保留。
+本次合入上游新增的 12 个提交：请求体 patch 内存预算与 JSON 热路径优化，Codex bootstrap/compaction 的轻量读取，Gemini/Antigravity 上游响应大小限制，图片任务独立内存预算，认证快照读取隐私门和 RPM 覆盖，以及仓储投影回归。上述能力来自上游；冲突解决继续保留 Fork 的大请求磁盘映射、实际分组归因、协议回退和权限边界。鉴权快照版本升为 `v27` 并同时保留 Fork 的图片计费与模型白名单字段；本次不新增用户配置或改变发布版本。
 
 ## Fork 发布版本
 
