@@ -131,19 +131,19 @@ func classifyRequestBodyReadError(req *http.Request, err error) string {
 		return RequestBodyReadErrorMaxBytes
 	}
 	lower := strings.ToLower(err.Error())
-	if strings.Contains(lower, "decode content-encoding") {
-		if strings.Contains(lower, "unsupported content-encoding") {
-			return RequestBodyReadErrorUnsupportedContentEncoding
-		}
-		return RequestBodyReadErrorDecodeContentEncoding
-	}
 	// Check timeouts first: on HTTP/1 a read deadline also cancels the request
-	// context, which would otherwise look like a client disconnect.
+	// context. Streaming decompression can wrap the timeout as a decode error.
 	if IsRequestBodyReadTimeout(err) {
 		return RequestBodyReadErrorTimeout
 	}
 	if requestBodyClientGone(req, err, lower) {
 		return RequestBodyReadErrorClientDisconnect
+	}
+	if strings.Contains(lower, "decode content-encoding") {
+		if strings.Contains(lower, "unsupported content-encoding") {
+			return RequestBodyReadErrorUnsupportedContentEncoding
+		}
+		return RequestBodyReadErrorDecodeContentEncoding
 	}
 	// HTTP/2 reports an END_STREAM that arrives before Content-Length bytes
 	// with "request declared a Content-Length of N but only wrote M bytes".

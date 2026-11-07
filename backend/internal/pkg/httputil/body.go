@@ -53,6 +53,17 @@ func (p *PrereadBody) Bytes() []byte {
 	return p.body
 }
 
+type requestBodyCountingReader struct {
+	reader    io.Reader
+	bytesRead int64
+}
+
+func (r *requestBodyCountingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.bytesRead += int64(n)
+	return n, err
+}
+
 // ReadRequestBodyWithDiskSpill keeps small bodies on the existing in-memory
 // path and stores large, chunked, or compressed bodies in a read-only mmap.
 func ReadRequestBodyWithDiskSpill(req *http.Request, threshold int64) ([]byte, func(), error) {
@@ -70,13 +81,19 @@ func ReadRequestBodyWithDiskSpill(req *http.Request, threshold int64) ([]byte, f
 		return body, nil, err
 	}
 
-	reader := io.Reader(req.Body)
+	startedAt := time.Now()
+	// Count the upload before decoding, so progress uses the same units as Content-Length.
+	raw := &requestBodyCountingReader{reader: req.Body}
+	readFailure := func(err error) error {
+		return &RequestBodyReadError{Err: err, BytesRead: raw.bytesRead, Elapsed: time.Since(startedAt)}
+	}
+	reader := io.Reader(raw)
 	closeReader := func() {}
 	if compressed {
 		var err error
-		reader, closeReader, err = newDecompressedRequestBodyReader(req.Context(), encoding, req.Body)
+		reader, closeReader, err = newDecompressedRequestBodyReader(req.Context(), encoding, raw)
 		if err != nil {
-			return nil, nil, fmt.Errorf("decode Content-Encoding %q: %w", encoding, err)
+			return nil, nil, readFailure(fmt.Errorf("decode Content-Encoding %q: %w", encoding, err))
 		}
 		reader = io.LimitReader(reader, maxDecompressedBodySize+1)
 	}
@@ -98,7 +115,7 @@ func ReadRequestBodyWithDiskSpill(req *http.Request, threshold int64) ([]byte, f
 		return req.Context().Err()
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, readFailure(err)
 	}
 	body := mapped.Bytes()
 	if compressed {

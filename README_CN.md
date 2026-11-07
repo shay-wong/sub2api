@@ -243,6 +243,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - 分组用量汇总复核聚合水位，避免历史用量并发变动时展示金额重复或遗漏；请求实际扣费不变。
 - 修复携带图片历史等大型 Responses 请求结束后，异步计费可能导致进程崩溃的问题。请求大小上限不变，上传超时仍需单独排查。
   - 磁盘请求体的解码与 JSON 规范化也遵守共享内存预算；解压内容超过 64 MiB 或 zstd 窗口超过 8 MiB 时明确拒绝，不静默截断。
+  - 磁盘路径上传失败会记录已接收字节数和耗时，不记录请求正文；读取超时返回 HTTP 408，客户端断开记为 499，压缩请求头读取失败也按此分类。
 - OpenAI Responses WebSocket 默认在完成一轮请求后空闲 5 分钟关闭，客户端应在下一轮自动重连。连接数上限依赖 Redis 分布式租约；Redis 故障且必须紧急恢复新连接时，可暂时设置 `gateway.openai_ws.max_ingress_connections_per_api_key: 0`，代价是临时关闭分布式连接数保护。
 - 已移除会泄露内部支付渠道配置的废弃公开接口 `GET /api/v1/payment/channels`。外部支付客户端应迁移到 `GET /api/v1/payment/checkout-info`；管理端支付渠道接口仍位于 `/api/v1/admin/payment`。
 
