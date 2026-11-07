@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36` |
-| 当前比较范围 | `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36..HEAD` |
+| 已合并上游提交 / 比较基线 | `2c93aea9f712c7e9396060acbeb9215d2c1883b0` |
+| 当前比较范围 | `2c93aea9f712c7e9396060acbeb9215d2c1883b0..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `27c9440cb50890e5bf1189f9bb37b14dc0bd5b9d`，固定上游 parent 为 `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36`，共同基线为 `c5ca149a3d856d92fa0b61bea276338be718c5db`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `9d26a1c63eee7c21583a0c268edb6839dd0df90c`，固定上游 parent 为 `2c93aea9f712c7e9396060acbeb9215d2c1883b0`，共同基线为 `0eee80ba87aa4f3aff7282bf1695aa6dc0471c36`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游新增的 12 个提交：请求体 patch 内存预算与 JSON 热路径优化，Codex bootstrap/compaction 的轻量读取，Gemini/Antigravity 上游响应大小限制，图片任务独立内存预算，认证快照读取隐私门和 RPM 覆盖，以及仓储投影回归。上述能力来自上游；冲突解决继续保留 Fork 的大请求磁盘映射、实际分组归因、协议回退和权限边界。鉴权快照版本升为 `v27` 并同时保留 Fork 的图片计费与模型白名单字段；本次不新增用户配置或改变发布版本。
+本次合入上游新增的 42 个提交（含合并提交）：GPT Image 2.6 原生图片链路、请求体读取超时及错误分类、WebSocket 每轮首字时间与 HTTP bridge 指纹收敛、Gemini 工具媒体与 Responses 内容/推理保留、Antigravity 响应格式及真实配额窗口、Claude Setup Token 周用量，以及 Cloudflare Anthropic REST 地址兼容。Antigravity direct/wrapped 响应格式与 Fork 已有能力重叠，合并继续保留严格解析错误和 Anthropic 消息 ID 格式；磁盘请求体的读取进度与超时分类适配另放在紧接合并的功能提交。实际分组计费、图片 opt-in、管理员权限、鉴权快照 `v27` 及自动重置状态显示保持原有契约；上游仍为 `0.2.19`，本次不修改版本源。
 
 ## Fork 发布版本
 
