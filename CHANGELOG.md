@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 提前采用上游 PR #8622：修复 Codex 桌面版页面上下文缺少 `call_id` 时被 HTTP Responses 误拒绝的问题，保留普通工具结果校验，无需额外配置。
 - 合入上游 OpenAI 30 分钟/12 小时缓存写入计费、请求体内存预算自适应、Antigravity 用量强制刷新与图片实际输出格式说明；保留 Fork 的渠道 Ultrafast 倍率覆盖和用量归因，版本准备为 `0.2.20-fork.2`。
 - 账号错误展示恢复上游的图标与完整悬停详情，移除短错误码解析；分页和移动端用量列表虚拟化保持不变。
 - 移除旧订阅人民币倍率 API 别名，统一使用 `subscription_usd_to_cny_rate`（设置接口为 `payment_subscription_usd_to_cny_rate`）；升级时一次性迁移旧配置，保留已有有效汇率和显式 `0`。

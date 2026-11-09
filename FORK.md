@@ -25,6 +25,8 @@
 
 本次合入上游新增的 8 个功能、修复及文档提交：OpenAI 30 分钟/12 小时缓存写入用量与计价、免费输入价格下的 Fast 倍率修复、按进程可用内存自适应请求体预算及 cgroup 读取边界、Antigravity 用量强制查询、孤立工具输出内存测试隔离和图片实际输出格式说明。上游版本仍为 `0.2.20`。Fork 保留独立 Ultrafast 渠道倍率、实际分组计费、mmap 生命周期、细粒度权限及自动重置策略；账号错误图标和旧人民币倍率退役等已完成的清理不回退。
 
+另提前摘取尚未合入上游的 [PR #8622](https://github.com/Wei-Shaw/sub2api/pull/8622)，来源提交为 `b2a695d617d490242a39b5f245cf2a50ae5d9993`。该补丁不改变上述正式上游基线，按能力 7 中的待吸收兼容修复维护；继续使用已准备且未发布的 `0.2.20-fork.2`。
+
 ## Fork 发布版本
 
 | 项目 | 值 |
@@ -202,6 +204,7 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
 
+- **Codex Desktop 网页上下文兼容（预先采用 PR #8622）**：生命周期为 `等待上游吸收`，来源提交为 `b2a695d617d490242a39b5f245cf2a50ae5d9993`。HTTP Responses 在工具结果校验前，将 `agent` 下缺少或空 `call_id` 的 `codex_apps_open_page`、`codex_apps_selected_page_part_N_of_M` 页面快照转为用户上下文，避免桌面版首条请求被误拒绝；要求名称、快照或分片头匹配，保留顺序、正文、历史及数字精度。真实工具结果、无效 `call_id`、重复 JSON 键和不匹配的条目仍遵守原校验。无需新增配置。实现为 `backend/internal/handler/openai_page_context.go` 和 `openai_gateway_handler.go`；回归为 `openai_page_context_test.go` 及 `openai_automation_bootstrap_test.go` 的零分配预检。运行 `go test -tags=unit ./internal/handler -run 'TestNormalizeCodex(PageContext|BootstrapPrecheck)'`；三语 README 与 CHANGELOG 同步。保留 Fork 的选后推理策略，不恢复补丁上下文中的预选组策略。当前提交定位：`git log -S'func normalizeCodexPageContext' -- backend/internal/handler/openai_page_context.go`；上游合入等价实现和回归后删除本差异记录。
 - **磁盘请求体读取诊断**：大请求及压缩请求经 mmap 读取失败时，也返回 `RequestBodyReadError` 的原始上传字节数和耗时，不能把解压后的字节数当作已接收字节数。真实读取超时和客户端断开优先于解码包装判定，分别使用 408 和 499；无效压缩仍为 400，超限与内存预算错误链继续保留 413/503。实现为 `backend/internal/pkg/httputil/body.go`、`body_read_error.go`，回归为 `body_read_error_test.go` 中 `TestDiskSpillRequestBodyReadFailuresReportRawProgress`，验证 `go test -race ./internal/pkg/httputil`。三语 README 与 CHANGELOG 同步；本次合并后独立适配定位：`git log -S'TestDiskSpillRequestBodyReadFailuresReportRawProgress' -- backend/internal/pkg/httputil/body_read_error_test.go`。上游具备等价磁盘路径诊断后移除此子项。
 - **磁盘请求体资源保护适配**：保留大请求 mmap 路径，同时让压缩解码窗口、复制缓冲区及 JSON 规范化共享上游请求内存预算；解压超过 64 MiB 明确拒绝，不截断后继续处理，zstd 窗口上限为 8 MiB。小请求继续使用上游带预算的读取与规范化路径，映射页延续 Fork 的磁盘映射生命周期。实现为 `backend/internal/pkg/httputil/body.go`；回归 `body_budget_test.go` 中 `TestDiskSpillRequestBodyEnforcesDecompressionLimits`、`TestDiskSpillRequestBodySharesMemoryBudget`，验证 `go test -race ./internal/pkg/httputil`。三语 README 与 CHANGELOG 同步；本次合并后的独立适配定位：`git log -S'TestDiskSpillRequestBodySharesMemoryBudget' -- backend/internal/pkg/httputil/body_budget_test.go`。上游具备等价磁盘路径和预算保护后移除此适配。
 - **到期用卡时间预览**：账号编辑页直接读取 `codex_reset_credit_snapshot`，显示最早未过期卡的 `expires_at - 提前量`，随单位/数值变化更新并标注本地时区；进入范围时提示下次检查，卡明细不完整、无效或全部过期时提示先查询额度，不编造计划。仅预览到期条件，用量条件仍可能提前触发；不新增接口或改变消费策略。`EditAccountModal.spec.ts` 覆盖 1000 分钟、三种单位、边界跨越和缺失信息；三语 README、CHANGELOG 同步。定位：`git log -S'autoResetCreditExpiryPreview' -- frontend/src/components/account/EditAccountModal.vue`，随此重置策略被上游等价吸收后移除 Fork 记录。

@@ -225,6 +225,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **OpenAI Ultrafast** - Uses upstream passthrough for `service_tier: "ultrafast"` in Responses, Chat Completions, and Responses WebSocket, including the Codex OAuth routing hint. Shared defaults are `6x` Standard for Astra and `2x` for other models.
   - The fork adds a separate **Ultrafast multiplier** under **Channels → Model pricing**. A positive value overrides the model default; leaving it blank uses that default, independently of the Fast multiplier.
   - Billing follows upstream's response-tier rules: an authoritative response can lower but never raise the billed tier; the amount is then calculated using that tier's configured prices. A `default` echo from a Codex OAuth/setup-token account keeps the final outbound tier; an explicit `priority` response can lower Ultrafast to Priority.
+- **Codex Desktop Page Context** - HTTP Responses accepts recognized open-page and selected-page snapshots sent without a call ID, without extra configuration. Regular tool results retain the existing validation rules.
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
   - Upstream now provides model catalog cache rechecks to avoid duplicate concurrent fetches; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits
