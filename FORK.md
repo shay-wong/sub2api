@@ -454,7 +454,7 @@ git diff --check
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
 - **已清理的 Project 空壳**：趋势、排行、Dashboard 和账号更新查询中恒为空的 Project 条件，以及 Ops 日志查询仅转调的 `ForContext` 包装，不属于权限隔离或兼容能力；清理后直接使用原查询和筛选 helper。旧 `project_id` 存储与默认值写入仍按能力 1 保留。
-- **上游共有的模型行为**：账号连接测试沿用 `openai.DefaultTestModel`（当前为 `gpt-5.4`），不存在 Fork 专有的 `gpt-5.6-sol` 默认。Astra 提示词原样沿用上游，Fast 支持由共享模型族判断覆盖；额外回归测试不构成独有能力。
+- **上游共有的模型行为**：账号连接测试沿用 `openai.DefaultTestModel`（当前为 `gpt-5.4`），不存在 Fork 专有的 `gpt-5.6-sol` 默认。Astra 提示词原样沿用上游，Fast 支持由共享模型族判断覆盖；额外回归测试不构成独有能力，完全重复的计费测试不保留。
 - **迁移文件编号**：fork 的 `231_channel_ultrafast_multiplier.sql` 与上游的 `231_add_usage_log_requested_reasoning_effort.sql`、`231_user_restrict_public_groups.sql` 可以并存；migration runner 以完整 filename 作为 `schema_migrations` 主键并校验各自 checksum，三个迁移均幂等且互不依赖，不为消除数字前缀重复而改名。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、provider snapshot、退款审计兼容等不变量。
