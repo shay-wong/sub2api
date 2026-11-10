@@ -215,7 +215,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复 Codex reasoning/Agent Identity、OpenAI privacy、Alpha Search、Responses passthrough、proxy stream circuit、429 清理和 account failover 的通用正确性。
 - **行为不变量**：保留可回放的 encrypted reasoning，剥离不可回查引用；Agent Identity 只恢复一次且不泄漏 assertion；代理 quarantine 只阻断对应请求范围并维持 fail-open 语义；额度重置的上游成功是不可逆结果，本地 429/runtime block 清理失败必须进入 HTTP 200 的部分成功恢复/告警流程，不得返回可重试失败并再次消耗 reset credit；`RequestScopedTransient` 只能驱动请求级重试/failover，不得降低所选账号的 scheduler health；失效 OAuth 账号不能阻断切换；Responses namespace 和 compact/passthrough 决策保持协议一致；passthrough 外部取消必须先选择精确 close code，关闭客户端连接以解除阻塞写，并在 `Relay` 返回前 join 已启动的 relay worker；ingress lease loss 在连接可写时保持 1013。
-- **GPT-6 Astra 目录补充**：Fork 额外保留内置 `gpt-6-astra` 价格目录条目，包含总上下文 `1,050,000`、最大输入 `922,000` 和完整价卡。标准价、Priority `2x`、272K 长上下文阶梯及静态兜底均已与上游一致，不属于独立定价规则。账号测试默认模型继续使用 `gpt-5.6-sol`，避免新模型权限尚未普及时改变健康检查行为。
+- **GPT-6 Astra 目录补充**：Fork 额外保留内置 `gpt-6-astra` 价格目录条目，包含总上下文 `1,050,000`、最大输入 `922,000` 和完整价卡。标准价、Priority `2x`、272K 长上下文阶梯及静态兜底均已与上游一致，不属于独立定价规则。
 - **GPT-6 Astra 剩余实现**：差异仅为 `backend/resources/model-pricing/model_prices_and_context_window.json` 的内置条目；`pricing_service.go` 的 Astra 兜底和 `billing_service.go` 的 Astra 基础价沿用上游。Ultrafast 渠道倍率覆盖另见能力 10。
 - **Astra 静态兜底对齐上游**：本次合并采用上游的 272K 输入阈值、输入 `2x`、输出 `1.5x`，不再保留故障兜底仅基础价的差异。`TestGetModelPricing_OpenAIGPT6AstraFallback` 与 `TestOpenAIFrontierDedicatedFallbacksUseOfficialRates` 覆盖两条兜底路径。
 - **大请求 mmap 生命周期**：`newOpenAIRequestView` 扫描正文仍使用零拷贝，但 Model、PromptCacheKey、PreviousResponseID、ServiceTier、ReasoningEffort 必须拥有独立字符串，不能让异步计费、数据库批量写入或跨正文替换状态引用已解除映射的内存。单纯保留 Go slice 不阻止 `Munmap`。原大请求优化来源为 `10d01a8d4`，本次修复定位：`git log -S'TestOpenAIRequestView_ScalarsOutliveMappedBody' -- backend/internal/service/openai_gateway_service_hotpath_test.go`。验证：`go test ./internal/service -run 'TestOpenAIRequestView'`；回归实际关闭映射后读取全部标量并走计费模型解析与字符串编码。同步三语 README 的大请求稳定性说明；这不改变请求大小上限，也不修复尚未定位的 524 上传中断。上游当前没有 mmap 请求体路径，仅合并上游不能替代本契约。
@@ -454,6 +454,7 @@ git diff --check
 - **派生输出**：单纯 VERSION 同步、Ent/Wire 生成输出和 locale 补齐不单列；它们归属于对应 source capability。
 - **内容与机械变更**：赞助商文案、链接修正、格式、lint annotation 和仅测试适配不单列。
 - **已清理的 Project 空壳**：趋势、排行、Dashboard 和账号更新查询中恒为空的 Project 条件，以及 Ops 日志查询仅转调的 `ForContext` 包装，不属于权限隔离或兼容能力；清理后直接使用原查询和筛选 helper。旧 `project_id` 存储与默认值写入仍按能力 1 保留。
+- **上游共有的模型行为**：账号连接测试沿用 `openai.DefaultTestModel`（当前为 `gpt-5.4`），不存在 Fork 专有的 `gpt-5.6-sol` 默认。Astra 提示词原样沿用上游，Fast 支持由共享模型族判断覆盖；额外回归测试不构成独有能力。
 - **迁移文件编号**：fork 的 `231_channel_ultrafast_multiplier.sql` 与上游的 `231_add_usage_log_requested_reasoning_effort.sql`、`231_user_restrict_public_groups.sql` 可以并存；migration runner 以完整 filename 作为 `schema_migrations` 主键并校验各自 checksum，三个迁移均幂等且互不依赖，不为消除数字前缀重复而改名。
 - **已合并上游修复**：`21aacde0b3d340e21253b73a04f6e724b40a77de` 已通过上游父提交 `b74024c7868ee88a0bf921306cbc22a2f922872a` 进入当前基线；其让下行 write context 脱离 relay cancellation 的基础修复不是 fork 差异。当前 fork 额外保证外部取消会关闭连接并 join 阻塞写，该行为归入能力 7，不单列新能力。
 - **既有上游吸收**：上游父提交 `27e8f69a9e04d5919c7f4b6a4175c34af24e7eb2` 已提供 Stripe 金额级幂等键、pending refund 的事务化 claim/finalize、可用余额原子扣减，以及 Messages 临时账号错误切换；这些上游子能力不作为 fork 差异。能力 7 与 10 只保留仍超出上游的协议、provider snapshot、退款审计兼容等不变量。
