@@ -116,9 +116,6 @@ func TestParsePaymentConfig(t *testing.T) {
 		if len(cfg.EnabledTypes) != 0 {
 			t.Fatalf("expected empty EnabledTypes, got %v", cfg.EnabledTypes)
 		}
-		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
-		}
 		if cfg.SubscriptionUSDToCNYRate != 0 {
 			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
 		}
@@ -139,7 +136,7 @@ func TestParsePaymentConfig(t *testing.T) {
 			SettingEnabledPaymentTypes:           "alipay,wxpay,stripe",
 			SettingBalancePayDisabled:            "true",
 			SettingBalanceRechargeMult:           "0.14",
-			SettingSubscriptionCNYMult:           "0.20",
+			SettingSubscriptionUSDToCNYRate:      "5",
 			SettingLoadBalanceStrategy:           "least_amount",
 			SettingProductNamePrefix:             "PRE",
 			SettingProductNameSuffix:             "SUF",
@@ -176,9 +173,6 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 		if cfg.BalanceRechargeMultiplier != 0.14 {
 			t.Fatalf("BalanceRechargeMultiplier = %v, want 0.14", cfg.BalanceRechargeMultiplier)
-		}
-		if cfg.SubscriptionCNYPaymentMultiplier != 0.20 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.20", cfg.SubscriptionCNYPaymentMultiplier)
 		}
 		if cfg.SubscriptionUSDToCNYRate != 5 {
 			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 5", cfg.SubscriptionUSDToCNYRate)
@@ -258,94 +252,36 @@ func TestParsePaymentConfig(t *testing.T) {
 		cfg := svc.parsePaymentConfig(map[string]string{
 			SettingBalanceRechargeMult: "0.14",
 		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
-		}
 		if cfg.SubscriptionUSDToCNYRate != 0 {
 			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
 		}
 	})
 
-	t.Run("explicit subscription USD to CNY rate has priority over legacy multiplier", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionCNYMult:      "0.20",
-			SettingSubscriptionUSDToCNYRate: "7.15",
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want float64
+	}{
+		{name: "configured rate", raw: "7.15", want: 7.15},
+		{name: "zero disables conversion", raw: "0", want: 0},
+		{name: "missing rate stays disabled", raw: "", want: 0},
+		{name: "invalid rate stays disabled", raw: "abc", want: 0},
+		{name: "negative rate stays disabled", raw: "-1", want: 0},
+		{name: "NaN stays disabled", raw: "NaN", want: 0},
+		{name: "infinity stays disabled", raw: "+Inf", want: 0},
+		{name: "configured whitespace is accepted", raw: " 7.15 ", want: 7.15},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := svc.parsePaymentConfig(map[string]string{
+				SettingSubscriptionUSDToCNYRate:       tt.raw,
+				"SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER": "0.20",
+			})
+			if cfg.SubscriptionUSDToCNYRate != tt.want {
+				t.Fatalf("SubscriptionUSDToCNYRate = %v, want %v", cfg.SubscriptionUSDToCNYRate, tt.want)
+			}
 		})
-		if cfg.SubscriptionCNYPaymentMultiplier != subscriptionUSDToCNYRateToPaymentMultiplier(7.15) {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want %v", cfg.SubscriptionCNYPaymentMultiplier, subscriptionUSDToCNYRateToPaymentMultiplier(7.15))
-		}
-		if cfg.SubscriptionUSDToCNYRate != 7.15 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 7.15", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
-
-	t.Run("rate-only config exposes derived legacy multiplier alias", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionUSDToCNYRate: "7.15",
-		})
-		if cfg.SubscriptionCNYPaymentMultiplier != subscriptionUSDToCNYRateToPaymentMultiplier(7.15) {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want %v", cfg.SubscriptionCNYPaymentMultiplier, subscriptionUSDToCNYRateToPaymentMultiplier(7.15))
-		}
-		if cfg.SubscriptionUSDToCNYRate != 7.15 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 7.15", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
-
-	t.Run("explicit zero rate clears legacy multiplier alias", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionUSDToCNYRate: "0",
-		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 0 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0", cfg.SubscriptionCNYPaymentMultiplier)
-		}
-		if cfg.SubscriptionUSDToCNYRate != 0 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
-
-	t.Run("explicit zero rate clears stale legacy multiplier alias", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionCNYMult:      "0.20",
-			SettingSubscriptionUSDToCNYRate: "0",
-		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 0 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0", cfg.SubscriptionCNYPaymentMultiplier)
-		}
-		if cfg.SubscriptionUSDToCNYRate != 0 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
-
-	t.Run("invalid canonical rate falls back to valid legacy multiplier", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionCNYMult:      "0.20",
-			SettingSubscriptionUSDToCNYRate: "abc",
-		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 0.20 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0.20", cfg.SubscriptionCNYPaymentMultiplier)
-		}
-		if cfg.SubscriptionUSDToCNYRate != 5 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 5", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
-
-	t.Run("invalid canonical rate without legacy uses default disabled state", func(t *testing.T) {
-		t.Parallel()
-		cfg := svc.parsePaymentConfig(map[string]string{
-			SettingSubscriptionUSDToCNYRate: "abc",
-		})
-		if cfg.SubscriptionCNYPaymentMultiplier != 1 {
-			t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 1", cfg.SubscriptionCNYPaymentMultiplier)
-		}
-		if cfg.SubscriptionUSDToCNYRate != 0 {
-			t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
-		}
-	})
+	}
 }
 
 func TestGetBasePaymentType(t *testing.T) {
@@ -662,160 +598,34 @@ func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
 	}
 }
 
-func TestUpdatePaymentConfig_DerivesLegacySubscriptionMultiplierFromCanonicalRate(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 7.15
+func TestUpdatePaymentConfigWritesOnlyCanonicalSubscriptionRate(t *testing.T) {
+	for _, rate := range []float64{7.15, 0} {
+		t.Run(fmt.Sprint(rate), func(t *testing.T) {
+			const legacyKey = "SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER"
+			repo := &paymentConfigSettingRepoStub{values: map[string]string{legacyKey: "0.2"}}
+			svc := &PaymentConfigService{settingRepo: repo}
 
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate: &rate,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	wantMultiplier := formatPositiveFloatExact(paymentConfigFloatPtr(subscriptionUSDToCNYRateToPaymentMultiplier(rate)))
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "7.15" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 7.15", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-	if repo.values[SettingSubscriptionCNYMult] != wantMultiplier {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want %q", repo.values[SettingSubscriptionCNYMult], wantMultiplier)
-	}
-}
-
-func TestUpdatePaymentConfig_ConvertsLegacySubscriptionMultiplierToCanonicalRate(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	multiplier := 0.2
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionCNYPaymentMultiplier: &multiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	if repo.values[SettingSubscriptionCNYMult] != "0.2" {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want 0.2", repo.values[SettingSubscriptionCNYMult])
-	}
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "5" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 5", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-}
-
-func TestUpdatePaymentConfig_CanonicalZeroClearsStaleLegacySubscriptionMultiplier(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 0.0
-	staleMultiplier := 0.2
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate:         &rate,
-		SubscriptionCNYPaymentMultiplier: &staleMultiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "0" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 0", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-	if repo.values[SettingSubscriptionCNYMult] != "" {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want empty", repo.values[SettingSubscriptionCNYMult])
-	}
-}
-
-func TestUpdatePaymentConfig_CanonicalZeroIgnoresInvalidLegacySubscriptionMultiplier(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 0.0
-	invalidMultiplier := 0.0
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate:         &rate,
-		SubscriptionCNYPaymentMultiplier: &invalidMultiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "0" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 0", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-	if repo.values[SettingSubscriptionCNYMult] != "" {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want empty", repo.values[SettingSubscriptionCNYMult])
-	}
-}
-
-func TestUpdatePaymentConfig_CanonicalZeroRoundTripsAsClearedLegacyAlias(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 0.0
-	staleMultiplier := 0.2
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate:         &rate,
-		SubscriptionCNYPaymentMultiplier: &staleMultiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	cfg, err := svc.GetPaymentConfig(context.Background())
-	if err != nil {
-		t.Fatalf("GetPaymentConfig returned error: %v", err)
-	}
-	if cfg.SubscriptionUSDToCNYRate != 0 {
-		t.Fatalf("SubscriptionUSDToCNYRate = %v, want 0", cfg.SubscriptionUSDToCNYRate)
-	}
-	if cfg.SubscriptionCNYPaymentMultiplier != 0 {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %v, want 0", cfg.SubscriptionCNYPaymentMultiplier)
-	}
-}
-
-func TestUpdatePaymentConfig_CanonicalRateOverridesConflictingLegacyMultiplier(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 7.15
-	conflictingMultiplier := 0.2
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate:         &rate,
-		SubscriptionCNYPaymentMultiplier: &conflictingMultiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	wantMultiplier := formatPositiveFloatExact(paymentConfigFloatPtr(subscriptionUSDToCNYRateToPaymentMultiplier(rate)))
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "7.15" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 7.15", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-	if repo.values[SettingSubscriptionCNYMult] != wantMultiplier {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want %q", repo.values[SettingSubscriptionCNYMult], wantMultiplier)
-	}
-}
-
-func TestUpdatePaymentConfig_CanonicalRateIgnoresInvalidLegacyMultiplier(t *testing.T) {
-	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
-	svc := &PaymentConfigService{settingRepo: repo}
-	rate := 7.15
-	invalidMultiplier := 0.0
-
-	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
-		SubscriptionUSDToCNYRate:         &rate,
-		SubscriptionCNYPaymentMultiplier: &invalidMultiplier,
-	})
-	if err != nil {
-		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
-	}
-
-	wantMultiplier := formatPositiveFloatExact(paymentConfigFloatPtr(subscriptionUSDToCNYRateToPaymentMultiplier(rate)))
-	if repo.values[SettingSubscriptionUSDToCNYRate] != "7.15" {
-		t.Fatalf("SubscriptionUSDToCNYRate = %q, want 7.15", repo.values[SettingSubscriptionUSDToCNYRate])
-	}
-	if repo.values[SettingSubscriptionCNYMult] != wantMultiplier {
-		t.Fatalf("SubscriptionCNYPaymentMultiplier = %q, want %q", repo.values[SettingSubscriptionCNYMult], wantMultiplier)
+			err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+				SubscriptionUSDToCNYRate: &rate,
+			})
+			if err != nil {
+				t.Fatalf("UpdatePaymentConfig returned error: %v", err)
+			}
+			want := formatNonNegativeFloatExact(&rate)
+			if len(repo.updates) != 1 || repo.updates[SettingSubscriptionUSDToCNYRate] != want {
+				t.Fatalf("updates = %v, want only canonical rate %q", repo.updates, want)
+			}
+			if repo.values[legacyKey] != "0.2" {
+				t.Fatalf("retired setting was changed: %q", repo.values[legacyKey])
+			}
+			cfg, err := svc.GetPaymentConfig(context.Background())
+			if err != nil {
+				t.Fatalf("GetPaymentConfig returned error: %v", err)
+			}
+			if cfg.SubscriptionUSDToCNYRate != rate {
+				t.Fatalf("SubscriptionUSDToCNYRate = %v, want %v", cfg.SubscriptionUSDToCNYRate, rate)
+			}
+		})
 	}
 }
 

@@ -41,7 +41,6 @@ export interface PaymentConfig {
   balance_disabled: boolean
   balance_recharge_multiplier: number
   subscription_usd_to_cny_rate: number
-  subscription_cny_payment_multiplier?: number
   enabled_payment_types: PaymentType[]
   help_image_url: string
   help_text: string
@@ -77,8 +76,6 @@ export interface CheckoutInfoResponse {
   balance_recharge_multiplier: number
   /** Subscription CNY conversion rate (1 USD = X CNY); 0 = disabled, plan price is charged as-is */
   subscription_usd_to_cny_rate: number
-  /** Deprecated inverse-rate alias kept for older deployments */
-  subscription_cny_payment_multiplier?: number
   recharge_fee_rate: number
   /** 充值赠送阶梯（按 min_amount 升序）；缺失/空数组 = 不赠送 */
   recharge_bonus_tiers?: RechargeBonusTier[]

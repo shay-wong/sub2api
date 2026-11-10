@@ -25,8 +25,6 @@ const (
 	SettingLoadBalanceStrategy = "LOAD_BALANCE_STRATEGY"
 	SettingBalancePayDisabled  = "BALANCE_PAYMENT_DISABLED"
 	SettingBalanceRechargeMult = "BALANCE_RECHARGE_MULTIPLIER"
-	// SettingSubscriptionCNYMult is the legacy inverse-rate setting kept for migration.
-	SettingSubscriptionCNYMult = "SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER"
 	// SettingSubscriptionUSDToCNYRate 是订阅 CNY 换算汇率（1 USD = X CNY）。
 	// 0/未配置 = 关闭换算（订阅按 price 数值直付），显式配置后 CNY 通道订阅按 price × rate 收款。
 	SettingSubscriptionUSDToCNYRate      = "SUBSCRIPTION_USD_TO_CNY_RATE"
@@ -63,9 +61,7 @@ type PaymentConfig struct {
 	BalanceRechargeMultiplier float64  `json:"balance_recharge_multiplier"`
 	// SubscriptionUSDToCNYRate 为 0 时订阅换算关闭（兼容存量行为）。
 	SubscriptionUSDToCNYRate float64 `json:"subscription_usd_to_cny_rate"`
-	// SubscriptionCNYPaymentMultiplier is a deprecated inverse-rate alias.
-	SubscriptionCNYPaymentMultiplier float64 `json:"subscription_cny_payment_multiplier,omitempty"`
-	RechargeFeeRate                  float64 `json:"recharge_fee_rate"`
+	RechargeFeeRate          float64 `json:"recharge_fee_rate"`
 	// RechargeBonusTiers 余额充值优惠阶梯（按 MinAmount 升序）；空表示无优惠。
 	RechargeBonusTiers []RechargeBonusTier `json:"recharge_bonus_tiers"`
 	// RechargeBonusMode 阶梯模式：bonus（赠金）/ discount（折扣），已归一化。
@@ -104,9 +100,7 @@ type UpdatePaymentConfigRequest struct {
 	BalanceDisabled           *bool    `json:"balance_disabled"`
 	BalanceRechargeMultiplier *float64 `json:"balance_recharge_multiplier"`
 	SubscriptionUSDToCNYRate  *float64 `json:"subscription_usd_to_cny_rate"`
-	// SubscriptionCNYPaymentMultiplier is accepted for legacy clients and converted to USD/CNY rate.
-	SubscriptionCNYPaymentMultiplier *float64 `json:"subscription_cny_payment_multiplier"`
-	RechargeFeeRate                  *float64 `json:"recharge_fee_rate"`
+	RechargeFeeRate           *float64 `json:"recharge_fee_rate"`
 	// RechargeBonusTiers nil 表示不更新；空切片表示清空阶梯。
 	RechargeBonusTiers  *[]RechargeBonusTier `json:"recharge_bonus_tiers"`
 	RechargeBonusMode   *string              `json:"recharge_bonus_mode"`
@@ -236,7 +230,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingPaymentEnabled, SettingMinRechargeAmount, SettingMaxRechargeAmount,
 		SettingDailyRechargeLimit, SettingOrderTimeoutMinutes, SettingMaxPendingOrders,
 		SettingEnabledPaymentTypes, SettingBalancePayDisabled, SettingBalanceRechargeMult,
-		SettingSubscriptionUSDToCNYRate, SettingSubscriptionCNYMult, SettingRechargeFeeRate, SettingLoadBalanceStrategy,
+		SettingSubscriptionUSDToCNYRate, SettingRechargeFeeRate, SettingLoadBalanceStrategy,
 		SettingRechargeBonusTiers, SettingRechargeBonusMode, SettingRechargeBonusNotice,
 		SettingProductNamePrefix, SettingProductNameSuffix,
 		SettingHelpImageURL, SettingHelpText,
@@ -284,23 +278,7 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		AlipayForceQRCode:             vals[SettingAlipayForceQRCode] == "true",
 		AlipayMobilePrecreateDeepLink: vals[SettingAlipayMobilePrecreateDeepLink] == "true",
 	}
-	canonicalRate, canonicalRateConfigured := parseConfiguredSubscriptionUSDToCNYRate(vals[SettingSubscriptionUSDToCNYRate])
-	if canonicalRateConfigured {
-		cfg.SubscriptionUSDToCNYRate = canonicalRate
-	}
-	legacyMultiplierConfigured := strings.TrimSpace(vals[SettingSubscriptionCNYMult]) != ""
-	switch {
-	case canonicalRateConfigured && cfg.SubscriptionUSDToCNYRate > 0:
-		cfg.SubscriptionCNYPaymentMultiplier = subscriptionUSDToCNYRateToPaymentMultiplier(cfg.SubscriptionUSDToCNYRate)
-	case canonicalRateConfigured:
-		cfg.SubscriptionCNYPaymentMultiplier = 0
-	case legacyMultiplierConfigured:
-		legacyMultiplier := normalizePaymentMultiplier(pcParseFloat(vals[SettingSubscriptionCNYMult], defaultPaymentMultiplier))
-		cfg.SubscriptionCNYPaymentMultiplier = legacyMultiplier
-		cfg.SubscriptionUSDToCNYRate = subscriptionCNYPaymentMultiplierToUSDToCNYRate(legacyMultiplier)
-	default:
-		cfg.SubscriptionCNYPaymentMultiplier = defaultPaymentMultiplier
-	}
+	cfg.SubscriptionUSDToCNYRate, _ = parseConfiguredSubscriptionUSDToCNYRate(vals[SettingSubscriptionUSDToCNYRate])
 	cfg.RechargeBonusMode, _ = NormalizeRechargeBonusMode(vals[SettingRechargeBonusMode])
 	cfg.AlipayMobilePrecreateDeepLink = pcEnvBoolOverride(
 		SettingAlipayMobilePrecreateDeepLink,
@@ -370,11 +348,6 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 			return infraerrors.BadRequest("INVALID_SUBSCRIPTION_USD_TO_CNY_RATE", "subscription USD to CNY rate must be 0 (disabled) or a positive number")
 		}
 	}
-	if req.SubscriptionUSDToCNYRate == nil && req.SubscriptionCNYPaymentMultiplier != nil {
-		if math.IsNaN(*req.SubscriptionCNYPaymentMultiplier) || math.IsInf(*req.SubscriptionCNYPaymentMultiplier, 0) || *req.SubscriptionCNYPaymentMultiplier <= 0 {
-			return infraerrors.BadRequest("INVALID_SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER", "subscription CNY payment multiplier must be greater than 0")
-		}
-	}
 	if req.RechargeFeeRate != nil {
 		v := *req.RechargeFeeRate
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
@@ -385,21 +358,6 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 			return infraerrors.BadRequest("INVALID_RECHARGE_FEE_RATE", "recharge fee rate allows at most 2 decimal places")
 		}
 	}
-	subscriptionUSDToCNYRate := req.SubscriptionUSDToCNYRate
-	var subscriptionCNYPaymentMultiplier *float64
-	if subscriptionUSDToCNYRate != nil {
-		if *subscriptionUSDToCNYRate > 0 {
-			derived := subscriptionUSDToCNYRateToPaymentMultiplier(*subscriptionUSDToCNYRate)
-			subscriptionCNYPaymentMultiplier = &derived
-		}
-	} else {
-		subscriptionCNYPaymentMultiplier = req.SubscriptionCNYPaymentMultiplier
-		if req.SubscriptionCNYPaymentMultiplier != nil {
-			derived := subscriptionCNYPaymentMultiplierToUSDToCNYRate(*req.SubscriptionCNYPaymentMultiplier)
-			subscriptionUSDToCNYRate = &derived
-		}
-	}
-
 	rechargeBonusTiersValue, rechargeBonusModeValue, err := s.resolveRechargeBonusUpdate(ctx, req)
 	if err != nil {
 		return err
@@ -437,11 +395,8 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	if req.BalanceRechargeMultiplier != nil {
 		m[SettingBalanceRechargeMult] = formatPositiveFloat(req.BalanceRechargeMultiplier)
 	}
-	if subscriptionUSDToCNYRate != nil {
-		m[SettingSubscriptionUSDToCNYRate] = formatNonNegativeFloatExact(subscriptionUSDToCNYRate)
-	}
-	if req.SubscriptionUSDToCNYRate != nil || req.SubscriptionCNYPaymentMultiplier != nil {
-		m[SettingSubscriptionCNYMult] = formatPositiveFloatExact(subscriptionCNYPaymentMultiplier)
+	if req.SubscriptionUSDToCNYRate != nil {
+		m[SettingSubscriptionUSDToCNYRate] = formatNonNegativeFloatExact(req.SubscriptionUSDToCNYRate)
 	}
 	if req.RechargeFeeRate != nil {
 		m[SettingRechargeFeeRate] = formatNonNegativeFloat(req.RechargeFeeRate)
@@ -518,14 +473,6 @@ func formatPositiveFloat(v *float64) string {
 		return "" // empty → parsePaymentConfig uses default
 	}
 	return strconv.FormatFloat(*v, 'f', 2, 64)
-}
-
-// formatPositiveFloatExact 保留完整精度，用于汇率等对小数位敏感的配置。
-func formatPositiveFloatExact(v *float64) string {
-	if v == nil || *v <= 0 {
-		return "" // empty → parsePaymentConfig 视为未配置（换算关闭）
-	}
-	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 func formatNonNegativeFloatExact(v *float64) string {

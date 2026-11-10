@@ -32,28 +32,6 @@ func normalizeSubscriptionUSDToCNYRate(rate float64) float64 {
 	return rate
 }
 
-func subscriptionCNYPaymentMultiplierToUSDToCNYRate(multiplier float64) float64 {
-	multiplier = normalizePaymentMultiplier(multiplier)
-	if multiplier <= 0 {
-		return 0
-	}
-	return decimal.NewFromInt(1).
-		Div(decimal.NewFromFloat(multiplier)).
-		Round(6).
-		InexactFloat64()
-}
-
-func subscriptionUSDToCNYRateToPaymentMultiplier(rate float64) float64 {
-	rate = normalizeSubscriptionUSDToCNYRate(rate)
-	if rate <= 0 {
-		return defaultPaymentMultiplier
-	}
-	return decimal.NewFromInt(1).
-		Div(decimal.NewFromFloat(rate)).
-		Round(6).
-		InexactFloat64()
-}
-
 func calculateCreditedBalance(paymentAmount, multiplier float64) float64 {
 	return decimal.NewFromFloat(paymentAmount).
 		Mul(decimal.NewFromFloat(normalizeBalanceRechargeMultiplier(multiplier))).

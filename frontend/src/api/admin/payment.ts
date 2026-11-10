@@ -25,7 +25,6 @@ export interface AdminPaymentConfig {
   balance_disabled: boolean
   balance_recharge_multiplier: number
   subscription_usd_to_cny_rate: number
-  subscription_cny_payment_multiplier?: number
   recharge_fee_rate: number
   load_balance_strategy: string
   product_name_prefix: string
@@ -46,7 +45,6 @@ export interface UpdatePaymentConfigRequest {
   balance_disabled?: boolean
   balance_recharge_multiplier?: number
   subscription_usd_to_cny_rate?: number
-  subscription_cny_payment_multiplier?: number
   recharge_fee_rate?: number
   load_balance_strategy?: string
   product_name_prefix?: string

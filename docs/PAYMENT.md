@@ -69,6 +69,12 @@ Configure the following in Admin Dashboard **Settings → Payment Settings**:
 | **Max Pending Orders** | Maximum concurrent pending orders per user | 3 |
 | **Load Balance Strategy** | Strategy for selecting provider instances | Round Robin |
 
+### Subscription CNY Conversion
+
+`subscription_usd_to_cny_rate` is the number of CNY per USD. A subscription priced at 10 with a rate of `7.15` costs CNY 71.50 before payment fees; `0` disables conversion and charges the plan's numeric price directly. The Settings API uses `payment_subscription_usd_to_cny_rate` for the same value.
+
+Upgrades migrate saved `SUBSCRIPTION_CNY_PAYMENT_MULTIPLIER` values once, using the reciprocal rounded to six decimal places, without overriding a valid current rate or an explicit `0`. For example, an old multiplier of `0.2` becomes a rate of `5`. The old database entry is retained for rollback, but application code no longer reads or updates it. API clients must use the current rate fields; `subscription_cny_payment_multiplier` and `payment_subscription_cny_payment_multiplier` are no longer supported or returned.
+
 ### Frontend Visible Method Routing
 
 The current payment UX keeps the frontend method list unified and does not expose provider brands directly:
