@@ -387,14 +387,14 @@ actionlint .github/workflows/stable-fork-release.yml
 - **多协议账号编辑默认值**：API 导入的 Command Code / OpenCode 账号缺失或含无效 `api_protocol` 时，编辑保存必须维持后端按模型分流的 `adaptive` 默认值及自定义 `api_base_urls`，不能因仅修改名称而锁定 Chat 协议；Cline 缺省仍为 Chat，显式有效协议继续保留。`frontend/src/components/account/EditAccountModal.vue` 复用平台目录的 `providerRoutesByModel`，由 `frontend/src/components/account/__tests__/EditAccountModal.spec.ts` 的 `preserves effective protocol` 表驱动回归覆盖。验证：`cd frontend && pnpm exec vitest run src/components/account/__tests__/EditAccountModal.spec.ts`；独立功能提交定位：`git log -S'preserves effective protocol' -- frontend/src/components/account/__tests__/EditAccountModal.spec.ts`。三语 README 的多账号管理条目同步此边界；上游默认值及回归等价后可删除本子项。
 
 - **生命周期**：`等待上游吸收`
-- **原始意图**：让账号错误在主列表保持短码、详情进入 tooltip；Pagination 尊重传入的大页选项；DataTable 各渲染路径统一忽略交互控件 row-click；iOS 输入聚焦不触发页面缩放。
-- **行为不变量**：主表不得铺开完整 JSON/error message；`status` 裸字段不得误识别为错误码；500/1000 page size 不得被默认配置覆盖；按钮、链接、输入框和 `data-row-click-stop` 不得触发行点击；iOS 修复保持 CSS/viewport 可访问性。
-- **当前代码**：`frontend/src/components/account/AccountStatusIndicator.vue`、`frontend/src/components/common/Pagination.vue`、`frontend/src/components/common/DataTable.vue`、`frontend/src/style.css`。
-- **测试**：`frontend/src/components/account/__tests__/AccountStatusIndicator.spec.ts`、`frontend/src/components/common/__tests__/Pagination.spec.ts`、`frontend/src/components/common/__tests__/DataTable.spec.ts`、`frontend/src/__tests__/iosInputZoom.spec.ts`。
-- **来源提交**：`66601d69641ed0ae3bf665721c7ea5aaf8413be3`、`470c597201dbb00e2b68060f98f19c240f4f33ea`、`0407629d24dd5fd312d39a4f37633134b8702e75`、`5b9e2eb6948544409b0304f080b211b2522369c6`。
+- **原始意图**：Pagination 尊重传入的大页选项；DataTable 各渲染路径统一忽略交互控件 row-click；移动端用量列表使用虚拟卡片减少大页渲染开销；iOS 输入聚焦不触发页面缩放。
+- **行为不变量**：500/1000 page size 不得被默认配置覆盖；按钮、链接、输入框和 `data-row-click-stop` 不得触发行点击；移动端用量列表虚拟化保持启用，不改变请求数据、统计或计费；iOS 修复保持 CSS/viewport 可访问性。账号错误展示已恢复上游图标和完整 tooltip，不再自行解析短错误码。
+- **当前代码**：`frontend/src/components/common/Pagination.vue`、`frontend/src/components/common/DataTable.vue`、`frontend/src/components/admin/usage/UsageTable.vue`、`frontend/src/style.css`。
+- **测试**：`frontend/src/components/common/__tests__/Pagination.spec.ts`、`frontend/src/components/common/__tests__/DataTable.spec.ts`、`frontend/src/components/admin/usage/__tests__/UsageTable.spec.ts`、`frontend/src/__tests__/iosInputZoom.spec.ts`。
+- **来源提交**：`470c597201dbb00e2b68060f98f19c240f4f33ea`、`0407629d24dd5fd312d39a4f37633134b8702e75`、`5b9e2eb6948544409b0304f080b211b2522369c6`。
 - **当前修复定位**：提交后运行 `git log -S'roleLabel' -- frontend/src/components/layout/AppHeader.vue` 与 `git log -S"wrapper.emitted('account-state-reset')" -- frontend/src/components/account/__tests__/AccountUsageCell.spec.ts`。
-- **上游相邻行为**：当前上游已扩展 Grok temporary-unschedulable 状态、账号优先级、无限并发输入和 Plugins 超级管理员入口；它不覆盖短错误码/完整 tooltip、Pagination、DataTable row-click 和 iOS 输入缩放契约，因此本条继续保留。
-- **本次上游吸收**：`3e60c3b86`、`994192ef4`、`db15e0090`、`a3a6a85b7` 提供紧凑账号 DTO、前端类型、按需详情读取和嵌套凭据脱敏回归，`aa556c372` 修复活动子路由下的侧栏折叠；它们不替代本条的短错误码、Pagination、row-click 和 iOS 输入缩放契约。
+- **上游相邻行为**：当前上游已扩展 Grok temporary-unschedulable 状态、账号优先级、无限并发输入和 Plugins 超级管理员入口；它不覆盖 Pagination、移动端用量虚拟化、DataTable row-click 和 iOS 输入缩放契约，因此本条继续保留。
+- **本次上游吸收**：`3e60c3b86`、`994192ef4`、`db15e0090`、`a3a6a85b7` 提供紧凑账号 DTO、前端类型、按需详情读取和嵌套凭据脱敏回归，`aa556c372` 修复活动子路由下的侧栏折叠；它们不替代本条的 Pagination、移动端用量虚拟化、row-click 和 iOS 输入缩放契约。
 - **人工合并解决**：无相关人工解决锚点。
 - **合并审查**：以交互和布局契约为准，不以组件是否仍存在同名 class/prop 为准；桌面表格、移动卡片和虚拟列表都要覆盖。
 - **删除条件**：上游分别提供等价交互及回归测试后逐项缩减。

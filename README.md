@@ -235,6 +235,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Built-in Payment System** - Supports EasyPay, Alipay, WeChat Pay, and Stripe for user self-service top-up, no separate payment service needed ([Configuration Guide](docs/PAYMENT.md))
   - As in upstream, pending refunds keep the requested balance or subscription deduction in place until confirmation; failure restores it. The fork retains concurrency protection, payment-channel snapshots, and failed-compensation recovery. Alipay confirmation uses the original refund request time even after recovery, while a new refund retry starts a new confirmation window. Legacy records without a reliable timestamp remain pending for reconciliation.
 - **Admin Dashboard** - Web interface for monitoring and management
+  - Account errors use the upstream icon and full hover details, without extracted short codes.
 - **Composite Groups** - Admin routing layer that resolves requested models to concrete providers for multi-provider groups ([Operator Guide](docs/COMPOSITE_GROUPS.md))
 - **External System Integration** - Embed external systems (e.g. ticketing) via iframe to extend the admin dashboard
 
