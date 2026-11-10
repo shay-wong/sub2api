@@ -249,7 +249,7 @@ func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsEr
 		pageSize = 500
 	}
 
-	where, args := buildOpsErrorLogsWhereForContext(ctx, filter)
+	where, args := buildOpsErrorLogsWhere(filter)
 	countSQL := "SELECT COUNT(*) FROM ops_error_logs e " + where
 
 	var total int
@@ -844,7 +844,7 @@ func (r *opsRepository) ListSystemLogs(ctx context.Context, filter *service.OpsS
 		pageSize = 200
 	}
 
-	where, args, _ := buildOpsSystemLogsWhereForContext(ctx, filter)
+	where, args, _ := buildOpsSystemLogsWhere(filter)
 	countSQL := "SELECT COUNT(*) FROM ops_system_logs l " + where
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
@@ -1151,13 +1151,6 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func buildOpsErrorLogsWhereForContext(ctx context.Context, filter *service.OpsErrorLogFilter) (string, []any) {
-	where, args := buildOpsErrorLogsWhere(filter)
-	clauses := []string{strings.TrimPrefix(where, "WHERE ")}
-	where = "WHERE " + strings.Join(clauses, " AND ")
-	return where, args
-}
-
 func opsFilterIncludesRecoveredProviderRows(filter *service.OpsErrorLogFilter, phaseFilter string) bool {
 	if filter == nil || !filter.IncludeRecoveredUpstream {
 		return false
@@ -1259,10 +1252,6 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 	return "WHERE " + strings.Join(clauses, " AND "), args, hasConstraint
 }
 
-func buildOpsSystemLogsWhereForContext(ctx context.Context, filter *service.OpsSystemLogFilter) (string, []any, bool) {
-	return buildOpsSystemLogsWhere(filter)
-}
-
 func buildOpsSystemLogsCleanupWhere(filter *service.OpsSystemLogCleanupFilter) (string, []any, bool) {
 	if filter == nil {
 		filter = &service.OpsSystemLogCleanupFilter{}
@@ -1302,7 +1291,7 @@ func buildOpsSystemLogsCleanupWhereForContext(ctx context.Context, filter *servi
 		Model:           filter.Model,
 		Query:           filter.Query,
 	}
-	return buildOpsSystemLogsWhereForContext(ctx, listFilter)
+	return buildOpsSystemLogsWhere(listFilter)
 }
 
 // Helpers for nullable args

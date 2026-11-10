@@ -297,7 +297,6 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		scanEnd = todayEnd
 	}
 	args := []any{startUTC, endUTC, todayUTC, todayEnd, scanStart, scanEnd}
-	projectCondition := ""
 	combinedStatsQuery := `
 		WITH scoped AS (
 			SELECT
@@ -313,7 +312,6 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			FROM usage_logs
 			WHERE created_at >= $5
 				AND created_at < $6
-				` + projectCondition + `
 		)
 		SELECT
 			COUNT(*) FILTER (WHERE created_at >= $1 AND created_at < $2) AS total_requests,
@@ -379,14 +377,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		activeScanEnd = hourEnd
 	}
 	activeArgs := []any{todayUTC, todayEnd, hourStart, hourEnd, activeScanStart, activeScanEnd}
-	activeProjectCondition := ""
 	activeUsersQuery := `
 		WITH scoped AS (
 			SELECT user_id, created_at
 			FROM usage_logs
 			WHERE created_at >= $5
 				AND created_at < $6
-				` + activeProjectCondition + `
 		)
 		SELECT
 			COUNT(DISTINCT CASE WHEN created_at >= $1 AND created_at < $2 THEN user_id END) AS active_users,

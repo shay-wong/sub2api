@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -56,9 +55,8 @@ func TestBuildOpsSystemLogsWhere_WithClientRequestIDAndUserID(t *testing.T) {
 	}
 }
 
-func TestBuildOpsSystemLogsWhereForContextDoesNotAddProjectScope(t *testing.T) {
-	ctx := context.Background()
-	where, args, hasConstraint := buildOpsSystemLogsWhereForContext(ctx, &service.OpsSystemLogFilter{})
+func TestBuildOpsSystemLogsWhereDoesNotAddProjectScope(t *testing.T) {
+	where, args, hasConstraint := buildOpsSystemLogsWhere(&service.OpsSystemLogFilter{})
 	if hasConstraint {
 		t.Fatalf("empty global filter should not count as a constraint")
 	}

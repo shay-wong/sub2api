@@ -376,10 +376,6 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 		platformClauseUsage = " AND g.platform = " + platformPlaceholder
 		platformClauseError = " AND platform = " + platformPlaceholder
 	}
-	projectClauseUsage := ""
-	projectClauseError := ""
-	projectClauseUsage = ""
-	projectClauseError = ""
 	limitPlaceholder := "$" + itoa(len(args)+1)
 
 	q := `
@@ -393,7 +389,6 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 	  WHERE ul.created_at >= $1 AND ul.created_at < $2
 	    AND ul.group_id = ANY($3)
 	    ` + platformClauseUsage + `
-	    ` + projectClauseUsage + `
 	  GROUP BY 1, 2
 	),
 	error_totals AS (
@@ -403,7 +398,6 @@ func (r *opsRepository) getThroughputTopGroupsByGroupIDs(ctx context.Context, st
 	  WHERE created_at >= $1 AND created_at < $2
 	    AND group_id = ANY($3)
 	    ` + platformClauseError + `
-	    ` + projectClauseError + `
 	    AND COALESCE(status_code, 0) >= 400
     AND is_count_tokens = FALSE
   GROUP BY 1

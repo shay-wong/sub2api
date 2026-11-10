@@ -30,15 +30,12 @@ type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := ""
-	outerProjectCondition := ""
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
 			SELECT api_key_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
-			  %s
 			GROUP BY api_key_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -53,10 +50,9 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		LEFT JOIN api_keys k ON u.api_key_id = k.id
 		WHERE u.api_key_id IN (SELECT api_key_id FROM top_keys)
 		  AND u.created_at >= $4 AND u.created_at < $5
-		  %s
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
-	`, topProjectCondition, dateFormat, outerProjectCondition)
+	`, dateFormat)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -90,8 +86,6 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int, metric string) (results []UserUsageTrendPoint, err error) {
 	dateFormat := safeDateFormat(granularity)
 	args := []any{startTime, endTime, limit, startTime, endTime}
-	topProjectCondition := ""
-	outerProjectCondition := ""
 	rankExpr := "SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)"
 	if metric == "actual_cost" {
 		rankExpr = "SUM(actual_cost)"
@@ -102,7 +96,6 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			SELECT user_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
-			  %s
 			GROUP BY user_id
 			ORDER BY %s DESC, user_id ASC
 			LIMIT $3
@@ -120,10 +113,9 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
 		  AND u.created_at >= $4 AND u.created_at < $5
-		  %s
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
-	`, topProjectCondition, rankExpr, dateFormat, outerProjectCondition)
+	`, rankExpr, dateFormat)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -171,7 +163,6 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
-			  %s
 			GROUP BY u.user_id, us.email, us.username
 		),
 		ranked AS (
@@ -203,8 +194,6 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
 	`
 	args := []any{startTime, endTime, limit}
-	projectCondition := strings.TrimSpace("")
-	query = fmt.Sprintf(query, projectCondition)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {

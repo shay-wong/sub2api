@@ -1602,7 +1602,6 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 		snapshot.CredentialsJSON, snapshot.ProxyID, string(service.GrokCredentialReasonProxyInvalid),
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1622,7 +1621,6 @@ func (r *accountRepository) SetGrokCredentialErrorIfMatch(
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
-	` + projectScope + `
 			AND ($2 <> $9 OR (
 				a.proxy_id IS NOT NULL AND NOT EXISTS (
 					SELECT 1 FROM proxies p WHERE p.id = a.proxy_id AND p.deleted_at IS NULL
@@ -1673,7 +1671,6 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 		string(expectedJSON),
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1688,7 +1685,6 @@ func (r *accountRepository) SetGrokOAuthErrorIfCredentialsUnchanged(
 			AND a.status = $6
 			AND a.credentials = $7::jsonb
 			AND NULLIF(BTRIM(a.credentials->>'refresh_token'), '') IS NULL
-	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -1741,7 +1737,6 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1753,7 +1748,6 @@ func (r *accountRepository) UpdateGrokOAuthCredentialsIfUnchanged(
 			AND a.type = $4
 			AND a.credentials = $5::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $6
-	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -1803,7 +1797,6 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1818,7 +1811,6 @@ func (r *accountRepository) SetGrokOAuthRefreshErrorIfCredentialsUnchanged(
 			AND a.status = $6
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
-	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -1868,7 +1860,6 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 		expectedProxyID,
 		service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -1883,7 +1874,6 @@ func (r *accountRepository) SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnc
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until < $1)
-	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
@@ -2724,7 +2714,6 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 		until, reason, id, service.StatusActive, service.PlatformGrok, service.AccountTypeOAuth,
 		snapshot.CredentialsJSON, snapshot.ProxyID, service.SchedulerOutboxEventAccountChanged,
 	}
-	projectScope := ""
 	query := `
 		WITH updated AS (
 		UPDATE accounts AS a
@@ -2746,7 +2735,6 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 			AND (a.auto_pause_on_expired IS NOT TRUE OR a.expires_at IS NULL OR a.expires_at > NOW())
 			AND a.credentials = $7::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $8
-	` + projectScope + `
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
