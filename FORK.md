@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `6b4b37db43443b5e88e424fe3c69602cc3810dfb` |
-| 当前比较范围 | `6b4b37db43443b5e88e424fe3c69602cc3810dfb..HEAD` |
+| 已合并上游提交 / 比较基线 | `ee58c0013c76ccd3f36439881bc848d342ec1c9d` |
+| 当前比较范围 | `ee58c0013c76ccd3f36439881bc848d342ec1c9d..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `8c536fb8964bf5dbf2ad70a6b32ecca802902542`，固定上游 parent 为 `6b4b37db43443b5e88e424fe3c69602cc3810dfb`，共同基线为 `2c93aea9f712c7e9396060acbeb9215d2c1883b0`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `1d77e7f825fb64a74c54fbf974f3660848189d8e`，固定上游 parent 为 `ee58c0013c76ccd3f36439881bc848d342ec1c9d`，共同基线为 `6b4b37db43443b5e88e424fe3c69602cc3810dfb`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游新增的 6 个功能提交及版本提交：GPT‑6.1 Terra 官方 Codex descriptor、努力等级与兼容 cache key 校验、订阅账号长上下文费用豁免、Codex 导出默认 GPT‑6.1 Sol、live web search、图片配置保留，以及上游版本升至 `0.2.20`。这些能力来自上游；Fork 继续保留自动重置卡、实际分组计费、权限边界和本地大请求诊断。GPT‑6.1 Sol/Terra 的上游模型协议和官方描述直接采用上游实现，Fork 保留 Astra 内置目录条目和独立的渠道 Ultrafast 倍率覆盖；默认计价规则与上游一致，不登记为 Fork 独有能力。
+本次合入上游新增的 8 个功能、修复及文档提交：OpenAI 30 分钟/12 小时缓存写入用量与计价、免费输入价格下的 Fast 倍率修复、按进程可用内存自适应请求体预算及 cgroup 读取边界、Antigravity 用量强制查询、孤立工具输出内存测试隔离和图片实际输出格式说明。上游版本仍为 `0.2.20`。Fork 保留独立 Ultrafast 渠道倍率、实际分组计费、mmap 生命周期、细粒度权限及自动重置策略；账号错误图标和旧人民币倍率退役等已完成的清理不回退。
 
 ## Fork 发布版本
 
@@ -32,15 +32,15 @@
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
 | 当前上游版本 | `0.2.20` |
-| 当前 Fork 版本 | `0.2.20-fork.1` |
-| 已存在同基线 Fork tag | 尚无 `v0.2.20-fork.*`；上游 `v0.2.20` tag 不属于 Fork |
-| 下次发布所需版本 | 至少 `0.2.20-fork.2`，发布时检查远端已占用修订号 |
+| 当前 Fork 版本 | `0.2.20-fork.2` |
+| 已存在同基线 Fork tag | `v0.2.20-fork.1`；上游 `v0.2.20` tag 不属于 Fork |
+| 下次发布所需版本 | 已准备 `0.2.20-fork.2`，发布时再次检查远端未占用 |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 升为 `0.2.20`，按规则将 Fork 版本重置为 `0.2.20-fork.1`。既有 `v0.2.19-fork.1` 和 `v0.2.19-fork.2` tag 作为历史发布保留，不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 仍为 `0.2.20`，因 `v0.2.20-fork.1` 已发布，按同基线递增规则准备 `0.2.20-fork.2`。既有 tag 不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
-本次仅合并代码、同步文档基线并更新未发布版本源，不发布或创建 tag；下一次发布由发布流程确定未占用的 fork 修订号。
+本次仅合并代码、同步文档基线并更新未发布版本源，不发布或创建 tag。
 
 ## 能力索引
 
@@ -315,6 +315,7 @@ actionlint .github/workflows/stable-fork-release.yml
 | 响应档位结算 | 权威响应只能降低计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显保留最终出站档位 |
 | GPT-6.1 Sol/Terra 长上下文 | OpenAI OAuth/setup-token 账号免模型默认长上下文附加费；API Key 账号仍按价卡和开关计费 |
 | 充值与退款基础行为 | 独立余额充值倍率、订阅 USD/CNY 汇率，以及 pending 期间持续冻结权益均已由上游提供 |
+| OpenAI 缓存写入 | 30 分钟/12 小时 token 分类、12 小时价格及免费输入下的 Fast 倍率均沿用上游；Fork 渠道 Ultrafast 覆盖继续生效 |
 
 当前计费差异是独立的渠道 Ultrafast 倍率覆盖，以及[实际调度分组归因](#2-实际调度分组归因)：例如 A 组倍率 `1x`、备用 B 组 `2x`，模型基础费用为 $1，请求实际切到 B 后，Fork 按 B 收取 $2，并使用 B 的订阅和用量归属；没有跨组且未配置 Ultrafast 覆盖时，这两项差异不影响费用。订阅限额耗尽返回 `429` 是错误协议修复，不是单价调整。以下充值、退款保护另按记账一致性说明。
 
@@ -335,6 +336,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **本次基线新增吸收**：`6466978d2` 统一 token 计费路径并提供上下文阶梯价，`75faedda9` 让 Fast/Priority 按上游实际档位只降不升计费，`695ebede7` 规范化 CN Anthropic usage token。它们不改变 fork 的公开 DTO、provider snapshot 与退款状态机边界。
 - **本次基线继续吸收**：`530fb20f2` 将长上下文阶梯价迁入价格目录，`593fc9365` 提供目录 override file，`e2cfaa46e` 修正目录缓存字段契约和 Gemini Pro 缓存写入价，`9eabd2a5b` 让账号统计应用相同模型计价策略。上游统一计价路径取代 fork 的旁路 helper，但不改变 Ultrafast 渠道倍率覆盖、公开 DTO、provider snapshot 与退款状态机边界。
 - **本次上游吸收**：`126ac24c8` 提供 Ultrafast 默认 `2x`，`8249ab37d` 增加 Anthropic max reasoning effort 计价，`fdc2ec17e`、`1cab4d8c2` 增加 fallback/override 价格文件按内容哈希热重载和一致快照提交，`de8d756af` 修复 pending Alipay 订单对账。它们不替代 fork 的 Ultrafast 渠道 override、公开 DTO、provider snapshot 与退款状态机边界。
+- **本次缓存 TTL 合并**：`fe093d76b` 和 `7156213cc` 新增 30 分钟/12 小时缓存写入记录、渠道 `cache_write_12h_price` 以及免费输入下的 Fast 倍率修复。渠道 SQL 同时保留 `ultrafast_multiplier`，用量写入和扫描同时保留旧 `project_id` 存储兼容；两份 `250_*.sql` 按完整文件名并存。`openai_cache_write_ttl_test.go` 交叉覆盖 Astra 12 小时写入默认 Ultrafast 6x 与渠道覆盖 2x；这些上游 TTL 能力不登记为新的 Fork 功能。
 - **当前修复定位**：提交后运行 `git log -S'recoverRefundingAttempt' -- backend/internal/service/payment_refund.go`、`git log -S'phase\": \"dispatching' -- backend/internal/service/payment_refund.go` 与 `git log -S'MerchantIdentityMetadata' -- backend/internal/payment/provider/wxpay.go`。
 - **人工合并解决**：`caae38b9abf429d1326ec174b54210a21b023309` 在 `payment_config_service.go` 及测试中保留 canonical rate、legacy 派生和输入校验；`d585df8d934807b5eaa3d65aac8cbb2954fa1519` 将上游事务化 pending-refund finalize 与 fork 的 provider snapshot、退款 ID 和旧 pending audit 兼容语义合并；`a8a3c18641fb1c00030c2baa22fc3918c9e44e68` 在订阅仓储冲突中保留行锁与缓存失效契约，并合入 daily 与 weekly/monthly 分离的时间锚点；其中 Project 过滤已失效。
 - **合并审查**：配置读写、下单展示、provider snapshot、退款 audit 和公开 DTO 必须一起比较；只吸收一个字段名不构成等价。

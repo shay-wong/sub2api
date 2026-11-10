@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 合入上游 OpenAI 30 分钟/12 小时缓存写入计费、请求体内存预算自适应、Antigravity 用量强制刷新与图片实际输出格式说明；保留 Fork 的渠道 Ultrafast 倍率覆盖和用量归因，版本准备为 `0.2.20-fork.2`。
 - 账号错误展示恢复上游的图标与完整悬停详情，移除短错误码解析；分页和移动端用量列表虚拟化保持不变。
 - 移除旧订阅人民币倍率 API 别名，统一使用 `subscription_usd_to_cny_rate`（设置接口为 `payment_subscription_usd_to_cny_rate`）；升级时一次性迁移旧配置，保留已有有效汇率和显式 `0`。
 - 文档：澄清与上游共有的默认计价、Ultrafast 倍率、响应档位结算及 Sol/Terra 订阅长上下文豁免；单列 Fork 的渠道倍率覆盖、实际分组计费和充值退款保护，计费代码未变。

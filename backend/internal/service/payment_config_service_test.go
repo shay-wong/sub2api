@@ -632,7 +632,3 @@ func TestUpdatePaymentConfigWritesOnlyCanonicalSubscriptionRate(t *testing.T) {
 func paymentConfigStrPtr(value string) *string {
 	return &value
 }
-
-func paymentConfigFloatPtr(value float64) *float64 {
-	return &value
-}

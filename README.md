@@ -211,6 +211,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - Bulk subscription actions check every direct subscription binding before execution or idempotent replay. Any unauthorized subscription rejects the entire batch with `403` and no mutations. Group bindings do not grant subscription access, and revoked access also blocks replay of earlier results.
   - OpenCode Go usage settings, queries, and refresh controls are super-admin-only because they operate across accounts sharing a key. Restricted account lists and details do not resolve usage from unbound sibling accounts.
 - **Precise Billing** - Token-level usage tracking and cost calculation
+  - OpenAI cache writes preserve upstream 30-minute and 12-hour TTLs. Channels can price 12-hour writes separately; explicit zero prices and custom Fast/Ultrafast multipliers remain effective.
   - Fork billing follows the group actually selected after fallback, including its prices, rate multiplier, subscription, and usage records. With a $1 base cost, falling back from a `1x` group to a `2x` group costs $2.
   - GPT-6.1 Sol/Terra long-context billing follows upstream: OpenAI OAuth/setup-token accounts are exempt from the model-default surcharge; API-key accounts retain the price-card and billing-toggle rules.
   - Inflight balance reservations follow the group and subscription actually selected after failover; same-group retries reuse the reservation, and queued billing retains it until settlement.
@@ -798,6 +799,16 @@ Simple Mode is designed for individual developers or internal teams who want qui
 - Optional key windows: Set `SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED=true` to enforce each API key's configured 5-hour, daily, and 7-day spending windows. The default is `false`; balance and subscription debit remain bypassed when enabled.
 - Window enforcement uses the database as its source of truth and records only API-key window usage. It is a post-request soft cap, so concurrent in-flight requests can overshoot by their final costs. Historical simple-mode usage is not backfilled.
 - Security note: In production, you must also set `SIMPLE_MODE_CONFIRM=true` to allow startup
+
+---
+
+## OpenAI Image Output Formats
+
+On `/v1/images/generations` and `/v1/images/edits`, OAuth / Setup Token requests use the Codex-native Images endpoints when the mapped upstream model is a supported GPT Image 1.5, 2, 2.5, or 2.6 model. Models before 2.6 can fall back to Responses if the native endpoint returns 404 or 405.
+
+Sub2API forwards `output_format` and `output_compression`, but whether they take effect depends on the upstream account and endpoint. An upstream may reject a format with a 4xx error or return HTTP 200 with a different format: for example, requesting `jpeg` or `svg` can yield `output_format: "png"` and PNG data. This behavior has also been reported for `gpt-image-2.5-flare` requests for `jpeg`.
+
+Before saving or serving an image, compare the returned `output_format` (including any per-image value) with the request and verify the actual image format. Use the actual output format for the filename extension and MIME type. A successful response containing a different format retains its status, image content, and usage; it can still incur charges. Automatically retrying may generate and bill another image.
 
 ---
 
