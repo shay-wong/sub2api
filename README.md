@@ -228,6 +228,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Codex Desktop Page Context** - Uses upstream compatibility for recognized open-page and selected-page snapshots sent without a call ID on HTTP Responses, without extra configuration. Regular tool results retain the existing validation rules.
 - **Claude Fable / Mythos 5.2** - Uses upstream model support, reasoning-effort conversion, and built-in fallback prices, including separate cache-write TTL prices.
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
+  - `/v1/messages` applies the reasoning mappings, ceiling, and deny rules of the group actually selected. A fallback group with no rules does not inherit the original group's policy.
   - Upstream now provides model catalog cache rechecks to avoid duplicate concurrent fetches; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits
   - Anthropic streams converted to Chat Completions or Responses keep a total cleanup deadline after disconnects, even while upstream pings continue, and bill recovered usage to the actual selected group. Explicit upstream error events are not billed; malformed SSE or conversion failures still terminate the stream instead of appearing successful.

@@ -158,11 +158,13 @@ func applyAnthropicReasoningEffortPolicyForRequest(c *gin.Context, apiKey *servi
 	return service.ApplyReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
 }
 
-func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *service.APIKey, body []byte) {
+func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *service.APIKey, selection *service.AccountSelectionResult, body []byte) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	bindRequestedReasoningEffort(c, body, strings.TrimSpace(gjson.GetBytes(body, "model").String()))
+	// Clear the previous attempt's policy even when the selected group has none.
+	c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicy(c.Request.Context(), "", nil, ""))
+	apiKey = &service.APIKey{Group: ResolveEffectiveGroup(selection, apiKey)}
 	isCNTarget := service.IsCNProvider(effectiveAPIKeyPlatform(c, apiKey))
 	if isCNTarget {
 		effort := gjson.GetBytes(body, "output_config.effort")

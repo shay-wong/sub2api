@@ -127,7 +127,7 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	require.NotNil(t, requested)
 	require.Equal(t, "max", *requested)
 
-	bindOpenAIReasoningEffortPolicyForMessagesRequest(openAICtx, apiKey, []byte(`{"output_config":{"effort":"max"}}`))
+	bindOpenAIReasoningEffortPolicyForMessagesRequest(openAICtx, apiKey, nil, []byte(`{"output_config":{"effort":"max"}}`))
 	bound, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(openAICtx.Request.Context(), body)
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -154,7 +154,7 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 			omittedCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			omittedCtx.Request = httptest.NewRequest("POST", "/v1/messages", nil)
 			omittedCtx.Request = omittedCtx.Request.WithContext(service.WithResolvedTargetPlatform(omittedCtx.Request.Context(), service.PlatformOpenAI))
-			bindOpenAIReasoningEffortPolicyForMessagesRequest(omittedCtx, synthesizedAPIKey, []byte(tc.request))
+			bindOpenAIReasoningEffortPolicyForMessagesRequest(omittedCtx, synthesizedAPIKey, nil, []byte(tc.request))
 			got, changed, err := service.ApplyOpenAIReasoningEffortPolicyFromContext(omittedCtx.Request.Context(), []byte(tc.response))
 			require.NoError(t, err)
 			require.Equal(t, tc.want != "medium", changed)
