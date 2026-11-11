@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- 提前采用上游 PR #8622：修复 Codex 桌面版页面上下文缺少 `call_id` 时被 HTTP Responses 误拒绝的问题，保留普通工具结果校验，无需额外配置。
-- 合入上游 OpenAI 30 分钟/12 小时缓存写入计费、请求体内存预算自适应、Antigravity 用量强制刷新与图片实际输出格式说明；保留 Fork 的渠道 Ultrafast 倍率覆盖和用量归因，版本准备为 `0.2.20-fork.2`。
+- 合入上游 `0.2.21`：支持 Claude Fable/Mythos 5.2，修复推理参数、WebSocket 后续轮次、Token 并发刷新，优化账号和 API Key 用量加载；充值倍率支持最多 6 位小数，版本准备为 `0.2.21-fork.1`。
+- Codex 桌面版页面上下文缺少 `call_id` 的兼容修复 #8622 已由上游提供；继续保留普通工具结果校验，无需额外配置。
+- 合入上游 OpenAI 30 分钟/12 小时缓存写入计费、请求体内存预算自适应、Antigravity 用量强制刷新与图片实际输出格式说明；保留 Fork 的渠道 Ultrafast 倍率覆盖和用量归因。
 - 账号错误展示恢复上游的图标与完整悬停详情，移除短错误码解析；分页和移动端用量列表虚拟化保持不变。
 - 移除旧订阅人民币倍率 API 别名，统一使用 `subscription_usd_to_cny_rate`（设置接口为 `payment_subscription_usd_to_cny_rate`）；升级时一次性迁移旧配置，保留已有有效汇率和显式 `0`。
 - 文档：澄清与上游共有的默认计价、Ultrafast 倍率、响应档位结算及 Sol/Terra 订阅长上下文豁免；单列 Fork 的渠道倍率覆盖、实际分组计费和充值退款保护，计费代码未变。

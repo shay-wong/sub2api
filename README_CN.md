@@ -231,7 +231,8 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **OpenAI Ultrafast** - 沿用上游在 Responses、Chat Completions 和 Responses WebSocket 中对 `service_tier: "ultrafast"` 的原样透传及 Codex OAuth 路由提示；两边默认均为 Astra 按 Standard 的 `6 倍`、其他模型 `2 倍`。
   - Fork 额外提供“**渠道 → 模型定价 → Ultrafast 倍率**”。填写正数时覆盖模型默认倍率；留空使用模型默认值，不继承 Fast 倍率。
   - 响应档位计费沿用上游：权威响应只能降低、不能抬高计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显仍按最终出站档位计费，明确的 `priority` 回显可以将 Ultrafast 降为 Priority。
-- **Codex 桌面版网页上下文兼容** - HTTP Responses 自动接收桌面版注入、缺少调用 ID 的已识别页面和选区快照，无需额外配置；普通工具结果仍遵守原有校验。
+- **Codex 桌面版网页上下文兼容** - 沿用上游对 HTTP Responses 中缺少调用 ID 的已识别页面和选区快照的兼容，无需额外配置；普通工具结果仍遵守原有校验。
+- **Claude Fable / Mythos 5.2** - 沿用上游模型支持、推理参数转换及内置兜底价格，包括不同缓存写入 TTL 的价格。
 - **智能调度** - 智能账号选择，支持粘性会话
 - **并发控制** - 用户级和账号级并发限制
   - Anthropic 流转 Chat Completions 或 Responses 后，客户端断开时的清理有总截止时间，不会被上游持续 ping 延长；回收用量按实际选中分组计费。明确上游 error 事件不计费；畸形 SSE 或转换失败仍终止流，不伪装成功。
