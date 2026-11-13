@@ -725,6 +725,7 @@ type adminServiceImpl struct {
 	settingService       *SettingService
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
+	subscriptionService  *SubscriptionService
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
 	affiliateService     adminRechargeAffiliateAccruer
@@ -779,6 +780,7 @@ func NewAdminService(
 	settingService *SettingService,
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	userSubRepo UserSubscriptionRepository,
+	subscriptionService *SubscriptionService,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
 	affiliateService *AffiliateService,
@@ -809,6 +811,7 @@ func NewAdminService(
 		settingService:          settingService,
 		defaultSubAssigner:      defaultSubAssigner,
 		userSubRepo:             userSubRepo,
+		subscriptionService:     subscriptionService,
 		privacyClientFactory:    privacyClientFactory,
 		runtimeBlocker:          runtimeBlocker,
 		affiliateService:        affiliateService,

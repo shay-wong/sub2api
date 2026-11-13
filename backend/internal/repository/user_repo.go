@@ -516,7 +516,7 @@ func (r *userRepository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-// deleteUser 在给定 client（可能是外部事务 client）上删除用户及其身份关联记录，自身不开启/提交事务。
+// deleteUser 在同一事务内撤销订阅并删除用户及其身份关联记录，自身不开启/提交事务。
 func (r *userRepository) deleteUser(ctx context.Context, exec *dbent.Client, id int64) error {
 	identityIDs, err := exec.AuthIdentity.Query().
 		Where(authidentity.UserIDEQ(id)).
@@ -541,6 +541,10 @@ func (r *userRepository) deleteUser(ctx context.Context, exec *dbent.Client, id 
 			Exec(ctx); err != nil {
 			return translatePersistenceError(err, service.ErrUserNotFound, nil)
 		}
+	}
+
+	if _, err := exec.UserSubscription.Delete().Where(usersubscription.UserIDEQ(id)).Exec(ctx); err != nil {
+		return fmt.Errorf("revoke user subscriptions: %w", err)
 	}
 
 	affected, err := exec.User.Delete().Where(dbuser.IDEQ(id)).Exec(ctx)

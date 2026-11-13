@@ -286,6 +286,9 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 9. 鉴权、会话绑定与审计状态正确性
 
+- **删除用户同步撤销订阅（本次变更，沿用本节生命周期）**：`UserRepository.deleteUser` 在删除用户的同一事务内批量软删除全部未撤销订阅，包括已过期和暂停的订阅；保留原状态、期限和用量历史，已撤销记录的删除时间不得重写。管理员删除用户仅在事务提交后复用 `SubscriptionService.invalidateSubscriptionCaches`，同步清除本机 L1、清理分布式缓存并广播跨实例失效；缓存失败记录日志，不把已提交的删除报告为失败。无需新增配置或迁移，不追溯清理升级前已删除用户的订阅。
+- **删除用户实现与回归**：代码为 `backend/internal/repository/user_repo.go`、`backend/internal/service/admin_user.go`、`backend/internal/service/admin_service.go`；测试为 `backend/internal/service/admin_service_delete_subscription_test.go` 与 `backend/internal/repository/user_repo_delete_atomicity_integration_test.go`，覆盖撤销、历史保留、事务回滚及提交后缓存失效。用户说明同步 `README.md`、`README_CN.md`、`README_JA.md` 的删除用户条目和 `CHANGELOG.md` 未发布段；提交后定位：`git log -S'TestAdminService_DeleteUser_InvalidatesSubscriptionsAfterCommit' -- backend/internal/service/admin_service_delete_subscription_test.go`。合并时必须保留原子软删除和提交后缓存边界；上游具备等价行为与回归覆盖后删除本子项。
+
 - **生命周期**：`等待上游吸收`
 - **原始意图**：修复反向代理环境下 session binding 与安全元数据 IP 混用、超级管理员 TOTP 验证方式、多实例审计清理并发、邮箱别名去重与密码登录状态、fail-closed 验证码，以及 pending OAuth callback 的前端状态一致性。
 - **行为不变量**：会话绑定使用稳定的 binding identity，审计日志仍记录真实安全元数据 IP；TOTP 必须通过用户配置的验证方式；多实例 clear 使用高水位和数据库状态 fencing，清理前已排队或并发写入的审计记录不得越过边界；邮箱别名候选超过单页上限时仍须完整查重，绑定真实邮箱后必须清除 `password_auth_disabled`；旧版或自定义 CSP 必须补齐 Aliyun CAPTCHA 的脚本和样式域名，否则不得启用会锁死鉴权入口的 fail-closed 配置；pending OAuth 发送验证码若已经进入 `choose_account_action_required`，所有 callback UI 必须立即消费该服务端状态，不得继续停留在失效的创建账号表单。
@@ -302,6 +305,8 @@ actionlint .github/workflows/stable-fork-release.yml
 (cd backend && go test -tags=unit ./internal/server/middleware -run 'Test.*SessionBinding')
 (cd backend && go test -tags=unit ./internal/server/middleware -run 'Test(SecurityHeaders|EnhanceCSPPolicy)')
 (cd backend && go test -tags=unit ./internal/service -run 'Test.*(SessionBinding|TOTP|AuditLogService)')
+(cd backend && go test -tags=unit ./internal/service -run '^TestAdminService_DeleteUser')
+(cd backend && go test -tags=integration ./internal/repository -run '^TestUserRepository_DeleteUser')
 (cd backend && go test ./internal/repository ./internal/service -run 'Test(UserRepositoryExistsByEmailAlias|AuthServiceBindEmailIdentity_)')
 (cd backend && go test ./internal/repository -run '^TestAuditLogRepository')
 (cd backend && go test ./migrations -run '^TestMigration182AddsPersistentAuditClearState$')

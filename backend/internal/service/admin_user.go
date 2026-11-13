@@ -392,6 +392,13 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
+	var subscriptions []UserSubscription
+	if s.userSubRepo != nil {
+		subscriptions, err = s.userSubRepo.ListByUserID(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list user subscriptions: %w", err)
+		}
+	}
 
 	if s.entClient != nil {
 		tx, err := s.entClient.Tx(ctx)
@@ -420,6 +427,13 @@ func (s *adminServiceImpl) DeleteUser(ctx context.Context, id int64) error {
 			}
 		}
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
+	}
+	if s.subscriptionService != nil {
+		for _, sub := range subscriptions {
+			if err := s.subscriptionService.invalidateSubscriptionCaches(id, sub.GroupID); err != nil {
+				logger.LegacyPrintf("service.admin", "deleted user subscription cache invalidation failed: user_id=%d group_id=%d err=%v", id, sub.GroupID, err)
+			}
+		}
 	}
 	return nil
 }
