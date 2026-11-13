@@ -547,18 +547,52 @@ func TestUsageLogRepositoryListWithFiltersRequestTypePriority(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUsageLogRepositoryListWithFiltersFastPaginationSkipsCountForSelectiveFilters(t *testing.T) {
+func TestUsageLogRepositoryListWithFiltersSelectiveFiltersReturnExactTotal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		filters usagestats.UsageLogFilters
+		column  string
+	}{
+		{name: "user", filters: usagestats.UsageLogFilters{UserID: 42}, column: "user_id"},
+		{name: "api key", filters: usagestats.UsageLogFilters{APIKeyID: 42}, column: "api_key_id"},
+		{name: "account", filters: usagestats.UsageLogFilters{AccountID: 42}, column: "account_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+
+			mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM usage_logs WHERE " + tc.column + " = \\$1").
+				WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(137)))
+			mock.ExpectQuery("SELECT .* FROM usage_logs WHERE "+tc.column+" = \\$1 ORDER BY id DESC LIMIT \\$2 OFFSET \\$3").
+				WithArgs(int64(42), 20, 0).
+				WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+			_, page, err := repo.ListWithFilters(
+				context.Background(),
+				pagination.PaginationParams{Page: 1, PageSize: 20},
+				tc.filters,
+			)
+
+			require.NoError(t, err)
+			require.Equal(t, int64(137), page.Total)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestUsageLogRepositoryListWithFiltersFastPaginationSkipsCountWithoutSelectiveFilters(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 
-	mock.ExpectQuery("SELECT .* FROM usage_logs WHERE user_id = \\$1 ORDER BY id DESC LIMIT \\$2 OFFSET \\$3").
-		WithArgs(int64(42), 21, 0).
+	mock.ExpectQuery("SELECT .* FROM usage_logs ORDER BY id DESC LIMIT \\$1 OFFSET \\$2").
+		WithArgs(21, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	logs, page, err := repo.ListWithFilters(
 		context.Background(),
 		pagination.PaginationParams{Page: 1, PageSize: 20},
-		usagestats.UsageLogFilters{UserID: 42},
+		usagestats.UsageLogFilters{},
 	)
 
 	require.NoError(t, err)

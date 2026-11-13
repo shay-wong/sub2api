@@ -680,13 +680,17 @@ func (s *UsageLogRepoSuite) TestListWithFilters() {
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-filters", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-filters"})
 
-	s.createUsageLog(user, apiKey, account, 10, 20, 0.5, time.Now())
+	for range 23 {
+		s.createUsageLog(user, apiKey, account, 10, 20, 0.5, time.Now())
+	}
 
 	filters := usagestats.UsageLogFilters{UserID: user.ID}
-	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)
-	s.Require().NoError(err, "ListWithFilters")
-	s.Require().Len(logs, 1)
-	s.Require().Equal(int64(1), page.Total)
+	for pageNumber, wantItems := range []int{20, 3} {
+		logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: pageNumber + 1, PageSize: 20}, filters)
+		s.Require().NoError(err, "ListWithFilters")
+		s.Require().Len(logs, wantItems)
+		s.Require().Equal(int64(23), page.Total)
+	}
 }
 
 func (s *UsageLogRepoSuite) TestRequestedModelCandidateRoundTripsThroughUsageFilters() {

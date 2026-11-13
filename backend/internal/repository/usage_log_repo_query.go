@@ -247,7 +247,11 @@ func (r *usageLogRepository) ListModelCandidates(ctx context.Context, filters Us
 }
 
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
-	return !filters.ExactTotal
+	if filters.ExactTotal {
+		return false
+	}
+	// 强选择过滤下记录集通常较小，保留精确总数。
+	return filters.UserID == 0 && filters.APIKeyID == 0 && filters.AccountID == 0
 }
 
 func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, whereClause string, args []any, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {

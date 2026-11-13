@@ -235,7 +235,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - Subscription CNY conversion uses `subscription_usd_to_cny_rate` (`0` disables conversion), or `payment_subscription_usd_to_cny_rate` in the Settings API. Upgrades migrate saved legacy multipliers once; the old multiplier API fields are no longer supported.
   - As in upstream, pending refunds keep the requested balance or subscription deduction in place until confirmation; failure restores it. The fork retains concurrency protection, payment-channel snapshots, and failed-compensation recovery. Alipay confirmation uses the original refund request time even after recovery, while a new refund retry starts a new confirmation window. Legacy records without a reliable timestamp remain pending for reconciliation.
 - **Admin Dashboard** - Web interface for monitoring and management
-  - Usage lists retain mobile virtualization. Upstream quick pagination reports a next-page lower bound; the fork also fetches and caches the exact total. Account errors use the upstream icon and full hover details, without extracted short codes.
+  - Usage lists retain mobile virtualization. Personal usage and queries filtered by user, API key, or account return the exact total, as in upstream. Broad admin lists use quick pagination; the fork also fetches and caches their exact total asynchronously. Account errors use the upstream icon and full hover details, without extracted short codes.
 - **Composite Groups** - Admin routing layer that resolves requested models to concrete providers for multi-provider groups ([Operator Guide](docs/COMPOSITE_GROUPS.md))
 - **External System Integration** - Embed external systems (e.g. ticketing) via iframe to extend the admin dashboard
 
