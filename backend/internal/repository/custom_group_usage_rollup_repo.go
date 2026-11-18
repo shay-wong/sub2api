@@ -16,10 +16,11 @@ import (
 // closedBefore / retainedFrom 在水位无效时退化为 1970-01-01，
 // 与此前 SQL 里 CASE WHEN valid 的语义一一对应。
 type groupUsageRollupSnapshot struct {
-	valid        bool
-	closedBefore string    // date，历史日桶的右开边界
-	retainedDate string    // retained_from 在服务端时区内的日期，历史日桶的左闭边界
-	tailStart    time.Time // 尾段（还没进日桶的那部分 usage_logs）的起点，不早于 expired_before
+	valid         bool
+	closedBefore  string    // date，历史日桶的右开边界
+	retainedDate  string    // retained_from 在服务端时区内的日期，历史日桶的左闭边界
+	tailStart     time.Time // 尾段（还没进日桶的那部分 usage_logs）的起点，不早于 expired_before
+	expiredBefore time.Time
 }
 
 // readGroupUsageRollupSnapshot 读一次汇总水位并在 Go 侧判定有效性。
@@ -52,9 +53,10 @@ func (r *usageLogRepository) readGroupUsageRollupSnapshot(ctx context.Context, t
 		tailFloor = expiredBefore.Time.UTC()
 	}
 	invalid := groupUsageRollupSnapshot{
-		closedBefore: "1970-01-01",
-		retainedDate: "1970-01-01",
-		tailStart:    tailFloor,
+		closedBefore:  "1970-01-01",
+		retainedDate:  "1970-01-01",
+		tailStart:     tailFloor,
+		expiredBefore: tailFloor,
 	}
 	if rowCount != 1 || !closedBefore.Valid || !retainedFrom.Valid ||
 		!stateTimezone.Valid || stateTimezone.String != timezoneName ||
@@ -76,10 +78,11 @@ func (r *usageLogRepository) readGroupUsageRollupSnapshot(ctx context.Context, t
 		retainedDate = expiredDate
 	}
 	return groupUsageRollupSnapshot{
-		valid:        true,
-		closedBefore: closedBefore.String,
-		retainedDate: retainedDate,
-		tailStart:    tailStart,
+		valid:         true,
+		closedBefore:  closedBefore.String,
+		retainedDate:  retainedDate,
+		tailStart:     tailStart,
+		expiredBefore: tailFloor,
 	}, nil
 }
 
@@ -108,15 +111,16 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 	//   Execution Time: 34 ms
 	// Recheck the watermark in the aggregation's own snapshot: a historical
 	// write can invalidate buckets after the first query. Keep the indexed tail
-	// for an unchanged watermark; only a mismatch scans the full raw history.
+	// for an unchanged watermark; a mismatch scans only the retained raw history.
 	const query = `
 		WITH usable_rollup AS (
 			SELECT $4::boolean AND EXISTS (
 				SELECT 1 FROM usage_group_rollup_state
 				WHERE id = 1
 					AND closed_before = $6::date
-					AND (retained_from AT TIME ZONE $8::text)::date = $5::date
+					AND (GREATEST(retained_from, expired_before, TIMESTAMPTZ '1970-01-01 00:00:00+00') AT TIME ZONE $8::text)::date = $5::date
 					AND timezone_name = $8
+					AND expired_before = $9::timestamptz
 			) AS usable
 		), historical AS (
 			SELECT
@@ -139,7 +143,9 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 			UNION ALL
 			SELECT ul.group_id, ul.actual_cost, ul.created_at
 			FROM usage_logs ul
-			WHERE ul.created_at >= TIMESTAMPTZ '1970-01-01 00:00:00+00'
+			WHERE ul.created_at >= GREATEST($9::timestamptz, COALESCE(
+				(SELECT expired_before FROM usage_group_rollup_state WHERE id = 1),
+				TIMESTAMPTZ '1970-01-01 00:00:00+00'))
 				AND NOT (SELECT usable FROM usable_rollup)
 		), tail AS (
 			SELECT
@@ -175,6 +181,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 		state.closedBefore,
 		state.tailStart,
 		timezoneName,
+		state.expiredBefore,
 	)
 	if err != nil {
 		return nil, err

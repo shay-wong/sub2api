@@ -403,7 +403,7 @@ func TestGroupUsageSummaryRevalidatesWatermarkAfterConcurrentWrite(t *testing.T)
 	require.NoError(t, err)
 	planText := strings.Join(plan, "\n")
 	require.Contains(t, planText, "Index Cond: (created_at >=", planText)
-	require.Regexp(t, `Scan on usage_logs[^\n]+\(never executed\)\n[^\n]+created_at >= '1970-01-01`, planText)
+	require.Regexp(t, `Scan on usage_logs[^\n]+\(never executed\)\n[^\n]+created_at >= GREATEST\('1970-01-01`, planText)
 	t.Log(planText)
 }
 

@@ -35,6 +35,7 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryUsesRollupTail(t *testing.T) {
 			"2026-03-07", // closed_before
 			time.Date(2026, 3, 7, 5, 0, 0, 0, time.UTC), // tail_start = closed_before 在配置时区的零点
 			"America/New_York",
+			time.Unix(0, 0).UTC(),
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}).
 			AddRow(int64(7), 12.5, 1.25, 2.5))
@@ -86,7 +87,7 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryFallsBackWhenWatermarkInvalid(
 			mock.ExpectQuery(`(?s)COUNT\(\*\).*usage_group_rollup_state.*WHERE id = 1`).
 				WillReturnRows(tc.rows)
 			mock.ExpectQuery(`(?s)usage_group_daily_rollups.*FROM usage_logs ul\s+WHERE ul\.created_at >= \$7`).
-				WithArgs(todayStart, yesterdayStart, "2026-03-08", false, "1970-01-01", "1970-01-01", epoch, "America/New_York").
+				WithArgs(todayStart, yesterdayStart, "2026-03-08", false, "1970-01-01", "1970-01-01", epoch, "America/New_York", epoch).
 				WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}))
 
 			_, err := repo.GetAllGroupUsageSummary(context.Background(), todayStart)
@@ -149,7 +150,7 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore(t *t
 			mock.ExpectQuery(`(?s)COUNT\(\*\).*MAX\(expired_before\).*usage_group_rollup_state.*WHERE id = 1`).
 				WillReturnRows(tc.rows)
 			mock.ExpectQuery(`(?s)usage_group_daily_rollups.*FROM usage_logs ul\s+WHERE ul\.created_at >= \$7`).
-				WithArgs(todayStart, yesterdayStart, "2026-03-08", tc.valid, tc.retained, tc.closed, tc.tailStart, "America/New_York").
+				WithArgs(todayStart, yesterdayStart, "2026-03-08", tc.valid, tc.retained, tc.closed, tc.tailStart, "America/New_York", expiredBefore).
 				WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}))
 
 			_, err := repo.GetAllGroupUsageSummary(context.Background(), todayStart)

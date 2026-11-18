@@ -372,6 +372,7 @@ actionlint .github/workflows/stable-fork-release.yml
 ## 11. 用量与运维可观测性、查询性能
 
 - **0.2.22 上游整合**：日汇总非阻塞重建、保留期清理、usage 批量结算及模型成本统计改进来自上游；合并继续保留 Fork 统一筛选与精确总数缓存，`actual_cost` 不再被账号成本覆盖。新增调度集成测试仅补齐旧 `project_id` 存储字段，不恢复 Project 范围。聚焦测试为 `TestGroupUsageRollup`、`TestSchedulerSnapshotConfiguredMembership` 和 `TestUsageLogRepositoryListWithFilters`。
+- **汇总保留期复核适配**：二次水位检查同步复核 `expired_before`，历史桶按保留期裁定有效边界；水位失效回退到原始用量时，也使用该次查询快照中的保留期下界，避免把尚未物理删除的过期记录重新计入。实现为 `backend/internal/repository/custom_group_usage_rollup_repo.go`，回归为 `group_usage_summary_retention_integration_test.go` 的 `TestGroupUsageSummaryRevalidationPreservesRetentionFloor`，覆盖落后的水位、无效时区和两次读取之间推进保留期。独立修复定位：`git log -S'TestGroupUsageSummaryRevalidationPreservesRetentionFloor' -- backend/internal/repository/group_usage_summary_retention_integration_test.go`。上游具备同等水位复核、保留期和并发回归后移除此子项；三语 README 及 CHANGELOG 同步。
 
 - **输出 TPS 集成测试兼容（仅维护者）**：上游逐请求 TPS 分位数测试直接写入 `usage_logs`，补充 `mustDefaultProjectID` 生成的兼容字段，满足尚未删除的 `project_id NOT NULL` 约束；不恢复 Project 权限或统计范围。验证：`go test -tags=integration ./internal/repository -run '^TestOpsOutputTPS'`。代码为 `backend/internal/repository/ops_repo_dashboard_integration_test.go`，当前提交定位：`git log -S'mustDefaultProjectID' -- backend/internal/repository/ops_repo_dashboard_integration_test.go`；删除旧列后同步删除此测试适配。
 
