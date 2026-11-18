@@ -152,8 +152,8 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 					}
 				}
 				// Request-specific calculation must not mutate shared fallback pricing.
-				require.Zero(t, svc.fallbackPrices[model].ModelUltrafastMultiplier)
-				require.Nil(t, svc.fallbackPrices[model].UltrafastMultiplier)
+				require.Zero(t, svc.fallbackPrices[model].UltrafastMultiplier)
+				require.Nil(t, svc.fallbackPrices[model].UltrafastMultiplierOverride)
 			})
 		}
 	}
@@ -166,7 +166,7 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 			pricing, err := newTestBillingService().getModelPricingAt(model, at)
 			require.NoError(t, err)
 			require.Equal(t, openAIUltrafastMultiplier(model, at), configuredServiceTierMultiplier("ultrafast", pricing))
-			pricing.UltrafastMultiplier = pricingMultiplier(2.5)
+			pricing.UltrafastMultiplierOverride = pricingMultiplier(2.5)
 			require.Equal(t, 2.5, configuredServiceTierMultiplier("ultrafast", pricing), "channel override must still take precedence over the dated model default")
 		}
 	}

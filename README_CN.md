@@ -222,6 +222,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
   - OpenCode Go 的用量设置、查询及刷新控制仅限超管，因为操作会涉及共享同一 Key 的多个账号；受限管理员的账号列表和详情不会关联未绑定账号的用量。
 - **精确计费** - Token 级别的用量追踪和成本计算
   - OpenAI 缓存写入保留上游 30 分钟和 12 小时分类，渠道可单独设置 12 小时写入价格；显式零价格和自定义 Fast/Ultrafast 倍率继续生效。
+  - Anthropic 的 5 分钟/1 小时缓存写入明细在 Responses、Chat Completions 转换中保持完整，未分类差额按短 TTL 价格补计，避免输入 token 漏计或重复计费。
   - Fork 在切换备用分组后，按实际选中分组的价格、倍率和订阅扣费，用量也归属该组。例如基础费用 $1，从 `1x` 的 A 组切到 `2x` 的 B 组后收取 $2。
   - GPT-6.1 Sol/Terra 长上下文计费与上游一致：OpenAI OAuth/setup-token 账号免模型默认附加费；API Key 账号仍按价卡及计费开关处理。
   - 余额并发预占跟随故障转移后实际选中的分组和订阅；同组重试复用预占，已排队计费完成结算后才释放所持引用。
@@ -232,11 +233,12 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **OpenAI GPT-6.2 Sol / Astra** - 沿用上游的模型发现、推理控制、定价和账号权益判断。
 - **OpenAI Ultrafast** - 沿用上游在 Responses、Chat Completions 和 Responses WebSocket 中对 `service_tier: "ultrafast"` 的原样透传及 Codex OAuth 路由提示。GPT-6 Astra 和 GPT-6.1 Sol 默认按 Standard 的 `6 倍`；GPT-6.2 Sol/Astra 在 `2027-03-01 08:00 UTC` 前为 `3 倍`，之后为 `6 倍`，按请求时点计算；未指定模型倍率时兜底 `2 倍`。
   - 在“**分组 → 新建/编辑**”中，强制 Ultrafast 仅对支持的模型及账号权益生效，可与强制 Fast 同时开启，优先 Ultrafast，其次 Fast；两个开关默认均关闭。
-  - Fork 额外提供“**渠道 → 模型定价 → Ultrafast 倍率**”。填写正数时覆盖模型默认倍率；留空使用模型默认值，不继承 Fast 倍率。
+  - 上游现已提供“**渠道 → 模型定价 → Ultra Fast 倍率**”。填写正数时覆盖模型默认倍率；留空使用模型默认值，不继承 Fast 倍率；既有 Fork 配置原样保留。
   - 响应档位计费沿用上游：权威响应只能降低、不能抬高计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显仍按最终出站档位计费，明确的 `priority` 回显可以将 Ultrafast 降为 Priority。
 - **Codex 桌面版上下文兼容** - 沿用上游对 HTTP Responses 中缺少调用 ID 的已识别页面快照及附加客户端上下文的兼容，无需额外配置；普通工具结果仍遵守原有校验。
 - **Claude Fable / Mythos 5.2** - 沿用上游模型支持、推理参数转换及内置兜底价格，包括不同缓存写入 TTL 的价格。
 - **智能调度** - 智能账号选择，支持粘性会话
+  - OpenAI 流式空闲期限随上游数据到达重置；首段内容输出前因空闲超时失败时，最多切换一次账号。
   - `/v1/messages` 的推理映射、上限和拒绝规则跟随实际选中分组；备用组未设置规则时不沿用原组配置。
 - **并发控制** - 用户级和账号级并发限制
   - Anthropic 流转 Chat Completions 或 Responses 后，客户端断开时的清理有总截止时间，不会被上游持续 ping 延长；回收用量按实际选中分组计费。明确上游 error 事件不计费；畸形 SSE 或转换失败仍终止流，不伪装成功。

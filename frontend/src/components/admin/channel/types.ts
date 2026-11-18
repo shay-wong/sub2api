@@ -31,8 +31,8 @@ export interface PricingFormEntry {
   cache_write_12h_price?: number | string | null
   cache_read_price: number | string | null
   fast_multiplier?: number | string | null
-  ultrafast_multiplier?: number | string | null
   flex_multiplier?: number | string | null
+  ultrafast_multiplier?: number | string | null
   reasoning_effort_multipliers?: Record<string, number | string> | null
   image_input_price: number | string | null
   image_output_price: number | string | null

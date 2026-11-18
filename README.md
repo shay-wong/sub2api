@@ -213,6 +213,7 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - OpenCode Go usage settings, queries, and refresh controls are super-admin-only because they operate across accounts sharing a key. Restricted account lists and details do not resolve usage from unbound sibling accounts.
 - **Precise Billing** - Token-level usage tracking and cost calculation
   - OpenAI cache writes preserve upstream 30-minute and 12-hour TTLs. Channels can price 12-hour writes separately; explicit zero prices and custom Fast/Ultrafast multipliers remain effective.
+  - Anthropic 5-minute/1-hour cache-write details survive Responses and Chat Completions conversions; any unclassified remainder is billed at the short-TTL price, without dropping or double-counting input tokens.
   - Fork billing follows the group actually selected after fallback, including its prices, rate multiplier, subscription, and usage records. With a $1 base cost, falling back from a `1x` group to a `2x` group costs $2.
   - GPT-6.1 Sol/Terra long-context billing follows upstream: OpenAI OAuth/setup-token accounts are exempt from the model-default surcharge; API-key accounts retain the price-card and billing-toggle rules.
   - Inflight balance reservations follow the group and subscription actually selected after failover; same-group retries reuse the reservation, and queued billing retains it until settlement.
@@ -226,11 +227,12 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **OpenAI GPT-6.2 Sol / Astra** - Uses upstream model discovery, reasoning controls, pricing, and account entitlement checks.
 - **OpenAI Ultrafast** - Uses upstream passthrough for `service_tier: "ultrafast"` in Responses, Chat Completions, and Responses WebSocket, including the Codex OAuth routing hint. GPT-6 Astra and GPT-6.1 Sol default to `6x` Standard. GPT-6.2 Sol/Astra default to `3x` before `2027-03-01 08:00 UTC`, then `6x`, based on the request time; models without a specific multiplier fall back to `2x`.
   - Under **Groups → Create/Edit**, forced Ultrafast applies only to supported models and account entitlements. It can coexist with forced Fast: Ultrafast takes priority, then Fast. Both switches are off by default.
-  - The fork adds a separate **Ultrafast multiplier** under **Channels → Model pricing**. A positive value overrides the model default; leaving it blank uses that default, independently of the Fast multiplier.
+  - Upstream now also provides **Ultrafast multiplier** under **Channels → Model pricing**. A positive value overrides the model default; leaving it blank uses that default, independently of the Fast multiplier. Existing fork settings are preserved.
   - Billing follows upstream's response-tier rules: an authoritative response can lower but never raise the billed tier; the amount is then calculated using that tier's configured prices. A `default` echo from a Codex OAuth/setup-token account keeps the final outbound tier; an explicit `priority` response can lower Ultrafast to Priority.
 - **Codex Desktop Context** - Uses upstream compatibility for recognized page snapshots and additional client context sent without a call ID on HTTP Responses, without extra configuration. Regular tool results retain the existing validation rules.
 - **Claude Fable / Mythos 5.2** - Uses upstream model support, reasoning-effort conversion, and built-in fallback prices, including separate cache-write TTL prices.
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
+  - OpenAI stream idle deadlines reset when upstream data arrives. An idle failure before the first content output can switch accounts at most once.
   - `/v1/messages` applies the reasoning mappings, ceiling, and deny rules of the group actually selected. A fallback group with no rules does not inherit the original group's policy.
   - Upstream now provides model catalog cache rechecks to avoid duplicate concurrent fetches; cache isolation and expiry behavior are unchanged.
 - **Concurrency Control** - Per-user and per-account concurrency limits

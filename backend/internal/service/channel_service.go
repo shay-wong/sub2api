@@ -803,8 +803,8 @@ func checkPricesNotNegative(p ChannelModelPricing) error {
 		val   *float64
 	}{
 		{"fast_multiplier", p.FastMultiplier},
-		{"ultrafast_multiplier", p.UltrafastMultiplier},
 		{"flex_multiplier", p.FlexMultiplier},
+		{"ultrafast_multiplier", p.UltrafastMultiplier},
 	} {
 		if c.val != nil && *c.val <= 0 {
 			return infraerrors.BadRequest("INVALID_MULTIPLIER", fmt.Sprintf("%s must be > 0", c.field))

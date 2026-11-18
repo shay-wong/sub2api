@@ -22,8 +22,8 @@ function createEntry(billingMode: PricingFormEntry['billing_mode'] = 'token'): P
     cache_write_price: null,
     cache_read_price: null,
     fast_multiplier: null,
-    ultrafast_multiplier: null,
     flex_multiplier: null,
+    ultrafast_multiplier: null,
     reasoning_effort_multipliers: null,
     image_input_price: null,
     image_output_price: null,
@@ -86,7 +86,7 @@ describe('PricingEntryCard request multipliers', () => {
     expect(hidden.text()).not.toContain('admin.channels.form.fastMultiplier')
 
     const shown = shallowMount(PricingEntryCard, {
-      props: { entry: createEntry(), enableTierMultipliers: true },
+      props: { entry: createEntry(), platform: 'openai', enableTierMultipliers: true },
     })
     expect(shown.text()).toContain('admin.channels.form.fastMultiplier')
     expect(shown.text()).toContain('admin.channels.form.ultrafastMultiplier')
