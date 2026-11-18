@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `6dd5a045b62e27e5b5b139adef91a171097f639b` |
-| 当前比较范围 | `6dd5a045b62e27e5b5b139adef91a171097f639b..HEAD` |
+| 已合并上游提交 / 比较基线 | `69d2fae91318359e4e25c0171eaf70364dad3629` |
+| 当前比较范围 | `69d2fae91318359e4e25c0171eaf70364dad3629..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `0add2175ad405c77ea08a42b5a7ebc7cf4ce2e3d`，固定上游 parent 为 `6dd5a045b62e27e5b5b139adef91a171097f639b`，共同基线为 `ee58c0013c76ccd3f36439881bc848d342ec1c9d`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `d41861a298fa44769722ba00e9721a81b7f49a27`，固定上游 parent 为 `69d2fae91318359e4e25c0171eaf70364dad3629`，共同基线为 `530c5e3a4f9c73ca2b0881191d0ef8e0d82c5484`；远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本次合入上游 `0.2.21`：Claude Fable/Mythos 5.2 模型及价格、Codex Pages 上下文兼容、合成推理参数的映射与限制、WebSocket 后续轮次及 TTFT 修复、刷新 Token 原子消费、充值倍率 6 位小数、API Key 用量异步查询和索引、账号额度刷新保留、审计入队唤醒，以及图片错误码、会话种子和工具元数据修复。Fork 保留独立 Ultrafast 渠道倍率、实际分组计费、mmap 生命周期、细粒度权限及自动重置策略；旧人民币倍率退役等已完成的清理不回退。
+本次合入上游 `0.2.22` 及后续 main：GPT-6.2 Sol/Astra、按模型与账号权益强制 Ultrafast、Gemini 4 Carbon/Hydrogen 和 Vertex 多区域计价、按用户通道合并扣费、分组日汇总非阻塞重建、调度快照复用与冷却账号保留、连接存活检测、Codex 外部上下文与工具 schema 兼容，以及流式首内容前故障转移和模型观测。Fork 保留独立 Ultrafast 渠道倍率、实际分组计费、mmap 生命周期、细粒度权限、自动重置策略和删除用户时撤销订阅；旧人民币倍率退役等已完成的清理不回退。
 
 [PR #8622](https://github.com/Wei-Shaw/sub2api/pull/8622) 的 `b2a695d617d490242a39b5f245cf2a50ae5d9993` 已包含于本次上游基线，不再作为待吸收 Fork 能力。生产实现与上游相同，保留提前合入时补充的转义名称与零分配预检回归；不重复注册 normalizer，也不回退 Fork 的选后推理策略。
 
@@ -33,14 +33,14 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.21` |
-| 当前 Fork 版本 | `0.2.21-fork.1` |
-| 已存在同基线 Fork tag | 尚无 `v0.2.21-fork.*`；旧版 `v0.2.20-fork.2` 保留 |
-| 下次发布所需版本 | 已准备 `0.2.21-fork.1`，发布时再次检查远端未占用 |
+| 当前上游版本 | `0.2.22` |
+| 当前 Fork 版本 | `0.2.22-fork.1` |
+| 已存在同基线 Fork tag | 尚无 `v0.2.22-fork.*`；旧版 `v0.2.21-fork.1` 保留 |
+| 下次发布所需版本 | 已准备 `0.2.22-fork.1`，发布时再次检查远端未占用 |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 升为 `0.2.21`，按规则从 `0.2.21-fork.1` 开始。既有 tag 不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 升为 `0.2.22`，按规则从 `0.2.22-fork.1` 开始。既有 tag 不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
 本次仅合并代码、同步文档基线并更新未发布版本源，不发布或创建 tag。
 
@@ -206,6 +206,8 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
 
+- **0.2.22 上游整合**：GPT-6.2 模型、Ultrafast 权益及强制档位、额外 Codex 上下文/工具声明规范化和流式模型观测均来自上游，不新增 Fork 能力。继续保留选后分组策略、完整 SSE/客户端工具往返、断线有界清理及请求体按需复制；sticky 写回复用上游有界 `WithoutCancel`，分组仍使用实际选中值。鉴权快照升至 `v29`，同时拒绝缺少 Fork 字段的上游 `v28` 和旧 Fork `v27`，并保留 `ForceOpenAIUltrafast`。验证包含 `TestAPIKeyAuthSnapshot`、`TestNormalizeCodex`、`TestHandleCC`、`TestHandleResponses` 与 `TestAntigravityCompat`。
+
 - **磁盘请求体读取诊断**：大请求及压缩请求经 mmap 读取失败时，也返回 `RequestBodyReadError` 的原始上传字节数和耗时，不能把解压后的字节数当作已接收字节数。真实读取超时和客户端断开优先于解码包装判定，分别使用 408 和 499；无效压缩仍为 400，超限与内存预算错误链继续保留 413/503。实现为 `backend/internal/pkg/httputil/body.go`、`body_read_error.go`，回归为 `body_read_error_test.go` 中 `TestDiskSpillRequestBodyReadFailuresReportRawProgress`，验证 `go test -race ./internal/pkg/httputil`。三语 README 与 CHANGELOG 同步；本次合并后独立适配定位：`git log -S'TestDiskSpillRequestBodyReadFailuresReportRawProgress' -- backend/internal/pkg/httputil/body_read_error_test.go`。上游具备等价磁盘路径诊断后移除此子项。
 - **磁盘请求体资源保护适配**：保留大请求 mmap 路径，同时让压缩解码窗口、复制缓冲区及 JSON 规范化共享上游请求内存预算；解压超过 64 MiB 明确拒绝，不截断后继续处理，zstd 窗口上限为 8 MiB。小请求继续使用上游带预算的读取与规范化路径，映射页延续 Fork 的磁盘映射生命周期。实现为 `backend/internal/pkg/httputil/body.go`；回归 `body_budget_test.go` 中 `TestDiskSpillRequestBodyEnforcesDecompressionLimits`、`TestDiskSpillRequestBodySharesMemoryBudget`，验证 `go test -race ./internal/pkg/httputil`。三语 README 与 CHANGELOG 同步；本次合并后的独立适配定位：`git log -S'TestDiskSpillRequestBodySharesMemoryBudget' -- backend/internal/pkg/httputil/body_budget_test.go`。上游具备等价磁盘路径和预算保护后移除此适配。
 - **到期用卡时间预览**：账号编辑页直接读取 `codex_reset_credit_snapshot`，显示最早未过期卡的 `expires_at - 提前量`，随单位/数值变化更新并标注本地时区；进入范围时提示下次检查，卡明细不完整、无效或全部过期时提示先查询额度，不编造计划。仅预览到期条件，用量条件仍可能提前触发；不新增接口或改变消费策略。`EditAccountModal.spec.ts` 覆盖 1000 分钟、三种单位、边界跨越和缺失信息；三语 README、CHANGELOG 同步。定位：`git log -S'autoResetCreditExpiryPreview' -- frontend/src/components/account/EditAccountModal.vue`，随此重置策略被上游等价吸收后移除 Fork 记录。
@@ -315,12 +317,14 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 10. 支付定价、结果 DTO 与退款状态机正确性
 
+- **0.2.22 上游整合**：按用户通道合并扣费及 Vertex 默认价卡多区域倍率沿用上游；批量命令继续消费已解析的订阅 ID 与金额，不重选分组。GPT-6.2 的请求时点倍率写入 `ModelUltrafastMultiplier`，渠道的可空 `UltrafastMultiplier` 继续优先。支付宝重试沿用 Fork 持久化的 `ProviderRequestID`，不以订单与金额重新生成；上游新增的重复退款回归补齐该请求 ID 后继续验证。聚焦测试为 `TestUsageBillingLane`、`TestUsageBillingRepositoryApplyBatch`、`TestGPT62`、`TestAlipayRefund`。
+
 以下是基于本文档上游基线核对的共享规则，不登记为 Fork 独有能力：
 
 | 共享规则 | 当前行为 |
 | --- | --- |
 | 基础计价 | Token 单价解析、Fast/长上下文计算沿用上游计价引擎和配置 |
-| Ultrafast 默认倍率 | Astra 为 Standard 的 `6x`，其他模型默认 `2x` |
+| Ultrafast 默认倍率 | GPT-6 Astra 与 GPT-6.1 Sol 为 Standard 的 `6x`；GPT-6.2 Sol/Astra 在 `2027-03-01T08:00:00Z` 前为 `3x`、之后为 `6x`，以请求时点计算；未设置模型倍率时兜底 `2x` |
 | 响应档位结算 | 权威响应只能降低计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显保留最终出站档位 |
 | GPT-6.1 Sol/Terra 长上下文 | OpenAI OAuth/setup-token 账号免模型默认长上下文附加费；API Key 账号仍按价卡和开关计费 |
 | 充值与退款基础行为 | 独立余额充值倍率、订阅 USD/CNY 汇率，以及 pending 期间持续冻结权益均已由上游提供 |
@@ -366,6 +370,8 @@ actionlint .github/workflows/stable-fork-release.yml
 ```
 
 ## 11. 用量与运维可观测性、查询性能
+
+- **0.2.22 上游整合**：日汇总非阻塞重建、保留期清理、usage 批量结算及模型成本统计改进来自上游；合并继续保留 Fork 统一筛选与精确总数缓存，`actual_cost` 不再被账号成本覆盖。新增调度集成测试仅补齐旧 `project_id` 存储字段，不恢复 Project 范围。聚焦测试为 `TestGroupUsageRollup`、`TestSchedulerSnapshotConfiguredMembership` 和 `TestUsageLogRepositoryListWithFilters`。
 
 - **输出 TPS 集成测试兼容（仅维护者）**：上游逐请求 TPS 分位数测试直接写入 `usage_logs`，补充 `mustDefaultProjectID` 生成的兼容字段，满足尚未删除的 `project_id NOT NULL` 约束；不恢复 Project 权限或统计范围。验证：`go test -tags=integration ./internal/repository -run '^TestOpsOutputTPS'`。代码为 `backend/internal/repository/ops_repo_dashboard_integration_test.go`，当前提交定位：`git log -S'mustDefaultProjectID' -- backend/internal/repository/ops_repo_dashboard_integration_test.go`；删除旧列后同步删除此测试适配。
 

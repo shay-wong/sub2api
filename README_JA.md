@@ -179,6 +179,11 @@
 <td><a href="https://massivetokens.com/signup?ref=SUB2API">Massive Tokens</a> は、企業や大量に利用する開発者向けに、Claude API を token 単位の卸売価格で提供しています。標準の Anthropic Messages API を提供しているため、Claude Code、Sub2API、LiteLLM、One API とコードを変更せずに連携できます。招待コード SUB2API で登録すると、すべての呼び出しが 5% オフになります。登録後は Telegram グループ @massivetokens (<a href="https://t.me/massivetokens">https://t.me/massivetokens</a>) に参加し、管理者に $10 分のクレジットをリクエストしてください。</td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3"><img src="assets/partners/logos/DataEyesAI.png" alt="DataEyesAI" width="150"></a></td>
+<td><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">DataEyesAI</a> は、開発者と企業向けのワンストップ AI API プラットフォームです。統一 API を通じて OpenAI、Claude、Gemini などの主要モデルを利用でき、AI コーディングからテキスト・画像・音声・動画の生成まで幅広く対応しています。Claude Code や Codex などの主要な AI コーディングツールに対応し、従量課金、リアルタイムの利用状況・コスト監視、24時間365日のテクニカルサポートを提供。モデル連携をより手軽にし、開発コストを管理しやすくします。<a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">こちらのリンク</a>から新規登録すると、利用クレジットを受け取れます。コード開発からマルチモーダル制作まで、AI 活用をここから始めましょう！</td>
+</tr>
+
 </table>
 
 </details>
@@ -216,10 +221,12 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
   - ディスク経由のリクエストも、デコードと JSON 正規化に共有メモリ予算を適用します。展開後の内容が 64 MiB、または zstd ウィンドウが 8 MiB を超えた場合は、黙って切り詰めず拒否します。
   - ディスク経由のアップロード失敗時は、本文を記録せず受信バイト数と経過時間を記録します。読み取りタイムアウトは HTTP 408、クライアント切断は 499 とし、圧縮ヘッダーの読み取り失敗にも同じ分類を適用します。
 - **OpenAI GPT-6 Astra** - 画像入力、`low` から `max` までの推論レベル、最大 922K トークン入力、Priority/Fast、272K の長文コンテキスト料金階層を含む上流のモデル対応を使用します。Fork は完全な Astra カタログ項目も同梱しますが、料金と静的フォールバック規則は上流と同じです。
-- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket での `service_tier: "ultrafast"` の転送と Codex OAuth ルーティングヒントは上流の実装を使用します。既定倍率も共通で、Astra は Standard の `6 倍`、その他のモデルは `2 倍`です。
+- **OpenAI GPT-6.2 Sol / Astra** - モデル検出、推論設定、料金、アカウントの利用資格判定に上流の実装を使用します。
+- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket での `service_tier: "ultrafast"` の転送と Codex OAuth ルーティングヒントは上流の実装を使用します。GPT-6 Astra と GPT-6.1 Sol は Standard の `6 倍`、GPT-6.2 Sol/Astra は `2027-03-01 08:00 UTC` より前は `3 倍`、以後は `6 倍`で、リクエスト時刻を基準にします。モデル固有の倍率がなければ `2 倍`です。
+  - 「**グループ → 新規作成/編集**」の Ultrafast 強制は、対応モデルとアカウントの利用資格に従います。Fast 強制との同時有効化が可能で、Ultrafast、Fast の順に適用します。両方とも既定はオフです。
   - Fork は「**チャネル → モデル料金 → Ultrafast 倍率**」を追加します。正の値を設定するとモデル既定値を上書きし、空欄ではモデル既定値を使用します。Fast 倍率は引き継ぎません。
   - 応答 tier の課金規則も上流と同じで、信頼できる応答は課金 tier を下げる場合のみ反映し、金額はその tier の料金設定から計算します。Codex OAuth/setup-token の `default` 応答では最終送信 tier を維持し、明示的な `priority` 応答では Ultrafast から Priority へ下げられます。
-- **Codex Desktop のページコンテキスト互換** - 呼び出し ID なしで送られる対応済みのページ・選択範囲スナップショットには上流の HTTP Responses 互換処理を使用し、追加設定は不要です。通常のツール結果には既存の検証規則を適用します。
+- **Codex Desktop のコンテキスト互換** - 呼び出し ID なしで送られる対応済みのページスナップショットと追加クライアントコンテキストには上流の HTTP Responses 互換処理を使用し、追加設定は不要です。通常のツール結果には既存の検証規則を適用します。
 - **Claude Fable / Mythos 5.2** - 上流のモデル対応、推論パラメータ変換、キャッシュ書き込み TTL ごとの料金を含む組み込みフォールバック料金を使用します。
 - **スマートスケジューリング** - スティッキーセッション付きのインテリジェントなアカウント選択
   - `/v1/messages` の推論マッピング・上限・拒否規則は、実際に選択されたグループに従います。フォールバック先に規則がなければ、元のグループの設定を引き継ぎません。

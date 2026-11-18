@@ -43,6 +43,15 @@ func (r openAIImagesPermissionAccountRepo) ListSchedulableUngroupedByPlatform(_ 
 	return r.ListSchedulableByGroupIDAndPlatform(context.Background(), 0, platform)
 }
 
+func (r openAIImagesPermissionAccountRepo) ListModelAvailabilityCandidates(_ context.Context, _ *int64, platforms []string, _ bool) ([]service.Account, error) {
+	for _, platform := range platforms {
+		if r.account.Platform == platform {
+			return []service.Account{r.account}, nil
+		}
+	}
+	return nil, nil
+}
+
 type openAIImagesPermissionGroupRepo struct {
 	service.GroupRepository
 	group *service.Group

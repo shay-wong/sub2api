@@ -182,6 +182,11 @@ Please read the following carefully before using this project:
 <td><a href="https://massivetokens.com/signup?ref=SUB2API">Massive Tokens</a> supplies Claude API access at wholesale per-token prices to businesses and high-volume developers. It serves the standard Anthropic Messages API, so it works with Claude Code, Sub2API, LiteLLM and One API without code changes. Sign up with code SUB2API for 5% off every call, then join our Telegram group @massivetokens (<a href="https://t.me/massivetokens">https://t.me/massivetokens</a>) and ask an admin for $10 in credits.</td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3"><img src="assets/partners/logos/DataEyesAI.png" alt="DataEyesAI" width="150"></a></td>
+<td><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">DataEyesAI</a> is an all-in-one AI API platform for developers and businesses, offering unified access to leading models including OpenAI, Claude, and Gemini for AI coding and text, image, audio, and video generation. It supports popular AI coding tools such as Claude Code and Codex, with pay-as-you-go pricing, real-time usage and cost monitoring, and 24/7 technical support to simplify model integration and keep development costs under control. New users can sign up through <a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">this link</a> to claim usage credits. From coding to multimodal creation, start your AI journey in one place!</td>
+</tr>
+
 </table>
 
 </details>
@@ -218,10 +223,12 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
   - Disk-backed requests also enforce the shared memory budget for decoding and JSON normalization. Decompressed content over 64 MiB or a zstd window over 8 MiB is rejected instead of silently truncated.
   - Failed disk-backed uploads record received bytes and elapsed time without request content. Read timeouts return HTTP 408, and client disconnects are recorded as 499, including failures while reading compressed headers.
 - **OpenAI GPT-6 Astra** - Uses upstream model support, including image input, `low` through `max` reasoning, a 922K-token maximum input, Priority/Fast, and the 272K long-context price tier. The fork also bundles a complete Astra catalog entry; its prices and static fallback rules match upstream.
-- **OpenAI Ultrafast** - Uses upstream passthrough for `service_tier: "ultrafast"` in Responses, Chat Completions, and Responses WebSocket, including the Codex OAuth routing hint. Shared defaults are `6x` Standard for Astra and `2x` for other models.
+- **OpenAI GPT-6.2 Sol / Astra** - Uses upstream model discovery, reasoning controls, pricing, and account entitlement checks.
+- **OpenAI Ultrafast** - Uses upstream passthrough for `service_tier: "ultrafast"` in Responses, Chat Completions, and Responses WebSocket, including the Codex OAuth routing hint. GPT-6 Astra and GPT-6.1 Sol default to `6x` Standard. GPT-6.2 Sol/Astra default to `3x` before `2027-03-01 08:00 UTC`, then `6x`, based on the request time; models without a specific multiplier fall back to `2x`.
+  - Under **Groups → Create/Edit**, forced Ultrafast applies only to supported models and account entitlements. It can coexist with forced Fast: Ultrafast takes priority, then Fast. Both switches are off by default.
   - The fork adds a separate **Ultrafast multiplier** under **Channels → Model pricing**. A positive value overrides the model default; leaving it blank uses that default, independently of the Fast multiplier.
   - Billing follows upstream's response-tier rules: an authoritative response can lower but never raise the billed tier; the amount is then calculated using that tier's configured prices. A `default` echo from a Codex OAuth/setup-token account keeps the final outbound tier; an explicit `priority` response can lower Ultrafast to Priority.
-- **Codex Desktop Page Context** - Uses upstream compatibility for recognized open-page and selected-page snapshots sent without a call ID on HTTP Responses, without extra configuration. Regular tool results retain the existing validation rules.
+- **Codex Desktop Context** - Uses upstream compatibility for recognized page snapshots and additional client context sent without a call ID on HTTP Responses, without extra configuration. Regular tool results retain the existing validation rules.
 - **Claude Fable / Mythos 5.2** - Uses upstream model support, reasoning-effort conversion, and built-in fallback prices, including separate cache-write TTL prices.
 - **Smart Scheduling** - Intelligent account selection with sticky sessions
   - `/v1/messages` applies the reasoning mappings, ceiling, and deny rules of the group actually selected. A fallback group with no rules does not inherit the original group's policy.

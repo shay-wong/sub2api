@@ -191,6 +191,11 @@
 <td><a href="https://massivetokens.com/signup?ref=SUB2API">Massive Tokens</a> 以批发价向企业和大用量开发者提供 Claude API。提供标准的 Anthropic Messages API，Claude Code、Sub2API、LiteLLM、One API 无需改代码即可接入。使用邀请码 SUB2API 注册，每次调用立减 5%；注册后加入 Telegram 群 @massivetokens (<a href="https://t.me/massivetokens">https://t.me/massivetokens</a>)，向管理员申请 $10 额度。</td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3"><img src="assets/partners/logos/DataEyesAI.png" alt="DataEyesAI" width="150"></a></td>
+<td><a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">DataEyesAI</a> 是面向开发者与企业的一站式 AI API 服务平台，通过统一接口接入 OpenAI、Claude、Gemini 等主流模型，覆盖 AI 编程及文本、图像、音频、视频生成。支持 Claude Code、Codex 等主流 AI 编程工具，提供按量付费、实时用量与成本监控，以及 7×24 小时技术支持，让模型接入更便捷、开发成本更可控。新用户通过<a href="https://www.dataeyes.vip/?promoter_code=9dkfv2r3">此链接</a>注册，可领取使用额度，从代码开发到多模态创作，一站开启 AI 应用之旅！</td>
+</tr>
+
 </table>
 
 </details>
@@ -224,10 +229,12 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
   - Gemini 显式缓存即使通过备用分组创建，仍由原 API Key 和原分组管理；创建、延期和引用请求按实际计费分组结算。延期使用创建时保存的计费组及延期时有效的价格与订阅；计费组失效时拒绝延期或引用，不改扣原组。旧缓存继续沿用原组，查询、删除和缩短有效期不受影响。
   - Anthropic 流转 Chat Completions 时，心跳写失败即停止向客户端写入，并在有界清理时限内收集上游晚到用量。
 - **OpenAI GPT-6 Astra** - 沿用上游模型支持，包括图片输入、`low` 至 `max` 推理档位、922K 最大输入、Priority/Fast 和 272K 长上下文阶梯。Fork 额外内置完整 Astra 目录条目，其价格及静态兜底规则与上游一致。
-- **OpenAI Ultrafast** - 沿用上游在 Responses、Chat Completions 和 Responses WebSocket 中对 `service_tier: "ultrafast"` 的原样透传及 Codex OAuth 路由提示；两边默认均为 Astra 按 Standard 的 `6 倍`、其他模型 `2 倍`。
+- **OpenAI GPT-6.2 Sol / Astra** - 沿用上游的模型发现、推理控制、定价和账号权益判断。
+- **OpenAI Ultrafast** - 沿用上游在 Responses、Chat Completions 和 Responses WebSocket 中对 `service_tier: "ultrafast"` 的原样透传及 Codex OAuth 路由提示。GPT-6 Astra 和 GPT-6.1 Sol 默认按 Standard 的 `6 倍`；GPT-6.2 Sol/Astra 在 `2027-03-01 08:00 UTC` 前为 `3 倍`，之后为 `6 倍`，按请求时点计算；未指定模型倍率时兜底 `2 倍`。
+  - 在“**分组 → 新建/编辑**”中，强制 Ultrafast 仅对支持的模型及账号权益生效，可与强制 Fast 同时开启，优先 Ultrafast，其次 Fast；两个开关默认均关闭。
   - Fork 额外提供“**渠道 → 模型定价 → Ultrafast 倍率**”。填写正数时覆盖模型默认倍率；留空使用模型默认值，不继承 Fast 倍率。
   - 响应档位计费沿用上游：权威响应只能降低、不能抬高计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显仍按最终出站档位计费，明确的 `priority` 回显可以将 Ultrafast 降为 Priority。
-- **Codex 桌面版网页上下文兼容** - 沿用上游对 HTTP Responses 中缺少调用 ID 的已识别页面和选区快照的兼容，无需额外配置；普通工具结果仍遵守原有校验。
+- **Codex 桌面版上下文兼容** - 沿用上游对 HTTP Responses 中缺少调用 ID 的已识别页面快照及附加客户端上下文的兼容，无需额外配置；普通工具结果仍遵守原有校验。
 - **Claude Fable / Mythos 5.2** - 沿用上游模型支持、推理参数转换及内置兜底价格，包括不同缓存写入 TTL 的价格。
 - **智能调度** - 智能账号选择，支持粘性会话
   - `/v1/messages` 的推理映射、上限和拒绝规则跟随实际选中分组；备用组未设置规则时不沿用原组配置。
