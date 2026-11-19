@@ -8,6 +8,8 @@ Go module downloads are shared across targets using the runner OS, actual Go ver
 
 All build jobs use the commit resolved by `prepare`, including a manual release's selected tag. Helper scripts come from the workflow revision and are passed as a run-local artifact, so older application tags do not need to contain the new scripts. The workflow serializes release runs to prevent simultaneous updates to moving image tags.
 
+The runtime images for amd64 and arm64 build and push concurrently on the publishing runner. The helper waits for both builds; if either fails, it exits unsuccessfully without publishing combined manifests or rolling tags. An architecture-specific version tag may already have been pushed by the other build. Simple mode still builds only amd64. Dry runs build both OCI archives concurrently without publishing.
+
 Fork publishing keeps registry login and image destination separate: `DOCKERHUB_USERNAME` authenticates, while the workflow resolves `DOCKERHUB_NAME` into the full `DOCKERHUB_IMAGE` repository path. The image helper uses that path unchanged; direct callers without it retain the username/sub2api fallback. Fork versions (`X.Y.Z-fork.N`) and plain releases publish version tags and update `latest`, major and minor tags in the configured repositories. Simple mode updates only the GHCR version tags and `latest`. The workflow enables rolling tags; direct helper callers can opt out with `PUBLISH_ROLLING_TAGS=false`. Existing remote tags change only after a successful publication.
 
 ## Validate without publication

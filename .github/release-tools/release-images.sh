@@ -17,6 +17,7 @@ fi
 publish_rolling_tags=${PUBLISH_ROLLING_TAGS:-true}
 arches=(amd64 arm64)
 if [[ ${SIMPLE_RELEASE:-false} == true ]]; then arches=(amd64); fi
+pids=()
 for arch in "${arches[@]}"; do
   args=(--platform "linux/$arch" --file ".release-context/$arch/Dockerfile"
     --label "org.opencontainers.image.version=$RELEASE_VERSION"
@@ -34,8 +35,14 @@ for arch in "${arches[@]}"; do
   else
     args+=(--push)
   fi
-  docker buildx build "${args[@]}" ".release-context/$arch"
+  docker buildx build "${args[@]}" ".release-context/$arch" &
+  pids+=("$!")
 done
+status=0
+for pid in "${pids[@]}"; do
+  wait "$pid" || status=$?
+done
+if (( status != 0 )); then exit "$status"; fi
 if [[ ${DRY_RUN:-false} != true && ${SIMPLE_RELEASE:-false} != true ]]; then
   major=${RELEASE_VERSION%%.*}
   minor=${RELEASE_VERSION#*.}; minor=${minor%%.*}

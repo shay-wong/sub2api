@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -159,6 +160,48 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertNotIn('skip/sub2api', log)
         self.assertIn('ghcr.io/exampleowner/sub2api', log)
 
+
+    def test_image_builds_overlap_and_failures_block_manifests(self):
+        fake_bin = Path('bin')
+        fake_bin.mkdir()
+        docker = fake_bin / 'docker'
+        docker.write_text(f'#!{sys.executable}\n' + '''import os
+from pathlib import Path
+import sys
+import time
+
+root = Path(os.environ['BUILD_MARKERS'])
+if sys.argv[1:3] == ['buildx', 'build']:
+    arch = sys.argv[sys.argv.index('--platform') + 1].split('/')[1]
+    (root / (arch + '.started')).touch()
+    deadline = time.monotonic() + 5
+    while not all((root / (item + '.started')).exists() for item in ('amd64', 'arm64')):
+        if time.monotonic() >= deadline:
+            sys.exit(24)
+        time.sleep(0.01)
+    if arch == os.environ['FAIL_ARCH']:
+        sys.exit(23)
+    time.sleep(0.1)
+    (root / (arch + '.finished')).touch()
+else:
+    assert all((root / (item + '.finished')).exists() for item in ('amd64', 'arm64'))
+    (root / 'manifest').touch()
+''')
+        docker.chmod(0o755)
+        for failed_arch in ('', 'amd64', 'arm64'):
+            with self.subTest(failed_arch=failed_arch):
+                markers = Path('case-' + (failed_arch or 'success')).resolve()
+                markers.mkdir()
+                env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
+                       'BUILD_MARKERS': str(markers), 'FAIL_ARCH': failed_arch, 'RUNNER_TEMP': self.temp.name,
+                       'RELEASE_VERSION': '9.8.7', 'RELEASE_SHA': 'a' * 40, 'GITHUB_REPOSITORY': 'ExampleOwner/sub2api',
+                       'DRY_RUN': 'false', 'SIMPLE_RELEASE': 'false', 'DOCKERHUB_USERNAME': 'skip'}
+                result = subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, timeout=10)
+                self.assertEqual(result.returncode, 23 if failed_arch else 0)
+                self.assertEqual((markers / 'manifest').exists(), not failed_arch)
+                for arch in ('amd64', 'arm64'):
+                    self.assertTrue((markers / (arch + '.started')).exists())
+                    self.assertEqual((markers / (arch + '.finished')).exists(), arch != failed_arch)
 
     def test_published_full_and_simple_image_tags(self):
         fake_bin = Path('bin')
