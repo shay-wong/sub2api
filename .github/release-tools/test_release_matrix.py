@@ -219,6 +219,32 @@ class ReleaseMatrixTest(unittest.TestCase):
                     for tag in ('latest', '9', '9.8'):
                         self.assertEqual(f'--tag custom-owner/custom-image:{tag} ' in log, rolling == 'true')
 
+    def test_release_go_caches_share_modules_and_isolate_builds(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
+        steps = workflow['jobs']['build-binaries']['steps']
+        restores = {step['id']: step for step in steps if step.get('uses') == 'actions/cache/restore@v6'}
+        modules = restores['go-modules']['with']
+        build = restores['go-cache']['with']
+        self.assertEqual(modules['path'], '~/go/pkg/mod')
+        self.assertNotIn('matrix.', modules['key'])
+        self.assertNotIn('outputs.sha', modules['key'])
+        self.assertIn("hashFiles('backend/go.mod', 'backend/go.sum')", modules['key'])
+        self.assertEqual(build['path'], '~/.cache/go-build')
+        for key in (modules['key'], build['key'], *build['restore-keys'].splitlines()):
+            self.assertIn('${{ steps.go-version.outputs.version }}', key)
+        for key in (build['key'], *build['restore-keys'].splitlines()):
+            self.assertIn('${{ matrix.goos }}-${{ matrix.goarch }}', key)
+        self.assertIn('${{ needs.prepare.outputs.sha }}', build['key'])
+        saves = [step for step in steps if step.get('uses') == 'actions/cache/save@v6']
+        self.assertEqual(len(saves), 2)
+        for save in saves:
+            cache_id = 'go-modules' if save['with']['path'] == modules['path'] else 'go-cache'
+            self.assertEqual(save['with']['path'], restores[cache_id]['with']['path'])
+            self.assertEqual(save['with']['key'], '${{ steps.' + cache_id + '.outputs.cache-primary-key }}')
+            self.assertIn(f"steps.{cache_id}.outputs.cache-hit != 'true'", save['if'])
+            if cache_id == 'go-modules':
+                self.assertIn("matrix.goos == 'linux' && matrix.goarch == 'amd64'", save['if'])
+
     def test_release_workflow_enables_rolling_tags_for_images_and_release_notes(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/release.yml').read_text())
         steps = {step.get('name'): step for step in workflow['jobs']['release']['steps']}
