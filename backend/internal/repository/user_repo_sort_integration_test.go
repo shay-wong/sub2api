@@ -3,7 +3,6 @@
 package repository
 
 import (
-	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -161,5 +160,3 @@ func (s *UserRepoSuite) TestListWithFilters_SortByLastUsedAtDesc_UsesUsageLogsNo
 	s.Require().Equal(wrongSource.ID, users[1].ID)
 	s.Require().Equal(nilUsage.ID, users[2].ID)
 }
-
-func TestUserRepoSortSuiteSmoke(_ *testing.T) {}
