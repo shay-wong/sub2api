@@ -18,7 +18,7 @@ test-unit:
 	go test -tags=unit ./...
 
 test-integration:
-	go test -tags=integration ./...
+	go run ./scripts/integration-tests
 
 test-e2e:
 	./scripts/e2e-test.sh

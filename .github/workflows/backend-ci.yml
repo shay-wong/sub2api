@@ -23,25 +23,48 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
     steps:
       - uses: actions/checkout@v6
       - name: Check Docker Compose simple mode environment
+        if: matrix.suite == 'unit'
         run: /bin/sh deploy/tests/docker-compose-simple-mode-env-test.sh
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           check-latest: false
-          cache: true
-          cache-dependency-path: backend/go.sum
+          cache: false
       - name: Verify Go version
+        id: go-version
         run: |
           go version | grep -q 'go1.27.4'
-      - name: Unit tests
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - name: Restore shared Go modules
+        id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: release-go-modules-${{ runner.os }}-${{ steps.go-version.outputs.version }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}
+      - name: Cache test Go build output
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-${{ matrix.suite }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-${{ matrix.suite }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-${{ matrix.suite }}-
+      - name: Run ${{ matrix.suite }} tests
         working-directory: backend
-        run: make test-unit
-      - name: Integration tests
-        working-directory: backend
-        run: make test-integration
+        run: make test-${{ matrix.suite }}
+      - name: Save shared Go modules
+        if: ${{ matrix.suite == 'unit' && steps.go-modules.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
   frontend:
     runs-on: ubuntu-latest
@@ -71,11 +94,25 @@ jobs:
         with:
           go-version-file: backend/go.mod
           check-latest: false
-          cache: true
-          cache-dependency-path: backend/go.sum
+          cache: false
       - name: Verify Go version
+        id: go-version
         run: |
           go version | grep -q 'go1.27.4'
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - name: Restore shared Go modules
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/go/pkg/mod
+          key: release-go-modules-${{ runner.os }}-${{ steps.go-version.outputs.version }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}
+      - name: Cache lint Go build output
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-lint-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-lint-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ci-go-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-version.outputs.version }}-lint-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
