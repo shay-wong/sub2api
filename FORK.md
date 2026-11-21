@@ -18,12 +18,12 @@
 | Fork 分支 | `stable` |
 | 权威上游 | `upstream` -> `git@github.com:Wei-Shaw/sub2api.git` |
 | 上游默认分支 | `main` |
-| 已合并上游提交 / 比较基线 | `2af3f1e15c98c893a89255a037f551046883b8c0` |
-| 当前比较范围 | `2af3f1e15c98c893a89255a037f551046883b8c0..HEAD` |
+| 已合并上游提交 / 比较基线 | `328db26f450edbdf9f8d4344a3ea903ac6396842` |
+| 当前比较范围 | `328db26f450edbdf9f8d4344a3ea903ac6396842..HEAD` |
 
-`upstream/main` 是移动目标，不自动等于本文档基线。本次版本同步合并的 fork parent 为 `7e2cf05e315d646011ab4382705037660e64442f`，固定上游 parent 为 `2af3f1e15c98c893a89255a037f551046883b8c0`，共同基线为 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`；前一业务合并已整合至该共同基线。远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
+`upstream/main` 是移动目标，不自动等于本文档基线。本次合并的 fork parent 为 `9d75dd3596b1b2939fad3c533d6c75f5f0785466`，固定上游 parent 为 `328db26f450edbdf9f8d4344a3ea903ac6396842`，共同基线为 `2af3f1e15c98c893a89255a037f551046883b8c0`。远端后续推进不改变本次 merge 的第二父，下一次审计仍须从最新已合并上游 merge 重新确定基线。
 
-本轮共合入上游 25 个提交，包括最后的 `0.2.23` 版本同步：Anthropic 与 OpenAI 协议转换保留缓存写入 TTL 明细、修复缓存总量与差额计费，并按上游数据读取重置流式空闲期限，首输出前空闲故障最多切换一次账号。渠道自定义 Ultrafast 倍率与预占内存测试隔离已被上游等价吸收，采用上游实现并移除独有能力记录。Fork 继续保留实际分组计费、mmap 生命周期、细粒度权限、自动重置策略和删除用户时撤销订阅；旧人民币倍率退役等已完成的清理不回退。
+本轮共合入上游 110 个提交，包括 `0.2.24` 版本同步：HTTP/WS 重复字段拒绝、请求体单次扫描与工具清理性能优化、OpenAI 旋转 Token 并发持久化、原生工具搜索与网页来源桥接、Exa 搜索、按耗时加权的平均 TPS、Claude 窗口费用估算、被动用量刷新及图片错误恢复。Fork 继续保留实际分组计费、mmap 生命周期、细粒度权限、自动重置策略、删除用户时撤销订阅，以及发布缓存去重和镜像并行构建。
 
 [PR #8622](https://github.com/Wei-Shaw/sub2api/pull/8622) 的 `b2a695d617d490242a39b5f245cf2a50ae5d9993` 已包含于本次上游基线，不再作为待吸收 Fork 能力。生产实现与上游相同，保留提前合入时补充的转义名称与零分配预检回归；不重复注册 normalizer，也不回退 Fork 的选后推理策略。
 
@@ -33,16 +33,16 @@
 | --- | --- |
 | 权威上游版本源 | 上游父提交中的 `backend/cmd/server/VERSION` |
 | Fork 版本源 | `backend/cmd/server/VERSION` |
-| 当前上游版本 | `0.2.23` |
-| 当前 Fork 版本 | `0.2.23-fork.1` |
-| 已存在同基线 Fork tag | 尚无 `v0.2.23-fork.*`；旧版 `v0.2.21-fork.1` 保留 |
-| 下次发布所需版本 | 已准备 `0.2.23-fork.1`，发布时再次检查远端未占用 |
+| 当前上游版本 | `0.2.24` |
+| 当前 Fork 版本 | `0.2.24-fork.1` |
+| 已存在同基线 Fork tag | 本地拉取的 tag 中尚无 `v0.2.24-fork.*`；旧版 `v0.2.23-fork.1` 保留 |
+| 下次发布所需版本 | 已准备 `0.2.24-fork.1`，发布时再次检查远端未占用 |
 
 所有 fork release 必须使用 `<upstream-version>-fork.<N>`。上游版本变化时从 `fork.1` 重新开始；同一上游版本的后续 fork release 从已发布的最高 `N` 递增，不得以 plain upstream version 发布 fork 构建。
 
-本次上游 base 升为 `0.2.23`，按规则从 `0.2.23-fork.1` 开始。既有 tag 不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
+本次上游 base 升为 `0.2.24`，按规则从 `0.2.24-fork.1` 开始。既有 tag 不重写或复用。发布流水线会读取 `HEAD` 与上游 `main` 的共同基线版本，并拒绝从不一致的旧 base 生成 fork tag。
 
-上游 `v0.2.23` tag 指向 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`，版本文件由后续的 `2af3f1e15` 同步为 `0.2.23`；当前基线已包含两者。本次仅合并代码、同步文档基线和未发布 Fork 版本，不发布或创建 tag。
+上游 `v0.2.24` tag 指向 `5c2982a81b46e2142d0143d2f83c1ce9c4da1d24`，版本文件由后续的 `328db26f4` 同步为 `0.2.24`；当前基线已包含两者。本次仅合并代码、同步文档基线和未发布 Fork 版本，不发布或创建 tag。
 
 ## 能力索引
 
@@ -227,7 +227,7 @@ actionlint .github/workflows/stable-fork-release.yml
 - **GPT-6 Astra 目录补充**：Fork 额外保留内置 `gpt-6-astra` 价格目录条目，包含总上下文 `1,050,000`、最大输入 `922,000` 和完整价卡。标准价、Priority `2x`、272K 长上下文阶梯及静态兜底均已与上游一致，不属于独立定价规则。
 - **GPT-6 Astra 剩余实现**：差异仅为 `backend/resources/model-pricing/model_prices_and_context_window.json` 的内置条目；`pricing_service.go` 的 Astra 兜底和 `billing_service.go` 的 Astra 基础价沿用上游。Ultrafast 渠道倍率覆盖也已由上游提供。
 - **Astra 静态兜底对齐上游**：本次合并采用上游的 272K 输入阈值、输入 `2x`、输出 `1.5x`，不再保留故障兜底仅基础价的差异。`TestGetModelPricing_OpenAIGPT6AstraFallback` 与 `TestOpenAIFrontierDedicatedFallbacksUseOfficialRates` 覆盖两条兜底路径。
-- **大请求 mmap 生命周期**：`newOpenAIRequestView` 扫描正文仍使用零拷贝，但 Model、PromptCacheKey、PreviousResponseID、ServiceTier、ReasoningEffort 必须拥有独立字符串，不能让异步计费、数据库批量写入或跨正文替换状态引用已解除映射的内存。单纯保留 Go slice 不阻止 `Munmap`。原大请求优化来源为 `10d01a8d4`，本次修复定位：`git log -S'TestOpenAIRequestView_ScalarsOutliveMappedBody' -- backend/internal/service/openai_gateway_service_hotpath_test.go`。验证：`go test ./internal/service -run 'TestOpenAIRequestView'`；回归实际关闭映射后读取全部标量并走计费模型解析与字符串编码。同步三语 README 的大请求稳定性说明；这不改变请求大小上限，也不修复尚未定位的 524 上传中断。上游当前没有 mmap 请求体路径，仅合并上游不能替代本契约。
+- **大请求 mmap 生命周期**：`newOpenAIRequestView` 扫描正文仍使用零拷贝，但 Model、PromptCacheKey、PreviousResponseID、ServiceTier、ReasoningEffort 必须拥有独立字符串，不能让异步计费、数据库批量写入或跨正文替换状态引用已解除映射的内存。单纯保留 Go slice 不阻止 `Munmap`。上游 `bcb22d4de` 已采用等价的标量字符串复制，合并使用其共享 `field` helper；复制本身不再属于 Fork 差异，仍保留 Fork 磁盘映射路径及关闭映射后的回归。原大请求优化来源为 `10d01a8d4`，回归定位：`git log -S'TestOpenAIRequestView_ScalarsOutliveMappedBody' -- backend/internal/service/openai_gateway_service_hotpath_test.go`。验证：`go test ./internal/service -run 'TestOpenAIRequestView'`；回归实际关闭映射后读取全部标量并走计费模型解析与字符串编码。同步三语 README 的大请求稳定性说明；这不改变请求大小上限，也不修复尚未定位的 524 上传中断。上游当前没有 mmap 请求体路径，仅合并上游不能替代本契约。
 - **限额错误不变量**：选定分组后的二次计费检查遇到 subscription 日、周、月用量耗尽时，必须保持 HTTP 429 和 `rate_limit_exceeded`，不得降级为 403；认证前置路径继续使用既有 `USAGE_LIMIT_EXCEEDED` 协议。
 - **限额错误映射**：代码位于 `backend/internal/handler/gateway_handler.go`，由 `backend/internal/handler/endpoint.go` 等入口共用；回归测试位于 `backend/internal/handler/gateway_handler_billing_error_test.go`；用户文档为 `README.md`、`README_CN.md`、`README_JA.md`。
 - **当前修复定位**：提交后运行 `git log -S'pkgerrors.IsTooManyRequests' -- backend/internal/handler/gateway_handler.go`、`git log -S'FixedRequestModel string' -- backend/internal/service/openai_ws_forwarder.go` 与 `git log -S'acceptedTurnStartedAt.Swap(nil)' -- backend/internal/service/openai_ws_v2_passthrough_adapter.go`。

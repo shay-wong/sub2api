@@ -181,7 +181,22 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		return nil, err
 	}
 	s.assignDefaultSubscriptions(ctx, user.ID)
+	s.assignDefaultPlatformQuotas(ctx, user)
 	return user, nil
+}
+
+func (s *adminServiceImpl) assignDefaultPlatformQuotas(ctx context.Context, user *User) {
+	if user == nil || user.Role != RoleUser || s.settingService == nil || s.userPlatformQuotaRepo == nil {
+		return
+	}
+	quotas, err := s.settingService.GetDefaultPlatformQuotas(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "failed to load default platform quotas: user_id=%d err=%v", user.ID, err)
+		return
+	}
+	if err := snapshotUserPlatformQuotaDefaults(ctx, s.userPlatformQuotaRepo, user.ID, quotas); err != nil {
+		logger.LegacyPrintf("service.admin", "failed to snapshot default platform quotas: user_id=%d err=%v (fail-open)", user.ID, err)
+	}
 }
 
 func (s *adminServiceImpl) assignDefaultSubscriptions(ctx context.Context, userID int64) {
