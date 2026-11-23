@@ -726,39 +726,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	rawTier := requestView.ServiceTier
-	if forcedTier := openAIGroupForcedServiceTier(ctx, account, upstreamModel); forcedTier != "" {
-		rawTier = forcedTier
-		if requestView.ServiceTier != forcedTier {
-			markPatchSet("service_tier", forcedTier)
-		}
+	clientServiceTier := requestView.ServiceTier
+	effectiveTier, blocked, policyErr := s.resolveOpenAIFastServiceTier(ctx, account, upstreamModel, clientServiceTier)
+	if policyErr != nil {
+		return nil, policyErr
 	}
-	if rawTier != "" {
-		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" {
-			action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, upstreamModel, normTier)
-			switch action {
-			case BetaPolicyActionBlock:
-				msg := errMsg
-				if msg == "" {
-					msg = fmt.Sprintf("openai service_tier=%s is not allowed for model %s", normTier, upstreamModel)
-				}
-				blocked := &OpenAIFastBlockedError{Message: msg}
-				writeOpenAIFastPolicyBlockedResponse(c, blocked)
-				return nil, blocked
-			case BetaPolicyActionFilter:
-				markPatchDelete("service_tier")
-			case OpenAIFastPolicyActionForcePriority:
-				if rawTier != OpenAIFastTierPriority {
-					markPatchSet("service_tier", OpenAIFastTierPriority)
-				}
-			default:
-				if normTier != rawTier {
-					markPatchSet("service_tier", normTier)
-				}
-			}
+	if blocked != nil {
+		writeOpenAIFastPolicyBlockedResponse(c, blocked)
+		return nil, blocked
+	}
+	if effectiveTier != clientServiceTier {
+		if effectiveTier == "" {
+			markPatchDelete("service_tier")
+		} else {
+			markPatchSet("service_tier", effectiveTier)
 		}
-	} else if s.shouldForceOpenAIFastPriorityForMissingTier(ctx, account, upstreamModel) {
-		markPatchSet("service_tier", OpenAIFastTierPriority)
 	}
 
 	if account.UsesOpenAICodexProtocol() {
@@ -1105,7 +1087,34 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
+	tierModel := upstreamModel
 	for {
+		if tierModel != upstreamModel {
+			tier, blocked, tierErr := s.resolveOpenAIFastServiceTier(ctx, account, upstreamModel, clientServiceTier)
+			if tierErr != nil {
+				return nil, tierErr
+			}
+			if blocked != nil {
+				writeOpenAIFastPolicyBlockedResponse(c, blocked)
+				return nil, blocked
+			}
+			if tier != requestView.ServiceTier {
+				if tier == "" {
+					markPatchDelete("service_tier")
+				} else {
+					markPatchSet("service_tier", tier)
+				}
+				if patchErr := flushPatches(); patchErr != nil {
+					return nil, patchErr
+				}
+				if bodyModified {
+					if marshalErr := replaceBodyFromDecoded(reqBody); marshalErr != nil {
+						return nil, marshalErr
+					}
+				}
+			}
+			tierModel = upstreamModel
+		}
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var headerGuard *openAIFirstOutputHeaderGuard

@@ -26,6 +26,38 @@ func forceChatMessagesFallbackAccount() *Account {
 	return account
 }
 
+func TestForwardAsAnthropic_ChatFallbackUsesEffectiveGroupTier(t *testing.T) {
+	for _, tc := range []struct {
+		model, want string
+		forced      bool
+	}{
+		{"gpt-6.1-sol", "ultrafast", true},
+		{"gpt-5.6-sol", "priority", true},
+		{"gpt-6.1-sol", "", false},
+	} {
+		t.Run(tc.model+tc.want, func(t *testing.T) {
+			account := forceChatMessagesFallbackAccount()
+			body := []byte(`{"model":"` + tc.model + `","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"service_tier":"ultrafast"}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl_group_tier","model":"` + tc.model + `","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: passthroughArgsTestConfig(), httpUpstream: upstream}
+			ctx := context.Background()
+			if tc.forced {
+				ctx = openAIUltrafastGroupContext()
+			}
+			result, err := svc.ForwardAsAnthropic(ctx, c, account, body, "", "")
+			require.NoError(t, err)
+			require.Equal(t, tc.want, gjson.GetBytes(upstream.lastBody, "service_tier").String())
+			require.Equal(t, tc.want, optionalStringValue(result.ServiceTier))
+		})
+	}
+}
+
 // errTailReader yields the given data, then returns err instead of io.EOF,
 // simulating an upstream connection that breaks mid-stream.
 type errTailReader struct {

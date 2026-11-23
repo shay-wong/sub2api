@@ -3837,7 +3837,7 @@ func TestAstraUltrafastCatalogUsesAccountCapabilities(t *testing.T) {
 		{AccountTypeAPIKey, "https://api.openai.com", "gpt-6-astra", true},
 		{AccountTypeAPIKey, "https://api.openai.com", "gpt-6.1-sol", false},
 		{AccountTypeAPIKey, "https://proxy.example", "gpt-6-astra", false},
-		{AccountTypeOAuth, "https://chatgpt.com", "gpt-6-astra", false},
+		{AccountTypeOAuth, "https://chatgpt.com", "gpt-6-astra", true},
 	} {
 		account := &Account{Platform: PlatformOpenAI, Type: tc.accountType, Credentials: map[string]any{"base_url": tc.base, "plan_type": "promax"}}
 		caps := accountCodexToolCapabilities(account, tc.model)

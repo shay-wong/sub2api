@@ -1208,7 +1208,7 @@ func TestPassthroughBilling_BlockedFrameDoesNotMutateServiceTier(t *testing.T) {
 }
 
 func TestWSResponseCreate_GroupForceUltrafast(t *testing.T) {
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "promax"}}
 	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
 		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIUltrafast: true,
 	})
@@ -1227,19 +1227,19 @@ func TestWSResponseCreate_GroupForceUltrafast(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported model keeps the client tier", func(t *testing.T) {
+	t.Run("unsupported model falls back to Fast", func(t *testing.T) {
 		svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 		missing, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(
 			ctx, account, "gpt-5.6-sol", []byte(`{"type":"response.create","model":"gpt-5.6-sol"}`))
 		require.NoError(t, err)
 		require.Nil(t, blocked)
-		require.False(t, gjson.GetBytes(missing, "service_tier").Exists())
+		require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(missing, "service_tier").String())
 
 		flex, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(
 			ctx, account, "gpt-5.6-sol", []byte(`{"type":"response.create","model":"gpt-5.6-sol","service_tier":"flex"}`))
 		require.NoError(t, err)
 		require.Nil(t, blocked)
-		require.Equal(t, OpenAIFastTierFlex, gjson.GetBytes(flex, "service_tier").String())
+		require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(flex, "service_tier").String())
 	})
 
 	t.Run("with force fast also on, unsupported model gets priority", func(t *testing.T) {

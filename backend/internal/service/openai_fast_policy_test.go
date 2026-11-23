@@ -602,7 +602,7 @@ func openAIUltrafastGroupContext() context.Context {
 
 func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastInjectsAndOverridesTier(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "promax"}}
 
 	for _, body := range [][]byte{
 		[]byte(`{"model":"gpt-6.1-sol","input":"hi"}`),
@@ -622,7 +622,7 @@ func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastInjectsAndOverridesTier(
 // 全局策略在分组强制之后裁决：针对 ultrafast 的 filter / block / force_priority
 // 规则必须作用在分组写入的 ultrafast 上，而只针对 priority 的规则不应误伤。
 func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastStillHonorsGlobalPolicy(t *testing.T) {
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "promax"}}
 	body := []byte(`{"model":"gpt-6.1-sol"}`)
 	rule := func(tier, action string) *OpenAIFastPolicySettings {
 		return &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{{
@@ -718,8 +718,8 @@ func TestOpenAIGroupForcedServiceTier(t *testing.T) {
 		{name: "ultrafast only, sol", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: sol, want: OpenAIFastTierUltrafast},
 		{name: "ultrafast only, astra", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: astra, want: OpenAIFastTierUltrafast},
 		{name: "ultrafast only, sol effort alias", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: "gpt-6.1-sol-high", want: OpenAIFastTierUltrafast},
-		{name: "ultrafast only, unsupported model follows client", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: unsupported, want: ""},
-		{name: "ultrafast only, empty model follows client", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: "", want: ""},
+		{name: "ultrafast only, unsupported model gets fast", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: unsupported, want: OpenAIFastTierPriority},
+		{name: "ultrafast only, empty model gets fast", ctx: group(PlatformOpenAI, false, true), account: openAIAccount, model: "", want: OpenAIFastTierPriority},
 
 		{name: "both, supported model gets ultrafast", ctx: group(PlatformOpenAI, true, true), account: openAIAccount, model: sol, want: OpenAIFastTierUltrafast},
 		{name: "both, unsupported model falls back to fast", ctx: group(PlatformOpenAI, true, true), account: openAIAccount, model: unsupported, want: OpenAIFastTierPriority},
@@ -735,8 +735,8 @@ func TestOpenAIGroupForcedServiceTier(t *testing.T) {
 	}
 }
 
-// 仅强制 Ultra Fast 的分组：不支持的模型保留客户端传入的档位（含省略）。
-func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastSkipsUnsupportedModels(t *testing.T) {
+// 仅强制 Ultra Fast 的分组也会将不支持的模型降为 Fast。
+func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastFallsBackForUnsupportedModels(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
@@ -744,10 +744,10 @@ func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastSkipsUnsupportedModels(t
 		body string
 		want string
 	}{
-		{body: `{"model":"gpt-5.6-sol","input":"hi"}`, want: ""},
+		{body: `{"model":"gpt-5.6-sol","input":"hi"}`, want: OpenAIFastTierPriority},
 		{body: `{"model":"gpt-5.6-sol","service_tier":"fast"}`, want: OpenAIFastTierPriority},
-		{body: `{"model":"gpt-5.6-sol","service_tier":"flex"}`, want: OpenAIFastTierFlex},
-		{body: `{"model":"gpt-5.6-sol","service_tier":"ultrafast"}`, want: OpenAIFastTierUltrafast},
+		{body: `{"model":"gpt-5.6-sol","service_tier":"flex"}`, want: OpenAIFastTierPriority},
+		{body: `{"model":"gpt-5.6-sol","service_tier":"ultrafast"}`, want: OpenAIFastTierPriority},
 	} {
 		updated, err := svc.applyOpenAIFastPolicyToBody(openAIUltrafastGroupContext(), account, "gpt-5.6-sol", []byte(tt.body))
 		require.NoError(t, err)
@@ -758,7 +758,7 @@ func TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastSkipsUnsupportedModels(t
 // 两个开关同时开启：支持的模型写 ultrafast，其余模型写 priority。
 func TestApplyOpenAIFastPolicyToBody_GroupForceFastAndUltrafastTogether(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"plan_type": "promax"}}
 	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
 		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true, ForceOpenAIUltrafast: true,
 	})

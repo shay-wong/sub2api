@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,12 +58,19 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 	return changed
 }
 
-// On ChatGPT subscriptions, Pro 200 includes GPT-6.2 Sol Ultrafast and
-// Pro 500 includes both GPT-6.2 models. Workspace grants come from discovery.
-func gpt62PlanIncludesUltrafast(account *Account, base string) bool {
-	if !account.IsOpenAIOAuthLike() || (base != "gpt-6.2-sol" && base != "gpt-6.2-astra") {
+// Published subscription entitlements take precedence over older model snapshots;
+// workspace or unknown plans require a grant on the final upstream model.
+func openAIAccountSupportsUltrafast(account *Account, finalModel string) bool {
+	if account == nil || !account.IsOpenAI() {
 		return false
 	}
+	if account.IsOpenAIApiKey() {
+		return true
+	}
+	if !account.IsOpenAIOAuthLike() || !openAIModelSupportsUltrafast(finalModel) {
+		return false
+	}
+	base := normalizeKnownOpenAICodexModel(finalModel)
 	// Use the same subscription SKU aliases as the account plan picker.
 	plan := strings.Map(func(r rune) rune {
 		switch r {
@@ -76,9 +84,26 @@ func gpt62PlanIncludesUltrafast(account *Account, base string) bool {
 		return base == "gpt-6.2-sol"
 	case "promax":
 		return true
-	default:
+	case "free", "go", "plus", "prolite", "team", "business", "selfservebusinessusagebased", "selfservebusinessprolite":
 		return false
 	}
+	metadata, ok := account.GetUpstreamModelMetadata(finalModel)
+	if !ok && base != strings.TrimSpace(finalModel) {
+		metadata, ok = account.GetUpstreamModelMetadata(base)
+	}
+	if !ok {
+		return false
+	}
+	var tiers []configuredCodexServiceTier
+	if json.Unmarshal(metadata.CodexToolCapabilities["service_tiers"], &tiers) != nil {
+		return false
+	}
+	for _, tier := range tiers {
+		if tier.ID == OpenAIFastTierUltrafast {
+			return true
+		}
+	}
+	return false
 }
 
 func accountCodexToolCapabilities(account *Account, modelID string) map[string]json.RawMessage {
@@ -129,10 +154,29 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	// Preserve declared tiers (including their provider-specific fields). An older
 	// OAuth snapshot can list only Fast even for a newly entitled subscription.
 	base := openai.GPT62ModelID(modelID)
-	planIncludesUltra := gpt62PlanIncludesUltrafast(account, base)
+	subscriptionUltra := account.IsOpenAIOAuthLike() && openAIAccountSupportsUltrafast(account, modelID)
 	apiUltra := account.IsOpenAIApiKey() && isOfficialOpenAIModelsBaseURL(baseURL) && (base != "" || isOpenAIGPT6AstraModel(modelID))
 	tiers := capabilities["service_tiers"]
-	if (apiUltra && len(tiers) == 0) || (planIncludesUltra && !gjson.GetBytes(tiers, `#(id=="ultrafast")`).Exists()) {
+	if account.IsOpenAIOAuthLike() && !subscriptionUltra {
+		if len(tiers) == 0 && configuredCodexSupportsUltrafastServiceTier(modelID) {
+			tiers, err = json.Marshal(configuredCodexServiceTiersForModel(modelID))
+			if err != nil {
+				panic(err)
+			}
+		}
+		declared := gjson.ParseBytes(tiers).Array()
+		for i := len(declared) - 1; i >= 0; i-- {
+			if declared[i].Get("id").String() != OpenAIFastTierUltrafast {
+				continue
+			}
+			tiers, err = sjson.DeleteBytes(tiers, strconv.Itoa(i))
+			if err != nil {
+				panic(err)
+			}
+			capabilities["service_tiers"] = tiers
+		}
+	}
+	if (apiUltra && len(tiers) == 0) || (subscriptionUltra && !gjson.GetBytes(tiers, `#(id=="ultrafast")`).Exists()) {
 		if len(tiers) == 0 {
 			tiers, err = json.Marshal(configuredCodexServiceTiersForModel(modelID))
 			if err != nil {

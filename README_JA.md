@@ -223,10 +223,11 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
   - ディスク経由のアップロード失敗時は、本文を記録せず受信バイト数と経過時間を記録します。読み取りタイムアウトは HTTP 408、クライアント切断は 499 とし、圧縮ヘッダーの読み取り失敗にも同じ分類を適用します。
 - **OpenAI GPT-6 Astra** - 画像入力、`low` から `max` までの推論レベル、最大 922K トークン入力、Priority/Fast、272K の長文コンテキスト料金階層を含む上流のモデル対応を使用します。Fork は完全な Astra カタログ項目も同梱しますが、料金と静的フォールバック規則は上流と同じです。
 - **OpenAI GPT-6.2 Sol / Astra** - モデル検出、推論設定、料金、アカウントの利用資格判定に上流の実装を使用します。
-- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket での `service_tier: "ultrafast"` の転送と Codex OAuth ルーティングヒントは上流の実装を使用します。GPT-6 Astra と GPT-6.1 Sol は Standard の `6 倍`、GPT-6.2 Sol/Astra は `2027-03-01 08:00 UTC` より前は `3 倍`、以後は `6 倍`で、リクエスト時刻を基準にします。モデル固有の倍率がなければ `2 倍`です。
-  - 「**グループ → 新規作成/編集**」の Ultrafast 強制は、対応モデルとアカウントの利用資格に従います。Fast 強制との同時有効化が可能で、Ultrafast、Fast の順に適用します。両方とも既定はオフです。
+- **OpenAI Ultrafast** - Responses、Chat Completions、Responses WebSocket は、最終的な上流モデルと実際に使うアカウント資格情報で利用資格を判定します。OAuth/setup-token アカウントに Ultra Fast の資格がない場合は Fast（`service_tier: "priority"`）へ変更し、ルーティングヒントと課金も最終 tier に揃えます。Pro $200 は GPT-6.2 Sol Ultrafast のみ、Pro $500 は GPT-6 Astra、GPT-6.1 Sol、GPT-6.2 Sol、GPT-6.2 Astra に対応します。workspace または不明なプランには、同じモデルに対する上流カタログの Ultrafast 利用許可が必要です。API キーにはサブスクリプション SKU の規則を適用せず、ローカル生成のモデル一覧も同じ資格判定に従います。
+  - 「**グループ → 新規作成/編集**」では Ultrafast 強制が Fast 強制より優先されます。モデルまたは契約が Ultrafast 非対応なら、Fast 強制がオフでも Fast に切り替えます。両方とも既定はオフです。グローバル Fast/Flex ポリシーのフィルター、拒否、Priority 強制は引き続き有効で、自動切り替え後には Fast の規則も確認します。
+  - 利用資格のある Ultrafast リクエストは上流のモデル料金を使用します。GPT-6 Astra と GPT-6.1 Sol は Standard の `6 倍`、GPT-6.2 Sol/Astra は `2027-03-01 08:00 UTC` より前は `3 倍`、以後は `6 倍`で、リクエスト時刻を基準にします。モデル固有の倍率がなければ `2 倍`です。
   - 上流でも「**チャネル → モデル料金 → Ultrafast 倍率**」を提供するようになりました。正の値でモデル既定値を上書きし、空欄ではモデル既定値を使用します。Fast 倍率は引き継がず、既存の Fork 設定は保持します。
-  - 応答 tier の課金規則も上流と同じで、信頼できる応答は課金 tier を下げる場合のみ反映し、金額はその tier の料金設定から計算します。Codex OAuth/setup-token の `default` 応答では最終送信 tier を維持し、明示的な `priority` 応答では Ultrafast から Priority へ下げられます。
+  - 応答 tier の課金規則も上流と同じで、信頼できる応答は課金 tier を下げる場合のみ反映し、金額はその tier の料金設定から計算します。Codex OAuth/setup-token の `default` 応答では最終送信 tier を維持し、明示的な `priority` 応答では Ultrafast から Priority へ下げられます。自動切り替えには既存の Fast 料金を使い、無料 Fast とチャネル独自料金も適用します。過去の課金記録は変更しません。
 - **Codex Desktop のコンテキスト互換** - 呼び出し ID なしで送られる対応済みのページスナップショットと追加クライアントコンテキストには上流の HTTP Responses 互換処理を使用し、追加設定は不要です。通常のツール結果には既存の検証規則を適用します。
 - **Claude Fable / Mythos 5.2** - 上流のモデル対応、推論パラメータ変換、キャッシュ書き込み TTL ごとの料金を含む組み込みフォールバック料金を使用します。
 - **スマートスケジューリング** - スティッキーセッション付きのインテリジェントなアカウント選択

@@ -208,6 +208,10 @@ actionlint .github/workflows/stable-fork-release.yml
 
 ## 7. OpenAI/Codex 协议、故障转移与账号状态正确性
 
+- **Ultra Fast 能力降级**（`等待上游吸收`）：参考 [PR #8165](https://github.com/Wei-Shaw/sub2api/pull/8165) 的账号能力思路，未全量合入其 Cyber、白名单或调度扩展。客户端显式 Ultra 与分组强制 Ultra 都在转发前按最终上游模型和实际凭据判断：Pro 200 仅允许 GPT-6.2 Sol；Pro 500 允许 GPT-6 Astra、GPT-6.1 Sol、GPT-6.2 Sol/Astra；workspace 或未知套餐须有同模型上游 `service_tiers` 的 `ultrafast` 授权，不能借用其他模型的能力；其他已知无权益套餐降为 Fast。API Key 不套用订阅 SKU 规则，shadow 按母账号凭据判定。不支持时自动改发 `priority`，不筛除账号、不拒绝整个请求；分组强制 Ultra 遇到模型本身不支持时，也在未开启强制 Fast 的情况下使用 Fast。
+- **Ultra Fast 策略、目录与计费不变量**：全局 `filter`、`block`、`force_priority` 优先于权益降档；自动降到 Fast 后重新执行 Fast 规则。原生 Responses、Chat、passthrough 及 WebSocket 每轮使用相同最终档位；同账号 compact fallback 换模型后按原请求重算档位，覆盖 HTTP 和 SSE 失败重试，不沿用前一个模型的降档结果。路由提示和用量结果不得保留降档前的 Ultra；本地模型目录投影使用同一资格判定。金额由最终档位的现有价格配置计算，免费 Fast 和渠道自定义价继续生效，不修改默认价卡或历史账单。此项与已由上游提供的 Ultrafast 协议透传、默认倍率和渠道覆盖分开维护。
+- **Ultra Fast 实现与验证**：当前代码为 `backend/internal/service/openai_codex_model_metadata.go`、`openai_gateway_request_body.go`、`openai_gateway_forward.go`、`openai_gateway_passthrough.go`、`openai_gateway_messages_chat_fallback.go`；两种 WS 模式分别经 `openai_ws_forwarder_ingress.go` 和 `openai_ws_v2_passthrough_adapter.go` 复用共享策略。回归为同目录 `openai_ultrafast_entitlement_test.go`、`openai_ultrafast_fallback_test.go`、`openai_ultrafast_forward_test.go`、`openai_fast_policy_test.go`、`openai_fast_policy_ws_test.go`、`openai_gateway_messages_chat_fallback_test.go`，覆盖模型级授权、最终模型映射、分组强制、HTTP/WS 实际出站、compact 换模型重试及 Fast 计费；聚焦验证：`go test -tags=unit ./internal/service -run 'Ultrafast|FastPolicy|ServiceTier|GPT62|Compact|ChatFallbackUsesEffectiveGroupTier'`（在 backend 目录运行）。用户说明为 `README.md`、`README_CN.md`、`README_JA.md`，发布记录为 `CHANGELOG.md` 当前未发布段。提交后定位：`git log -S'openAIAccountSupportsUltrafast' -- backend/internal/service/openai_codex_model_metadata.go`。合并审查须保留降档、Fast 规则再检查和最终档位计费；仅在上游等价覆盖上述契约与回归后移除此子项。
+
 - **本次上游流与缓存整合**：`189b336f4`、`29809eef0` 沿用最后上游读取时间执行空闲期限，并让首输出前的空闲故障受一次换号预算约束；`7f6673ead` 至 `23c3eb7f8` 补齐跨协议缓存写入分类及总量归一化。它们不替代 Fork 的完整 SSE/客户端工具处理、明确错误不计费、断线总清理期限和实际分组归因。验证包含 `TestRelayStalls`、`TestAnthropicCompatDisconnectDrainDeadlineSurvivesHeartbeats`、`TestNativeAnthropicCacheCreationRouteBillingBoundary` 以及 handler 的 `TestOpenAIFirstOutputFailoverStopsAfterOneAccountSwitch`。
 
 - **0.2.22 上游整合**：GPT-6.2 模型、Ultrafast 权益及强制档位、额外 Codex 上下文/工具声明规范化和流式模型观测均来自上游，不新增 Fork 能力。继续保留选后分组策略、完整 SSE/客户端工具往返、断线有界清理及请求体按需复制；sticky 写回复用上游有界 `WithoutCancel`，分组仍使用实际选中值。鉴权快照升至 `v29`，同时拒绝缺少 Fork 字段的上游 `v28` 和旧 Fork `v27`，并保留 `ForceOpenAIUltrafast`。验证包含 `TestAPIKeyAuthSnapshot`、`TestNormalizeCodex`、`TestHandleCC`、`TestHandleResponses` 与 `TestAntigravityCompat`。
@@ -264,6 +268,7 @@ actionlint .github/workflows/stable-fork-release.yml
 (cd backend && go test ./internal/service/openai_ws_v2 -run '^TestRelay_ContextCancellationJoinsBlockedDownstreamWrite$')
 (cd backend && go test ./internal/service -run '^TestPassthroughLifecycle_LeaseLossSendsRetryClose$')
 (cd backend && go test ./internal/service -run 'ServiceTier|Ultrafast' -count=1)
+(cd backend && go test -tags=unit ./internal/service -run 'Test(OpenAIAccountSupportsUltrafast|OAuthUltrafastCatalogMatchesAccountEntitlement|UltrafastForward|ApplyOpenAIFastPolicyToBody_GroupForceUltrafast|WSResponseCreate_GroupForceUltrafast)' -count=1)
 (cd backend && go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test(ResetCreditLocalClearFailureReturnsConsumedResult|OpenAIGatewayService_ReportOpenAIAccountScheduleFailoverSkipsHealthNeutralFailures|.*ResetQuota)')
 (cd frontend && ./node_modules/.bin/vitest run src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts src/views/admin/__tests__/AccountsView.batchTest.spec.ts)
 ```
@@ -335,7 +340,7 @@ actionlint .github/workflows/stable-fork-release.yml
 | 充值与退款基础行为 | 独立余额充值倍率、订阅 USD/CNY 汇率，以及 pending 期间持续冻结权益均已由上游提供 |
 | 缓存写入 | 保留 Anthropic 5 分钟/1 小时和 OpenAI 30 分钟/12 小时分类；总量超出已分类明细的部分按短 TTL 价格补计，渠道 TTL 价格与档位倍率沿用上游 |
 
-当前请求计费差异是[实际调度分组归因](#2-实际调度分组归因)：例如 A 组倍率 `1x`、备用 B 组 `2x`，模型基础费用为 $1，请求实际切到 B 后，Fork 按 B 收取 $2，并使用 B 的订阅和用量归属；没有跨组时，这项差异不影响费用。渠道 Ultrafast 覆盖现与上游相同；订阅限额耗尽返回 `429` 是错误协议修复，不是单价调整。以下充值、退款保护另按记账一致性说明。
+当前请求计费差异包括[实际调度分组归因](#2-实际调度分组归因)：例如 A 组倍率 `1x`、备用 B 组 `2x`，模型基础费用为 $1，请求实际切到 B 后，Fork 按 B 收取 $2，并使用 B 的订阅和用量归属；没有跨组时，这项差异不影响费用。[Ultra Fast 能力降级](#7-openaicodex-协议故障转移与账号状态正确性)则让没有对应模型权益的 OAuth 请求改用 Fast，并按最终档位配置结算。渠道 Ultrafast 覆盖现与上游相同；订阅限额耗尽返回 `429` 是错误协议修复，不是单价调整。以下充值、退款保护另按记账一致性说明。
 
 本次按维护者确认采用上游的 pending 持续冻结：新退款处理中保留余额/订阅扣减，成功不重复扣减，失败补偿恢复；旧审计仍按原扣减/补偿字段兼容处理。Fork 保留 attempt 并发防重、渠道快照和补偿失败重试。支付宝查询宽限期以持久化的 `providerRequestedAt` 为准：恢复只轮换本地租约，新退款重试才更新渠道时间；旧审计回退到已有 attempt 时间，无时间依据则继续 pending，不能使用复用审计行的 `CreatedAt` 提前判失败。实现为 `backend/internal/service/payment_refund.go`、`payment_service.go` 与 `backend/internal/payment/provider/alipay.go`；回归为 `payment_refund_pending_hold_test.go`、`payment_refund_test.go` 的 `TestRefundProviderRequestedAtUsesRequestGenerationNotAuditCreation`。独立适配提交定位：`git log -S'ProviderRequestedAt' -- backend/internal/service/payment_refund.go`。
 

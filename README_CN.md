@@ -231,10 +231,11 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
   - Anthropic 流转 Chat Completions 时，心跳写失败即停止向客户端写入，并在有界清理时限内收集上游晚到用量。
 - **OpenAI GPT-6 Astra** - 沿用上游模型支持，包括图片输入、`low` 至 `max` 推理档位、922K 最大输入、Priority/Fast 和 272K 长上下文阶梯。Fork 额外内置完整 Astra 目录条目，其价格及静态兜底规则与上游一致。
 - **OpenAI GPT-6.2 Sol / Astra** - 沿用上游的模型发现、推理控制、定价和账号权益判断。
-- **OpenAI Ultrafast** - 沿用上游在 Responses、Chat Completions 和 Responses WebSocket 中对 `service_tier: "ultrafast"` 的原样透传及 Codex OAuth 路由提示。GPT-6 Astra 和 GPT-6.1 Sol 默认按 Standard 的 `6 倍`；GPT-6.2 Sol/Astra 在 `2027-03-01 08:00 UTC` 前为 `3 倍`，之后为 `6 倍`，按请求时点计算；未指定模型倍率时兜底 `2 倍`。
-  - 在“**分组 → 新建/编辑**”中，强制 Ultrafast 仅对支持的模型及账号权益生效，可与强制 Fast 同时开启，优先 Ultrafast，其次 Fast；两个开关默认均关闭。
+- **OpenAI Ultrafast** - Responses、Chat Completions 和 Responses WebSocket 按最终上游模型及账号实际凭据判断权益；OAuth/setup-token 账号不支持 Ultra Fast 时，自动改发 Fast（`service_tier: "priority"`），路由提示和计费同步使用最终档位。Pro 200 仅支持 GPT-6.2 Sol Ultrafast；Pro 500 还支持 GPT-6 Astra、GPT-6.1 Sol 和 GPT-6.2 Astra。workspace 或未知套餐须在上游目录取得同一模型的 Ultrafast 授权；API Key 不套用订阅套餐规则。本地生成的模型目录也按同一资格判断展示档位。
+  - 在“**分组 → 新建/编辑**”中，强制 Ultrafast 优先于强制 Fast；模型或订阅不支持 Ultrafast 时，即使未开启强制 Fast 也自动使用 Fast。两个开关默认均关闭。全局 Fast/Flex 的过滤、拦截和强制 Priority 规则仍生效；自动降为 Fast 后会再检查 Fast 规则。
+  - 有资格的 Ultrafast 请求沿用上游模型定价：GPT-6 Astra 和 GPT-6.1 Sol 默认按 Standard 的 `6 倍`；GPT-6.2 Sol/Astra 在 `2027-03-01 08:00 UTC` 前为 `3 倍`，之后为 `6 倍`，按请求时点计算；未指定模型倍率时兜底 `2 倍`。
   - 上游现已提供“**渠道 → 模型定价 → Ultra Fast 倍率**”。填写正数时覆盖模型默认倍率；留空使用模型默认值，不继承 Fast 倍率；既有 Fork 配置原样保留。
-  - 响应档位计费沿用上游：权威响应只能降低、不能抬高计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显仍按最终出站档位计费，明确的 `priority` 回显可以将 Ultrafast 降为 Priority。
+  - 响应档位计费沿用上游：权威响应只能降低、不能抬高计费档位，金额按该档位的价格配置计算；Codex OAuth/setup-token 的 `default` 回显仍按最终出站档位计费，明确的 `priority` 回显可以将 Ultrafast 降为 Priority。自动降档使用现有 Fast 价格，免费 Fast 和渠道自定义定价继续生效；历史账单不变。
 - **Codex 桌面版上下文兼容** - 沿用上游对 HTTP Responses 中缺少调用 ID 的已识别页面快照及附加客户端上下文的兼容，无需额外配置；普通工具结果仍遵守原有校验。
 - **Claude Fable / Mythos 5.2** - 沿用上游模型支持、推理参数转换及内置兜底价格，包括不同缓存写入 TTL 的价格。
 - **智能调度** - 智能账号选择，支持粘性会话

@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGPT62IdentityEffortAndSampling(t *testing.T) {
@@ -202,10 +203,14 @@ func TestGPT62OfflineCodexCatalogAndAccountTiers(t *testing.T) {
 				require.NotContains(t, string(caps["service_tiers"]), "ultrafast")
 				group := &Group{ID: 1, Status: StatusActive, Hydrated: true, Platform: PlatformOpenAI, ForceOpenAIUltrafast: true}
 				ctx := context.WithValue(context.Background(), ctxkey.Group, group)
-				require.Empty(t, openAIGroupForcedServiceTier(ctx, account, tc.model))
+				out, err := (&OpenAIGatewayService{}).applyOpenAIFastPolicyToBody(ctx, account, tc.model, []byte(`{}`))
+				require.NoError(t, err)
+				require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(out, "service_tier").String())
 				group.ForceOpenAIFast = true
 				account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{tc.model: {ID: tc.model, CodexToolCapabilities: map[string]json.RawMessage{"service_tiers": json.RawMessage(`[{"id":"priority"}]`)}}}})
-				require.Equal(t, "priority", openAIGroupForcedServiceTier(ctx, account, tc.model))
+				out, err = (&OpenAIGatewayService{}).applyOpenAIFastPolicyToBody(ctx, account, tc.model, []byte(`{}`))
+				require.NoError(t, err)
+				require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(out, "service_tier").String())
 				// An account which actually advertises Ultrafast keeps that capability.
 				account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{tc.model: {ID: tc.model, CodexToolCapabilities: map[string]json.RawMessage{"service_tiers": json.RawMessage(`[{"id":"ultrafast","name":"Ultrafast"}]`)}}}})
 				require.Equal(t, "ultrafast", openAIGroupForcedServiceTier(ctx, account, tc.model+"-max"))
@@ -289,7 +294,9 @@ func TestGPT62SubscriptionUltrafastInManifestAndForcedRequests(t *testing.T) {
 				require.Equal(t, "account Fast", tiers[0].(map[string]any)["description"])
 			}
 			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
-			forced := openAIGroupForcedServiceTier(ctx, &account, account.GetMappedModel("public")+"-max")
+			out, err := (&OpenAIGatewayService{}).applyOpenAIFastPolicyToBody(ctx, &account, account.GetMappedModel("public")+"-max", []byte(`{}`))
+			require.NoError(t, err)
+			forced := gjson.GetBytes(out, "service_tier").String()
 			if tc.want {
 				require.Len(t, tiers, 2)
 				require.Equal(t, "ultrafast", tiers[1].(map[string]any)["id"])

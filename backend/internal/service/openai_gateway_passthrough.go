@@ -257,6 +257,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if policyModel == "" {
 		policyModel = reqModel
 	}
+	clientServiceTier := gjson.GetBytes(body, "service_tier").String()
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, policyModel, body)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -361,6 +362,25 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
 			actualModel = reqModel
+		}
+		if policyModel != actualModel {
+			tier, blocked, tierErr := s.resolveOpenAIFastServiceTier(ctx, account, actualModel, clientServiceTier)
+			if tierErr != nil {
+				return nil, tierErr
+			}
+			if blocked != nil {
+				writeOpenAIFastPolicyBlockedResponse(c, blocked)
+				return nil, blocked
+			}
+			if tier == "" {
+				body, tierErr = sjson.DeleteBytes(body, "service_tier")
+			} else {
+				body, tierErr = sjson.SetBytes(body, "service_tier", tier)
+			}
+			if tierErr != nil {
+				return nil, fmt.Errorf("set compact fallback service_tier: %w", tierErr)
+			}
+			policyModel = actualModel
 		}
 		SetOpsUpstreamModel(c, actualModel)
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
